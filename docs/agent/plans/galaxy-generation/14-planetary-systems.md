@@ -34481,3 +34481,8 @@ ACTIVE HOST · HOST LEAVING MAIN SEQUENCE · EXTRAPOLATED ZONE · FROZEN SURFACE
   countdown on a display with the `DISPLAY TIME` long form that form whole (`T-0 yr 000/00:04:12`
   under a day), its field sized for `T+2000 yr 000/00:00:00`; `format.test.ts` pins the form
   under a day. The column's look at both sizes stays on the owner's checklist.
+- **P14.T53.f, the `SUPERCRITICAL` rows, ruled (2026-11-13, the owner's delegated UX call,
+  ux-calls-and-checklist-gaps):** amended, the client as built. `SUPERCRITICAL <substance>` is the
+  `ATMOSPHERE` lead row's, beside `GAS ENVELOPE` (`envelopeLabel`), not the `SURFACE` state's,
+  which keeps `SUPERCRITICAL H2O` alone; the guide's `ATMOSPHERE` and `GAS ENVELOPE` rows now name
+  it, with `CH4`, `O2` and `UNLISTED MATERIAL` as examples.

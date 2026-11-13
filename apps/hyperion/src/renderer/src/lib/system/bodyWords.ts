@@ -179,7 +179,7 @@ export function planetClassLabel(planetClass: PlanetClassDto): string {
  * `SUPERCRITICAL H2O` is the `SURFACE` state `steam_envelope`'s word, a phase word beside a
  * formula, never "steam". Another condensable's reads by the same pattern, named by
  * {@link substanceName} (`SUPERCRITICAL CH4`, and `SUPERCRITICAL UNLISTED MATERIAL` for a name the
- * list does not hold), its wording to the UX sign-off.
+ * list does not hold), as the guide's `GAS ENVELOPE` row gives it (ruled 2026-11-13).
  */
 export function envelopeLabel(supercritical: string | null): string {
   return supercritical === null
