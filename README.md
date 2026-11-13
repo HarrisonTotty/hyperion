@@ -75,6 +75,5 @@ A change's gate is `just smart-ci`, the part of `just ci` that it needs
 | [`docs/frontend/ux-guidelines.md`](docs/frontend/ux-guidelines.md) | The bridge consoles' visual and UX guidelines                            |
 | [`docs/agent/brainstorming/`](docs/agent/brainstorming/)           | The design: galaxy, rendering and planets, life, the single-player game  |
 | [`docs/agent/plans/`](docs/agent/plans/)                           | The action plans, each set with a roadmap `README.md`                    |
-| [`docs/agent/handoff/README.md`](docs/agent/handoff/README.md)     | Where development stands and what comes next                             |
 | [`docs/measurements/`](docs/measurements/)                         | Recorded runs of the by-hand and timed checks                            |
 | [`NOTICE`](NOTICE)                                                 | Third-party software and data, and their licences                        |
