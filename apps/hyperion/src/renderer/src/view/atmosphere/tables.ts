@@ -2286,7 +2286,13 @@ export class AtmosphereTables {
   #plan: TablesPlan;
   /** The medium's layer edges, {@link packLayerEdges}'s, packed once a medium. */
   #layerEdges: Float32Array = new Float32Array(LAYER_EDGES_FLOATS);
-  #key: string | null = null;
+  /**
+   * What the tables were built for, and its key once a later {@link AtmosphereTables.setMedium}
+   * has formed it: the key's JSON of the medium and its curves held some 80 to 120 ms of a body's
+   * first build on the pod, where nothing compares it until a second medium is set
+   * (perf-long-tasks-2). `null` until a build ends, and from a restore.
+   */
+  #keyed: { readonly of: Parameters<typeof keyOf>; text: string | null } | null = null;
   #builds = 0;
   /** Whether {@link AtmosphereTables.dispose} has released the resources. */
   #disposed = false;
@@ -2416,7 +2422,7 @@ export class AtmosphereTables {
       this.#sourceStub = null;
       this.#slotDepthsKernel = null;
       this.#armSlotDepthsKernel = null;
-      this.#key = null;
+      this.#keyed = null;
       // The thick table belongs to the medium, which the restore builds again: uploaded anew after
       // it, with the bake and the correction it was packed of.
       const thick = this.#thick?.packed ?? null;
@@ -3224,9 +3230,14 @@ export class AtmosphereTables {
         "the atmosphere's tables were disposed: a caller holds them past their release",
       );
     }
-    const key = keyOf(medium, bottomRadiusM, curves, body);
-    if (key === this.#key) {
-      return false;
+    const built = this.#keyed;
+    let key: string | null = null;
+    if (built !== null) {
+      built.text ??= keyOf(...built.of);
+      key = keyOf(medium, bottomRadiusM, curves, body);
+      if (key === built.text) {
+        return false;
+      }
     }
     // The kernels read the medium with its terms' forward deltas taken out, as their twin reads
     // `kernelMedium(medium)` (R08.T7).
@@ -3264,7 +3275,7 @@ export class AtmosphereTables {
     this.#layerEdges = layerEdges;
     this.#slotDepthsRefusal = refusal;
     this.#row = row;
-    this.#key = null;
+    this.#keyed = null;
     this.#irradianceBuilt = false;
     this.#sourceTableBuilt = false;
     // A thick table, a correction and a deck belong to the medium they were baked for (R08.T14.c,
@@ -3358,7 +3369,7 @@ export class AtmosphereTables {
         slotDepths: r.slotDepths?.texture ?? null,
       },
     );
-    this.#key = key;
+    this.#keyed = { of: [medium, bottomRadiusM, curves, body], text: key };
     this.#builds += 1;
     return true;
   }

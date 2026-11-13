@@ -459,6 +459,27 @@ describe("AtmosphereTables", () => {
     expect(engine.counts.dispatches).toBe(2);
   });
 
+  it("forms no key at its first build, and compares the held medium's once another is set (perf-long-tasks-2)", async () => {
+    const engine = await countingRenderEngine();
+    const stringify = vi.spyOn(JSON, "stringify");
+    const keys = (): number =>
+      stringify.mock.calls.filter(
+        ([value]) => typeof value === "object" && value !== null && "medium" in value,
+      ).length;
+    try {
+      const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, R);
+      expect(keys()).toBe(0);
+      expect(tables.setMedium({ ...R05_EARTH_REFERENCE }, R)).toBe(false);
+      expect(keys()).toBe(2);
+      expect(tables.setMedium(TABULATED, R)).toBe(true);
+      expect(tables.setMedium(R05_EARTH_REFERENCE, R)).toBe(true);
+      expect(tables.setMedium(R05_EARTH_REFERENCE, R)).toBe(false);
+      expect(tables.builds).toBe(3);
+    } finally {
+      stringify.mockRestore();
+    }
+  });
+
   it("builds the sky's irradiance over the tables into its rgba32float layer (R08.T9.b)", async () => {
     const engine = await countingRenderEngine();
     const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, R);
