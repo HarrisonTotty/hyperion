@@ -64,10 +64,14 @@ describe("the clouds' probe", () => {
     );
   });
 
-  it("expects each case's twin, a place above the shell keeping all its light", () => {
-    const [field, optics, ground] = expectedCloudProbe(CASES, CLOUDS);
+  it("expects a field case's sample and coverage cell", () => {
+    const [field] = expectedCloudProbe(CASES, CLOUDS);
     expect(field).toHaveLength(CLOUD_PROBE_OUTPUTS);
     expect(field?.[7]).toBeCloseTo(3, 2);
+  });
+
+  it("expects an optics case's δ-Eddington at its inputs in f32", () => {
+    const [, optics] = expectedCloudProbe(CASES, CLOUDS);
     const slab = deltaEddington({
       tau: 10,
       asymmetry: Math.fround(0.85),
@@ -79,6 +83,10 @@ describe("the clouds' probe", () => {
       slab.directTransmittance,
       slab.diffuseTransmittance,
     ]);
+  });
+
+  it("expects a place above the shell to keep all its light", () => {
+    const [, , ground] = expectedCloudProbe(CASES, CLOUDS);
     expect(ground).toEqual([1, 1, 0, 0, 0, 0, 0, 0]);
   });
 });

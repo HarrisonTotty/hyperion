@@ -15,8 +15,10 @@
  * - **The in-cloud τ** grows with the excess z − z_c, linearly, so that a cloud thins to nothing at
  *   its edge and thickens inwards, scaled so that its mean over the cloudy area is the condensate's
  *   τ̄: τ = τ̄ N (z − z_c), N = C ÷ (φ(z_c) − z_c C), φ the normal density (a labelled
- *   heuristic, lean 2026-11-02; its spread within a cloud is a truncated normal's, whose χ is near
- *   Oreopoulos and Cahalan 2005's 0.75 where C is about 0.5).
+ *   heuristic, lean 2026-11-02, in place of Design note 10's log-normal: its spread within a cloud
+ *   is a truncated normal's, whose inhomogeneity χ = exp⟨ln τ⟩ ÷ ⟨τ⟩ is 0.66 at C = 0.5 and 0.70 at
+ *   0.67, from 0.60 to 0.82 over C 0.05–0.95, against Oreopoulos and Cahalan 2005's 0.75, which it
+ *   meets near C = 0.82).
  * - **The footprint** decides what is resolved: octave k is drawn with weight
  *   w_k = clamp(log₂(ℓ_k ÷ 2F), 0, 1), fading out across one octave of footprint F (Design note 3's
  *   fade), times the time-rate fade (`coverage.ts`' `timeRateFade`); its variance, unresolved,
@@ -65,21 +67,24 @@ export function cloudBaseCellM(radiusM: number): number {
   return Math.min(CLOUD_BASE_CELL_MAX_M, (Math.PI * radiusM) / 8);
 }
 
+/** A 3 × 3 matrix, row-major. */
+export type Matrix3 = readonly [
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+];
+
 /**
  * The rotation each octave's coordinates take from the last's, row-major (Quilez's fbm matrix,
  * orthonormal), so that the octaves' lattices never align.
  */
-export const OCTAVE_ROTATION: readonly [
-  number,
-  number,
-  number,
-  number,
-  number,
-  number,
-  number,
-  number,
-  number,
-] = [0, 0.8, 0.6, -0.8, 0.36, -0.48, -0.6, -0.48, 0.64];
+export const OCTAVE_ROTATION: Matrix3 = [0, 0.8, 0.6, -0.8, 0.36, -0.48, -0.6, -0.48, 0.64];
 
 /**
  * The least unresolved standard deviation the field takes, so that a fully resolved footprint's
@@ -227,7 +232,7 @@ export interface CloudFieldParams {
   /** ℓ₀, octave 0's lattice cell, m ({@link cloudBaseCellM}). */
   readonly baseCellM: number;
   /** The body's rotation of the octaves' coordinates, row-major. */
-  readonly rotation: readonly number[];
+  readonly rotation: Matrix3;
   /** Each phase's advection time, s (`coverage.ts`' `FlowPhase.advectionS`). */
   readonly advectionS: readonly [number, number];
   /** Each phase's weight. */
@@ -254,12 +259,13 @@ export interface CloudSample {
   readonly unresolvedSd: number;
 }
 
-/** A point turned by a row-major 3 × 3 matrix. */
-function turned(m: readonly number[], p: Vec3): Vec3 {
+/** A point turned by a matrix. */
+function turned(m: Matrix3, p: Vec3): Vec3 {
+  const [m0, m1, m2, m3, m4, m5, m6, m7, m8] = m;
   return {
-    x: (m[0] ?? 0) * p.x + (m[1] ?? 0) * p.y + (m[2] ?? 0) * p.z,
-    y: (m[3] ?? 0) * p.x + (m[4] ?? 0) * p.y + (m[5] ?? 0) * p.z,
-    z: (m[6] ?? 0) * p.x + (m[7] ?? 0) * p.y + (m[8] ?? 0) * p.z,
+    x: m0 * p.x + m1 * p.y + m2 * p.z,
+    y: m3 * p.x + m4 * p.y + m5 * p.z,
+    z: m6 * p.x + m7 * p.y + m8 * p.z,
   };
 }
 
@@ -267,6 +273,11 @@ function turned(m: readonly number[], p: Vec3): Vec3 {
  * Where the structure at `point` came from `advectionS` earlier under the wind there: turned about
  * the pole by −u t ÷ ρ (`coverage.ts`' `zonalAdvection`), then about the local east by v t ÷ r, so
  * that the structure moves north at v; a point on the axis takes no zonal turn.
+ *
+ * @param point - Body-fixed, m.
+ * @param eastMps - The wind's eastward part, m s⁻¹.
+ * @param northMps - Its northward part, m s⁻¹.
+ * @param advectionS - How long ago, s.
  */
 export function advected(point: Vec3, eastMps: number, northMps: number, advectionS: number): Vec3 {
   const rho = Math.hypot(point.x, point.y);
@@ -386,7 +397,7 @@ function unit(hash: number): number {
  * A body's rotation of its octaves' coordinates from its seed: the unit quaternion of three uniform
  * hashes (Shoemake 1992's uniform rotation), row-major.
  */
-export function cloudRotationOf(seed: number): number[] {
+export function cloudRotationOf(seed: number): Matrix3 {
   const u1 = unit(latticeHash(1, 0, 0, seed));
   const u2 = unit(latticeHash(2, 0, 0, seed));
   const u3 = unit(latticeHash(3, 0, 0, seed));

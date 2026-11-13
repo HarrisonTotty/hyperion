@@ -18,6 +18,9 @@ import { cloudNoiseTexels } from "./cloudNoise";
 import { type CoverageGrid, FLOW_MAP_PERIOD_S } from "./coverage";
 
 const NOISE = cloudNoiseTexels();
+
+/** The field's z_r at 33° N, 77° W over 1 km at t = 123,456.5 s (2026-11-13). */
+const PINNED_RESOLVED = -0.861_089_044_936_004_2;
 const EARTH_M = 6_378_137;
 const SHELL_M = EARTH_M + 1_500;
 
@@ -143,7 +146,7 @@ describe("the body's rotation and parameters", () => {
         expect(dot).toBeCloseTo(i === j ? 1 : 0, 12);
       }
     }
-    const [a = 0, b = 0, c = 0, d = 0, e = 0, f = 0, g = 0, h = 0, k = 0] = m;
+    const [a, b, c, d, e, f, g, h, k] = m;
     expect(a * (e * k - f * h) - b * (d * k - f * g) + c * (d * h - e * g)).toBeCloseTo(1, 12);
   });
 
@@ -225,6 +228,12 @@ describe("the field", () => {
     const again = cloudFieldParams(input(123_456, 500_000_000));
     expect(cloudFieldAt(coverage, NOISE, again, point, 1_000)).toEqual(
       cloudFieldAt(coverage, NOISE, params, point, 1_000),
+    );
+  });
+
+  it("holds its pinned value at one place, through pinnedMath's transcendentals", () => {
+    expect(cloudFieldAt(coverage, NOISE, params, onShell(33, -77), 1_000).resolved).toBe(
+      PINNED_RESOLVED,
     );
   });
 

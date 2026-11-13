@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import type { SunState } from "../atmosphere/hillaire";
 import { IDENTITY_QUATERNION } from "../camera/quaternion";
 import type { BufferSpec, TextureSpec } from "../engine/memory";
 import type { BufferHandle, TextureHandle } from "../engine/types";
@@ -73,8 +74,11 @@ function wgslConst(wgsl: string, name: string): number {
 class RecordingEngine {
   readonly buffers = new Map<BufferHandle, BufferSpec>();
   readonly textures = new Map<TextureHandle, TextureSpec>();
-  readonly textureWrites: TextureHandle[] = [];
-  bufferWrites = 0;
+  /** Each texture write's texture and a copy of its bytes, in order. */
+  readonly textureWrites: Array<{ readonly texture: TextureHandle; readonly bytes: Uint8Array }> =
+    [];
+  /** Each buffer write's bytes, in order. */
+  readonly bufferWrites: Uint8Array[] = [];
 
   createBuffer(spec: BufferSpec): BufferHandle {
     const handle: BufferHandle = { kind: "buffer", name: spec.name, bytes: spec.bytes };
@@ -88,12 +92,20 @@ class RecordingEngine {
     return handle;
   }
 
-  writeBuffer(): void {
-    this.bufferWrites += 1;
+  writeBuffer(_buffer: BufferHandle, _offsetBytes: number, data: ArrayBufferView): void {
+    this.bufferWrites.push(new Uint8Array(data.buffer, data.byteOffset, data.byteLength).slice());
   }
 
-  writeTexture(texture: TextureHandle): void {
-    this.textureWrites.push(texture);
+  writeTexture(
+    texture: TextureHandle,
+    _origin: GPUOrigin3D,
+    _size: GPUExtent3D,
+    data: ArrayBufferView,
+  ): void {
+    this.textureWrites.push({
+      texture,
+      bytes: new Uint8Array(data.buffer, data.byteOffset, data.byteLength).slice(),
+    });
   }
 
   releaseBuffer(buffer: BufferHandle): void {
@@ -102,6 +114,11 @@ class RecordingEngine {
 
   releaseTexture(texture: TextureHandle): void {
     this.textures.delete(texture);
+  }
+
+  /** How many times `texture` was written. */
+  writesOf(texture: TextureHandle | undefined): number {
+    return this.textureWrites.filter((write) => write.texture === texture).length;
   }
 }
 
@@ -194,7 +211,45 @@ describe("seasonOf", () => {
   });
 });
 
+/** A source at zenith-ward component `z` in the body's y–z plane, in light slot `slot`. */
+function sun(z: number, slot: number): SunState {
+  return {
+    directionBodyFixed: { x: 0, y: Math.sqrt(1 - z * z), z },
+    illuminanceLx: [100_000, 90_000, 80_000],
+    angularRadiusRad: 4.65e-3,
+    curveSlot: slot,
+  };
+}
+
 describe("cloudLayerUniforms", () => {
+  const lit = (suns: SunState[]): Readonly<Record<string, Float32Array>> =>
+    cloudLayerUniforms({
+      camera: {
+        positionM: { x: FIGURE.equatorialRadiusM + 5_000, y: 0, z: 0 },
+        orientation: IDENTITY_QUATERNION,
+        fovXRad: 1,
+        viewport: { widthPx: 200, heightPx: 100 },
+      },
+      figure: FIGURE,
+      shell: cloudShellOf(FIGURE, 1_500),
+      airTopM: 100_000,
+      suns,
+      exposureScale: 1e-3,
+      octaves: 9,
+    });
+
+  it("packs at most two sources, brightest first, each its direction, slot and exposed light", () => {
+    const uniforms = lit([sun(0.6, 0), sun(0.8, 1), sun(0, 2)]);
+    expect(uniforms["view"]?.[3]).toBe(2);
+    expect(Array.from(uniforms["source0"] ?? [])).toEqual([0, 0.8, 0.6, 0].map(Math.fround));
+    expect(Array.from(uniforms["source1"] ?? [])).toEqual([0, 0.6, 0.8, 1].map(Math.fround));
+    expect(Array.from(uniforms["sourceLight0"] ?? [])).toEqual([100, 90, 80, 0].map(Math.fround));
+  });
+
+  it("carries the octaves the layer draws", () => {
+    expect(lit([])["levers"]?.[0]).toBe(9);
+  });
+
   it("forms the shell's quadric in f64, positive above the shell and negative below", () => {
     const shell = cloudShellOf(FIGURE, 1_500);
     const view = (heightM: number): Record<string, Float32Array> =>
@@ -239,29 +294,61 @@ describe("CloudLayers", () => {
     layers.dispose();
   });
 
-  it("makes a body's rows and coverage in the clouds' category, writing the coverage once a season step", () => {
+  it("makes a body's rows in the clouds' category", () => {
     const engine = new RecordingEngine();
-    const layers = readyLayers(engine);
-    const gpu = layers.frame(FRAME);
-    expect(gpu).not.toBeNull();
-    expect(engine.buffers.get(gpu?.layer ?? { kind: "buffer", name: "", bytes: 0 })).toMatchObject({
-      bytes: 16 * CLOUD_LAYER_ROWS,
+    const gpu = readyLayers(engine).frame(FRAME);
+    const spec = gpu === null ? undefined : engine.buffers.get(gpu.layer);
+    expect(spec).toMatchObject({ bytes: 16 * CLOUD_LAYER_ROWS, category: "clouds" });
+  });
+
+  it("makes a body's coverage texture in the clouds' category", () => {
+    const engine = new RecordingEngine();
+    const gpu = readyLayers(engine).frame(FRAME);
+    const spec = gpu === null ? undefined : engine.textures.get(gpu.coverage);
+    expect(spec).toMatchObject({
+      size: { width: CLOUD_COVERAGE_WIDTH, height: CLOUD_COVERAGE_HEIGHT },
+      format: "rgba16float",
       category: "clouds",
     });
-    const coverage = engine.textures.get(gpu?.coverage ?? { kind: "texture", name: "" });
-    expect(coverage).toMatchObject({ format: "rgba16float", category: "clouds" });
-    const writes = (): number =>
-      engine.textureWrites.filter((texture) => texture === gpu?.coverage).length;
-    expect(writes()).toBe(1);
+  });
+
+  it("writes a body's coverage again only when its season moves a step or its fraction changes", () => {
+    const engine = new RecordingEngine();
+    const layers = readyLayers(engine);
+    const coverage = layers.frame(FRAME)?.coverage;
+    expect(engine.writesOf(coverage)).toBe(1);
     layers.frame({ ...FRAME, time: { seconds: 2_000, nanos: 0 } });
-    expect(writes()).toBe(1);
+    expect(engine.writesOf(coverage)).toBe(1);
     layers.frame({
       ...FRAME,
       season: { subsolarLatitudeRad: FRAME.season.subsolarLatitudeRad + CLOUD_SEASON_STEP_RAD },
     });
-    expect(writes()).toBe(2);
-    expect(engine.bufferWrites).toBe(3);
-    layers.dispose();
+    expect(engine.writesOf(coverage)).toBe(2);
+    layers.frame({ ...FRAME, clouds: { ...FRAME.clouds, cloudFraction: 0.5 } });
+    expect(engine.writesOf(coverage)).toBe(3);
+  });
+
+  it("writes a body's rows at every frame", () => {
+    const engine = new RecordingEngine();
+    const layers = readyLayers(engine);
+    layers.frame(FRAME);
+    layers.frame({ ...FRAME, time: { seconds: 2_000, nanos: 0 } });
+    expect(engine.bufferWrites).toHaveLength(2);
+  });
+
+  it("gives a client joining late the same rows and coverage as one drawing from earlier, bit for bit", () => {
+    const early = new RecordingEngine();
+    const earlyLayers = readyLayers(early);
+    earlyLayers.frame({
+      ...FRAME,
+      time: { seconds: 0, nanos: 0 },
+      season: { subsolarLatitudeRad: 0 },
+    });
+    earlyLayers.frame(FRAME);
+    const late = new RecordingEngine();
+    readyLayers(late).frame(FRAME);
+    expect(late.bufferWrites.at(-1)).toEqual(early.bufferWrites.at(-1));
+    expect(late.textureWrites.at(-1)?.bytes).toEqual(early.textureWrites.at(-1)?.bytes);
   });
 
   it("lets go of a body no frame draws, and of everything when disposed", () => {

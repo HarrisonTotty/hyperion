@@ -587,7 +587,8 @@ ambiguous, the design note that reads it is named.
     shell (a ray–sphere intersection, well under 0.1 ms, with the diffuse part into
     `terrain_sky_factor`), is built and tested beside it behind the `cloudShadows` ladder entry, off
     on the low setting, and a correction proposing to turn it on there goes to the README's
-    brainstorm corrections for the owner. The high setting marches the volume at quarter resolution
+    brainstorm corrections for the owner (amended 2026-10-09, the README's corrections: on for both
+    settings; applied by R11.T7.b). The high setting marches the volume at quarter resolution
     with temporal reprojection (Nubis 2015: a 128³ base noise, a 32³ detail noise and a 128² curl
     noise, single-channel `r8unorm` as Frostbite did, about 2 MiB in all), Hillaire 2016's
     energy-conserving integration, a two-lobe Henyey–Greenstein phase whose weighted asymmetry
@@ -802,7 +803,7 @@ ambiguous, the design note that reads it is named.
     (high; low): `decoration` (on; off),
     `scatterDensity` (1; 0, the fraction of the decorative instance density drawn, which R12 may
     tune, with 0 creating no scatter pipeline), `clouds` (`volume`; `layer`), `cloudShadows` (on;
-    off), `oceanComponents` (32; 8), `oceanRefraction` and `whitecaps` (on; off), `rings`
+    on, amended 2026-10-09), `oceanComponents` (32; 8), `oceanRefraction` and `whitecaps` (on; off), `rings`
     (`particles`; `annulus`) and `ringShadowOnBody` (on; off). The pass labels, each mapped to one
     of R12's `BudgetRow`s: `decoration` (inside R10's terrain pass, timed as its increment),
     `rocks`, `scatter`, `clouds`, `cloudShadow`, `ocean`, `rings` and `still`. Every GPU allocation
@@ -818,7 +819,7 @@ ambiguous, the design note that reads it is named.
     The month is found from the seasonal orbit's mean anomaly at the scene's time with R09's
     `month_blend`, called through R10's wasm field or a TypeScript twin tested against it (re-validated
     2026-11-02: `field::months::month_blend(header, mean_anomaly) -> MonthBlend`; neither it nor a
-    `ClimateCell` reader is exported by `wasm.rs`, so T7 blends the stand-in's months itself). The
+    `ClimateCell` reader is exported by `wasm.rs`, so T7's stand-in turns with the subsolar latitude in place of months). The
     coverage, the wind and the sea state are blended between the two nearest months, so the seasons
     turn without a step at a month's edge, and on an eccentric orbit faster near periapsis, as the
     climate does. Both hold still when the scene's time rate is zero, and clouds fade to their mean
@@ -1158,8 +1159,8 @@ tests. Acceptance: `pnpm test`, `just ci`, `just test-render`, by hand at the su
   height and latitude and the sun's azimuth, shaded by δ-Eddington, entered in R02's
   transparent-layer order; its direct transmittance along the sun, from one tap at the sun ray's
   crossing of the shell, into R10's `terrain_shadow_factor`, and its diffuse transmittance into
-  R10's `terrain_sky_factor`, behind the `cloudShadows` entry (off on the low setting, Design note
-  10); the low setting's clouds. Tests: under a τ = 10 column at μ₀ = 1 the direct factor is below
+  R10's `terrain_sky_factor`, behind the `cloudShadows` entry (on for both settings since the
+  amendment of 2026-10-09, Design note 10); the low setting's clouds. Tests: under a τ = 10 column at μ₀ = 1 the direct factor is below
   10⁻⁴ and the ground's total irradiance is within 2% of T_total times the unclouded total; with
   `cloudShadows` off neither hook is written; the smoke harness; every texel finite. Bench on the
   UHD 620 at 720p, by the owner, against about 1 ms and under 16 MB, with the development machine's
@@ -1417,8 +1418,8 @@ Task records as built: [11-surface-detail-clouds-oceans-rings-stills/records/](1
   and `FORCED_REGION_RESIDENCY_S` is provisional until R05.T18. A powered descent that manoeuvres
   off its extrapolation inside the horizon could reach ground whose rocks are not yet drawn; the
   sessions plan's or the flight model's `planned_path` removes the risk.
-- **Cloud shadows on the low setting** are off, as the brainstorm's ladder says, though they cost
-  under 0.1 ms; whether to turn them on is proposed to the owner as a brainstorm correction.
+- **Cloud shadows on the low setting** are on since the owner's amendment of 2026-10-09 (the
+  README's corrections), at under 0.1 ms; `SETTINGS.low.cloudShadows` follows from R11.T7.b.
 - **The ocean on the quadtree.** Open question 7's risk is reduced by drawing near water on a
   projected grid and keeping waves out of the authoritative surface; a later ruling that waves are
   collidable, or a tide model, reopens it.

@@ -458,8 +458,8 @@ const LOW_CACHE_BYTES = 64 * MIB;
  * levels from quarter resolution, eclipses with 3 annuli and lights each body by planetshine from
  * one neighbour, against 1, 7 levels from full resolution, 4 annuli and two neighbours (R07 Design
  * note 18, R07.T17). R11's ladder entries are Design note 18's (high; low): decoration on and off,
- * the decorative scatter's density 1 and 0, the clouds' volume and layer with and without their
- * shadows on the terrain, 32 and 8 Gerstner components with and without refraction and whitecaps,
+ * the decorative scatter's density 1 and 0, the clouds' volume and layer, each with its shadows on
+ * the terrain (amended 2026-10-09), 32 and 8 Gerstner components with and without refraction and whitecaps,
  * and the rings' particles and annulus with and without their shadow on the body, so that the low
  * setting draws no decoration of any kind (R11.T1).
  */
@@ -570,7 +570,9 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
     decoration: false,
     scatterDensity: 0,
     clouds: "layer",
-    cloudShadows: false,
+    // On for both settings: the one-tap shadow costs under 0.1 ms (the brainstorm's amendment of
+    // 2026-10-09, plan R11's Design note 10).
+    cloudShadows: true,
     oceanComponents: 8,
     oceanRefraction: false,
     whitecaps: false,

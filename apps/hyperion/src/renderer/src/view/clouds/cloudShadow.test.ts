@@ -4,7 +4,13 @@ import { cloudFieldAt, cloudFieldParams, cloudSeedOf, coverageTexels } from "./c
 import { cloudShellOf } from "./cloudLayer";
 import { cloudNoiseTexels } from "./cloudNoise";
 import { deltaEddington } from "./cloudOptics";
-import { CLEAR_GROUND, type CloudLightInput, cloudGroundLight, cloudLightAt } from "./cloudShadow";
+import {
+  CLEAR_GROUND,
+  CLOUD_SKY_MU,
+  type CloudLightInput,
+  cloudGroundLight,
+  cloudLightAt,
+} from "./cloudShadow";
 import { STAND_IN_CONDENSATES } from "./condensates";
 
 const WATER = STAND_IN_CONDENSATES.liquidWater;
@@ -45,24 +51,29 @@ function overcast(fraction: number, rate = 1): CloudLightInput {
 }
 
 describe("cloudGroundLight", () => {
-  it("under a τ = 10 cover and a zenith sun lets through under 10⁻⁴ of the beam and T_total of the light", () => {
+  it("lets through under 10⁻⁴ of the beam under a τ = 10 cover and a zenith sun", () => {
+    expect(cloudGroundLight(1, 10, WATER, 1).direct).toBeLessThan(1e-4);
+  });
+
+  it("lights the ground under a whole cover by T(μ₀) of the beam and T(0.6) of the sky", () => {
     const light = cloudGroundLight(1, 10, WATER, 1);
-    expect(light.direct).toBeLessThan(1e-4);
-    const slab = deltaEddington({
-      tau: 10,
-      asymmetry: WATER.asymmetry,
-      singleScatterAlbedo: 1 - WATER.coAlbedo,
-      mu0: 1,
-    });
-    const total = slab.directTransmittance + slab.diffuseTransmittance;
-    // A clear ground's beam on a horizontal surface and its sky, in any one unit.
-    for (const [beam, sky] of [
-      [1, 0.15],
-      [0.6, 0.4],
-    ] as const) {
-      const ground = beam * light.direct + sky * light.sky + beam * light.diffuse;
-      expect(Math.abs(ground / (total * (beam + sky)) - 1)).toBeLessThan(0.02);
-    }
+    const total = (mu0: number): number => {
+      const slab = deltaEddington({
+        tau: 10,
+        asymmetry: WATER.asymmetry,
+        singleScatterAlbedo: 1 - WATER.coAlbedo,
+        mu0,
+      });
+      return slab.directTransmittance + slab.diffuseTransmittance;
+    };
+    expect(light.direct + light.diffuse).toBeCloseTo(total(1), 12);
+    expect(light.sky).toBeCloseTo(total(CLOUD_SKY_MU), 12);
+    expect(cloudGroundLight(1, 10, WATER, 0.3).sky).toBe(light.sky);
+    // The plan's test, the ground within 2% of T_total(μ₀) times its clear light, holds while the
+    // sky is under about 8% of the beam (its light being taken at 0.6, T 0.45 against 0.58).
+    const [beam, sky] = [1, 0.08];
+    const ground = beam * (light.direct + light.diffuse) + sky * light.sky;
+    expect(Math.abs(ground / (total(1) * (beam + sky)) - 1)).toBeLessThan(0.02);
   });
 
   it("keeps every part under no cover", () => {

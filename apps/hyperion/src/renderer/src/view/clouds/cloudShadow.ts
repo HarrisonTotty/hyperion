@@ -13,13 +13,14 @@
  * parts the terrain applies per source (lean, 2026-11-02):
  *
  * - **direct**, (1 − f) + f T_dir, on the source's direct light;
- * - **sky**, (1 − f) + f (T_dir + T_diff), on the sky's light, which reaches the ground through the
- *   cloud as the beam does;
+ * - **sky**, (1 − f) + f T(0.6), on the sky's light, which reaches the ground through the cloud
+ *   as diffuse light does, at the diffusivity's cosine {@link CLOUD_SKY_MU} (as the layer takes the
+ *   sky's light, `cloudLayer.wgsl`), whatever the source's height;
  * - **diffuse**, f T_diff, the share of the source's direct light on a horizontal surface above the
  *   layer, μ₀ E T, that the cloud scatters down, added to the sky's light.
  *
- * So under a whole cover the ground's irradiance is T_total times the clear sky's, its sun and its
- * sky, the source's transmittance to the layer taken as to the ground.
+ * So under a whole cover the ground's irradiance is T(μ₀) times the clear sky's beam and T(0.6)
+ * times its sky, the source's transmittance to the layer taken as to the ground.
  *
  * The tap ({@link cloudLightAt}) is where the ray from the place towards the source leaves the
  * layer's shell, the field there over the source's disc seen across that distance, so that a cloud's
@@ -51,6 +52,13 @@ export const CLEAR_GROUND: CloudGroundLight = { direct: 1, sky: 1, diffuse: 0 };
 export const CLOUD_LEAST_MU = 0.02;
 
 /**
+ * The zenith cosine the sky's diffuse light is taken at through the layer: 0.6, the two-stream
+ * diffusivity's 1 ÷ 1.66 (`cloudLayer.wgsl`'s CLOUD_SKY_MU and `cloudShadow.wgsl`'s
+ * CLOUD_SHADOW_SKY_MU).
+ */
+export const CLOUD_SKY_MU = 0.6;
+
+/**
  * The ground light under a footprint of covered share `fraction` and in-cloud τ `inCloudTau`, the
  * source at zenith cosine `mu0` against the layer's normal.
  */
@@ -70,10 +78,16 @@ export function cloudGroundLight(
     singleScatterAlbedo: 1 - optics.coAlbedo,
     mu0: Math.min(Math.max(mu0, CLOUD_LEAST_MU), 1),
   });
+  const skySlab = deltaEddington({
+    tau: Math.max(inCloudTau, 0),
+    asymmetry: optics.asymmetry,
+    singleScatterAlbedo: 1 - optics.coAlbedo,
+    mu0: CLOUD_SKY_MU,
+  });
   const diffuse = Math.max(slab.diffuseTransmittance, 0);
   return {
     direct: 1 - f + f * slab.directTransmittance,
-    sky: 1 - f + f * (slab.directTransmittance + diffuse),
+    sky: 1 - f + f * (skySlab.directTransmittance + Math.max(skySlab.diffuseTransmittance, 0)),
     diffuse: f * diffuse,
   };
 }

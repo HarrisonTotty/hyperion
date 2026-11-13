@@ -8,7 +8,7 @@
 //   - the conservative solution at a scaled co-albedo 1 − ϖ′ ≤ CLOUD_CONSERVATIVE_CO_ALBEDO, 10⁻⁶,
 //     re-derived for f32: the general solution's error grows as ε₃₂ ÷ k, ε₃₂ = 2⁻²³ (k ≈ 1.3 × 10⁻³
 //     at 1 − ϖ′ = 10⁻⁶ and g 0.85), and the absorptance the conservative side drops there is at most
-//     3.3 × 10⁻⁵ at τ ≤ 50, so the two errors meet near it. Emulated in correctly rounded f32 over
+//     3.3 × 10⁻⁵ at τ ≤ 50 and g 0.85 (1.2 × 10⁻⁴ at g 0), so the two errors meet near it. Emulated in correctly rounded f32 over
 //     1 − ϖ₀ 10⁻⁹ to 0.5, g 0 to 0.9, μ₀ 0.02 to 1 and τ 0.01 to 50, this form is within 8.0 × 10⁻⁵ of
 //     the f64 one in R and 4.3 × 10⁻⁵ in T (2026-11-02); WGSL's own `exp`, bounded to 3 + 2|x| ULP,
 //     adds to that, which the smoke harness bounds;

@@ -233,10 +233,10 @@ export function packCloudLayer(
   }
   out.set([1 / Math.sqrt(total), datumRadiusM], 12);
   out.set(params.octaveFades, 16);
-  const r = params.rotation;
-  out.set([r[0] ?? 0, r[1] ?? 0, r[2] ?? 0], 28);
-  out.set([r[3] ?? 0, r[4] ?? 0, r[5] ?? 0], 32);
-  out.set([r[6] ?? 0, r[7] ?? 0, r[8] ?? 0], 36);
+  const [r0, r1, r2, r3, r4, r5, r6, r7, r8] = params.rotation;
+  out.set([r0, r1, r2], 28);
+  out.set([r3, r4, r5], 32);
+  out.set([r6, r7, r8], 36);
   for (let k = 0; k < params.octaves; k += 1) {
     for (let i = 0; i < 2; i += 1) {
       const at = 3 * (2 * k + i);
@@ -267,7 +267,7 @@ export interface CloudLayerView {
  * in the body-fixed axes, the shell's quadric constant |S o|² − a_s² (S = diag(1, 1, a_s ÷ c_s)),
  * which `f32` cannot form near the shell, and its two brightest sources.
  */
-export function cloudLayerUniforms(view: CloudLayerView): Record<string, Float32Array> {
+export function cloudLayerUniforms(view: CloudLayerView): Readonly<Record<string, Float32Array>> {
   const { camera, figure, shell } = view;
   const o = camera.positionM;
   const geodetic = geodeticOf(o, figure);
@@ -359,8 +359,11 @@ export interface CloudFrame {
   readonly condensate: CloudCondensate;
   readonly figure: SpheroidFigure;
   readonly season: CloudSeason;
+  /** The scene's time on the universe clock. */
   readonly time: Pick<UniverseTime, "seconds" | "nanos">;
+  /** The scene's time rate, simulation seconds per real second. */
   readonly rate: number;
+  /** The octaves the layer draws at most ({@link LAYER_OCTAVES}). */
   readonly octaves: number;
 }
 
@@ -585,7 +588,7 @@ export function cloudLayerDraw(
   gpu: CloudBodyGpu,
   sceneDepth: TextureHandle,
   tables: SurfaceLightingTables,
-  uniforms: Record<string, Float32Array>,
+  uniforms: Readonly<Record<string, Float32Array>>,
 ): DrawItem {
   return {
     mesh: triangle,

@@ -9,8 +9,8 @@
 // body's centre ÷ the datum's equatorial radius a (`terrainLit.wgsl`), `sun` the unit direction to
 // the source and `source_radius` its angular radius, rad, all body-fixed, and returns
 //   x: on the source's direct light, (1 − f) + f T_dir, in place of R10's `terrain_shadow_factor`;
-//   y: on the sky's light from the source, (1 − f) + f (T_dir + T_diff), in place of its share of
-//      R10's `terrain_sky_factor`;
+//   y: on the sky's light from the source, (1 − f) + f T(0.6), the sky's diffuse light through the
+//      cloud at the diffusivity's cosine, in place of its share of R10's `terrain_sky_factor`;
 //   z: f T_diff, the share of the source's direct light on a horizontal surface above the layer that
 //      the cloud scatters down, which the terrain adds to the sky's light;
 // f the covered share of the crossing's footprint and T_dir, T_diff the δ-Eddington transmittances at
@@ -22,6 +22,8 @@
 const CLOUD_SHADOW_LEAST_MU : f32 = 0.02;
 // The least footprint of a shadow's tap, m.
 const CLOUD_SHADOW_LEAST_FOOTPRINT_M : f32 = 1.0;
+// The zenith cosine of the sky's light through the layer (`cloudShadow.ts`' CLOUD_SKY_MU).
+const CLOUD_SHADOW_SKY_MU : f32 = 0.6;
 
 fn terrain_cloud_light(p : vec3f, sun : vec3f, source_radius : f32) -> vec3f {
   let shell = cloud_row(CLOUD_ROW_SHELL);
@@ -46,6 +48,7 @@ fn terrain_cloud_light(p : vec3f, sun : vec3f, source_radius : f32) -> vec3f {
   let field = cloud_field_at(crossing, footprint, CLOUD_OCTAVES_MAX);
   let optics = cloud_row(CLOUD_ROW_OPTICS);
   let slab = cloud_delta_eddington(field.in_cloud_tau, optics.x, optics.y, mu0);
+  let sky = cloud_delta_eddington(field.in_cloud_tau, optics.x, optics.y, CLOUD_SHADOW_SKY_MU);
   let f = field.fraction;
-  return vec3f(1.0 - f + f * slab.direct, 1.0 - f + f * (slab.direct + slab.diffuse), f * slab.diffuse);
+  return vec3f(1.0 - f + f * slab.direct, 1.0 - f + f * (sky.direct + sky.diffuse), f * slab.diffuse);
 }

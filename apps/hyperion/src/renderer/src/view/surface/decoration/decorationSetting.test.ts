@@ -51,7 +51,8 @@ describe("R11's ladder entries (Design note 18)", () => {
       decoration: false,
       scatterDensity: 0,
       clouds: "layer",
-      cloudShadows: false,
+      // On for both settings (the brainstorm's amendment of 2026-10-09).
+      cloudShadows: true,
       oceanComponents: 8,
       oceanRefraction: false,
       whitecaps: false,

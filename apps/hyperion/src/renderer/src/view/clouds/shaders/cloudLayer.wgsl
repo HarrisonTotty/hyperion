@@ -13,7 +13,8 @@
 // `atmosphere_sun_transmittance` and `atmosphere_sky_irradiance`, R08 Design note 17), its radiance
 // that flux taken as Lambertian, π⁻¹ of it a steradian (lean, 2026-11-02): from above,
 // R(μ₀) μ₀ E T_sun + R(0.6) E_sky, the sky's light at 0.6, the diffusivity's cosine; from below,
-// T_diff(μ₀) μ₀ E T_sun + T(0.6) E_sky. The background is seen through it by e^(−τ ÷ μ_v) of the
+// T_diff(μ₀) μ₀ E T_sun + T_diff(0.6) E_sky, the sky's unscattered light being the background's,
+// seen through the cloud. The background is seen through it by e^(−τ ÷ μ_v) of the
 // covered share, μ_v the view ray's cosine against the normal.
 //
 // The air between the camera and the hit (lean, 2026-11-02): its transmittance T_f is R08's, the
@@ -21,7 +22,8 @@
 // upward direction between them, the camera's own taken as 1 above the air; its light, which the
 // composite laid over the whole ray, is (1 − T_f) J, J the single-scattering source of each source,
 // its light times the transmittance to the hit and Rayleigh's phase function at their angle, with the
-// sky's light over 4π for the multiple scattering. So the blend is
+// sky's mean intensity for the multiple scattering, E_sky ÷ 2π for an isotropic upper hemisphere of
+// irradiance E_sky. So the blend is
 // out = T_c dst + (1 − T_c) S_f + T_f C, T_c the background's share, C the cloud's light.
 //
 // Composed after frame.wgsl, R08's surface lighting (`SURFACE_LIGHTING_WGSL`: preciseTrig.wgsl,
@@ -183,10 +185,10 @@ fn fragmentMain(@builtin(position) position : vec4f) -> @location(0) vec4f {
     if (above) {
       radiance = radiance + light * (slab.reflectance * lit + sky_slab.reflectance * sky);
     } else {
-      radiance = radiance + light * (slab.diffuse * lit + (sky_slab.direct + sky_slab.diffuse) * sky);
+      radiance = radiance + light * (slab.diffuse * lit + sky_slab.diffuse * sky);
     }
     source_function = source_function
-      + light * (transmitted * cloud_rayleigh_phase(dot(s, d)) + sky * 0.0795775);
+      + light * (transmitted * cloud_rayleigh_phase(dot(s, d)) + sky * 0.15915494);
   }
   radiance = radiance * 0.31830989;
   // The air in front of the hit: the transmittances to space from the lower end and the upper along
