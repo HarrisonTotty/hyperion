@@ -12,8 +12,8 @@
  * `shading` `forward` or `visibility`, `terrainBudget` `patches` or `triangles`,
  * `standInStrides` `off`, `own-grids` or `all`, `hiddenMarks` `drawn` or `culled`, `edgeStandIns`
  * `off`, `surveyed` or `masks`, `discCells` `per-cell` or `packed`, `figureShading` `forward`
- * or `screen`, `terrainPlanetshine` `record` or `brightest`, and `decorationSets` `generated`
- * or `off`. As `qualityLaunch.ts` does for the setting, it rides in the
+ * or `screen`, `terrainPlanetshine` `record` or `brightest`, `decorationSets` `generated` or
+ * `off`, and `selectionScale` `presented` or `rendered`. As `qualityLaunch.ts` does for the setting, it rides in the
  * renderer's own `argv` as an extra switch, `--hyperion-geometry=<override>`, present only when the
  * launch gave one, in the canonical form {@link geometryText} writes, and the preload gives it to
  * `HyperionApi.geometry`. Both sides of the hand-off use this module; it imports types only, so it
@@ -52,6 +52,7 @@ const FIELDS = [
   "figureShading",
   "terrainPlanetshine",
   "decorationSets",
+  "selectionScale",
 ] as const;
 
 /** A field's values, as a refusal names them. */
@@ -79,6 +80,7 @@ const VALUES: Readonly<Record<(typeof FIELDS)[number], string>> = {
   figureShading: "forward or screen",
   terrainPlanetshine: "record or brightest",
   decorationSets: "generated or off",
+  selectionScale: "presented or rendered",
 };
 
 /** The refusal of `text` as `field`'s value. */
@@ -207,6 +209,12 @@ function readField(out: OverrideBeingRead, field: (typeof FIELDS)[number], text:
         throw refused(field, text);
       }
       out.decorationSets = text;
+      break;
+    case "selectionScale":
+      if (text !== "presented" && text !== "rendered") {
+        throw refused(field, text);
+      }
+      out.selectionScale = text;
       break;
     case "farCascadeRate": {
       const rate = text === "1" ? 1 : text === "2" ? 2 : text === "4" ? 4 : null;

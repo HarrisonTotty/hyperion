@@ -23,6 +23,7 @@ import type { FramePacingName } from "../../../../preload/api";
 import { drawsNow, VsyncClock, vsyncsPerDraw } from "../../lib/vsyncPacing";
 import type { PassTimes } from "../engine/types";
 import { gpuTimeMs, ResolutionController, type ScaleBounds } from "./resolutionController";
+import { SelectionScaleHold, selectionScaleStep } from "./selectionScale";
 import type { ViewBudget } from "./viewBudget";
 
 /** The animation frames a view's rate spans: 1 at 60 Hz, 2 at 30 Hz. */
@@ -284,6 +285,11 @@ export const CALM_FRAMES = 60;
  * BudgetedScale.airStepped}): from the frame its scale first drops below its max, until its scale
  * is back at its max and its frames have stayed calm, under {@link CALM_SHARE} of the budget, for
  * {@link CALM_FRAMES} frames in a row.
+ *
+ * It holds the scale the lit terrain counts a rendered pixel at too ({@link
+ * BudgetedScale.selectionScale}; perf-terrain-selection-scale): while its `control` is set, the
+ * controller's scale snapped up to the floor's steps and held (`selectionScale.ts`); else the
+ * budget's `renderScale`.
  */
 export class BudgetedScale {
   #controller: ResolutionController | null = null;
@@ -291,6 +297,8 @@ export class BudgetedScale {
   #airStepped = false;
   #lowest = false;
   #calm = 0;
+  readonly #selection = new SelectionScaleHold();
+  #selectionScale = 1;
 
   /** Whether the frame-rate floor has stepped the view's air to the low setting's sizes. */
   get airStepped(): boolean {
@@ -312,6 +320,18 @@ export class BudgetedScale {
   }
 
   /**
+   * The internal scale the lit terrain's selection counts a rendered pixel at under
+   * `GeometrySettings.selectionScale` `rendered` (perf-terrain-selection-scale), as of the last
+   * {@link BudgetedScale.update}: the scale it returned snapped up to the floor's steps
+   * (`selectionScaleStep` of the control's bounds), a new step taken once it has stood for
+   * `SELECTION_SCALE_HOLD_FRAMES` frames in a row; the budget's `renderScale` while no control is
+   * set; 1 before an update.
+   */
+  get selectionScale(): number {
+    return this.#selectionScale;
+  }
+
+  /**
    * The scale of the primary's next frame, from its budget and the measurements of the frames
    * since the last call (once a primary frame).
    *
@@ -330,6 +350,8 @@ export class BudgetedScale {
       this.#bounds = null;
       this.#airStepped = false;
       this.#lowest = false;
+      this.#selection.reset();
+      this.#selectionScale = budget.renderScale;
       return budget.renderScale;
     }
     if (
@@ -339,10 +361,13 @@ export class BudgetedScale {
     ) {
       this.#controller = new ResolutionController(control.bounds, control.target);
       this.#bounds = control.bounds;
+      // A new controller starts at its bounds' max, which the selection takes at once.
+      this.#selection.reset();
     } else {
       this.#controller.retarget(control.target);
     }
     const scale = this.#controller.update(gpuFramesMs, intervalMs);
+    this.#selectionScale = this.#selection.update(selectionScaleStep(scale, control.bounds));
     this.#stepAir(control, scale, gpuFramesMs, intervalMs);
     this.#lowest = control.kind === "floor" && scale <= control.bounds[0];
     return scale;

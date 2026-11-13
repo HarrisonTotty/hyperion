@@ -279,6 +279,7 @@ const GEOMETRY_SETTINGS = {
   figureShading: "screen",
   terrainPlanetshine: "record",
   decorationSets: "generated",
+  selectionScale: "presented",
 } as const;
 
 /** A smoke's report: 10 s of frames at 60 Hz from 1,000 ms, its trace in three windows. */

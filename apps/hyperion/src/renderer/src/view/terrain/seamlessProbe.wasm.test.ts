@@ -211,6 +211,10 @@ import type { WorkerLike } from "./workers/pool";
  * - `SEAM_EDGE_STAND_INS` (`off`, `surveyed` or `masks`; R14.T3.c's edge stand-ins): the passes'
  *   `GeometrySettings.edgeStandIns`, the setting's unset. The counts and the strides' measure take
  *   each record's classes as the cull does, an edge bake's stand-in's by its cull input's bits.
+ * - `SEAM_LIT_TAU_SCALE` (perf-terrain-selection-scale): the view's lit τ scale throughout, its
+ *   report's `litTauScale` (`GeometrySettings.selectionScale` `rendered` at a held step), at least
+ *   1; unset, none, its τ at its CSS px. 886 ÷ 720 is the M5's low window at the floor's lowest
+ *   step; with `SEAM_COUNTS=1` it counts the lit triangles and patches the lever leaves.
  */
 const SLOW = import.meta.env["HYPERION_SLOW_TESTS"] === "1";
 
@@ -275,6 +279,11 @@ const OCCLUSION_SCALE = Math.max(1, numberKnob("SEAM_OCCLUSION_SCALE", 4));
 const COUNTS = knob("SEAM_COUNTS") === "1";
 const COUNT_STRIDE = Math.max(1, Math.round(numberKnob("SEAM_COUNT_STRIDE", 4)));
 const CACHE_SCALE = Math.max(0.1, numberKnob("SEAM_CACHE_SCALE", 1));
+/** The view's lit τ scale throughout (`SEAM_LIT_TAU_SCALE`), or `null` for none. */
+const LIT_TAU_SCALE =
+  knob("SEAM_LIT_TAU_SCALE") === undefined
+    ? null
+    : Math.max(1, numberKnob("SEAM_LIT_TAU_SCALE", 1));
 const BUDGET_KNOB = knob("SEAM_BUDGET");
 const BUDGET = BUDGET_KNOB === "patches" || BUDGET_KNOB === "triangles" ? BUDGET_KNOB : null;
 const EDGE_STAND_INS_KNOB = knob("SEAM_EDGE_STAND_INS");
@@ -2997,6 +3006,11 @@ interface ProbeOptions {
    * passes at stride 1; by default the knobs' ({@link STRIDE_WINDOW} with `SEAM_STRIDES=measured`).
    */
   readonly strides?: StrideWindow | null;
+  /**
+   * The view's lit τ scale at each frame of the script, s (perf-terrain-selection-scale), its
+   * report's `litTauScale`; by default {@link LIT_TAU_SCALE}'s, none where it is unset.
+   */
+  readonly litTauScaleAt?: (tS: number) => number;
 }
 
 /** What a run gives: the record, and the trace of its selections in the trace's span. */
@@ -3075,6 +3089,8 @@ async function play(options: ProbeOptions): Promise<Played> {
   const heightPx = setting === "high" ? 1080 : 720;
   const fovXRad = Math.PI / 3;
   let handed = false;
+  const litTauScaleAt =
+    options.litTauScaleAt ?? (LIT_TAU_SCALE === null ? null : () => LIT_TAU_SCALE);
   const reportAt = (tS: number): TerrainViewReport => {
     const sc = scene.sceneAt(tS);
     const pose = scene.cameraAt(tS);
@@ -3112,6 +3128,7 @@ async function play(options: ProbeOptions): Promise<Played> {
       setting,
       streamPriority: "primary",
       regimes,
+      ...(litTauScaleAt === null ? {} : { litTauScale: litTauScaleAt(tS) }),
     };
   };
 
@@ -3302,7 +3319,9 @@ async function play(options: ProbeOptions): Promise<Played> {
       engine.depthLayerRenders.length = 0;
       const seenBody = viewReport.scene.bodies.find((b) => b.id === body);
       const passView =
-        seenBody === undefined ? null : terrainPassViewOf(PRIMARY_VIEW_ID, viewReport, seenBody);
+        seenBody === undefined
+          ? null
+          : terrainPassViewOf(PRIMARY_VIEW_ID, viewReport, seenBody, "lit");
       const drawStartMs = performance.now();
       const drew =
         passView !== null &&
@@ -3776,6 +3795,7 @@ const PLAY_KNOBS = JSON.stringify({
   lookahead: LOOKAHEAD,
   standIns: STAND_INS,
   edgeStandIns: EDGE_STAND_INS,
+  litTauScale: LIT_TAU_SCALE,
 });
 
 /** A segment's figures as `scripts/seamSegments.mjs` keeps them. */
@@ -3911,6 +3931,74 @@ const SEGMENTS = segmentsKnob();
 /** The resume check's span on high: past the first draws, to the first changes of the strides. */
 const RESUME_TO_S = 47;
 
+/**
+ * The M5's low window at the frame-rate floor's lowest step on high (perf-bodies-near-ground): its
+ * 886 rows of CSS px rendered at 720, the lit τ scale `selectionScale` `rendered` gives there.
+ */
+const M5_LOWEST_TAU_SCALE = 886 / 720;
+
+/** The step test's span, s of the script: from just before the hand-over to the low flight's start. */
+const SELECTION_STEPS_PLAY_S = [40, 200] as const;
+
+/** Where the step test's lit τ scale starts to step, s: past the hand-over and its first draws. */
+const SELECTION_STEPS_FROM_S = 45;
+
+/** How long the step test holds each lit τ scale, s: far longer than a step's slew of the bands. */
+const SELECTION_STEP_S = 3;
+
+/** The frames after a step change the step test reads as the step's own, s. */
+const SELECTION_STEP_WINDOW_S = 0.5;
+
+/**
+ * `run`'s lit τ steps (`scaleAt`'s changes from frame to frame) and what the frames within
+ * {@link SELECTION_STEP_WINDOW_S} after each drew: their largest move, their pops, and the run's
+ * other frames' for comparison.
+ */
+function selectionStepsOf(
+  run: SeamRun,
+  scaleAt: (tS: number) => number,
+): {
+  readonly count: number;
+  readonly afterStepMovePxMax: number;
+  readonly afterStepPops: number;
+  readonly afterStepFrames: number;
+  readonly otherMovePxMax: number;
+  readonly otherPops: number;
+  readonly otherFrames: number;
+} {
+  const stepsS: number[] = [];
+  for (let n = 1; n < run.frames.length; n += 1) {
+    const before = run.frames[n - 1];
+    const now = run.frames[n];
+    if (before !== undefined && now !== undefined && scaleAt(now.tS) !== scaleAt(before.tS)) {
+      stepsS.push(now.tS);
+    }
+  }
+  const afterStep = (tS: number): boolean =>
+    stepsS.some((stepS) => tS >= stepS && tS < stepS + SELECTION_STEP_WINDOW_S);
+  const after = run.frameChanges.filter((change) => afterStep(change.tS));
+  const other = run.frameChanges.filter((change) => !afterStep(change.tS));
+  return {
+    count: stepsS.length,
+    afterStepMovePxMax: largestMovePx(after),
+    afterStepPops: popsIn(after),
+    afterStepFrames: after.length,
+    otherMovePxMax: largestMovePx(other),
+    otherPops: popsIn(other),
+    otherFrames: other.length,
+  };
+}
+
+/** The largest move of `changes`, px; 0 for none. */
+function largestMovePx(changes: ReadonlyArray<SeamFrameChange>): number {
+  return changes.reduce((largest, change) => Math.max(largest, change.movePx), 0);
+}
+
+/** The pops of `changes`. */
+function popsIn(changes: ReadonlyArray<SeamFrameChange>): number {
+  return changes.reduce((sum, change) => sum + change.pops, 0);
+}
+
 describe("the seamless probe over TERRAIN TEST", () => {
   it(
     "plays to the hand-over and draws the ground, whole",
@@ -4023,6 +4111,47 @@ describe.runIf(SLOW)("the seamless probe's acceptance (HYPERION_SLOW_TESTS=1)", 
         true,
       ]);
       expect(merged).toEqual(whole);
+    },
+  );
+
+  it.for(settingsPlayed())(
+    "draws no hole, collapse, jump or eviction, nor a frame's change past its bounds, as the lit selection steps between the floor's lowest step and its full scale through the descent on %s (perf-terrain-selection-scale)",
+    { timeout: 2 * 60 * 60 * 1000 },
+    async (setting, { task }) => {
+      const scaleAt = (tS: number): number =>
+        tS < SELECTION_STEPS_FROM_S ||
+        Math.floor((tS - SELECTION_STEPS_FROM_S) / SELECTION_STEP_S) % 2 === 1
+          ? 1
+          : M5_LOWEST_TAU_SCALE;
+      const played = await play({
+        setting,
+        fromS: SELECTION_STEPS_PLAY_S[0],
+        toS: SELECTION_STEPS_PLAY_S[1],
+        litTauScaleAt: scaleAt,
+      });
+      const summary = summariseSeamRun(played.run);
+      const steps = selectionStepsOf(played.run, scaleAt);
+      Object.assign(task.meta, { seamless: { ...report(played, summary), selectionSteps: steps } });
+      expect({
+        holes: summary.holeFrames,
+        collapses: summary.collapses,
+        flickers: summary.flickers,
+        jumps: summary.jumps,
+        selectedEvicted: summary.selectedEvicted,
+      }).toEqual({ holes: 0, collapses: 0, flickers: 0, jumps: 0, selectedEvicted: 0 });
+      // The frame's bounds at the default knobs alone, as the acceptance's.
+      const bounds = AT_DEFAULT_KNOBS ? FRAME_BOUNDS[setting] : null;
+      expect(
+        bounds === null
+          ? []
+          : [
+              ["movePx", summary.frameMovePxMax, bounds.movePx],
+              ["normalDegP95", summary.frameNormalDeg.p95, bounds.normalDegP95],
+              ["popsPerS", summary.framePopsPerS, bounds.popsPerS],
+              ["stepMovePx", steps.afterStepMovePxMax, bounds.movePx],
+            ].filter(([, value, bound]) => Number(value) > Number(bound)),
+      ).toEqual([]);
+      expect(steps.count).toBeGreaterThan(10);
     },
   );
 

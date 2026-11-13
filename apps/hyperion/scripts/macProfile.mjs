@@ -59,8 +59,8 @@
 // names of `MAC_PROFILE_LEVERS` (limb-rays, march-sources, surface-lobes, decked-air-surface,
 // lit-per-fragment, composite-per-pixel, occlusion, strides, far-cascades, disc-cells,
 // figure-shading, the lit terrain's probes terrain-unshaded, terrain-no-cascades,
-// terrain-no-horizon and terrain-no-maturity, terrain-planetshine, shading, shading-occlusion,
-// decoration-sets, pacing-120); with none given it runs every pair but decked-air-surface, and --levers all runs
+// terrain-no-horizon and terrain-no-maturity, terrain-planetshine, selection-scale, shading,
+// shading-occlusion, decoration-sets, pacing-120); with none given it runs every pair but decked-air-surface, and --levers all runs
 // every pair; --settings none and --levers none drop those runs. pacing-120
 // (R07.T19) runs both sides on a 120 Hz offscreen frame clock (`--frame-rate 120`), frames counted
 // (`--frame-pacing display`) against each view at its own rate (`rate`), each window's callbacks,

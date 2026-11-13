@@ -186,7 +186,7 @@ describe("the geometry override's hand-off (plan R14, Design note 17)", () => {
     }
   });
 
-  it("reads and writes the detail sets' lever, last in the fields' order (plan R11, R11.T2.c)", () => {
+  it("reads and writes the detail sets' lever, after the terrain's planetshine in the fields' order (plan R11, R11.T2.c)", () => {
     const override = parseGeometryOverride("decorationSets=off,terrainPlanetshine=brightest");
     expect([
       override,
@@ -199,6 +199,22 @@ describe("the geometry override's hand-off (plan R14, Design note 17)", () => {
     ]);
     for (const text of ["decorationSets=on", "decorationSets=false", "decorationSets="]) {
       expect(() => parseGeometryOverride(text)).toThrow("decorationSets is generated or off");
+    }
+  });
+
+  it("reads and writes the lit terrain's selection scale, last in the fields' order (perf-terrain-selection-scale)", () => {
+    const override = parseGeometryOverride("selectionScale=rendered,terrainPlanetshine=brightest");
+    expect([
+      override,
+      geometryText(override),
+      parseGeometryOverride("selectionScale=presented"),
+    ]).toEqual([
+      { selectionScale: "rendered", terrainPlanetshine: "brightest" },
+      "terrainPlanetshine=brightest,selectionScale=rendered",
+      { selectionScale: "presented" },
+    ]);
+    for (const text of ["selectionScale=device", "selectionScale=css", "selectionScale="]) {
+      expect(() => parseGeometryOverride(text)).toThrow("selectionScale is presented or rendered");
     }
   });
 

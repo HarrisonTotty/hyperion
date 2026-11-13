@@ -1656,6 +1656,9 @@ function ViewStage({
           floorLowest: primaryScale.atLowestStep,
           // The scene target at the render resolution times the budget's or controller's scale.
           renderScale,
+          // That scale snapped to the floor's steps and held, at whose rendered pixel its lit
+          // terrain selects where its geometry says `rendered` (perf-terrain-selection-scale).
+          selectionScale: primaryScale.selectionScale,
           availability: inputs.availability,
           // The exposure's source: its frames take the histogram its meter reads (Design note 11),
           // none under INCIDENT.

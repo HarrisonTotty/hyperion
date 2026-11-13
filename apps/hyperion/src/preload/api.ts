@@ -468,6 +468,8 @@ export interface GeometryOverride {
   readonly terrainPlanetshine?: "record" | "brightest";
   /** Plan R11's detail sets (R11.T2.c): generated where decoration is drawn, or none. */
   readonly decorationSets?: "generated" | "off";
+  /** The pixel the lit terrain's τ is counted in: the presented CSS px, or the rendered one too. */
+  readonly selectionScale?: "presented" | "rendered";
 }
 
 /** A mesh's DAG-cut tolerance (plan R14, R14.T5.f), px: in its camera pass, and as an occluder. */

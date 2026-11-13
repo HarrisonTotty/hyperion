@@ -13,6 +13,7 @@ import {
   PENDING_PRIMARY_FRAMES,
   PrimaryFrameTimes,
 } from "./framePacing";
+import { SELECTION_SCALE_HOLD_FRAMES, selectionScaleStep } from "./selectionScale";
 import { type ViewBudget, viewBudgets, type ViewSpec } from "./viewBudget";
 
 const PRIMARY = viewId("view");
@@ -510,6 +511,78 @@ describe("BudgetedScale", () => {
     expect([scale.airStepped, scale.controller?.scale]).toEqual([false, max]);
     expect(16.7).toBeLessThanOrEqual(CALM_INTERVAL_SHARE * periodMs);
     expect(periodMs).toBeGreaterThan(CALM_INTERVAL_SHARE * periodMs);
+  });
+
+  it("holds the lit selection's scale at the floor's step its scale stands on, taking a new one only after its hold (perf-terrain-selection-scale)", () => {
+    const floor = viewBudgets(
+      [{ id: PRIMARY, slot: "primary", style: "photorealistic" }],
+      "high",
+      886,
+    ).get(PRIMARY);
+    if (floor === undefined || floor.control?.kind !== "floor") {
+      throw new Error("the primary alone on high should have its floor");
+    }
+    const { bounds } = floor.control;
+    const gpuBudgetMs = floor.control.target.gpuBudgetMs;
+    const scale = new BudgetedScale();
+    const before = scale.selectionScale;
+    scale.update(floor, [0.2 * gpuBudgetMs], 16.7);
+    const atMax = scale.selectionScale;
+    // Frames far over the budget drop the scale to the floor's lowest step, the M5's 720 of 886.
+    const scales: number[] = [];
+    const selections: number[] = [];
+    let frames = 0;
+    while (scale.controller?.scale !== bounds[0] && frames < 2_000) {
+      scales.push(scale.update(floor, [3 * gpuBudgetMs], 16.7));
+      selections.push(scale.selectionScale);
+      frames += 1;
+    }
+    for (let frame = 0; frame < SELECTION_SCALE_HOLD_FRAMES; frame += 1) {
+      scale.update(floor, [0.9 * gpuBudgetMs], 16.7);
+    }
+    const settled = scale.selectionScale;
+    // Never finer than a step its scale stood on, never coarser than its scale's own step.
+    const snapped = scales.map((each) => selectionScaleStep(each, bounds));
+    expect([before, atMax, settled]).toEqual([1, 1, bounds[0]]);
+    expect(selections.every((each, n) => each >= (snapped[n] ?? 0))).toBe(true);
+    expect(bounds[0]).toBeCloseTo(720 / 886, 12);
+  });
+
+  it("takes the budget's scale as the lit selection's where no control is set", () => {
+    const scale = new BudgetedScale();
+    scale.update(primaryBudget("wireframe", 0), undefined, 16.7);
+    const wireframe = scale.selectionScale;
+    const one = primaryBudget("photorealistic", 1);
+    for (let frame = 0; frame < 200; frame += 1) {
+      scale.update(one, [3 * (one.control?.target.gpuBudgetMs ?? 0)], 16.7);
+    }
+    const dropped = scale.selectionScale;
+    // The instruments closed, with no rows known: no floor, the budget's scale.
+    scale.update(primaryBudget("photorealistic", 0), [], 16.7);
+    expect([wireframe, dropped < max, scale.selectionScale]).toEqual([1, true, max]);
+  });
+
+  it("takes a new control's max as the lit selection's at once, whatever step the old one held", () => {
+    const floor = viewBudgets(
+      [{ id: PRIMARY, slot: "primary", style: "photorealistic" }],
+      "high",
+      886,
+    ).get(PRIMARY);
+    if (floor === undefined || floor.control?.kind !== "floor") {
+      throw new Error("the primary alone on high should have its floor");
+    }
+    const gpuBudgetMs = floor.control.target.gpuBudgetMs;
+    const scale = new BudgetedScale();
+    let frames = 0;
+    while (scale.selectionScale !== floor.control.bounds[0] && frames < 2_000) {
+      scale.update(floor, [3 * gpuBudgetMs], 16.7);
+      frames += 1;
+    }
+    const held = scale.selectionScale;
+    // An instrument opens: the controller's bounds change, and its new controller starts at max.
+    const one = primaryBudget("photorealistic", 1);
+    scale.update(one, [3 * (one.control?.target.gpuBudgetMs ?? 0)], 16.7);
+    expect([held, scale.selectionScale]).toEqual([floor.control.bounds[0], max]);
   });
 
   it("gives a wireframe primary its budget's scale, 1", () => {

@@ -297,6 +297,17 @@ export interface GeometrySettings {
    * `generated` on both settings; the low setting draws no decoration, and so generates none.
    */
   readonly decorationSets: "generated" | "off";
+  /**
+   * The pixel the lit terrain's τ is counted in (perf-terrain-selection-scale, the owner's Mac):
+   * `presented`, as before, the presented size's CSS px (`selectionViewport`); `rendered`, the
+   * larger of that and the pixel its photorealistic image is rendered at, the render resolution
+   * times its internal scale snapped up to the floor's steps and held
+   * (`budget/selectionScale.ts`), so that at the frame-rate floor's lowest step, 0.813 of high's
+   * rows in the M5's low window, its lit passes select and stride no finer than a rendered pixel.
+   * The hand-over's range, the field's want and the wireframe stay at CSS px. `presented` on both
+   * settings until the owner's Mac pair (a lean, 2026-11-10).
+   */
+  readonly selectionScale: "presented" | "rendered";
 }
 
 /**
@@ -332,6 +343,7 @@ export const GEOMETRY_BEFORE_R14: GeometrySettings = {
   figureShading: "forward",
   terrainPlanetshine: "record",
   decorationSets: "generated",
+  selectionScale: "presented",
 };
 
 /**
@@ -519,6 +531,7 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       figureShading: "forward",
       terrainPlanetshine: "record",
       decorationSets: "generated",
+      selectionScale: "presented",
     },
     decoration: true,
     scatterDensity: 1,
@@ -576,6 +589,7 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       figureShading: "forward",
       terrainPlanetshine: "record",
       decorationSets: "generated",
+      selectionScale: "presented",
     },
     decoration: false,
     scatterDensity: 0,

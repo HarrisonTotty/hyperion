@@ -55,6 +55,9 @@ export function queryOverride(parameters: URLSearchParams): GeometryOverride {
     planetshineText === "record" || planetshineText === "brightest" ? planetshineText : undefined;
   const setsText = parameters.get("geometry-decorationSets");
   const decorationSets = setsText === "generated" || setsText === "off" ? setsText : undefined;
+  const selectionText = parameters.get("geometry-selectionScale");
+  const selectionScale =
+    selectionText === "presented" || selectionText === "rendered" ? selectionText : undefined;
   const rate = parameters.get("geometry-farCascadeRate");
   const farCascadeRate = rate === "1" ? 1 : rate === "2" ? 2 : rate === "4" ? 4 : undefined;
   const toleranceText = /^(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)$/.exec(
@@ -90,5 +93,6 @@ export function queryOverride(parameters: URLSearchParams): GeometryOverride {
     ...(figureShading === undefined ? {} : { figureShading }),
     ...(terrainPlanetshine === undefined ? {} : { terrainPlanetshine }),
     ...(decorationSets === undefined ? {} : { decorationSets }),
+    ...(selectionScale === undefined ? {} : { selectionScale }),
   };
 }

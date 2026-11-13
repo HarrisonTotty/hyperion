@@ -180,6 +180,15 @@ export const MAC_PROFILE_LEVERS: ReadonlyArray<MacProfileLever> = [
     countSides: false,
   },
   {
+    name: "selection-scale",
+    decides:
+      "perf-terrain-selection-scale, the lit terrain's τ: at the presented CSS px (A) against the larger of a CSS and a rendered pixel, the floor's held step (B)",
+    a: [],
+    b: ["--geometry", "selectionScale=rendered"],
+    ratios: [1],
+    countSides: false,
+  },
+  {
     name: "shading",
     decides:
       "R14.T2.e, the terrain's shading: forward, T2.a's (A), against the visibility buffer (B)",

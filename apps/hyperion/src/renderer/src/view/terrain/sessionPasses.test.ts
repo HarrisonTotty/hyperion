@@ -68,7 +68,7 @@ import { fieldCellIndex } from "./coverage";
 import { LiveFrameTerrain } from "./frameTerrain";
 import { allocationTally } from "./gpu/allocationTally";
 import { datumGroundUnder } from "./grounded";
-import { limbDistanceM, pixelAngleRad } from "./handover";
+import { handoverTauPx, limbDistanceM, pixelAngleRad } from "./handover";
 import { childKeys, type PatchKey, patchKeyString } from "./patchKey";
 import { MAX_CONTACTS } from "./gpu/uniforms";
 import { CASCADE_BYTES, casterReachM } from "./shadows/cascades";
@@ -97,6 +97,7 @@ import { decorationLevel, decorationSeed } from "../surface/decoration/decoratio
 import { finestLevel } from "./cube";
 import { DETAIL_KERNELS } from "../surface/decoration/detailTextureBake";
 import type { DrawItem } from "../engine/types";
+import { selectionTolerancePx } from "./selectionTolerance";
 import { terrainSlotLayout } from "./slotLayout";
 
 const UNIVERSE: UniverseIdHex = "000000000000002a";
@@ -1089,16 +1090,58 @@ describe("the scene's craft as a pass's contacts (R10.T16.b; R05 Design note 9)"
       },
       selectionPx: SESSION_PRESENTED,
     });
-    const view = terrainPassViewOf(PRIMARY, retina, moon);
+    const view = terrainPassViewOf(PRIMARY, retina, moon, "lit");
     expect([view?.view.viewport, view]).toEqual([
       SESSION_PRESENTED,
-      terrainPassViewOf(PRIMARY, handing(6e6), moon),
+      terrainPassViewOf(PRIMARY, handing(6e6), moon, "lit"),
     ]);
+  });
+
+  it("takes a view into a lit pass at τ times its lit τ scale, and into a wireframe pass at its own τ (perf-terrain-selection-scale)", () => {
+    const plain = terrainPassViewOf(PRIMARY, handing(6e6), moon, "lit");
+    const scaled = handing(6e6, { litTauScale: 1.25 });
+    const lit = terrainPassViewOf(PRIMARY, scaled, moon, "lit");
+    expect([lit?.tauPx, lit?.view, terrainPassViewOf(PRIMARY, scaled, moon, "wire")]).toEqual([
+      1.25 * (plain?.tauPx ?? Number.NaN),
+      plain?.view,
+      plain,
+    ]);
+  });
+
+  it("reselects a lit pass at its view's new lit τ scale, and leaves a wireframe pass's selection as it was (perf-terrain-selection-scale)", async () => {
+    const selectedTauPx = async (
+      style: "photorealistic" | "wireframe",
+    ): Promise<ReadonlyArray<number>> => {
+      const h = await harness();
+      const report = handing(5e6, { style, drawnStyle: style });
+      h.session.noteView(PRIMARY, report);
+      h.session.step();
+      await answerField(h, 1, [fieldCellIndex({ face: 2, level: FIELD_LEVEL, i: 16, j: 16 })]);
+      h.session.step();
+      const pass = style === "photorealistic" ? h.session.pass(MOON) : h.session.wirePass(MOON);
+      if (pass === null) {
+        throw new Error(`no ${style} pass to observe`);
+      }
+      const taus: number[] = [];
+      pass.observe({
+        onSelect: (input) => {
+          taus.push(input.views[0]?.tauPx ?? Number.NaN);
+        },
+      });
+      h.session.noteView(PRIMARY, { ...report, litTauScale: 1.25 });
+      h.session.step();
+      h.session.noteView(PRIMARY, report);
+      h.session.step();
+      return taus;
+    };
+    const tauPx = selectionTolerancePx(handoverTauPx("photorealistic", "high"));
+    expect(await selectedTauPx("photorealistic")).toEqual([1.25 * tauPx, tauPx]);
+    expect(await selectedTauPx("wireframe")).toEqual([]);
   });
 
   it("weighs a view by its budget's streaming priority: a secondary's a quarter of a primary's", () => {
     const weightOf = (streamPriority: "primary" | "secondary"): number | undefined =>
-      terrainPassViewOf(INSTRUMENT, handing(6e6, { streamPriority }), moon)?.weight;
+      terrainPassViewOf(INSTRUMENT, handing(6e6, { streamPriority }), moon, "lit")?.weight;
     expect([weightOf("primary"), weightOf("secondary")]).toEqual([
       PRIMARY_VIEW_WEIGHT,
       SECONDARY_VIEW_WEIGHT,

@@ -38,6 +38,7 @@ import {
 } from "../../view/photoreal/internalScale";
 import { overlayDrawsAt, overlaySubmission } from "../../view/photoreal/overlay";
 import { PhotorealRenderer, type PhotorealStatus } from "../../view/photoreal/renderer";
+import { renderedTauScale } from "../../view/budget/selectionScale";
 import type { ViewBudget } from "../../view/budget/viewBudget";
 import type { Histogram } from "../../view/post/histogram";
 import type { HistogramMeter } from "../../view/post/meter";
@@ -156,6 +157,13 @@ export interface ViewFrameInputs {
    * resolution (`renderViewport`).
    */
   readonly renderScale: number;
+  /**
+   * The internal scale its lit terrain counts a rendered pixel at where its geometry's
+   * `selectionScale` is `rendered` (perf-terrain-selection-scale): its frame-rate floor's or
+   * controller's scale snapped up to the floor's steps and held (`BudgetedScale.selectionScale`);
+   * {@link ViewFrameInputs.renderScale} where absent.
+   */
+  readonly selectionScale?: number | undefined;
   /** The styles it may draw: the adapter's, and for the primary the budget's permission too. */
   readonly availability: StyleAvailability;
   /**
@@ -332,12 +340,14 @@ export function terrainReportOf(
     return null;
   }
   const presentedPx = presentedViewport(size);
+  const selectionPx = selectionViewport(presentedPx, size.devicePixelRatio);
   return {
     scene: run.scene,
     pose: runPose(run),
     fovXRad: (run.camera.fovDeg * Math.PI) / 180,
     presentedPx,
-    selectionPx: selectionViewport(presentedPx, size.devicePixelRatio),
+    selectionPx,
+    ...litTauScaleOf(inputs, presentedPx, selectionPx),
     style: inputs.style,
     drawnStyle,
     setting: inputs.setting,
@@ -345,6 +355,29 @@ export function terrainReportOf(
     regimes,
     regimesFromM,
   };
+}
+
+/**
+ * A view's report's lit τ scale (`TerrainViewReport.litTauScale`; perf-terrain-selection-scale):
+ * where its geometry's `selectionScale` is `rendered`, `renderedTauScale` of its selection size
+ * over its render resolution (`renderViewport` at its setting's rows) at its held selection scale
+ * ({@link ViewFrameInputs.selectionScale}, else its `renderScale`); nothing at `presented`, so that
+ * its lit passes select at its CSS px as before, bit for bit.
+ */
+function litTauScaleOf(
+  inputs: ViewFrameInputs,
+  presentedPx: ViewSize,
+  selectionPx: ViewSize,
+): { readonly litTauScale?: number } {
+  const geometry = inputs.geometry ?? SETTINGS[inputs.setting].geometry;
+  if (geometry.selectionScale !== "rendered") {
+    return {};
+  }
+  const rendered = internalViewport(
+    renderViewport(presentedPx, SETTINGS[inputs.setting].terrain.renderHeightPx),
+    inputs.selectionScale ?? inputs.renderScale,
+  );
+  return { litTauScale: renderedTauScale(selectionPx, rendered) };
 }
 
 /**

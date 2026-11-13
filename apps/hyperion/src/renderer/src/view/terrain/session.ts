@@ -329,6 +329,14 @@ export interface TerrainViewReport {
    * `presentedPx`, as at a ratio of 1.
    */
   readonly selectionPx?: Viewport;
+  /**
+   * The factor its lit passes' τ takes, at least 1 (`GeometrySettings.selectionScale` `rendered`;
+   * perf-terrain-selection-scale): {@link TerrainViewReport.selectionPx}'s width over the width its
+   * photorealistic image is rendered at, at its held selection scale (`renderedTauScale`), so that
+   * they select, band and stride at τ of the larger of a CSS and a rendered pixel. Its hand-over,
+   * its fields' want and its wireframe passes take none. Absent, 1: τ at its CSS px, as before.
+   */
+  readonly litTauScale?: number;
   /** The style its budget draws (`ViewBudget.style`), whose τ judges its range (Design note 13). */
   readonly style: RenderStyle;
   /**
@@ -521,14 +529,19 @@ export function viewFieldCandidates(
 /**
  * One view's part in a body's pass (R10.T16.b): its camera from the body's centre as it last drew,
  * in the body's non-rotating axes (the galactic axes, the body frame's), at its style's τ
- * (`handoverTauPx`), its selection size ({@link TerrainViewReport.selectionPx}) and its weight
- * (`PRIMARY_VIEW_WEIGHT` or `SECONDARY_VIEW_WEIGHT`, from its budget's `streamPriority`); `null`
- * for a body whose rotation is not known, which is never handed over.
+ * (`handoverTauPx`), times its {@link TerrainViewReport.litTauScale} in a lit pass, its selection
+ * size ({@link TerrainViewReport.selectionPx}) and its weight (`PRIMARY_VIEW_WEIGHT` or
+ * `SECONDARY_VIEW_WEIGHT`, from its budget's `streamPriority`); `null` for a body whose rotation is
+ * not known, which is never handed over.
+ *
+ * @param shading - The pass's: a lit pass's τ takes the view's lit τ scale, a wireframe pass's
+ *   none.
  */
 export function terrainPassViewOf(
   id: ViewId,
   report: TerrainViewReport,
   body: ViewBody,
+  shading: PassShading,
 ): TerrainPassView | null {
   const rotation = body.rotation;
   if (rotation === null) {
@@ -548,7 +561,10 @@ export function terrainPassViewOf(
       fovXRad: report.fovXRad,
       viewport: report.selectionPx ?? report.presentedPx,
     },
-    tauPx: handoverTauPx(report.style, report.setting),
+    tauPx:
+      shading === "lit" && report.litTauScale !== undefined
+        ? handoverTauPx(report.style, report.setting) * report.litTauScale
+        : handoverTauPx(report.style, report.setting),
     weight: report.streamPriority === "primary" ? PRIMARY_VIEW_WEIGHT : SECONDARY_VIEW_WEIGHT,
   };
 }
@@ -967,7 +983,7 @@ interface HandingView {
  * A body's passes by their shading (R10.T11): the photorealistic style's, lit, and the
  * wireframe's.
  */
-type PassShading = "lit" | "wire";
+export type PassShading = "lit" | "wire";
 
 /** No view shows the terrain's fault. */
 const NO_FAULTS: ReadonlyMap<ViewId, TerrainFault> = new Map();
@@ -1917,7 +1933,7 @@ export class TerrainSession {
         }
       }
       for (const [body, pass] of passes) {
-        this.#stepPass(body, pass, views.get(body) ?? []);
+        this.#stepPass(body, pass, views.get(body) ?? [], shading);
       }
     }
     this.#followFaults(handingIds(handing, wireHanding));
@@ -1962,10 +1978,18 @@ export class TerrainSession {
     }
   }
 
-  /** Steps `body`'s pass over the views that hand it over, with the scene's craft as its contacts. */
-  #stepPass(body: BodyIdHex, pass: TerrainPass, views: ReadonlyArray<HandingView>): void {
+  /**
+   * Steps `body`'s pass, of `shading`, over the views that hand it over, with the scene's craft as
+   * its contacts.
+   */
+  #stepPass(
+    body: BodyIdHex,
+    pass: TerrainPass,
+    views: ReadonlyArray<HandingView>,
+    shading: PassShading,
+  ): void {
     const passViews = views
-      .flatMap(({ id, report, body: seen }) => terrainPassViewOf(id, report, seen) ?? [])
+      .flatMap(({ id, report, body: seen }) => terrainPassViewOf(id, report, seen, shading) ?? [])
       .slice(0, MAX_SELECTION_VIEWS);
     const seen = this.#sceneWith(body);
     const grounded =

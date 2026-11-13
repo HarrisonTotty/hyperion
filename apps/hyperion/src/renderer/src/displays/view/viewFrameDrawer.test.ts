@@ -567,6 +567,57 @@ describe("what a view drew, for the terrain session (R10.T16.a)", () => {
     });
   });
 
+  it("reports no lit τ scale at the presented CSS px, the settings' own (perf-terrain-selection-scale)", () => {
+    const report = terrainReportOf(
+      inputsOf("photorealistic"),
+      new Map(),
+      "primary",
+      "photorealistic",
+      null,
+    );
+    expect(report === null ? null : Object.hasOwn(report, "litTauScale")).toBe(false);
+  });
+
+  it("reports its lit τ scale at the larger of a CSS and a rendered pixel where its geometry says rendered", () => {
+    const rendered = { ...SETTINGS.low.geometry, selectionScale: "rendered" } as const;
+    const at = (ratio: number, scales: Partial<ViewFrameInputs>): number | undefined =>
+      terrainReportOf(
+        { ...inputsOf("photorealistic", ratio), geometry: rendered, ...scales },
+        new Map(),
+        "primary",
+        "photorealistic",
+        null,
+      )?.litTauScale;
+    expect([
+      // At its full scale its 320 CSS px are rendered at 320.
+      at(1, {}),
+      // Its held selection scale's 256 px, not the frame's own scale.
+      at(1, { renderScale: 0.9, selectionScale: 0.8 }),
+      // Its frame's scale where none is held.
+      at(1, { renderScale: 0.8 }),
+      // At a ratio of 2 its 640 device px at half scale are its 320 CSS px; at 0.4, 256.
+      at(2, { selectionScale: 0.5 }),
+      at(2, { selectionScale: 0.4 }),
+    ]).toEqual([1, 1.25, 1.25, 1, 1.25]);
+  });
+
+  it("counts the high setting's render rows in its rendered pixel", () => {
+    const report = terrainReportOf(
+      {
+        ...inputsOf("photorealistic"),
+        size: { widthPx: 2000, heightPx: 1200, devicePixelRatio: 1, remPx: 16 },
+        setting: "high",
+        geometry: { ...SETTINGS.high.geometry, selectionScale: "rendered" },
+      },
+      new Map(),
+      "primary",
+      "photorealistic",
+      null,
+    );
+    // 1,080 of its 1,200 rows: 1,800 of its 2,000 px.
+    expect(report?.litTauScale).toBe(2000 / 1800);
+  });
+
   it("reports nothing while its stage is not laid out", () => {
     expect(
       terrainReportOf(
