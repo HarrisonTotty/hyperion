@@ -393,9 +393,10 @@ export interface PhotorealSettings {
   readonly planetshineSources: number;
   /**
    * The cells per axis a disc of 32 px or more takes in its limb pixels while a photorealistic
-   * primary's frame-rate floor stands at its lowest step (R07.T8.i, the owner's priority; a lean,
-   * 2026-11-02): 2, a quarter of `LIMB_SAMPLES`' cells, within 1/3 stop of them on at least 99.5%
-   * of the limb's pixels; `LIMB_SAMPLES` (4) is the way back. The low setting never steps its floor
+   * primary's frame-rate floor stands at its lowest step (R07.T8.i, the owner's priority; built
+   * 2026-11-02, kept 2026-11-13): 2, a quarter of `LIMB_SAMPLES`' cells, every limb pixel within
+   * 1/3 stop of them or under one 8-bit code at black apart (99.15-99.74% by 1/3 stop alone);
+   * `LIMB_SAMPLES` (4) is the way back. The low setting never steps its floor
    * (`aloneScaleBounds`), so its value is never read; it is the same.
    */
   readonly floorLimbSamples: number;

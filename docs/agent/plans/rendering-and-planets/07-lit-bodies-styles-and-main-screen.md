@@ -10120,7 +10120,9 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     `TerrainSession.coverageWhole` and `CoverageMask.whole`.
   - No kernel lever: `cell_samples` places points only inside the limb. The cells with none, 62% of
     the pass's cells on the inspection's orbit window at high, already shade nothing.
-- **R07.T8.i, as built** (2026-11-02, perf-disc-cells; a lean, pending the owner's ruling).
+- **R07.T8.i, as built** (2026-11-02, perf-disc-cells; a lean, kept: ruled 2026-11-13,
+  ux-calls-and-checklist-gaps, since the twin's misses are corner slivers at black and the floor
+  holds 2 only at its lowest step on high).
   - Built because the pass stayed at 17% of SwiftShader's GPU time after T8.h (the brief's 8%).
   - `PhotorealSettings.floorLimbSamples` (2 on both settings; 4 is the way back) is a large disc's
     limb cells while `BudgetedScale.atLowestStep` (the floor's scale at its bounds' min) holds.

@@ -1636,3 +1636,9 @@ ejecta-block population), shape parameter or authoritative dip opens a new tag a
     tallest form holds it on high), else among `labelStatements` (its third argument) where that
     line is a state or gives way for room; an instrument's in its label block, its survey line
     standing on a `GROUND` page that may be closed.
+- **The terrain resolve's texture budget for R11 (ruled 2026-11-13, ux-calls-and-checklist-gaps;
+  R14's records):** the resolve binds 15 of WebGPU's 16 sampled textures a stage. T9.a's rings'
+  shadow, τ(r) at one crossing, goes in the resolve frame's `rgba32float` row (a storage buffer in
+  the forward pass); T2.c's decoration sets are one `texture_2d_array`, a layer a material; T7.c's
+  cloud shadow is its own texture, the room made by moving `phase_factor_table` (`rgba32float`)
+  into the resolve frame as the lights were, which is bit for bit.

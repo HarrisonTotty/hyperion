@@ -1435,7 +1435,8 @@ T2.b–e where the owner's ruling puts the visibility buffer first).
     figures): records at the end of Risks.
 - **R14.T3.c Strides in camera passes.** Size L, after seamless-2.
   - The cull picks the coarsest stride whose level's stated error plus e_s, projected at the
-    cluster's distance, is within τ′ (Design note 3's τ′, unslewed); stride 1 in the forced region.
+    cluster's distance, is within τ′ (as built the bands' slewed τ′, ruled 2026-11-13; see its
+    record); stride 1 in the forced region.
     It builds the stated-bound rule unless the ruling T3.e drafts adopts the measured deviation's.
     `strides: "measured"`.
   - **The stride's transition** is a distance morph of its own, CDLOD-style and stateless: each
@@ -2377,7 +2378,7 @@ pages are assets and presentation; collision never reads them. No domain tag is 
     while it is held or its byte is not 0 (`strideFadingEdges`). Not the task's stateless morph,
     nor "the same position at every t" across that edge: for the 300 ms the two sides part, by at
     most the falling stride displacement, over the skirts. The hold at k = 1 switches at once.
-  - Not Design note 3's unslewed τ′ (lean, 2026-11-04; pending the owner's ruling): a patch's stride
+  - Not Design note 3's unslewed τ′ (lean, 2026-11-04; kept, ruled 2026-11-13): a patch's stride
     scale takes its view's bands' τ′ (`bandTauPx`), reached at most `BAND_SLEW_PER_STEP` a step as
     the morph bands' is, because the budget's τ′ jumped 1.8 times in one frame on low and turned a
     normal past 2°. While τ′ tightens the strides lag it, about 30 steps for that jump, so the drawn
@@ -2600,8 +2601,10 @@ pages are assets and presentation; collision never reads them. No domain tag is 
     buffers on `baked-offsets` (heights, slots, instances, offsets, survey mask, lists, class
     layers, horizon map), 7 on `face-differences`, and 15 sampled textures of WebGPU's 16 a stage.
     R11's planned additions (the cloud layer's shadow, the rings' shadow, the decoration's albedo)
-    need no storage buffer, but as three textures they would pass the 16: packed as layers of one
-    array, or as uniforms (pending the owner's ruling). The resolve frame is 2,077 texels,
+    need no storage buffer, but as three textures they would pass the 16 (ruled 2026-11-13: the
+    rings' τ(r) in the resolve frame's row, the decoration's sets as one `texture_2d_array`, and the
+    cloud shadow its own texture, room made by moving `rgba32float` `phase_factor_table` into the
+    resolve frame, so 16 of 16; R11.T2.c, T7.c and T9.a). The resolve frame is 2,077 texels,
     33,232 B a lit view by IDs, category `other`, outside Design note 15's rows.
   - `TerrainVisibility.resolve` and `FrameVisibility.resolve`. The renderer owns a
     `VisibilityBuffer` a view (made at the first frame by IDs, let go at a forward one) and draws
