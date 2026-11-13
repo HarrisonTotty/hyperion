@@ -763,6 +763,7 @@ outcome in the task it falls on.
   `PerfRecordError` naming it; the package imports nothing from `node:*`, `electron` or the DOM (a
   test over its sources). Acceptance: `pnpm --filter @hyperion/perf test`, `pnpm typecheck`,
   `just ci`.
+  Records: [12-measurements-and-settings-ladder/records/R12.T1.a.md](12-measurements-and-settings-ladder/records/R12.T1.a.md).
 - **R12.T1.b The fold, the table and the store.** `src/fold.ts` with `foldSpikeResult`, which turns
   one of R05's results files into a record with `source: "descent-spike"`; `src/table.ts`, which
   writes `budget.md`'s generated sections between `<!-- generated:<name> -->` markers from the

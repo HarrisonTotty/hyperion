@@ -2,6 +2,7 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "composite": true,
+    "allowImportingTsExtensions": true,
     "tsBuildInfoFile": "node_modules/.cache/tsc/web.tsbuildinfo",
     "lib": ["es2023", "es2025.float16", "dom", "dom.iterable"],
     "jsx": "react-jsx",

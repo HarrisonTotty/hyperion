@@ -13,6 +13,7 @@
     "test:watch": "node ../../tools/node-floor/check.cjs && vitest"
   },
   "dependencies": {
+    "@hyperion/perf": "workspace:*",
     "@hyperion/protocol": "workspace:*",
     "commander": "^15.0.0",
     "react": "^19.3.0",

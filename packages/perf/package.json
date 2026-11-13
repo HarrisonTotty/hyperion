@@ -1,0 +1,18 @@
+{
+  "name": "@hyperion/perf",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "HYPERION's performance record (plan R12): the run record, its rows and scenes, and the tools over runs.v1.jsonl.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "node ../../tools/node-floor/check.cjs && tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
+    "test": "node ../../tools/node-floor/check.cjs && vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.6",
+    "vitest": "^5.0.1"
+  }
+}
