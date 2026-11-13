@@ -3061,6 +3061,8 @@ acid become rows of T52.c's condensation loop, and T24.d's composition is T52.d'
       κ₁ built 2026-11-01, held at 27: Risks, "Deviations in P14.T24.h.b, as built". The column
       read whole built 2026-11-10, held at 32: Risks, "the envelope's column read whole". The warm
       envelopes' haze split built 2026-11-13, held at 32: Risks, "the warm envelopes' haze split".
+      The bright haze's second mode and per-band floor built 2026-11-13, held at 32: Risks, "the
+      bright haze's second mode".
 - **P14.T24.i An unlit body's mean surface temperature** (23 → 24, before the serve gate; lane
   `p14-gate-24`, with P14.T56.f, one gate; behind a hold at 24 with a tripwire;
   decision-bump-plan-after-22, "Version-24 lanes after 23", V3.3, 2026-10-22).
@@ -34537,3 +34539,26 @@ ACTIVE HOST · HOST LEAVING MAIN SEQUENCE · EXTRAPOLATED ZONE · FROZEN SURFACE
     `planetary::chem::photochem`, `planetary::hooks::envelope_atmosphere`,
     `planetary::viewer::envelope_census` and `planetary::testing::held`;
     `cargo test -p hyperion-fit warm_haze`; `just fit-check`; the slow haze census by name.
+- **P14.T24.h.b's follow-up, the bright haze's second mode and a per-band floor (lane
+  `fix-dark-sub-neptune-3`, 2026-11-13; research-leans-52's ruling).** Under the same hold
+  (`ENVELOPE_COLUMN_VERSION` 32); nothing moves at 31.
+  - _New items:_ `photochem`'s `coagulated_haze`, `COAGULATED_HAZE_PARTICLES`,
+    `COAGULATED_HAZE_BASE` and `BRIGHT_HAZE_OPTICAL_DEPTH`; `HazeRule::Coagulated`;
+    `envelope_bond::ColumnFloor`.
+  - _Changed contracts:_ `tables::warm_haze` holds `COAGULATED_HAZE_OPTICAL_DEPTH` (fit revision 1),
+    which `WarmFixture::light` and `ClosedReading::coagulated_haze_optical_depth` take;
+    `assemble_under` takes `(rules, floor)`; the closed form's hazes carry their `HazeRule`.
+  - _Rule:_ the slab keeps τ(550) 10 × (1 − s); the coagulated mode, 0.5 µm tholin from the slab's
+    base to 1,000 Pa, takes the fitted 44.32 × (1 − s); `bright_share` counts the slab alone.
+  - _Lean (2026-11-13), landed as ruled:_ the per-band floor only in a column holding the bright
+    haze (`ColumnFloor::of`), so the giants, `GIANTS_32` and `COLOURS_32` stay bit for bit.
+  - _Lean (2026-11-13):_ the coagulated mode's size and depth, GJ 1214 b's budget, serve every warm
+    envelope.
+  - _Deviation:_ `warm_haze` emitted `--since 31` (the emitter's ceiling), not 32.
+  - _Changed (tests):_ the owner's draw meets the client's full-pass march within a third of a stop
+    (`DARK_SUB_NEPTUNE_MARCH`); its disc table, re-measured, is pinned as it stands, B and V 0.67
+    and 0.39 stops under the photometry (`TWIN_EXCESS_AS_IT_STANDS`; lean, 2026-11-13).
+  - _At the bump:_ fold `ColumnFloor::of`'s `Clipped` arm with the rest; restamp `warm_haze` at 32.
+  - _Accept:_ part 2's, with both slow censuses by name:
+    `under_every_32_hold_the_envelope_column_moves_only_gas_envelopes_and_their_satellites` and
+    `under_every_32_hold_the_warm_sub_neptunes_take_their_hazes_by_temperature`.

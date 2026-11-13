@@ -5,8 +5,9 @@ use hyperion_testkit::float::assert_same_bits;
 
 use super::*;
 use crate::planetary::chem::HostAbundances;
+use crate::planetary::chem::photochem::BRIGHT_HAZE_OPTICAL_DEPTH;
 use crate::planetary::testing::{EnvelopeByHand, envelope_by_hand, with_every_32_hold};
-use crate::tables::warm_haze::BRIGHT_HAZE_OPTICAL_DEPTH;
+use crate::tables::warm_haze::COAGULATED_HAZE_OPTICAL_DEPTH;
 use crate::units::{Dex, Watts};
 
 /// The fixture's record envelope by hand at equilibrium temperature `t_eq` (K): its mass, radius,
@@ -68,7 +69,7 @@ fn hazes_of(envelope: &crate::planetary::record::Envelope) -> Vec<(&'static str,
 /// The fixture first (the brief): at 31 GJ 1214 b, its zero-albedo `T_eq` 595 K, draws no
 /// photochemical haze, its S₈ vapour unsaturated in a stratosphere near 500 K and its soot below
 /// Gao et al.'s grid, and its closed form a Bond albedo of 0.012 under its M dwarf's light, against
-/// its measured 0.51 ± 0.06 (Kempton et al. 2023, recalled).
+/// its measured 0.51 ± 0.06 (Kempton et al. 2023).
 #[test]
 fn gj_1214_b_draws_no_haze_at_31() {
     let held = GJ_1214_B
@@ -76,6 +77,7 @@ fn gj_1214_b_draws_no_haze_at_31() {
             ClosedReading {
                 rules: EnvelopeColumnRules::Clipped,
                 bright_haze_optical_depth: BRIGHT_HAZE_OPTICAL_DEPTH,
+                coagulated_haze_optical_depth: COAGULATED_HAZE_OPTICAL_DEPTH,
             },
             BondAlbedo::from_fraction(0.3),
         )
@@ -89,17 +91,18 @@ fn gj_1214_b_draws_no_haze_at_31() {
     assert_eq!(hazes_of(&envelope), [], "{held:?}");
 }
 
-/// Under every 32 hold the fixture's record carries the bright haze alone at the fitted τ(550),
-/// whole below 600 K and above 550 K, and its closed form meets the brief's colour and `p_V`: B/V
-/// 0.6–0.7 and R/V 1.1–1.6 in its column's spherical albedo, `p_V` 0.15–0.25, its q the bright
-/// haze's. Its Bond albedo, pinned, falls short of the measured 0.39–0.63 (a finding): Khare et
-/// al.'s tholin of 0.1 µm is thin beyond 1 µm, where two thirds of a 3,250 K host's light lies,
-/// and the column is read only above τ(550) 10 (`warm_haze`'s fit takes that reach).
+/// Under every 32 hold the fixture's record carries the bright haze alone, its slab and its
+/// coagulated mode at their τ(550), whole below 600 K and above 550 K, and its closed form meets
+/// the brief's: its Bond albedo within the measured 0.39–0.63 (pinned at the fit's), B/V 0.6–0.7
+/// and R/V 1.1–1.6 in its column's spherical albedo, `p_V` 0.15–0.25, its q the bright haze's.
+/// The slab sets the visible; the coagulated mode, read in each bin to its own τ of 10, the
+/// infrared, where two thirds of a 3,250 K host's light lies (research-leans-52).
 #[test]
 fn under_every_32_hold_gj_1214_b_draws_its_bright_haze() {
     let light = GJ_1214_B
-        .light(BRIGHT_HAZE_OPTICAL_DEPTH)
+        .light(COAGULATED_HAZE_OPTICAL_DEPTH)
         .expect("the fixture's column");
+    assert!((0.39..=0.63).contains(&light.bond_albedo), "{light:?}");
     let [b, v, r] = light.spherical_albedo;
     assert!((0.6..=0.7).contains(&(b / v)), "{light:?}");
     assert!((1.1..=1.6).contains(&(r / v)), "{light:?}");
@@ -114,15 +117,18 @@ fn under_every_32_hold_gj_1214_b_draws_its_bright_haze() {
     ]) {
         assert_same_bits(q, bright);
     }
-    assert!((light.bond_albedo - 0.2211).abs() < 5e-4, "{light:?}");
-    let envelope = with_every_32_hold(|| by_hand(light.equilibrium_temperature_k));
+    assert!((light.bond_albedo - 0.5100).abs() < 5e-4, "{light:?}");
+    // By hand the given T_eq is the zero-albedo one, which sets the hazes' shares.
+    let envelope = with_every_32_hold(|| by_hand(light.zero_albedo_temperature_k));
     let hazes = hazes_of(&envelope);
-    assert_eq!(hazes.len(), 1, "{hazes:?}");
-    assert_eq!(hazes[0].0, "tholin");
-    assert!(
-        (hazes[0].1 / BRIGHT_HAZE_OPTICAL_DEPTH - 1.0).abs() < 1e-9,
-        "{hazes:?}"
-    );
+    assert_eq!(hazes.len(), 2, "{hazes:?}");
+    for ((key, tau), want) in hazes
+        .iter()
+        .zip([BRIGHT_HAZE_OPTICAL_DEPTH, COAGULATED_HAZE_OPTICAL_DEPTH])
+    {
+        assert_eq!(*key, "tholin");
+        assert!((tau / want - 1.0).abs() < 1e-9, "{hazes:?}");
+    }
 }
 
 /// The fixture's flux is its host's black body at its distance, and its zero-albedo `T_eq` the

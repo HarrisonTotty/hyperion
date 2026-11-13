@@ -1,11 +1,14 @@
 //! The warm envelopes' bright haze on its fit's fixture (P14.T24.h.b, from generator version 32;
 //! research-leans-50's ruling, 2026-11-10): GJ 1214 b as the snapshot path's closed form reads it,
-//! for `hyperion-fit`'s `warm_haze` task, which fits the bright haze's τ(550)
-//! ([`BRIGHT_HAZE_OPTICAL_DEPTH`](crate::tables::warm_haze::BRIGHT_HAZE_OPTICAL_DEPTH)) on the
-//! planet's measured Bond albedo, and for the sim's tests. Not a part of the generator's API.
+//! for `hyperion-fit`'s `warm_haze` task, which fits the τ(550) of the bright haze's coagulated
+//! mode ([`COAGULATED_HAZE_OPTICAL_DEPTH`](crate::tables::warm_haze::COAGULATED_HAZE_OPTICAL_DEPTH);
+//! research-leans-52's ruling, 2026-11-13) on the planet's measured Bond albedo, and for the sim's
+//! tests. Not a part of the generator's API.
 //!
 //! The fixture is read under 32's rules whatever the version's (`envelope_bond`'s "The column read
-//! whole"), its bright haze at the optical depth it is given, its `T_eq` iterated with its own Bond
+//! whole"), its bright haze's slab at
+//! [`BRIGHT_HAZE_OPTICAL_DEPTH`](crate::planetary::chem::photochem::BRIGHT_HAZE_OPTICAL_DEPTH) and
+//! its coagulated mode at the optical depth it is given, its `T_eq` iterated with its own Bond
 //! albedo (`FIXED_POINT_STEPS` steps from 0.3), about a host whose light is a black body's of its
 //! effective temperature (`area_mix::HostShade::of_host`).
 //!
@@ -162,18 +165,21 @@ impl WarmFixture {
         }
     }
 
-    /// Its light under 32's rules with its bright haze of τ(550) `bright_haze_optical_depth` at its
-    /// whole share, its `T_eq` its own Bond albedo's after `FIXED_POINT_STEPS` steps; `None` for an
-    /// optical depth that is not finite and positive, and where the closed form gives it no column.
+    /// Its light under 32's rules with its bright haze's coagulated mode of τ(550)
+    /// `coagulated_haze_optical_depth` at its whole share, the slab at the record's, its `T_eq` its
+    /// own Bond albedo's after `FIXED_POINT_STEPS` steps; `None` for an optical depth that is not
+    /// finite and positive, and where the closed form gives it no column.
     #[must_use]
-    pub fn light(&self, bright_haze_optical_depth: f64) -> Option<WarmLight> {
-        if !(bright_haze_optical_depth.is_finite() && bright_haze_optical_depth > 0.0) {
+    pub fn light(&self, coagulated_haze_optical_depth: f64) -> Option<WarmLight> {
+        if !(coagulated_haze_optical_depth.is_finite() && coagulated_haze_optical_depth > 0.0) {
             return None;
         }
         self.light_under(
             ClosedReading {
                 rules: EnvelopeColumnRules::Whole,
-                bright_haze_optical_depth,
+                bright_haze_optical_depth:
+                    crate::planetary::chem::photochem::BRIGHT_HAZE_OPTICAL_DEPTH,
+                coagulated_haze_optical_depth,
             },
             BondAlbedo::from_fraction(0.3),
         )

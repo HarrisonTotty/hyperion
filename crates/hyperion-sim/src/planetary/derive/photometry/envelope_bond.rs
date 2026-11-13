@@ -61,7 +61,8 @@
 //! # What is not modelled
 //!
 //! - **Below the floor** nothing is read: a conservative deck read whole would give the albedo of
-//!   a semi-infinite cloud (decision-deep-decks-split §6.6), so the floor is black.
+//!   a semi-infinite cloud (decision-deep-decks-split §6.6), so the floor is black (from 32, in a
+//!   column with the bright haze, each bin's own floor; "The column read whole").
 //! - **Thermal emission** in the last bins, and the alkali lines' cores (within 25 cm⁻¹).
 //! - **The host's \[Fe/H\] and C/O on the snapshot path**: the closed form takes a protosolar host
 //!   ([`column`](mod@column)).
@@ -89,12 +90,22 @@
 //! ([`column::ClosedLight::bright_share`]), by which the photometry weighs a provisional
 //! envelope's q (`photometry::BRIGHT_HAZE_PHASE_INTEGRAL`).
 //!
+//! Under it too (research-leans-52's ruling, 2026-11-13, the lane `fix-dark-sub-neptune-3`) the
+//! bright haze has a coagulated mode beneath its slab (`photochem::coagulated_haze`), and a column
+//! that holds the bright haze is read in each bin down to where that bin's own τ, its Rayleigh and
+//! its particles', reaches 10 ([`ColumnFloor::EachBin`]), not τ(550): its infrared, where the
+//! 0.1 µm slab is thin, is read in the coagulated mode below. The crossing layer is cut there, a
+//! homogeneous layer's share. Every other column keeps the floor at τ(550) 10, so the giants'
+//! columns stay as they were (a lean, landed as ruled: the per-bin floor would move Saturn's B/V
+//! and R/V by 0.02 and Uranus's Bond albedo by 0.004).
+//!
 //! # Determinism
 //!
 //! Every loop's count is fixed, every sum runs in a fixed order and every transcendental is
 //! [`math`]'s.
 
 use crate::math;
+use crate::planetary::chem::photochem::HazeRule;
 use crate::planetary::derive::atmosphere::Gas;
 use crate::planetary::derive::photometry::area_mix::{HostShade, OPTICS_BANDS, band_weighted};
 use crate::planetary::derive::photometry::{Bands, BrightShare, DiscColour};
@@ -128,7 +139,7 @@ const OPAQUE_ABSORPTION: f64 = 30.0;
 /// envelope's Bond and geometric albedo is as it was, bit for bit. 32's bump deletes this hold,
 /// [`EnvelopeColumnRules`] with its `Clipped` arm and its matches (in [`layer_two_stream`], whose
 /// `rules` parameter [`bin_albedos_under`] reads, `column_top`, [`narrow_table_for`],
-/// `envelope_atmosphere::haze_shares` and [`gas_envelope_light`]), the `rules` of
+/// [`ColumnFloor::of`], `envelope_atmosphere::haze_shares` and [`gas_envelope_light`]), the `rules` of
 /// [`column::ClosedReading`] and the `_under` functions' (each folding into its plain one), the
 /// tests that call the `Clipped` arm, the tests' switch, its line in the tests' `HeldRules` and in
 /// `with_every_32_hold`, and its tripwire (`the_envelope_column_is_held_only_until_the_32_bump`);
@@ -225,8 +236,41 @@ pub(crate) struct ColumnLayer {
     pub(crate) particles: [[f64; 3]; OPTICS_BANDS],
 }
 
+/// Where a column's floor lies ([`assemble_under`], [`bin_albedos_under`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum ColumnFloor {
+    /// R08's: where τ(550) from the top, the gas's Rayleigh and every mode's, reaches
+    /// [`FLOOR_OPTICAL_DEPTH`], in every bin alike.
+    Visual,
+    /// In each bin where that bin's own τ from the top, its Rayleigh and its particles'
+    /// extinction, reaches [`FLOOR_OPTICAL_DEPTH`], the layer it crosses cut there (a
+    /// homogeneous layer's share, exact for one): from 32 a column that holds the bright haze's
+    /// (research-leans-52's ruling, 2026-11-13; the [module documentation](self), "The column read
+    /// whole").
+    EachBin,
+}
+
+impl ColumnFloor {
+    /// The floor of a column read under `rules` whose photochemical hazes are those of the rules
+    /// `hazes`: [`ColumnFloor::EachBin`] under [`EnvelopeColumnRules::Whole`] with the bright haze
+    /// ([`HazeRule::Bright`]), [`ColumnFloor::Visual`] otherwise, so that the giants' columns stay
+    /// as they were (a lean, 2026-11-13, landed as ruled).
+    #[must_use]
+    pub(crate) fn of(
+        rules: EnvelopeColumnRules,
+        hazes: impl IntoIterator<Item = HazeRule>,
+    ) -> Self {
+        let bright = hazes.into_iter().any(|rule| rule == HazeRule::Bright);
+        match (rules, bright) {
+            (EnvelopeColumnRules::Whole, true) => Self::EachBin,
+            (EnvelopeColumnRules::Whole, false) | (EnvelopeColumnRules::Clipped, _) => Self::Visual,
+        }
+    }
+}
+
 /// An envelope's column above its floor: its gravity, its gas's mean molar mass and its Rayleigh
-/// cross section at 550 nm (per molecule of the mixture), and its layers from the top down.
+/// cross section at 550 nm (per molecule of the mixture), its layers from the top down, and where
+/// its floor lies in each bin.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct EnvelopeColumn {
     /// The gravity, m s⁻².
@@ -237,6 +281,8 @@ pub(crate) struct EnvelopeColumn {
     pub(crate) rayleigh_550_m2: f64,
     /// The layers, top first.
     pub(crate) layers: Vec<ColumnLayer>,
+    /// Its floor: at its last layer's bottom in every bin, or cut in each bin.
+    pub(crate) floor: ColumnFloor,
 }
 
 /// The mean over bin `bin` of (550 ÷ λ)^4.08, uniform in wavelength: the bin's Rayleigh optical
@@ -495,6 +541,13 @@ pub(crate) fn bin_albedos_under(
             let [ext, sca, g_sca] = layer.particles[bin];
             scattering[i] = [rayleigh + ext, rayleigh + sca, g_sca];
         }
+        // The bin's own floor (ColumnFloor::EachBin): the layer in which its Rayleigh and
+        // particles' τ from the top reaches FLOOR_OPTICAL_DEPTH, and the share of that layer above
+        // it; the whole column under ColumnFloor::Visual or where the bin's τ never reaches it.
+        let (floor_layer, floor_share) = match column.floor {
+            ColumnFloor::Visual => (count, 1.0),
+            ColumnFloor::EachBin => bin_floor(&scattering),
+        };
         let mut albedo = 0.0;
         for (g, weight) in opacity::G_WEIGHTS.iter().enumerate() {
             // The deepest layer the light returns from: where the absorption from the top passes
@@ -508,10 +561,23 @@ pub(crate) fn bin_albedos_under(
                     break;
                 }
             }
+            // The bin's floor where it lies at or above that layer, its crossing layer cut.
+            let share = if floor_layer < deepest {
+                deepest = floor_layer + 1;
+                floor_share
+            } else {
+                1.0
+            };
             let mut below = 0.0;
             for i in (0..deepest).rev() {
                 let [ext, sca, g_sca] = scattering[i];
-                let tau = ext + absorption[i][g];
+                let gas = absorption[i][g];
+                let (ext, sca, g_sca, gas) = if i == floor_layer {
+                    (ext * share, sca * share, g_sca * share, gas * share)
+                } else {
+                    (ext, sca, g_sca, gas)
+                };
+                let tau = ext + gas;
                 if tau <= 0.0 {
                     continue;
                 }
@@ -524,6 +590,22 @@ pub(crate) fn bin_albedos_under(
         }
         albedo
     })
+}
+
+/// The layer of a column whose scattering by layer is `scattering` (its extinction first, the
+/// bin's Rayleigh and particles') in which the extinction from the top reaches
+/// [`FLOOR_OPTICAL_DEPTH`], and the share of that layer above the level where it does: its
+/// layers' count and 1 where it never does.
+#[must_use]
+fn bin_floor(scattering: &[[f64; 3]]) -> (usize, f64) {
+    let mut above = 0.0;
+    for (i, [ext, _, _]) in scattering.iter().enumerate() {
+        if above + ext >= FLOOR_OPTICAL_DEPTH {
+            return (i, (FLOOR_OPTICAL_DEPTH - above) / ext);
+        }
+        above += ext;
+    }
+    (scattering.len(), 1.0)
 }
 
 /// The Bond albedo of `column` under the light `shade`: [`bin_albedos`] weighted by it (the tests'
@@ -721,6 +803,75 @@ impl ColumnMode {
     }
 }
 
+/// The level of a column's floor `floor` from its top `top` (Pa), its Rayleigh τ(550) per Pa
+/// `rayleigh_per_pa` and its modes `modes` with their tables' brackets `brackets` ([`assemble_under`]):
+/// by [`FLOOR_BISECTIONS`] bisections in ln p from the top to [`FLOOR_SEARCH_BOTTOM_PA`], the last
+/// level where τ(550) from p = 0 ([`ColumnFloor::Visual`]) or the least of the bins' τ from the top
+/// ([`ColumnFloor::EachBin`]) lies under [`FLOOR_OPTICAL_DEPTH`].
+#[must_use]
+fn floor_level(
+    floor: ColumnFloor,
+    (top, rayleigh_per_pa): (f64, f64),
+    modes: &[ColumnMode],
+    brackets: &[Option<(ParticleTable, (usize, f64))>],
+) -> f64 {
+    let total = |p: f64| {
+        let mut tau = rayleigh_per_pa * p;
+        for mode in modes {
+            tau += mode.tau_above(p);
+        }
+        tau
+    };
+    // Under ColumnFloor::EachBin each mode's extinction in each bin over its 550 nm one (0 for a
+    // mode with no optics, which the engine does not read) and its τ above the top, for the least
+    // of the bins' τ above p as the engine reads them from the top; nothing under Visual.
+    let by_bin: Vec<([f64; OPTICS_BANDS], f64)> = match floor {
+        ColumnFloor::Visual => Vec::new(),
+        ColumnFloor::EachBin => brackets
+            .iter()
+            .zip(modes)
+            .map(|(bracket, mode)| {
+                let extinction = core::array::from_fn(|bin| {
+                    bracket.map_or(0.0, |(table, at)| particle_optics_at(table, at, bin)[0])
+                });
+                (extinction, mode.tau_above(top))
+            })
+            .collect(),
+    };
+    let least = |p: f64| {
+        let below: Vec<f64> = modes
+            .iter()
+            .zip(&by_bin)
+            .map(|(mode, (_, at_top))| mode.tau_above(p) - at_top)
+            .collect();
+        let mut least = f64::INFINITY;
+        for bin in 0..OPTICS_BANDS {
+            let mut tau = rayleigh_per_pa * rayleigh_bin_factor(bin) * (p - top);
+            for (delta, (extinction, _)) in below.iter().zip(&by_bin) {
+                tau += delta * extinction[bin];
+            }
+            if tau < least {
+                least = tau;
+            }
+        }
+        least
+    };
+    let (mut low, mut high) = (math::ln(top), math::ln(FLOOR_SEARCH_BOTTOM_PA));
+    for _ in 0..FLOOR_BISECTIONS {
+        let middle = f64::midpoint(low, high);
+        let tau = match floor {
+            ColumnFloor::Visual => total(math::exp(middle)),
+            ColumnFloor::EachBin => least(math::exp(middle)),
+        };
+        if tau < FLOOR_OPTICAL_DEPTH {
+            low = middle;
+        } else {
+            high = middle;
+        }
+    }
+    math::exp(low)
+}
+
 /// The column of `modes` in a gas of mean molar mass `molar_mass` (g mol⁻¹) whose Rayleigh
 /// scattering is that of `scattering` ([`rayleigh_of`]) under `gravity` (m s⁻²), its temperature
 /// by pressure `temperature_at` and its absorbers by pressure and temperature `gas_at`: the floor
@@ -741,7 +892,7 @@ pub(crate) fn assemble(
     gas_at: impl Fn(f64, f64) -> Absorbers,
 ) -> EnvelopeColumn {
     assemble_under(
-        EnvelopeColumnRules::in_force(),
+        (EnvelopeColumnRules::in_force(), ColumnFloor::Visual),
         air,
         scattering,
         modes,
@@ -750,10 +901,13 @@ pub(crate) fn assemble(
     )
 }
 
-/// [`assemble`] under the rules `rules`, whatever the rules in force.
+/// [`assemble`] under the rules `rules`, whatever the rules in force, to the floor `floor`: under
+/// [`ColumnFloor::EachBin`] the column reaches down to where every bin's own τ from the top, its
+/// Rayleigh and its particles' extinction, reaches [`FLOOR_OPTICAL_DEPTH`] (by the same bisection,
+/// to 10⁹ Pa at most), and [`bin_albedos_under`] cuts each bin at its own.
 #[must_use]
 pub(crate) fn assemble_under(
-    rules: EnvelopeColumnRules,
+    (rules, floor): (EnvelopeColumnRules, ColumnFloor),
     (gravity, molar_mass): (f64, f64),
     scattering: &Absorbers,
     modes: &[ColumnMode],
@@ -763,25 +917,16 @@ pub(crate) fn assemble_under(
     let rayleigh = rayleigh_of(scattering);
     let molecule = molar_mass / 1_000.0 * BOLTZMANN_CONSTANT / MOLAR_GAS_CONSTANT;
     let rayleigh_per_pa = rayleigh / (molecule * gravity);
-    let total = |p: f64| {
-        let mut tau = rayleigh_per_pa * p;
-        for mode in modes {
-            tau += mode.tau_above(p);
-        }
-        tau
-    };
     let top = column_top(rules, modes);
-    let (mut low, mut high) = (math::ln(top), math::ln(FLOOR_SEARCH_BOTTOM_PA));
-    for _ in 0..FLOOR_BISECTIONS {
-        let middle = f64::midpoint(low, high);
-        if total(math::exp(middle)) < FLOOR_OPTICAL_DEPTH {
-            low = middle;
-        } else {
-            high = middle;
-        }
-    }
-    let floor = math::exp(low);
-    let mut points = vec![top, floor];
+    let brackets: Vec<Option<(ParticleTable, (usize, f64))>> = modes
+        .iter()
+        .map(|mode| {
+            mode.optics
+                .map(|(table, radius)| (table, log_bracket(table.radii(), radius)))
+        })
+        .collect();
+    let bottom = floor_level(floor, (top, rayleigh_per_pa), modes, &brackets);
+    let mut points = vec![top, bottom];
     for mode in modes.iter().filter(|m| m.coverage > 0.0) {
         let f = mode.exponent + 1.0;
         for p in [
@@ -790,7 +935,7 @@ pub(crate) fn assemble_under(
             mode.base * math::exp(-3.0 / f),
             mode.top,
         ] {
-            if top < p && p < floor {
+            if top < p && p < bottom {
                 points.push(p);
             }
         }
@@ -808,13 +953,6 @@ pub(crate) fn assemble_under(
         }
         levels.push(p);
     }
-    let brackets: Vec<Option<(ParticleTable, (usize, f64))>> = modes
-        .iter()
-        .map(|mode| {
-            mode.optics
-                .map(|(table, radius)| (table, log_bracket(table.radii(), radius)))
-        })
-        .collect();
     let mut above: Vec<f64> = modes.iter().map(|mode| mode.tau_above(levels[0])).collect();
     let layers = levels
         .windows(2)
@@ -856,6 +994,7 @@ pub(crate) fn assemble_under(
         molar_mass_g_per_mol: molar_mass,
         rayleigh_550_m2: rayleigh,
         layers,
+        floor,
     }
 }
 

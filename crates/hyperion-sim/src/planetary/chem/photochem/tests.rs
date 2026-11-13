@@ -766,8 +766,9 @@ fn the_rules_are_pinned() {
     golden!("planetary/photochem", w.as_str());
 }
 
-/// [`the_rules_are_pinned`]'s lines of 32's rules (research-leans-50's ruling): the bright haze,
-/// its cool edge and the soot column's shares, under either rules.
+/// [`the_rules_are_pinned`]'s lines of 32's rules (research-leans-50's and research-leans-52's
+/// rulings): the bright haze, its cool edge, the soot column's shares under either rules, and the
+/// bright haze's coagulated mode.
 fn pin_the_bright_haze(w: &mut hyperion_testkit::golden::GoldenWriter) {
     if let Some(Haze {
         profile: HazeProfile::Layer { base, top, .. },
@@ -805,6 +806,30 @@ fn pin_the_bright_haze(w: &mut hyperion_testkit::golden::GoldenWriter) {
             }
         }
     }
+    w.f64("bright haze record tau", BRIGHT_HAZE_OPTICAL_DEPTH);
+    if let Some(Haze {
+        profile:
+            HazeProfile::Layer {
+                base,
+                top,
+                exponent,
+            },
+        amount: HazeAmount::OpticalDepth { optical_depth, .. },
+        ..
+    }) = coagulated_haze(&air(560.0, 100.0), 0.01, 44.0).expect("in range")
+    {
+        w.f64("coagulated haze tau", optical_depth);
+        w.f64("coagulated haze base", base.value());
+        w.f64("coagulated haze top", top.value());
+        w.f64("coagulated haze exponent", exponent);
+    }
+    let size = gamma(COAGULATED_HAZE_PARTICLES.0, COAGULATED_HAZE_PARTICLES.1);
+    w.f64("coagulated haze r_eff", size.effective_radius().value());
+    w.f64("coagulated haze v_eff", size.effective_variance());
+    w.f64(
+        "coagulated haze record tau",
+        crate::tables::warm_haze::COAGULATED_HAZE_OPTICAL_DEPTH,
+    );
 }
 
 /// The bright haze (from 32; research-leans-50) shares the soot's column: none where the soot
@@ -832,6 +857,54 @@ fn the_bright_haze_shares_the_soot_s_column() {
     for tau in [0.0, -1.0, f64::NAN, f64::INFINITY] {
         assert!(matches!(
             bright_haze(&warm, 0.01, tau),
+            Err(EvaluateRuleError::OpticalDepth(_))
+        ));
+    }
+}
+
+/// The bright haze's coagulated mode (from 32; research-leans-52) lies under its slab: none where
+/// the soot forms none, Khare et al.'s tholin of 0.5 µm in a gamma of `v_eff` 0.05, well mixed from
+/// the slab's base to 10 mbar, at the optical depth it is given at 550 nm, and an optical depth
+/// that is not positive refused.
+#[test]
+fn the_coagulated_haze_lies_under_the_bright_haze_s_slab() {
+    let warm = air(560.0, 100.0);
+    let haze = coagulated_haze(&warm, 0.01, 44.0)
+        .expect("in range")
+        .expect("a haze");
+    let slab = bright_haze(&warm, 0.01, 10.0)
+        .expect("in range")
+        .expect("a haze");
+    assert_eq!(haze.rule(), HazeRule::Coagulated);
+    assert_eq!(haze.material(), slab.material());
+    let (
+        HazeProfile::Layer {
+            base: slab_base, ..
+        },
+        HazeProfile::Layer {
+            base,
+            top,
+            exponent,
+        },
+    ) = (slab.profile(), haze.profile())
+    else {
+        panic!("both are layers");
+    };
+    assert_same_bits(top.value(), slab_base.value());
+    assert_same_bits(base.value(), COAGULATED_HAZE_BASE.value());
+    assert_same_bits(exponent, 0.0);
+    assert!((haze.size().effective_radius().value() - 5.0e-7).abs() < 1e-19);
+    assert!((haze.size().effective_variance() - 0.05).abs() < 1e-15);
+    assert!(matches!(
+        haze.amount(),
+        HazeAmount::OpticalDepth { optical_depth, wavelength }
+            if (optical_depth - 44.0).abs() < 1e-12 && (wavelength.value() - 0.55).abs() < 1e-12
+    ));
+    assert_eq!(coagulated_haze(&warm, 0.0, 44.0), Ok(None));
+    assert_eq!(coagulated_haze(&air(1_000.0, 1.0), 0.01, 44.0), Ok(None));
+    for tau in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+        assert!(matches!(
+            coagulated_haze(&warm, 0.01, tau),
             Err(EvaluateRuleError::OpticalDepth(_))
         ));
     }

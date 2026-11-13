@@ -32,19 +32,38 @@ const DARK_SUB_NEPTUNE: RawPlanetInputs = RawPlanetInputs {
 };
 
 /// [`DARK_SUB_NEPTUNE`]'s disc as R08's disc twin draws it under 32's rules (the lane
-/// `fix-dark-sub-neptune-2`'s measurement, 2026-11-10): the client's `test/discAirCases.ts`
+/// `fix-dark-sub-neptune-3`'s measurement, 2026-11-13): the client's `test/discAirCases.ts`
 /// (`bakedDiscAir`, `integratedRadianceAt` at phase 0 from 10⁹ m, `geometricAlbedoOf`, its table's
 /// disc) on the record's air as `body_detail` sends it, assembled by `assembleMedium` under the
 /// reference Sun, its upper medium drawn on its floor's datum. Its soot shares its column with the
-/// bright haze (its zero-albedo `T_eq` 672 K, s 0.72): soot τ(550) 2.35 and the bright haze 2.80.
-/// With the soot alone (the lane `fix-dark-sub-neptune`'s rules) it was 0.0224, 0.0166 and 0.0122,
-/// which the same harness gives to within 0.0001; at 31 0.0226, 0.0169 and 0.0124. The full passes'
-/// march, unrouted, gives 0.0309, 0.0494 and 0.0602.
+/// bright haze (its zero-albedo `T_eq` 672 K, s 0.72): soot τ(550) 2.35, the bright haze's slab
+/// 2.80 and its coagulated mode 12.41 beneath. Without that mode (the lane `fix-dark-sub-neptune-2`)
+/// the table gave 0.0342, 0.0483 and 0.0553; with it, though it lies under the slab, the table's
+/// floor rises from 6.8 bar to 390 Pa and it reads 0.38, 0.30 and 0.23 stops darker, where the
+/// full passes' march ([`DARK_SUB_NEPTUNE_MARCH`]) moves by under 0.1 stop and the closed form not
+/// at all. The same mode moved to 10–100 kPa, or of the slab's 0.1 µm particles, darkens the table
+/// alike: the table reads layers the slab hides (a finding). With the soot alone (the lane
+/// `fix-dark-sub-neptune`'s rules) it was 0.0224, 0.0166 and 0.0122, which the same harness gives
+/// to within 0.0001; at 31 0.0226, 0.0169 and 0.0124.
 const DARK_SUB_NEPTUNE_TWIN: Bands = Bands {
-    b: 0.0342,
-    v: 0.0483,
-    r: 0.0553,
+    b: 0.0263,
+    v: 0.0393,
+    r: 0.0471,
 };
+
+/// [`DARK_SUB_NEPTUNE`]'s disc as the client's full passes draw it under 32's rules, routed through
+/// its thick table: [`DARK_SUB_NEPTUNE_TWIN`]'s harness's `routed` (the same measurement). Without
+/// the coagulated mode it gave 0.0424, 0.0569 and 0.0647.
+const DARK_SUB_NEPTUNE_MARCH: Bands = Bands {
+    b: 0.0434,
+    v: 0.0549,
+    r: 0.0604,
+};
+
+/// How far above [`DARK_SUB_NEPTUNE_TWIN`] the draw's p lies in B and V under every 32 hold, in
+/// stops, pinned as it stands (a finding: the table reads the layers its slab hides): +0.67 and
+/// +0.39 measured, past the brief's third of a stop; R lies within a third.
+const TWIN_EXCESS_AS_IT_STANDS: [f64; 2] = [0.70, 0.42];
 
 /// The Bond albedo under which the owner's draw is still dark (research-leans-50: "stays dark
 /// (`A_B` under about 0.1)"): a GJ 436 b or GJ 3470 b analogue, not a GJ 1214 b one.
@@ -68,21 +87,22 @@ fn photometry_of(raw: RawPlanetInputs) -> Bands {
     photometry.geometric_albedo()
 }
 
-/// Each band's p over the twin's, in stops: log₂ of the ratio, B, V and R.
-fn stops(p: Bands) -> [f64; 3] {
-    let twin = DARK_SUB_NEPTUNE_TWIN;
+/// Each band's p over `twin`'s, in stops: log₂ of the ratio, B, V and R.
+fn stops(p: Bands, twin: Bands) -> [f64; 3] {
     [p.b / twin.b, p.v / twin.v, p.r / twin.r].map(crate::math::log2)
 }
 
-/// The warm soot-hazed sub-Neptune's photometry meets its disc twin under every 32 hold, each of B,
-/// V and R within a third of a stop, where at 31 its V and B lie a stop above the soot's twin and
-/// its R a stop under this one: its column started below its soot, which lies above 1 Pa, and the
-/// δ-Eddington held its dark layers at R = 0, so that its p was Neptune's row scaled by a Bond
-/// albedo of 0.027 that the gas alone returned. From 32 its soot keeps 0.72 of its column and the
-/// bright haze the rest (its zero-albedo `T_eq` 672 K), its q weighed toward the bright haze's by
-/// that haze's share of the hazes' light, and it stays dark: its Bond albedo under [`DARK`].
+/// The warm soot-hazed sub-Neptune's photometry meets its disc twin under every 32 hold: each of B,
+/// V and R within a third of a stop of the client's full passes ([`DARK_SUB_NEPTUNE_MARCH`]), and
+/// its table's disc ([`DARK_SUB_NEPTUNE_TWIN`]) in R, in B and V as it stands
+/// ([`TWIN_EXCESS_AS_IT_STANDS`]); at 31 its R lies a stop under the twin: its column started below
+/// its soot, which lies above 1 Pa, and the δ-Eddington held its dark layers at R = 0, so that its
+/// p was Neptune's row scaled by a Bond albedo of 0.027 that the gas alone returned. From 32 its
+/// soot keeps 0.72 of its column and the bright haze the rest (its zero-albedo `T_eq` 672 K), its q
+/// weighed toward the bright haze's by that haze's share of the hazes' light, and it stays dark:
+/// its Bond albedo under [`DARK`], 0.048 with the coagulated mode (research-leans-52).
 #[test]
-fn under_every_32_hold_the_dark_sub_neptune_meets_its_disc_twin() {
+fn under_every_32_hold_the_dark_sub_neptune_meets_its_full_passes_and_stays_dark() {
     let held = photometry_of(DARK_SUB_NEPTUNE);
     let (whole, bond, zero_albedo) = with_every_32_hold(|| {
         let system =
@@ -105,13 +125,23 @@ fn under_every_32_hold_the_dark_sub_neptune_meets_its_disc_twin() {
             t_eq / crate::math::powf(1.0 - bond, 0.25),
         )
     });
-    let (at_31, at_32) = (stops(held), stops(whole));
+    let twin = DARK_SUB_NEPTUNE_TWIN;
+    let (at_31, at_32) = (stops(held, twin), stops(whole, twin));
+    let march = stops(whole, DARK_SUB_NEPTUNE_MARCH);
     eprintln!(
         "at 31: p {held:?}, {at_31:+.2?} stops; under every 32 hold: p {whole:?}, {at_32:+.2?} \
-         stops (B, V, R), its Bond albedo {bond:.4}, its zero-albedo T_eq {zero_albedo:.1} K"
+         stops (B, V, R) over the table's disc and {march:+.2?} over the full passes, its Bond \
+         albedo {bond:.4}, its zero-albedo T_eq {zero_albedo:.1} K"
     );
-    for (band, stop) in ["B", "V", "R"].into_iter().zip(at_32) {
+    for (band, stop) in ["B", "V", "R"].into_iter().zip(march) {
         assert!(stop.abs() <= THIRD_OF_A_STOP, "{band}: {stop:+.3} stops");
+    }
+    for (stop, limit) in at_32.into_iter().zip(
+        TWIN_EXCESS_AS_IT_STANDS
+            .into_iter()
+            .chain([THIRD_OF_A_STOP]),
+    ) {
+        assert!((-THIRD_OF_A_STOP..=limit).contains(&stop), "{at_32:?}");
     }
     assert!(at_31[2] < -2.0 * THIRD_OF_A_STOP, "{at_31:?}");
     assert!(bond < DARK, "{bond}");

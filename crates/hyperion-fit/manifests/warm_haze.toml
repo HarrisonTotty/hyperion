@@ -1,12 +1,13 @@
-# The warm envelopes' bright haze's τ(550) (plan 14, P14.T24.h.b; research-leans-50's ruling,
-# 2026-11-10), which the sim's `photochem::bright_haze` takes at its whole share from generator
-# version 32: fitted, as the cold giants' hazes were, on GJ 1214 b's Bond albedo by the sim's closed
-# form of the planet (`photometry::warm_haze::GJ_1214_B`) under 32's rules. It takes no dataset.
+# The τ(550) of the warm envelopes' bright haze's coagulated mode (plan 14, P14.T24.h.b;
+# research-leans-52's ruling, 2026-11-13), which the sim's `photochem::coagulated_haze` takes at its
+# whole share from generator version 32, under the bright haze's slab of τ(550) 10: fitted, as the
+# cold giants' hazes were, on GJ 1214 b's Bond albedo by the sim's closed form of the planet
+# (`photometry::warm_haze::GJ_1214_B`) under 32's rules. It takes no dataset.
 task = "warm_haze"
 
 [params]
-# GJ 1214 b's Bond albedo, 0.51 ± 0.06 (Kempton et al. 2023, Nature 620, 67, recalled), and the
-# acceptance's range of it, two standard deviations.
+# GJ 1214 b's Bond albedo, 0.51 ± 0.06 (Kempton et al. 2023, Nature 620, 67), and the acceptance's
+# range of it, two standard deviations.
 target_bond_albedo = 0.51
 bond_albedo_min = 0.39
 bond_albedo_max = 0.63
@@ -20,10 +21,9 @@ blue_over_visual_min = 0.6
 blue_over_visual_max = 0.7
 red_over_visual_min = 1.1
 red_over_visual_max = 1.6
-# The depths read: ten from τ(550) 1 to 10, the column's reach, above which the closed form reads
-# nothing more (`envelope_bond::FLOOR_OPTICAL_DEPTH`, decision-deep-decks-split §3.3); the depth
-# bisected 40 times between the two that bracket the target, where two do.
-depth_min = 1.0
-depth_max = 10.0
+# The depths read: ten from τ(550) 10 to 100, about research-leans-52's 44; the depth bisected 40
+# times between the two that bracket the target, where two do.
+depth_min = 10.0
+depth_max = 100.0
 depth_points = 10
 bisections = 40

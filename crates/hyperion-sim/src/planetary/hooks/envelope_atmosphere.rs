@@ -226,8 +226,9 @@
 //!   the rule's own 950 K edge is unchanged). The cool giants' stratospheric hazes are not modelled.
 //! - **The bright haze** ([`bright_haze`], from generator version 32; research-leans-50's ruling,
 //!   2026-11-10): the taper reads the zero-albedo `T_eq`, and the share of the soot's column it
-//!   drops is Khare et al.'s tholin, of the fitted τ(550) at its whole share, cut at its cool edge
-//!   (400–550 K) (`haze_shares`).
+//!   drops is Khare et al.'s tholin, of τ(550) 10 at its whole share, cut at its cool edge
+//!   (400–550 K) (`haze_shares`), over its coagulated mode to 10 mbar ([`coagulated_haze`],
+//!   research-leans-52), of the fitted τ(550) at the same share.
 //! - **The ice giants' haze** ([`ice_giant_haze`], Irwin et al. 2022), based at the CH₄ deck's base,
 //!   and **the chromophore** ([`chromophore`], Braude et al. 2020) at the NH₃ deck's, on a
 //!   Jupiter-like ammonia cloud alone: an NH₃ deck with no CH₄ deck above it (stated; Braude et al.
@@ -314,9 +315,9 @@ use crate::planetary::chem::condense::{
 use crate::planetary::chem::envelope_abundances::EnvelopeAbundances;
 use crate::planetary::chem::equilibrium::{GasEquilibrium, Network, SolveEquilibriumError};
 use crate::planetary::chem::photochem::{
-    EvaluateRuleError, Haze, HazeAmount, HazeProfile, UpperAtmosphere, ammonia_haze, bright_haze,
-    bright_haze_cool_share, chromophore, ice_giant_haze, methane_layer_particles, soot,
-    sulphur_dioxide, sulphur_haze,
+    BRIGHT_HAZE_OPTICAL_DEPTH, EvaluateRuleError, Haze, HazeAmount, HazeProfile, UpperAtmosphere,
+    ammonia_haze, bright_haze, bright_haze_cool_share, chromophore, coagulated_haze,
+    ice_giant_haze, methane_layer_particles, soot, sulphur_dioxide, sulphur_haze,
 };
 use crate::planetary::chem::quench::{
     ApplyQuenchError, DeriveQuenchError, EddyDiffusion, MixingColumn, Quench,
@@ -337,7 +338,7 @@ use crate::substance::{
     CondensedPhase, Element, MOLAR_GAS_CONSTANT, SubstanceId, by_key, formation,
     mean_molar_mass_g_per_mol, mixture_heat_capacity_over_r_at,
 };
-use crate::tables::warm_haze::BRIGHT_HAZE_OPTICAL_DEPTH;
+use crate::tables::warm_haze::COAGULATED_HAZE_OPTICAL_DEPTH;
 use crate::units::consts::{BOLTZMANN_CONSTANT, STEFAN_BOLTZMANN};
 use crate::units::{
     Dex, EarthMasses, Kelvin, KilogramsPerSquareMetre, Metres, MetresPerSecondSquared, Pascals,
@@ -1803,11 +1804,13 @@ pub(crate) fn soot_weight(equilibrium_temperature: Kelvin) -> f64 {
 ///
 /// - [`EnvelopeColumnRules::Clipped`], to 31: soot's [`soot_weight`] of `T_eq`, and no bright haze;
 /// - [`EnvelopeColumnRules::Whole`], from 32 (research-leans-50's ruling, 2026-11-10): soot's
-///   [`soot_weight`] of the zero-albedo `T_eq`, s, and the bright haze 1 − s of its τ times its
-///   cool edge's share ([`bright_haze_cool_share`]). The zero-albedo `T_eq` does not follow the
+///   [`soot_weight`] of the zero-albedo `T_eq`, s, and the bright haze, its coagulated mode alike
+///   ([`coagulated_haze`]), 1 − s of its τ times its cool edge's share
+///   ([`bright_haze_cool_share`]). The zero-albedo `T_eq` does not follow the
 ///   Bond albedo the hazes themselves set, so the hazes' shares no longer feed on their own
 ///   albedo: keyed on `T_eq`, the owner's draw's soot thickened as the soot darkened it (667 to
-///   671 K, τ(550) 2.20 to 2.28), and the fitted bright haze cuts GJ 1214 b's `T_eq` by 36 K.
+///   671 K, τ(550) 2.20 to 2.28), and the bright haze with its coagulated mode cuts GJ 1214 b's
+///   `T_eq` by 97 K.
 #[must_use]
 pub(crate) fn haze_shares(
     rules: EnvelopeColumnRules,
@@ -1842,7 +1845,7 @@ fn photochemistry(
             .find(|d| d.condensate().substance().key().as_str() == key)
     };
     // Each haze with the share of its rule's amount drawn: soot's taper below Gao et al.'s grid,
-    // and from 32 the bright haze in the share it drops.
+    // and from 32 the bright haze and its coagulated mode in the share it drops.
     let mut hazes: Vec<(Haze, f64)> = Vec::new();
     hazes.extend(sulphur_haze(air, sulphur)?.map(|haze| (haze, 1.0)));
     let (weight, bright) = haze_shares(
@@ -1857,6 +1860,10 @@ fn photochemistry(
     if bright > 0.0 {
         hazes.extend(
             bright_haze(air, methane, BRIGHT_HAZE_OPTICAL_DEPTH)?.map(|haze| (haze, bright)),
+        );
+        hazes.extend(
+            coagulated_haze(air, methane, COAGULATED_HAZE_OPTICAL_DEPTH)?
+                .map(|haze| (haze, bright)),
         );
     }
     let methane = deck("CH4");

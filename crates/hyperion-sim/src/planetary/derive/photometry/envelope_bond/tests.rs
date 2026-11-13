@@ -94,7 +94,8 @@ fn the_envelope_column_is_held_only_until_the_32_bump() {
         "the 31 → 32 bump reads an envelope's column whole: delete `ENVELOPE_COLUMN_VERSION`, \
          `EnvelopeColumnRules` with its `Clipped` arm and its matches in `layer_two_stream` (and \
          its `rules` parameter, which `bin_albedos` reads), `column_top`, `narrow_table_for`, \
-         `envelope_atmosphere::haze_shares` and `gas_envelope_light`, fold `ClosedReading`'s \
+         `ColumnFloor::of`, `envelope_atmosphere::haze_shares` and `gas_envelope_light`, fold \
+         `ClosedReading`'s \
          rules and the `_under` functions into their plain ones, restamp `tables::warm_haze` \
          at 32, delete the tests that call the `Clipped` arm, the tests' \
          `with_envelope_column`, its lines in `HeldRules` and `with_every_32_hold`, and this test; \
@@ -293,11 +294,14 @@ fn the_bright_haze_reads_its_narrow_table_from_32() {
 }
 
 /// The bright haze's share of the hazes' light is its modes' τ ω over its and the soot's, bin by
-/// bin, from their narrow tables, and 0 with no bright haze; and the light gives a share from 32
-/// alone, none to a column with no bright haze (the hot fixture's) and none at 31.
+/// bin, from their narrow tables, its coagulated mode not counted, and 0 with no bright haze; and
+/// the light gives a share from 32 alone, none to a column with no bright haze (the hot fixture's)
+/// and none at 31.
 #[test]
 fn the_bright_haze_s_share_is_its_scattering_over_the_hazes() {
-    use crate::planetary::chem::photochem::{UpperAtmosphere, bright_haze, soot};
+    use crate::planetary::chem::photochem::{
+        HazeRule, UpperAtmosphere, bright_haze, coagulated_haze, soot,
+    };
     use crate::planetary::hooks::envelope_atmosphere::haze_mode_at;
     use crate::units::MetresPerSecondSquared;
     let air = UpperAtmosphere {
@@ -315,8 +319,21 @@ fn the_bright_haze_s_share_is_its_scattering_over_the_hazes() {
             .expect("a haze"),
         0.28,
     );
+    let deep_mode = mode(
+        coagulated_haze(&air, 0.01, 44.0)
+            .expect("in range")
+            .expect("a haze"),
+        0.28,
+    );
     let rules = EnvelopeColumnRules::Whole;
-    let share = column::bright_share(rules, &[soot_mode, bright_mode]);
+    let share = column::bright_share(
+        rules,
+        &[
+            (HazeRule::Soot, soot_mode),
+            (HazeRule::Bright, bright_mode),
+            (HazeRule::Coagulated, deep_mode),
+        ],
+    );
     let scattering = |mode| {
         let ColumnMode {
             tau,
@@ -342,7 +359,13 @@ fn the_bright_haze_s_share_is_its_scattering_over_the_hazes() {
         );
     }
     assert!(share.iter().all(|w| *w > 0.0 && *w < 1.0), "{share:?}");
-    for bin in column::bright_share(rules, &[soot_mode]) {
+    for bin in column::bright_share(
+        rules,
+        &[
+            (HazeRule::Soot, soot_mode),
+            (HazeRule::Coagulated, deep_mode),
+        ],
+    ) {
         assert_same_bits(bin, 0.0);
     }
     let (_, _, at_31) = gas_envelope_light(&sun(), &hot_jupiter_inputs());
@@ -350,6 +373,72 @@ fn the_bright_haze_s_share_is_its_scattering_over_the_hazes() {
         gas_envelope_light(&sun(), &hot_jupiter_inputs())
     });
     assert_eq!((at_31, hot), (None, None));
+}
+
+/// From 32 a column that holds the bright haze is read in each bin down to where that bin's own τ
+/// reaches 10 ([`ColumnFloor::EachBin`]), its crossing layer cut: a deep well-mixed tholin layer
+/// in no absorbing gas reads in each bin as one homogeneous layer of that bin's τ 10 (or the whole
+/// layer, where it is thinner), where the visual floor reads every bin to τ(550) 10; and only a
+/// column read whole with the bright haze takes it.
+#[test]
+fn a_bright_hazed_column_is_read_in_each_bin_to_its_own_floor() {
+    use crate::planetary::chem::photochem::HazeRule;
+    let whole = EnvelopeColumnRules::Whole;
+    let hazed = [HazeRule::Soot, HazeRule::Bright, HazeRule::Coagulated];
+    assert_eq!(ColumnFloor::of(whole, hazed), ColumnFloor::EachBin);
+    assert_eq!(
+        ColumnFloor::of(whole, [HazeRule::Soot, HazeRule::IceGiant]),
+        ColumnFloor::Visual
+    );
+    assert_eq!(
+        ColumnFloor::of(EnvelopeColumnRules::Clipped, hazed),
+        ColumnFloor::Visual
+    );
+    let tholin = narrow::NARROW_KEYS
+        .iter()
+        .position(|k| *k == "tholin")
+        .map(ParticleTable::Narrow)
+        .expect("tholin's narrow table");
+    let radius = 5.0e-7;
+    let deep = ColumnMode {
+        tau: 100.0,
+        base: 1.0e3,
+        top: 0.1,
+        exponent: 0.0,
+        coverage: 1.0,
+        optics: Some((tholin, radius)),
+    };
+    let none = Absorbers::default();
+    let read = |floor| {
+        let column = assemble_under(
+            (whole, floor),
+            (10.0, 2.3),
+            &none,
+            &[deep],
+            |_| 500.0,
+            |_, _| none,
+        );
+        bin_albedos_under(whole, &column)
+    };
+    let (each, visual) = (read(ColumnFloor::EachBin), read(ColumnFloor::Visual));
+    let at = log_bracket(tholin.radii(), radius);
+    for bin in 0..OPTICS_BANDS {
+        let [extinction, omega, g] = particle_optics_at(tholin, at, bin);
+        // A bin whose whole layer is thinner than its floor reads it whole.
+        let own_tau = (deep.tau * extinction).min(FLOOR_OPTICAL_DEPTH);
+        let (own, _) = layer_two_stream(whole, own_tau, omega, g);
+        let (to_550, _) = layer_two_stream(whole, FLOOR_OPTICAL_DEPTH * extinction, omega, g);
+        assert!(
+            (each[bin] - own).abs() < 1e-9,
+            "bin {bin}: {} against {own}",
+            each[bin]
+        );
+        assert!(
+            (visual[bin] - to_550).abs() < 1e-9,
+            "bin {bin}: {} against {to_550}",
+            visual[bin]
+        );
+    }
 }
 
 /// The Rayleigh factor of a bin is its mean of (550 ÷ λ)^4.08: 1 for a bin at 550 nm alone, about

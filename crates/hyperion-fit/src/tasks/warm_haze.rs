@@ -1,19 +1,20 @@
-//! The warm envelopes' bright haze's optical depth (plan 14, P14.T24.h.b; research-leans-50's
-//! ruling, 2026-11-10), which the sim's `photochem::bright_haze` takes at its whole share from
-//! generator version 32 through
-//! [`tables::warm_haze`](hyperion_sim::tables::warm_haze).
+//! The optical depth of the warm envelopes' bright haze's coagulated mode (plan 14, P14.T24.h.b;
+//! research-leans-50's and research-leans-52's rulings, 2026-11-10 and 2026-11-13), which the
+//! sim's `photochem::coagulated_haze` takes at its whole share from generator version 32 through
+//! [`tables::warm_haze`](hyperion_sim::tables::warm_haze), under the bright haze's slab of τ(550)
+//! 10 (`photochem::BRIGHT_HAZE_OPTICAL_DEPTH`).
 //!
 //! The fit, as the cold giants' hazes were fitted (`photochem::AMMONIA_HAZE_OPTICAL_DEPTH` on
 //! Jupiter's Bond albedo): the snapshot path's closed form of GJ 1214 b
 //! ([`GJ_1214_B`]: Cloutier et al. 2021, AJ 162, 174) read under 32's rules at
-//! [`DEPTH_POINTS_KEY`] optical depths of its bright haze from [`DEPTH_MIN_KEY`] to
+//! [`DEPTH_POINTS_KEY`] optical depths of the coagulated mode from [`DEPTH_MIN_KEY`] to
 //! [`DEPTH_MAX_KEY`], three or more, each its `T_eq` at its own Bond albedo
 //! ([`WarmFixture::light`]), and the depth bisected between the two that bracket the planet's
-//! measured Bond albedo, 0.51 ± 0.06 (Kempton et al. 2023, Nature 620, 67, recalled). Where every
-//! point lies below it the fit takes the greatest depth, the column's reach: the closed form reads
-//! a column only above τ(550) 10 (`envelope_bond::FLOOR_OPTICAL_DEPTH`, decision-deep-decks-split
-//! §3.3), so that a thicker haze adds nothing. The acceptance is the brief's: the Bond albedo
-//! within 0.39–0.63, `p_V` 0.15–0.25, the colour's B/V 0.6–0.7 and R/V 1.1–1.6.
+//! measured Bond albedo, 0.51 ± 0.06 (Kempton et al. 2023, Nature 620, 67). Where every point lies
+//! on one side of it the fit takes the nearest end. The column is read in each bin down to where
+//! that bin's own τ reaches 10 (`envelope_bond::ColumnFloor::EachBin`), so the mode's infrared
+//! light is read where the bright haze's slab is thin. The acceptance is the brief's: the Bond
+//! albedo within 0.39–0.63, `p_V` 0.15–0.25, the colour's B/V 0.6–0.7 and R/V 1.1–1.6.
 //!
 //! Every probe reads the depths it is given, never the committed table, so that the table is no
 //! input of its own fit.
@@ -26,17 +27,17 @@ use crate::emit::{RustTable, TableItem};
 use crate::manifest::{Manifest, ManifestParamError, SimFingerprint};
 use crate::task::{FitTask, RunTaskError, TaskClass, TaskOutput, check_manifest};
 
-/// The task's revision.
-pub const VERSION: u32 = 0;
+/// The task's revision: 1 fits the coagulated mode (research-leans-52), 0 the bright haze's slab.
+pub const VERSION: u32 = 1;
 
 /// The table's one item.
-pub const ITEMS: [&str; 1] = ["BRIGHT_HAZE_OPTICAL_DEPTH"];
+pub const ITEMS: [&str; 1] = ["COAGULATED_HAZE_OPTICAL_DEPTH"];
 
 /// The manifest's key of the Bond albedo fitted to.
 pub const TARGET_KEY: &str = "target_bond_albedo";
 /// The manifest's key of the least optical depth read.
 pub const DEPTH_MIN_KEY: &str = "depth_min";
-/// The manifest's key of the greatest optical depth read: the column's reach.
+/// The manifest's key of the greatest optical depth read.
 pub const DEPTH_MAX_KEY: &str = "depth_max";
 /// The manifest's key of the number of optical depths read, three or more.
 pub const DEPTH_POINTS_KEY: &str = "depth_points";
@@ -44,7 +45,7 @@ pub const DEPTH_POINTS_KEY: &str = "depth_points";
 pub const BISECTIONS_KEY: &str = "bisections";
 
 /// The optical depths the fingerprint reads the fixture at.
-pub const PROBE_DEPTHS: [f64; 3] = [1.0, 3.0, 10.0];
+pub const PROBE_DEPTHS: [f64; 3] = [10.0, 30.0, 100.0];
 
 /// The acceptance's ranges, as the manifest states them: (key of the least, key of the greatest).
 const RANGES: [(&str, &str, &str); 4] = [
@@ -68,7 +69,7 @@ pub struct WarmHazeFit {
     pub bracketed: bool,
 }
 
-/// The fixture `fixture`'s light at the bright haze's optical depth `depth`.
+/// The fixture `fixture`'s light at the coagulated mode's optical depth `depth`.
 ///
 /// # Errors
 ///
@@ -80,7 +81,7 @@ fn light_at(fixture: &WarmFixture, depth: f64) -> Result<WarmLight, RunTaskError
     })
 }
 
-/// The fit of `fixture`'s bright haze to the Bond albedo `target` over `points` optical depths,
+/// The fit of `fixture`'s coagulated mode to the Bond albedo `target` over `points` optical depths,
 /// evenly spaced from `min` to `max`, by `bisections` bisections between the bracketing two.
 ///
 /// # Errors
@@ -154,8 +155,9 @@ pub fn render(fit: &WarmHazeFit) -> RustTable {
         summary: vec![
             "The warm envelopes' bright haze (plan 14, P14.T24.h.b, from generator version 32):"
                 .to_owned(),
-            "its τ(550) where it takes the whole of the soot's column, which".to_owned(),
-            "`planetary::chem::photochem::bright_haze` draws.".to_owned(),
+            "the τ(550) of its coagulated mode where it takes the whole of the soot's column,"
+                .to_owned(),
+            "which `planetary::chem::photochem::coagulated_haze` draws.".to_owned(),
         ],
         notes: vec![
             "Fitted on GJ 1214 b's Bond albedo by the snapshot path's closed form of the planet"
@@ -167,10 +169,10 @@ pub fn render(fit: &WarmHazeFit) -> RustTable {
         items: vec![TableItem::Scalar {
             name: ITEMS[0].to_owned(),
             doc: vec![
-                "The bright haze's τ(550) at its whole share: GJ 1214 b's closed form gives a Bond"
+                "The coagulated mode's τ(550) at its whole share: GJ 1214 b's closed form gives a"
                     .to_owned(),
                 format!(
-                    "albedo of {:.4} at it, its zero-albedo `T_eq` {:.1} K and its own {:.1} K.",
+                    "Bond albedo of {:.4} at it, its zero-albedo `T_eq` {:.1} K and its own {:.1} K.",
                     light.bond_albedo,
                     light.zero_albedo_temperature_k,
                     light.equilibrium_temperature_k
@@ -189,10 +191,10 @@ pub fn render(fit: &WarmHazeFit) -> RustTable {
 fn acceptance(fit: &WarmHazeFit, manifest: &Manifest) -> Result<String, ManifestParamError> {
     let mut parts = Vec::with_capacity(RANGES.len() + 2);
     parts.push(format!(
-        "GJ 1214 b's Bond albedo by its bright haze's τ(550): {}",
+        "GJ 1214 b's Bond albedo by its coagulated haze's τ(550): {}",
         fit.points
             .iter()
-            .map(|(depth, light)| format!("{depth:.1} {:.4}", light.bond_albedo))
+            .map(|(depth, light)| format!("{depth:.0} {:.4}", light.bond_albedo))
             .collect::<Vec<_>>()
             .join(", ")
     ));
@@ -222,7 +224,7 @@ fn acceptance(fit: &WarmHazeFit, manifest: &Manifest) -> Result<String, Manifest
     Ok(parts.join("; "))
 }
 
-/// The task: P14.T24.h.b's bright haze on GJ 1214 b, fast.
+/// The task: P14.T24.h.b's coagulated haze on GJ 1214 b, fast.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub struct WarmHazeTask;
 
@@ -288,10 +290,11 @@ impl FitTask for WarmHazeTask {
         )?;
         Ok(TaskOutput {
             table: render(&fit),
-            source: "GJ 1214 b's Bond albedo, 0.51 ± 0.06 (Kempton et al. 2023, Nature 620, 67, \
-                     recalled), on the sim's closed form of the planet and its host (Cloutier et \
-                     al. 2021, AJ 162, 174, recalled) under 32's rules, its bright haze Khare et \
-                     al.'s (1984, Icarus 60, 127) tholin (research-leans-50's ruling)"
+            source: "GJ 1214 b's Bond albedo, 0.51 ± 0.06 (Kempton et al. 2023, Nature 620, 67), \
+                     on the sim's closed form of the planet and its host (Cloutier et al. 2021, AJ \
+                     162, 174, recalled) under 32's rules, its bright haze Khare et al.'s (1984, \
+                     Icarus 60, 127) tholin in two modes (research-leans-50's and \
+                     research-leans-52's rulings)"
                 .to_owned(),
             acceptance: acceptance(&fit, manifest)?,
             provisional: None,
@@ -306,7 +309,7 @@ mod tests {
     /// The rendered table declares [`ITEMS`].
     #[test]
     fn the_table_declares_its_item() {
-        let fit = fit(&GJ_1214_B, 0.51, (1.0, 10.0, 3), 0).expect("the fixture's column");
+        let fit = fit(&GJ_1214_B, 0.51, (10.0, 100.0, 3), 0).expect("the fixture's column");
         let table = render(&fit);
         let names: Vec<&str> = table.items.iter().filter_map(TableItem::name).collect();
         assert_eq!(names, ITEMS);
@@ -316,20 +319,20 @@ mod tests {
     /// end where every depth read lies on one side of it.
     #[test]
     fn the_fit_bisects_a_bracketed_target_and_takes_an_end_otherwise() {
-        let low = light_at(&GJ_1214_B, 1.0).expect("a column").bond_albedo;
-        let high = light_at(&GJ_1214_B, 4.0).expect("a column").bond_albedo;
+        let low = light_at(&GJ_1214_B, 10.0).expect("a column").bond_albedo;
+        let high = light_at(&GJ_1214_B, 40.0).expect("a column").bond_albedo;
         let target = f64::midpoint(low, high);
-        let bracketed = fit(&GJ_1214_B, target, (1.0, 4.0, 4), 30).expect("a column");
+        let bracketed = fit(&GJ_1214_B, target, (10.0, 40.0, 4), 30).expect("a column");
         assert!(bracketed.bracketed);
         assert!(
             (bracketed.light.bond_albedo - target).abs() < 1e-6,
             "{bracketed:?}"
         );
-        let beyond = fit(&GJ_1214_B, 0.99, (1.0, 4.0, 3), 30).expect("a column");
+        let beyond = fit(&GJ_1214_B, 0.99, (10.0, 40.0, 3), 30).expect("a column");
         assert!(!beyond.bracketed);
-        assert!((beyond.optical_depth - 4.0).abs() < 1e-12);
-        let below = fit(&GJ_1214_B, 0.0, (1.0, 4.0, 3), 30).expect("a column");
-        assert!((below.optical_depth - 1.0).abs() < 1e-12);
+        assert!((beyond.optical_depth - 40.0).abs() < 1e-12);
+        let below = fit(&GJ_1214_B, 0.0, (10.0, 40.0, 3), 30).expect("a column");
+        assert!((below.optical_depth - 10.0).abs() < 1e-12);
     }
 
     /// The fit refuses fewer than three depths and a range that is not one, naming the key.

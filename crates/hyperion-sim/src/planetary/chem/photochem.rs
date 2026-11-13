@@ -21,6 +21,7 @@
 //! | [`sulphur_haze`] | Gao et al. 2017 | `T_eq` 250–700 K; S₈ saturated aloft | an S₈ haze, 100–0.1 mbar |
 //! | [`soot`], [`hydrocarbon_share`] | Gao et al. 2020 | `T_eq` below 950 K | a soot haze from 1 µbar |
 //! | [`bright_haze`], [`bright_haze_cool_share`] | research-leans-50 | the soot's column, from 32 | a tholin haze on the soot's layer |
+//! | [`coagulated_haze`] | research-leans-52 | the bright haze's, from 32 | its coagulated mode, to 10 mbar |
 //! | [`ice_giant_haze`] | Irwin et al. 2022 | a CH₄ layer | a haze above it |
 //! | [`chromophore`] | Braude et al. 2020 | an NH₃ layer | a red layer at 0.2 bar or above |
 //! | [`ammonia_haze`] | fitted on Jupiter | an NH₃ layer | an NH₃-ice haze above it, to 0.1 bar |
@@ -52,8 +53,10 @@
 //! - **The bright haze** (from generator version 32; research-leans-50's ruling, 2026-11-10): Khare
 //!   et al.'s (1984) tholin on the soot's layer, which takes the share of the soot's column that
 //!   the soot's taper below Gao et al.'s grid drops (`envelope_atmosphere::haze_shares`), cut at its
-//!   cool edge ([`BRIGHT_HAZE_COOL_EDGE`]), its τ(550) fitted on GJ 1214 b's Bond albedo
-//!   (`tables::warm_haze`).
+//!   cool edge ([`BRIGHT_HAZE_COOL_EDGE`]), of τ(550) [`BRIGHT_HAZE_OPTICAL_DEPTH`] at its whole
+//!   share. Under it (research-leans-52's ruling, 2026-11-13) lies the same haze grown by
+//!   coagulation as it settles ([`coagulated_haze`]), from the slab's base to 10 mbar, whose τ(550)
+//!   is fitted on GJ 1214 b's Bond albedo (`tables::warm_haze`).
 //! - **The ice giants' haze** (P. G. J. Irwin et al., "Hazy blue worlds: a holistic aerosol model
 //!   for Uranus and Neptune, including dark spots", JGR Planets 127, e2022JE007189, 2022,
 //!   arXiv:2201.04516): their Aerosol-3, "an extended layer of photochemically-produced haze" from
@@ -442,6 +445,9 @@ pub enum HazeRule {
     Ammonia,
     /// [`bright_haze`]: a warm envelope's bright organic haze, from generator version 32.
     Bright,
+    /// [`coagulated_haze`]: the bright haze grown as it settles below its slab, from generator
+    /// version 32.
+    Coagulated,
 }
 
 /// A haze's vertical extent.
@@ -795,6 +801,13 @@ pub fn soot(air: &UpperAtmosphere, methane: f64) -> Result<Option<Haze>, Evaluat
 /// 0.80, 0.88 and 0.92 and g 0.52, 0.42 and 0.31 at 450, 550 and 650 nm.
 pub const BRIGHT_HAZE_PARTICLES: (Micrometres, f64) = (Micrometres::new(0.1), 0.05);
 
+/// The bright haze's τ(550) at its whole share: 10. The lane `fix-dark-sub-neptune-2` fitted it on
+/// GJ 1214 b's Bond albedo and took the column's reach then, τ(550) 10 above its floor;
+/// research-leans-52's ruling (2026-11-13) keeps it, since the slab sets the visible colour (the
+/// fixture's spherical albedo's B/V 0.63 and R/V 1.36), and fits the depth under it instead
+/// ([`coagulated_haze`]).
+pub const BRIGHT_HAZE_OPTICAL_DEPTH: f64 = 10.0;
+
 /// The cool edge of the bright haze in the zero-albedo `T_eq`, K: none at or below 400 K and whole
 /// from 550 K, linear between (a lean of 2026-11-10, research-leans-50, landed as ruled).
 ///
@@ -802,7 +815,7 @@ pub const BRIGHT_HAZE_PARTICLES: (Micrometres, f64) = (Micrometres::new(0.1), 0.
 ///   no thick haze: TOI-270 d at 350–390 K (Benneke et al. 2024, arXiv:2403.03325) and K2-18 b at
 ///   about 260 K (Madhusudhan et al. 2023, ApJL 956, L13), both recalled.
 /// - **550 K**: below GJ 1214 b's 595 K (Cloutier et al. 2021, AJ 162, 174, recalled), whose
-///   Bond albedo of 0.51 ± 0.06 (Kempton et al. 2023, Nature 620, 67, recalled) needs a bright,
+///   Bond albedo of 0.51 ± 0.06 (Kempton et al. 2023, Nature 620, 67) needs a bright,
 ///   high aerosol over its metal-rich gas.
 pub const BRIGHT_HAZE_COOL_EDGE: (Kelvin, Kelvin) = (Kelvin::new(400.0), Kelvin::new(550.0));
 
@@ -819,8 +832,8 @@ pub fn bright_haze_cool_share(zero_albedo_temperature: Kelvin) -> f64 {
 }
 
 /// The bright organic haze of an envelope with upper atmosphere `air` whose gas holds methane at
-/// mole fraction `methane` at the haze's level, of τ(550) `optical_depth` (the record's is the
-/// fitted `tables::warm_haze::BRIGHT_HAZE_OPTICAL_DEPTH`), or `None` where [`soot`] forms none
+/// mole fraction `methane` at the haze's level, of τ(550) `optical_depth` (the record's is
+/// [`BRIGHT_HAZE_OPTICAL_DEPTH`]), or `None` where [`soot`] forms none
 /// (from generator version 32; research-leans-50's ruling, 2026-11-10).
 ///
 /// It shares [`soot`]'s column: where the soot's share is below 1, under Gao et al.'s 700 K grid
@@ -885,6 +898,98 @@ pub fn bright_haze(
             optical_depth,
             wavelength: Micrometres::new(0.55),
         },
+    }))
+}
+
+/// The coagulated haze's particles: a gamma distribution of effective radius 0.5 µm and effective
+/// variance 0.05, the bright haze's narrow table (research-leans-52's ruling, 2026-11-13), near the
+/// settling budget's 0.57 µm at 100 Pa, above and below which the budget's haze holds about half
+/// its τ each ([`coagulated_haze`]); the well-mixed mode holds 90% of its τ below 100 Pa.
+pub const COAGULATED_HAZE_PARTICLES: (Micrometres, f64) = (Micrometres::new(0.5), 0.05);
+
+/// The coagulated haze's base: 1,000 Pa, 10 mbar (research-leans-52's ruling, 2026-11-13), the
+/// level by which the settling budget's particles reach 1.4 µm ([`coagulated_haze`]).
+pub const COAGULATED_HAZE_BASE: Pascals = Pascals::new(1.0e3);
+
+/// The bright haze's coagulated mode in an envelope with upper atmosphere `air` whose gas holds
+/// methane at mole fraction `methane` at the haze's level, of τ(550) `optical_depth` (the record's
+/// is the fitted `tables::warm_haze::COAGULATED_HAZE_OPTICAL_DEPTH`), or `None` where [`soot`]
+/// forms none (from generator version 32; research-leans-52's ruling, 2026-11-13).
+///
+/// A haze made at [`SOOT_FORMATION`] grows by coagulation as it settles: "Particles grow through
+/// their mutual collisions (coagulation)" (P. Lavvas et al., "Photochemical Hazes in Sub-Neptunian
+/// Atmospheres with a Focus on GJ 1214b", ApJ 878, 118, 2019, arXiv:1905.02976), and a warm
+/// (about 500 K) planet's haze "consists of particles of various sizes" (Y. Kawashima and M.
+/// Ikoma, ApJ 853, 7, 2018, arXiv:1712.02808). The ruling's budget (isothermal 500 K, μ 2.35,
+/// particles of 1 g cm⁻³ from 1 nm, settling alone, no eddy mixing) at a column production rate of
+/// 5 × 10⁻¹¹ g cm⁻² s⁻¹ gives r 0.21 µm by 10 Pa, 0.57 µm by 100 Pa and 1.4 µm by 1,000 Pa, and
+/// τ(550) 9.5 above 10 Pa and 44 between 10 and 1,000 Pa: two modes, the bright haze's slab and
+/// this one. That rate lies inside P. Gao et al.'s grid for GJ 1214 b, 10⁻¹⁴–10⁻⁹ g cm⁻² s⁻¹ (ApJ
+/// 951, 96, 2023, arXiv:2305.05697), between Lavvas et al.'s "order 10−11" and Gao et al.'s
+/// preferred "≥10−10". Each source was checked by its abstract and indexed text, not read whole
+/// (2026-11-13). The budget is GJ 1214 b's (its gravity, about 500 K and μ 2.35), and its size and
+/// depth serve every warm envelope (a lean, 2026-11-13): at 10⁻¹¹ or 10⁻¹⁰ g cm⁻² s⁻¹ it grows to
+/// 1.0 or 1.6 µm by 1,000 Pa, and eddy mixing, which it leaves out, would thin it below some
+/// 30 Pa. Its material is the bright haze's tholin, its particles
+/// [`COAGULATED_HAZE_PARTICLES`], its layer well mixed from the bright haze's base to
+/// [`COAGULATED_HAZE_BASE`], its amount the optical depth it is given, which the caller shares out
+/// as it shares the bright haze's.
+///
+/// # Errors
+///
+/// As [`bright_haze`]'s.
+///
+/// # Examples
+///
+/// ```
+/// use hyperion_sim::planetary::chem::photochem::{
+///     HazeProfile, UpperAtmosphere, bright_haze, coagulated_haze,
+/// };
+/// use hyperion_sim::units::{Kelvin, MetresPerSecondSquared};
+///
+/// # fn main() -> Result<(), hyperion_sim::planetary::chem::photochem::EvaluateRuleError> {
+/// let air = UpperAtmosphere {
+///     equilibrium_temperature: Kelvin::new(500.0),
+///     stratosphere_temperature: Kelvin::new(420.0),
+///     metallicity: 100.0,
+///     gravity: MetresPerSecondSquared::new(10.7),
+///     molar_mass_g_per_mol: 3.0,
+/// };
+/// let slab = bright_haze(&air, 0.01, 10.0)?.expect("a haze");
+/// let deep = coagulated_haze(&air, 0.01, 44.0)?.expect("a haze");
+/// let (HazeProfile::Layer { base, .. }, HazeProfile::Layer { top, .. }) =
+///     (slab.profile(), deep.profile())
+/// else {
+///     unreachable!("both are layers");
+/// };
+/// assert!(top.value().total_cmp(&base.value()).is_eq());
+/// assert_eq!(coagulated_haze(&air, 0.0, 44.0)?, None);
+/// # Ok(())
+/// # }
+/// ```
+pub fn coagulated_haze(
+    air: &UpperAtmosphere,
+    methane: f64,
+    optical_depth: f64,
+) -> Result<Option<Haze>, EvaluateRuleError> {
+    let Some(slab) = bright_haze(air, methane, optical_depth)? else {
+        return Ok(None);
+    };
+    // The slab is the soot's layer; a Gaussian, which no rule gives it, would take its peak.
+    let top = match slab.profile {
+        HazeProfile::Layer { base, .. } => base,
+        HazeProfile::Gaussian { peak, .. } => peak,
+    };
+    let (radius, variance) = COAGULATED_HAZE_PARTICLES;
+    Ok(Some(Haze {
+        rule: HazeRule::Coagulated,
+        size: gamma(radius, variance),
+        profile: HazeProfile::Layer {
+            base: COAGULATED_HAZE_BASE,
+            top,
+            exponent: 0.0,
+        },
+        ..slab
     }))
 }
 

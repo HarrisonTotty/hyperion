@@ -502,7 +502,7 @@ pub const MANIFEST: &[TableInfo] = &[
     },
     TableInfo {
         name: "warm_haze",
-        revision: 0,
+        revision: 1,
         since_generator_version: 31,
         provisional: false,
     },
