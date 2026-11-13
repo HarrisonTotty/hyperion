@@ -128,7 +128,10 @@ export function lightingState(
 /** The label block's line while the sky is asked and none of its arrival is held. */
 export const LIGHTING_PENDING = "LIGHTING: PENDING";
 
-/** The label block's line where no light is held and none is asked. */
+/**
+ * The label block's line where no light is held and none is awaited: the discs answered empty or
+ * refused, or a kept scene with none (a lost link alone reads {@link LIGHTING_PENDING}).
+ */
 export const LIGHTING_NOT_RECEIVED = "LIGHTING: NOT RECEIVED";
 
 /**

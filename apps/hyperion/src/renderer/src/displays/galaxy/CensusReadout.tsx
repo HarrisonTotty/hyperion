@@ -34,7 +34,7 @@ import {
 } from "./chartModel";
 import { usePageTabFocus } from "./pageTabFocus";
 
-/** A value of the census table that is Missing: a status this build does not know. */
+/** A value of the census readout that is Missing: a status this build does not know, an edge. */
 const MISSING = <span className="readout__missing">—</span>;
 
 /** What a layer's line in the census table says about the layer, in words. */
@@ -103,8 +103,9 @@ interface BandProps {
  * A layer's band as the table writes it, one span with one unit, the header's `M☉` but for the
  * free-floating planets': the stellar layers' exact edges (`0.08 – 0.5`), the brown dwarfs' 13
  * Jupiter masses to three decimals up to the stars' `0.08` (`0.012 – 0.08`), and the planets' in
- * Earth masses with their drawn `M⊕` (`0.33 – 4132 M⊕`; plan 13, design note 14). The band of a
- * layer this build does not know is Missing, since its unit and precision are not known.
+ * Earth masses with their drawn `M⊕` (`0.33 – 4132 M⊕`; plan 13, design note 14). The table never
+ * writes the band of a layer this build does not know, whose unit and precision are not known: it
+ * names that layer across the band's cell ({@link CensusTable}), so its case here is Missing.
  */
 function Band({ line }: BandProps) {
   let band: ReactNode;
@@ -173,25 +174,28 @@ function CensusTable({ layers }: CensusTableProps) {
         </tr>
       </thead>
       <tbody>
-        {censusLinesLightestFirst(layers).map((layer) => (
-          <tr key={lineKey(layer)}>
-            {layer.layer === "unknown" ? (
-              <th scope="row" colSpan={2}>
-                {UNLISTED_LAYER}
-              </th>
-            ) : (
-              <>
-                <th scope="row">{layerLetter(layer.layer)}</th>
-                <td className="census-table__band">
-                  <Band line={layer} />
-                </td>
-              </>
-            )}
-            <td className="census-table__count">{expectedCount(layer.expected)}</td>
-            <td className="census-table__count">{formatNumber(layer.returned, 0)}</td>
-            <td className="census-table__status">{statusWords(layer.status)}</td>
-          </tr>
-        ))}
+        {censusLinesLightestFirst(layers).map((layer) => {
+          const letter = layerLetter(layer.layer);
+          return (
+            <tr key={lineKey(layer)}>
+              {letter === null ? (
+                <th scope="row" colSpan={2}>
+                  {UNLISTED_LAYER}
+                </th>
+              ) : (
+                <>
+                  <th scope="row">{letter}</th>
+                  <td className="census-table__band">
+                    <Band line={layer} />
+                  </td>
+                </>
+              )}
+              <td className="census-table__count">{expectedCount(layer.expected)}</td>
+              <td className="census-table__count">{formatNumber(layer.returned, 0)}</td>
+              <td className="census-table__status">{statusWords(layer.status)}</td>
+            </tr>
+          );
+        })}
       </tbody>
     </table>
   );

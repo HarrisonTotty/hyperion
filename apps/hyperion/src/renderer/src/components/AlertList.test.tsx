@@ -273,7 +273,7 @@ describe("AlertList (plan 12, P12.T12)", () => {
     expect(row).toHaveTextContent("FLUX RADIO —");
     expect(row).not.toHaveTextContent("W/m²");
     expect(within(row).getByText("—")).toHaveClass("readout__missing");
-    expect(row.getAttribute("aria-label")).toContain("FLUX RADIO —");
+    expect(row).toHaveAccessibleName(/FLUX RADIO —/u);
   });
 
   it("trails each stale row with one S and names it stale", () => {
