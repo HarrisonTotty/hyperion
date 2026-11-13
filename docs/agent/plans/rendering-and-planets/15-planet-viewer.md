@@ -287,3 +287,8 @@ LONGITUDE …`, since the light is not where the records put it. `MAXIMIZE VIEW`
   confirmation): `LOAD` is offered while a moon is shown; `SHARE`'s last string stays shown, muted
   over `SHARE_HELD_NOTE`, and a copy or a cut of it is refused (`SHARE_NOT_COPIED`) until a string
   is pasted over it; a string loaded ends the hold (`setInputs`).
+- R15.T5 (ruled 2026-11-13, the owner's delegated UX call, ux-calls-and-checklist-gaps): both marks
+  closed. The muted, editable fields stand, `SEED` described by the `NO INPUTS` line too
+  (`SeedField`'s `noteId`); the held string, refused to a copy or a cut, is refused to a drag too
+  (`ShareField`'s `onDragStart`). The clipboard, a screen reader and both sizes stay on the
+  owner's checklist.

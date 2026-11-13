@@ -104,6 +104,7 @@ export function PlanetViewerBar({
           label="DRAW SEED"
           seed={drawSeed}
           serverRefusal={null}
+          noteId={null}
           onEnter={onDrawSeedChange}
         />
         <span className="planet-viewer__last-draw">
@@ -140,9 +141,9 @@ interface ShareFieldProps {
 
 /**
  * The inputs' string, to copy, or a pasted one to `LOAD`. Held back with `heldId`, the string
- * shown is muted, with {@link SHARE_HELD_NOTE} under it, and a copy or a cut of it is refused,
- * saying so ({@link SHARE_NOT_COPIED}), until another is typed or pasted over it; `LOAD` still
- * takes a pasted one.
+ * shown is muted, with {@link SHARE_HELD_NOTE} under it, and a copy, a cut or a drag of it is
+ * refused, saying so ({@link SHARE_NOT_COPIED}), until another is typed or pasted over it; `LOAD`
+ * still takes a pasted one.
  */
 function ShareField({ inputs, onLoad, heldId }: ShareFieldProps) {
   const fieldId = useId();
@@ -205,6 +206,7 @@ function ShareField({ inputs, onLoad, heldId }: ShareFieldProps) {
         }}
         onCopy={refuseCopy}
         onCut={refuseCopy}
+        onDragStart={refuseCopy}
         onKeyDown={(event) => {
           if (event.key === "Enter") {
             event.preventDefault();

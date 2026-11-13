@@ -533,6 +533,7 @@ export function PlanetInputsPanel({
                   ? command.state.reason
                   : null
               }
+              noteId={noInputs ? noInputsId : null}
               onEnter={viewer.setSeed}
             />
             <button

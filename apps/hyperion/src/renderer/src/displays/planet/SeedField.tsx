@@ -4,6 +4,7 @@ import { useId } from "react";
 import { StatusText } from "../../components/StatusText";
 import { formatHex64, parseSeedHex } from "../../lib/seed";
 import { isEmptyEntry, showSelected } from "../../lib/textEntry";
+import { describedBy } from "./describedBy";
 import { useEntryDraft } from "./useEntryDraft";
 
 /** Props of {@link SeedField}. */
@@ -11,6 +12,8 @@ export interface SeedFieldProps {
   readonly label: string;
   readonly seed: SeedHex;
   readonly serverRefusal: string | null;
+  /** The ID of the panel's `NO INPUTS` note, which says why its value is muted, or `null` (R15.T5). */
+  readonly noteId: string | null;
   readonly onEnter: (seed: SeedHex) => void;
 }
 
@@ -20,7 +23,7 @@ export interface SeedFieldProps {
  * what is valid; `Escape`, or `Enter` in the emptied field, drops what was typed. On the `INPUTS`
  * panel its refusal is the panel's one ({@link useEntryDraft}).
  */
-export function SeedField({ label, seed, serverRefusal, onEnter }: SeedFieldProps) {
+export function SeedField({ label, seed, serverRefusal, noteId, onEnter }: SeedFieldProps) {
   const fieldId = useId();
   const errorId = useId();
   const { draft, refusal: entryRefusal, type, drop, refuse } = useEntryDraft(false);
@@ -57,7 +60,7 @@ export function SeedField({ label, seed, serverRefusal, onEnter }: SeedFieldProp
         spellCheck={false}
         value={draft ?? text}
         aria-invalid={refusal === null ? undefined : "true"}
-        aria-describedby={refusal === null ? undefined : errorId}
+        aria-describedby={describedBy([noteId, refusal === null ? null : errorId])}
         onChange={(event) => {
           type(event.target.value);
         }}

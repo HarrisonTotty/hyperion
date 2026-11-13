@@ -3,7 +3,7 @@
  * its planet opened in `VIEW`'s display of its own.
  */
 import type { ResponseFor } from "@hyperion/protocol";
-import { act, render, screen, within } from "@testing-library/react";
+import { act, createEvent, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Activity } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -721,6 +721,16 @@ describe("nextDrawSeed", () => {
       expect(sma).not.toHaveAccessibleDescription(/NO INPUTS/u);
     });
 
+    it("describes SEED by its NO INPUTS line while a moon is shown", async () => {
+      await handOverMoon();
+      expect(screen.getByRole("textbox", { name: "SEED" })).toHaveAccessibleDescription(
+        NO_INPUTS_DESCRIPTION,
+      );
+      expect(screen.getByRole("textbox", { name: "DRAW SEED" })).not.toHaveAccessibleDescription(
+        /NO INPUTS/u,
+      );
+    });
+
     it("holds GENERATE back, saying why", async () => {
       const { socket, user } = await handOverMoon();
       const generate = screen.getByRole("button", { name: "G GENERATE" });
@@ -753,6 +763,15 @@ describe("nextDrawSeed", () => {
         share.getAttribute("value"),
         wholeText(SHARE_NOT_COPIED).length,
       ]).toEqual(["before", shown, 1]);
+    });
+
+    it("refuses a drag of SHARE's held string, saying NOT COPIED", async () => {
+      await handOverMoon();
+      const share = screen.getByRole("textbox", { name: "SHARE" });
+      // user-event cannot drag, so the drag's start is fired as the browser would fire it.
+      const drag = createEvent.dragStart(share);
+      fireEvent(share, drag);
+      expect([drag.defaultPrevented, wholeText(SHARE_NOT_COPIED).length]).toEqual([true, 1]);
     });
 
     it("still offers RANDOMIZE", async () => {
