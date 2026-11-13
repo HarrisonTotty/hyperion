@@ -13,8 +13,10 @@
 # `planetary/derive/photometry/envelope_bond/opacity.rs` (P14.T24.h.b part 5) with Karkoschka and
 # Tomasko 2010's CH4 and the alkali wings from the client's tables and the particles' Mie tables.
 # `reduce_narrow.py` beside it writes `envelope_bond/narrow.rs` (from generator version 32) from the
-# client's index files alone, none of these. Nothing here computes a value the generator reads at
-# run time; the reduced tables are committed.
+# client's index files and Khare et al.'s tholin infrared index (`data/khare_1984_tholin/nk.csv`),
+# none of these; `phase_integral.py` computes the bright haze's phase integral that the photometry
+# states (`photometry::BRIGHT_HAZE_PHASE_INTEGRAL`) from the same index files. Nothing here computes
+# a value the generator reads at run time; the reduced tables are committed.
 dataset = "nicholls_2025_dayspring"
 class = "fetched"
 citation = "H. Nicholls (2025), spectral_files/Dayspring/48 (Zenodo, DOI 10.5281/zenodo.15721749; with L. Soucasse) and spectral_files/Dayspring/256 (Zenodo, DOI 10.5281/zenodo.15799474): SOCRATES spectral files fitted to DACE opacities (Grimm et al. 2021, ApJS 253, 30), as the PROTEUS framework (Nicholls et al.) distributes them"

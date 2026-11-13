@@ -222,6 +222,7 @@ pub static REGISTRY: [&dyn FitTask; 64] = [
     &tasks::thermo_equilibrium::ThermoEquilibrium27Task,
     &tasks::type_ia_delay::TypeIaDelayTask,
     &tasks::type_ia_yield::TypeIaYieldTask,
+    &tasks::warm_haze::WarmHazeTask,
     &tasks::wd_cooling::WdCoolingTask,
 ];
 
@@ -368,6 +369,7 @@ mod tests {
                 "thermo_equilibrium_27",
                 "type_ia_delay",
                 "type_ia_yield",
+                "warm_haze",
                 "wd_cooling"
             ]
         );

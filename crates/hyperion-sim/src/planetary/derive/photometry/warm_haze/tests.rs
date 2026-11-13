@@ -1,0 +1,142 @@
+//! The fit's fixture, GJ 1214 b: what it draws at 31, and its bright haze under 32's rules at the
+//! fitted optical depth against the brief's targets.
+
+use hyperion_testkit::float::assert_same_bits;
+
+use super::*;
+use crate::planetary::chem::HostAbundances;
+use crate::planetary::testing::{EnvelopeByHand, envelope_by_hand, with_every_32_hold};
+use crate::tables::warm_haze::BRIGHT_HAZE_OPTICAL_DEPTH;
+use crate::units::{Dex, Watts};
+
+/// The fixture's record envelope by hand at equilibrium temperature `t_eq` (K): its mass, radius,
+/// gravity and fractions, protosolar about a host whose snow line lies at 0.15 au (the builder's,
+/// labelled), formed where it orbits.
+fn by_hand(t_eq: f64) -> crate::planetary::record::Envelope {
+    let fixture = GJ_1214_B;
+    let inputs = fixture
+        .inputs(Kelvin::new(t_eq))
+        .expect("the fixture's inputs");
+    let mass = EarthMasses::new(fixture.mass_earth);
+    let fractions = composition(
+        mass,
+        EarthRadii::new(fixture.radius_earth),
+        SnowLineSide::Inside,
+        fixture.flux(),
+    )
+    .expect("a composition")
+    .fractions();
+    let radius = inputs.radius.value();
+    envelope_by_hand(&EnvelopeByHand {
+        mass,
+        fractions,
+        radius: inputs.radius,
+        gravity: MetresPerSecondSquared::new(
+            GRAVITATIONAL_CONSTANT * inputs.mass.value() / (radius * radius),
+        ),
+        equilibrium_temperature: Kelvin::new(t_eq),
+        internal_luminosity: Watts::ZERO,
+        age: Years::new(fixture.age_years),
+        formation_distance: Metres::new(fixture.semi_major_axis_au * METRES_PER_AU),
+        snow_line: Metres::new(0.15 * METRES_PER_AU),
+        fe_h: Dex::ZERO,
+        alpha_fe: Dex::ZERO,
+        host: HostAbundances::protosolar(),
+        primordial_helium_per_hydrogen: crate::substance::Element::He
+            .protosolar_abundance_per_hydrogen(),
+        starlit: true,
+    })
+    .expect("the fixture's envelope")
+}
+
+/// The keys of the photochemical hazes' materials among an envelope's modes.
+fn hazes_of(envelope: &crate::planetary::record::Envelope) -> Vec<(&'static str, f64)> {
+    envelope
+        .atmosphere()
+        .modes()
+        .iter()
+        .filter_map(|mode| {
+            let key = mode.material().substance().key();
+            let key: &'static str = ["soot", "tholin", "S8"]
+                .into_iter()
+                .find(|k| *k == key.as_str())?;
+            Some((key, mode.optical_depth().map_or(f64::NAN, |d| d.value())))
+        })
+        .collect()
+}
+
+/// The fixture first (the brief): at 31 GJ 1214 b, its zero-albedo `T_eq` 595 K, draws no
+/// photochemical haze, its S₈ vapour unsaturated in a stratosphere near 500 K and its soot below
+/// Gao et al.'s grid, and its closed form a Bond albedo of 0.012 under its M dwarf's light, against
+/// its measured 0.51 ± 0.06 (Kempton et al. 2023, recalled).
+#[test]
+fn gj_1214_b_draws_no_haze_at_31() {
+    let held = GJ_1214_B
+        .light_under(
+            ClosedReading {
+                rules: EnvelopeColumnRules::Clipped,
+                bright_haze_optical_depth: BRIGHT_HAZE_OPTICAL_DEPTH,
+            },
+            BondAlbedo::from_fraction(0.3),
+        )
+        .expect("the fixture's column");
+    assert!(
+        (held.zero_albedo_temperature_k - 595.3).abs() < 0.1,
+        "{held:?}"
+    );
+    assert!((held.bond_albedo - 0.0120).abs() < 5e-4, "{held:?}");
+    let envelope = by_hand(held.equilibrium_temperature_k);
+    assert_eq!(hazes_of(&envelope), [], "{held:?}");
+}
+
+/// Under every 32 hold the fixture's record carries the bright haze alone at the fitted τ(550),
+/// whole below 600 K and above 550 K, and its closed form meets the brief's colour and `p_V`: B/V
+/// 0.6–0.7 and R/V 1.1–1.6 in its column's spherical albedo, `p_V` 0.15–0.25, its q the bright
+/// haze's. Its Bond albedo, pinned, falls short of the measured 0.39–0.63 (a finding): Khare et
+/// al.'s tholin of 0.1 µm is thin beyond 1 µm, where two thirds of a 3,250 K host's light lies,
+/// and the column is read only above τ(550) 10 (`warm_haze`'s fit takes that reach).
+#[test]
+fn under_every_32_hold_gj_1214_b_draws_its_bright_haze() {
+    let light = GJ_1214_B
+        .light(BRIGHT_HAZE_OPTICAL_DEPTH)
+        .expect("the fixture's column");
+    let [b, v, r] = light.spherical_albedo;
+    assert!((0.6..=0.7).contains(&(b / v)), "{light:?}");
+    assert!((1.1..=1.6).contains(&(r / v)), "{light:?}");
+    assert!(
+        (0.15..=0.25).contains(&light.geometric_albedo[1]),
+        "{light:?}"
+    );
+    for (q, bright) in light.phase_integral.into_iter().zip([
+        crate::planetary::derive::photometry::BRIGHT_HAZE_PHASE_INTEGRAL.b,
+        crate::planetary::derive::photometry::BRIGHT_HAZE_PHASE_INTEGRAL.v,
+        crate::planetary::derive::photometry::BRIGHT_HAZE_PHASE_INTEGRAL.r,
+    ]) {
+        assert_same_bits(q, bright);
+    }
+    assert!((light.bond_albedo - 0.2211).abs() < 5e-4, "{light:?}");
+    let envelope = with_every_32_hold(|| by_hand(light.equilibrium_temperature_k));
+    let hazes = hazes_of(&envelope);
+    assert_eq!(hazes.len(), 1, "{hazes:?}");
+    assert_eq!(hazes[0].0, "tholin");
+    assert!(
+        (hazes[0].1 / BRIGHT_HAZE_OPTICAL_DEPTH - 1.0).abs() < 1e-9,
+        "{hazes:?}"
+    );
+}
+
+/// The fixture's flux is its host's black body at its distance, and its zero-albedo `T_eq` the
+/// planet's 595 K (Cloutier et al. 2021, recalled: 596 ± 19 K).
+#[test]
+fn the_fixture_s_flux_is_its_host_s() {
+    let t0 = equilibrium_temperature(GJ_1214_B.flux(), BondAlbedo::from_fraction(0.0)).value();
+    let expected = GJ_1214_B.host_temperature_k
+        * (GJ_1214_B.host_radius_solar * SOLAR_RADIUS_M
+            / (2.0 * GJ_1214_B.semi_major_axis_au * METRES_PER_AU))
+            .sqrt();
+    assert!(
+        (t0 / expected - 1.0).abs() < 1e-12,
+        "{t0} against {expected}"
+    );
+    assert!((t0 - 595.3).abs() < 0.1, "{t0}");
+}

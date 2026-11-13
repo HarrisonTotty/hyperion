@@ -136,7 +136,7 @@ use crate::planetary::derive::atmosphere::{
     SurfaceState, VolatileDraws, WeatheringCase, has_surface_section, published_label,
 };
 use crate::planetary::derive::figure::{BodyFigure, FigureInputs};
-use crate::planetary::derive::irradiation::{BondAlbedo, luminosity_flux};
+use crate::planetary::derive::irradiation::{BondAlbedo, equilibrium_temperature, luminosity_flux};
 use crate::planetary::derive::pass_record::{
     ContextTide, PassBulk, PassContext, PassRecord, PassRecordOf, RecordCrust, RecordSpin,
     WaterGate,
@@ -888,6 +888,7 @@ fn photometry_of(
         fractions,
         bond: albedo,
         band_albedo: atmosphere.band_albedo(),
+        bright_share: atmosphere.bright_share(),
     })
 }
 
@@ -2942,6 +2943,10 @@ impl PlanetarySystem {
             radius: Metres::from(bulk.radius()),
             gravity: bulk.surface_gravity(),
             equilibrium_temperature: bulk.equilibrium_temperature(),
+            zero_albedo_temperature: equilibrium_temperature(
+                derived.flux(),
+                BondAlbedo::from_fraction(0.0),
+            ),
             internal_luminosity: derived.internal_luminosity(),
             age: ctx.age_at(epoch.t),
             formation: self.formation_zone(body),

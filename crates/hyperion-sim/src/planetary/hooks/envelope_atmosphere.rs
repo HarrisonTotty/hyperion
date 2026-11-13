@@ -224,6 +224,10 @@
 //!   only within Gao et al.'s grid: their models span `T_eq` 700–2,800 K, so the rule's column is
 //!   scaled by [`SOOT_GRID_EDGE`]'s linear taper, 0 at and below 600 K and whole from 700 K (stated;
 //!   the rule's own 950 K edge is unchanged). The cool giants' stratospheric hazes are not modelled.
+//! - **The bright haze** ([`bright_haze`], from generator version 32; research-leans-50's ruling,
+//!   2026-11-10): the taper reads the zero-albedo `T_eq`, and the share of the soot's column it
+//!   drops is Khare et al.'s tholin, of the fitted τ(550) at its whole share, cut at its cool edge
+//!   (400–550 K) (`haze_shares`).
 //! - **The ice giants' haze** ([`ice_giant_haze`], Irwin et al. 2022), based at the CH₄ deck's base,
 //!   and **the chromophore** ([`chromophore`], Braude et al. 2020) at the NH₃ deck's, on a
 //!   Jupiter-like ammonia cloud alone: an NH₃ deck with no CH₄ deck above it (stated; Braude et al.
@@ -310,12 +314,14 @@ use crate::planetary::chem::condense::{
 use crate::planetary::chem::envelope_abundances::EnvelopeAbundances;
 use crate::planetary::chem::equilibrium::{GasEquilibrium, Network, SolveEquilibriumError};
 use crate::planetary::chem::photochem::{
-    EvaluateRuleError, Haze, HazeAmount, HazeProfile, UpperAtmosphere, ammonia_haze, chromophore,
-    ice_giant_haze, methane_layer_particles, soot, sulphur_dioxide, sulphur_haze,
+    EvaluateRuleError, Haze, HazeAmount, HazeProfile, UpperAtmosphere, ammonia_haze, bright_haze,
+    bright_haze_cool_share, chromophore, ice_giant_haze, methane_layer_particles, soot,
+    sulphur_dioxide, sulphur_haze,
 };
 use crate::planetary::chem::quench::{
     ApplyQuenchError, DeriveQuenchError, EddyDiffusion, MixingColumn, Quench,
 };
+use crate::planetary::derive::photometry::envelope_bond::EnvelopeColumnRules;
 use crate::planetary::derive::radius::giant_share;
 use crate::planetary::hooks::aerosols::{
     Absorber, AerosolDeck, AerosolMode, BuildAbsorberError, CLOUD_EDDY_DIFFUSION, DECK_WIDTH,
@@ -331,6 +337,7 @@ use crate::substance::{
     CondensedPhase, Element, MOLAR_GAS_CONSTANT, SubstanceId, by_key, formation,
     mean_molar_mass_g_per_mol, mixture_heat_capacity_over_r_at,
 };
+use crate::tables::warm_haze::BRIGHT_HAZE_OPTICAL_DEPTH;
 use crate::units::consts::{BOLTZMANN_CONSTANT, STEFAN_BOLTZMANN};
 use crate::units::{
     Dex, EarthMasses, Kelvin, KilogramsPerSquareMetre, Metres, MetresPerSecondSquared, Pascals,
@@ -521,6 +528,14 @@ pub const ABSORBER_LEVEL: Pascals = Pascals::new(1.0e3);
 /// taper between them (stated) below Gao et al. 2020's grid, whose models span `T_eq` 700–2,800 K
 /// (Nature Astronomy 4, 951); [`soot`]'s own 950 K edge, above which it gives way to the silicates,
 /// is unchanged.
+///
+/// From generator version 32 (`haze_shares`) the taper reads the zero-albedo `T_eq`, and the
+/// share of the soot's column it drops is the bright haze's ([`bright_haze`]), not nothing
+/// (research-leans-50's ruling, 2026-11-10): whole at 700 K, Gao et al.'s grid floor, and none at
+/// 600 K, just above GJ 1214 b's 595 K (Cloutier et al. 2021, AJ 162, 174, recalled), whose Bond
+/// albedo of 0.51 ± 0.06 (Kempton et al. 2023, Nature 620, 67, recalled) soot cannot give: even a
+/// semi-infinite layer of it returns a spherical albedo of 0.03 or less (the research's Monte
+/// Carlo).
 pub const SOOT_GRID_EDGE: (Kelvin, Kelvin) = (Kelvin::new(600.0), Kelvin::new(700.0));
 
 /// The deepest level the quench is sought at, 1 kbar (10⁸ Pa): [`MixingColumn::bottom`]'s "within
@@ -750,6 +765,11 @@ pub struct EnvelopeAtmosphereInputs<'a> {
     /// The equilibrium temperature `T_eq`, finite and not negative: the record's, of the starlight
     /// alone, over the whole sphere with its Bond albedo folded in (ruling 112.7's light-only split).
     pub equilibrium_temperature: Kelvin,
+    /// The equilibrium temperature at zero albedo, (F ÷ 4σ)^¼ of the starlight now over the whole
+    /// sphere: from generator version 32 the hazes' shares read it in place of
+    /// `equilibrium_temperature`, which follows the Bond albedo the hazes set (`haze_shares`).
+    /// One that is not a number draws no soot and no bright haze.
+    pub zero_albedo_temperature: Kelvin,
     /// The gravity, the bulk section's surface gravity, finite and positive.
     pub gravity: MetresPerSecondSquared,
     /// The host's \[Fe/H\], finite: with P14.T50.b's enrichment E it sets the metallicity, E ×
@@ -1061,6 +1081,7 @@ impl EnvelopeAtmosphere {
     ///     network: &network,
     ///     internal_temperature: Kelvin::new(104.8),
     ///     equilibrium_temperature: Kelvin::new(103.6),
+    ///     zero_albedo_temperature: Kelvin::new(123.4),
     ///     gravity: MetresPerSecondSquared::new(24.79),
     ///     fe_h: Dex::ZERO,
     ///     grey: GreyProfile::ADOPTED,
@@ -1160,7 +1181,13 @@ impl EnvelopeAtmosphere {
                     gravity: inputs.gravity,
                     molar_mass_g_per_mol: upper_molar_mass_g_per_mol,
                 };
-                photochemistry(&air, profile, upper_gas, decks)
+                photochemistry(
+                    &air,
+                    inputs.zero_albedo_temperature,
+                    profile,
+                    upper_gas,
+                    decks,
+                )
             } else {
                 Ok((Vec::new(), None))
             }
@@ -1770,11 +1797,40 @@ pub(crate) fn soot_weight(equilibrium_temperature: Kelvin) -> f64 {
     }
 }
 
-/// The photochemistry of a starlit envelope of upper atmosphere `air` and profile `profile`, whose
-/// trimmed 10-mbar gas is `upper` and whose decks are `decks` (the [module](self)'s documentation):
-/// its hazes' modes, in their rules' order, and its SO₂ layer's absorber.
+/// The shares of [`soot`]'s column an envelope of equilibrium temperature `equilibrium_temperature`
+/// and zero-albedo equilibrium temperature `zero_albedo_temperature` draws under the envelope
+/// column's rules `rules`, as soot and as the bright haze ([`bright_haze`], of its rule's τ):
+///
+/// - [`EnvelopeColumnRules::Clipped`], to 31: soot's [`soot_weight`] of `T_eq`, and no bright haze;
+/// - [`EnvelopeColumnRules::Whole`], from 32 (research-leans-50's ruling, 2026-11-10): soot's
+///   [`soot_weight`] of the zero-albedo `T_eq`, s, and the bright haze 1 − s of its τ times its
+///   cool edge's share ([`bright_haze_cool_share`]). The zero-albedo `T_eq` does not follow the
+///   Bond albedo the hazes themselves set, so the hazes' shares no longer feed on their own
+///   albedo: keyed on `T_eq`, the owner's draw's soot thickened as the soot darkened it (667 to
+///   671 K, τ(550) 2.20 to 2.28), and the fitted bright haze cuts GJ 1214 b's `T_eq` by 36 K.
+#[must_use]
+pub(crate) fn haze_shares(
+    rules: EnvelopeColumnRules,
+    equilibrium_temperature: Kelvin,
+    zero_albedo_temperature: Kelvin,
+) -> (f64, f64) {
+    match rules {
+        EnvelopeColumnRules::Clipped => (soot_weight(equilibrium_temperature), 0.0),
+        EnvelopeColumnRules::Whole => {
+            let soot = soot_weight(zero_albedo_temperature);
+            let bright = (1.0 - soot) * bright_haze_cool_share(zero_albedo_temperature);
+            (soot, if bright > 0.0 { bright } else { 0.0 })
+        }
+    }
+}
+
+/// The photochemistry of a starlit envelope of upper atmosphere `air`, zero-albedo equilibrium
+/// temperature `zero_albedo_temperature` and profile `profile`, whose trimmed 10-mbar gas is
+/// `upper` and whose decks are `decks` (the [module](self)'s documentation): its hazes' modes, in
+/// their rules' order, and its SO₂ layer's absorber.
 fn photochemistry(
     air: &UpperAtmosphere,
+    zero_albedo_temperature: Kelvin,
     profile: &EnvelopeProfile,
     upper: &[(SubstanceId, f64)],
     decks: &[AerosolDeck],
@@ -1785,12 +1841,23 @@ fn photochemistry(
             .iter()
             .find(|d| d.condensate().substance().key().as_str() == key)
     };
-    // Each haze with the share of its rule's amount drawn: soot's taper below Gao et al.'s grid.
+    // Each haze with the share of its rule's amount drawn: soot's taper below Gao et al.'s grid,
+    // and from 32 the bright haze in the share it drops.
     let mut hazes: Vec<(Haze, f64)> = Vec::new();
     hazes.extend(sulphur_haze(air, sulphur)?.map(|haze| (haze, 1.0)));
-    let weight = soot_weight(air.equilibrium_temperature);
+    let (weight, bright) = haze_shares(
+        EnvelopeColumnRules::in_force(),
+        air.equilibrium_temperature,
+        zero_albedo_temperature,
+    );
+    let methane = share_of(upper, "CH4");
     if weight > 0.0 {
-        hazes.extend(soot(air, share_of(upper, "CH4"))?.map(|haze| (haze, weight)));
+        hazes.extend(soot(air, methane)?.map(|haze| (haze, weight)));
+    }
+    if bright > 0.0 {
+        hazes.extend(
+            bright_haze(air, methane, BRIGHT_HAZE_OPTICAL_DEPTH)?.map(|haze| (haze, bright)),
+        );
     }
     let methane = deck("CH4");
     if let Some(methane) = methane {

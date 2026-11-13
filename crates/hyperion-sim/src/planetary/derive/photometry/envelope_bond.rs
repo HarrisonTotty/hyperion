@@ -77,9 +77,17 @@
 //! (the lane's check, 48 streams a hemisphere, re-derived by its science check) it runs 0.5–9% low
 //! over ω 0.1–1 and τ 0.3–17, where the δ-Eddington runs 0.005–0.06 low and below 0 for ω under
 //! about 0.3. A gamma soot mode, as the record draws Gao et al.'s, reads its own narrow Mie table
-//! ([`table_for`]). A gas envelope above
+//! ([`narrow_table_for`]). A gas envelope above
 //! `HOT_GIANT_TEMPERATURE`, which has no analogue, then takes its p from its column's own albedo
 //! by band (`photometry`'s module documentation).
+//!
+//! Under the same hold (research-leans-50's ruling, the lane `fix-dark-sub-neptune-2`) the soot's
+//! column is shared by the zero-albedo `T_eq` with a bright organic haze, Khare et al.'s tholin
+//! (`envelope_atmosphere::haze_shares`, `photochem::bright_haze`), on the record and in the closed
+//! form alike; the tholin reads a narrow table of its own and has no wide one; and the closed form
+//! gives the bright haze's share of its hazes' light by bin
+//! ([`column::ClosedLight::bright_share`]), by which the photometry weighs a provisional
+//! envelope's q (`photometry::BRIGHT_HAZE_PHASE_INTEGRAL`).
 //!
 //! # Determinism
 //!
@@ -89,7 +97,7 @@
 use crate::math;
 use crate::planetary::derive::atmosphere::Gas;
 use crate::planetary::derive::photometry::area_mix::{HostShade, OPTICS_BANDS, band_weighted};
-use crate::planetary::derive::photometry::{Bands, DiscColour};
+use crate::planetary::derive::photometry::{Bands, BrightShare, DiscColour};
 use crate::substance::optics::SPECTRAL_BIN_EDGES_NM;
 use crate::substance::rayleigh::gas_cross_section;
 use crate::substance::{CondensedPhase, Element, MOLAR_GAS_CONSTANT};
@@ -119,11 +127,14 @@ const OPAQUE_ABSORPTION: f64 = 30.0;
 /// Below it [`EnvelopeColumnRules::in_force`] is [`EnvelopeColumnRules::Clipped`], and every
 /// envelope's Bond and geometric albedo is as it was, bit for bit. 32's bump deletes this hold,
 /// [`EnvelopeColumnRules`] with its `Clipped` arm and its matches (in [`layer_two_stream`], whose
-/// `rules` parameter [`bin_albedos`] reads, `column_top`, [`table_for`] and
-/// [`gas_envelope_light`]), the tests that call the `Clipped` arm, the tests' switch, its line in
-/// the tests' `HeldRules` and in `with_every_32_hold`, and its tripwire
-/// (`the_envelope_column_is_held_only_until_the_32_bump`); `photometry`'s
-/// `the_solar_system_draws_itself_in_its_surfaces_colours` then finds the giants' colours.
+/// `rules` parameter [`bin_albedos_under`] reads, `column_top`, [`narrow_table_for`],
+/// `envelope_atmosphere::haze_shares` and [`gas_envelope_light`]), the `rules` of
+/// [`column::ClosedReading`] and the `_under` functions' (each folding into its plain one), the
+/// tests that call the `Clipped` arm, the tests' switch, its line in the tests' `HeldRules` and in
+/// `with_every_32_hold`, and its tripwire (`the_envelope_column_is_held_only_until_the_32_bump`);
+/// `photometry`'s `the_solar_system_draws_itself_in_its_surfaces_colours` then finds the giants'
+/// colours. The bright haze's table (`tables::warm_haze`, emitted `--since 31`, the emitter's
+/// ceiling) is restamped at the bump.
 pub(crate) const ENVELOPE_COLUMN_VERSION: GeneratorVersion = GeneratorVersion::new(32);
 
 /// How an envelope's column is read (its hold, [`ENVELOPE_COLUMN_VERSION`]).
@@ -452,9 +463,18 @@ pub(crate) fn layer_two_stream(
 
 /// The spherical albedo of `column` over a black floor in each of the optics' bins (the
 /// [module](self)'s engine), each layer by the closure the rules in force give.
+#[cfg(test)]
 #[must_use]
 pub(crate) fn bin_albedos(column: &EnvelopeColumn) -> [f64; OPTICS_BANDS] {
-    let rules = EnvelopeColumnRules::in_force();
+    bin_albedos_under(EnvelopeColumnRules::in_force(), column)
+}
+
+/// [`bin_albedos`] under the rules `rules`, whatever the rules in force.
+#[must_use]
+pub(crate) fn bin_albedos_under(
+    rules: EnvelopeColumnRules,
+    column: &EnvelopeColumn,
+) -> [f64; OPTICS_BANDS] {
     let masses = absorber_masses();
     let air = (column.gravity, column.molar_mass_g_per_mol);
     let molecule = column.molar_mass_g_per_mol / 1_000.0 * BOLTZMANN_CONSTANT / MOLAR_GAS_CONSTANT;
@@ -564,34 +584,58 @@ impl ParticleTable {
 /// [`narrow::NARROW_EFFECTIVE_VARIANCE`] of a material with a narrow table
 /// ([`narrow::NARROW_KEYS`]) that one.
 ///
-/// The narrow tables are soot's alone (`reduce_narrow.py`; the lane's lean, 2026-11-10): the record
-/// draws Gao et al.'s soot as a gamma of `v_eff` 0.05, whose ω at 50 nm is 0.16, 0.10 and 0.07 in B,
-/// V and R against the wide table's 0.22, 0.18 and 0.14. The cold giants' hazes, gammas too, keep
-/// the wide table, with which their optical depths were fitted on the giants' measured albedos and
-/// colours (a finding).
+/// The narrow tables are soot's and the bright haze's tholin (`reduce_narrow.py`; the lanes'
+/// leans, 2026-11-10): the record draws Gao et al.'s soot as a gamma of `v_eff` 0.05, whose ω at
+/// 50 nm is 0.16, 0.10 and 0.07 in B, V and R against the wide table's 0.22, 0.18 and 0.14, and
+/// the tholin has no wide table. The cold giants' hazes, gammas too, keep the wide table, with
+/// which their optical depths were fitted on the giants' measured albedos and colours (a finding).
+#[cfg(test)]
 #[must_use]
 pub(crate) fn table_for(
     table: usize,
     distribution: &crate::substance::SizeDistribution,
 ) -> ParticleTable {
+    table_for_under(EnvelopeColumnRules::in_force(), table, distribution)
+}
+
+/// [`table_for`] under the rules `rules`, whatever the rules in force.
+#[must_use]
+pub(crate) fn table_for_under(
+    rules: EnvelopeColumnRules,
+    table: usize,
+    distribution: &crate::substance::SizeDistribution,
+) -> ParticleTable {
+    let key = opacity::PARTICLE_KEYS.get(table).copied().unwrap_or("");
+    narrow_table_for(rules, key, distribution).unwrap_or(ParticleTable::Wide(table))
+}
+
+/// The narrow table a mode of the material keyed `key` whose sizes are `distribution` reads under
+/// the rules `rules`: from 32 ([`EnvelopeColumnRules::Whole`]) a gamma distribution of `v_eff`
+/// [`narrow::NARROW_EFFECTIVE_VARIANCE`] of a material with one ([`narrow::NARROW_KEYS`]); `None`
+/// otherwise. The bright haze's tholin ([`bright_haze`]) has a narrow table and no wide one.
+///
+/// [`bright_haze`]: crate::planetary::chem::photochem::bright_haze
+#[must_use]
+pub(crate) fn narrow_table_for(
+    rules: EnvelopeColumnRules,
+    key: &str,
+    distribution: &crate::substance::SizeDistribution,
+) -> Option<ParticleTable> {
     use crate::substance::SizeDistributionKind;
-    let narrow = || {
-        let width = distribution.effective_variance() - narrow::NARROW_EFFECTIVE_VARIANCE;
-        let key = opacity::PARTICLE_KEYS.get(table)?;
-        narrow::NARROW_KEYS
-            .iter()
-            .position(|k| k == key)
-            .filter(|_| width.abs() < 1e-9)
-    };
-    match (EnvelopeColumnRules::in_force(), distribution.kind()) {
+    match (rules, distribution.kind()) {
         (EnvelopeColumnRules::Whole, SizeDistributionKind::Gamma) => {
-            narrow().map_or(ParticleTable::Wide(table), ParticleTable::Narrow)
+            let width = distribution.effective_variance() - narrow::NARROW_EFFECTIVE_VARIANCE;
+            narrow::NARROW_KEYS
+                .iter()
+                .position(|k| *k == key)
+                .filter(|_| width.abs() < 1e-9)
+                .map(ParticleTable::Narrow)
         }
         (EnvelopeColumnRules::Whole, SizeDistributionKind::LogNormal)
         | (
             EnvelopeColumnRules::Clipped,
             SizeDistributionKind::Gamma | SizeDistributionKind::LogNormal,
-        ) => ParticleTable::Wide(table),
+        ) => None,
     }
 }
 
@@ -628,8 +672,8 @@ const LAYER_STEP_LN_P: f64 = 2.0;
 /// under [`EnvelopeColumnRules::Clipped`]; under [`EnvelopeColumnRules::Whole`] the highest top of
 /// a mode with a τ where that lies above it.
 #[must_use]
-fn column_top(modes: &[ColumnMode]) -> f64 {
-    match EnvelopeColumnRules::in_force() {
+fn column_top(rules: EnvelopeColumnRules, modes: &[ColumnMode]) -> f64 {
+    match rules {
         EnvelopeColumnRules::Clipped => COLUMN_TOP_PA,
         // Positive tops alone, so that no signed zero or NaN reaches the fold's `min` (portable
         // across targets) or the floor search's ln.
@@ -687,8 +731,29 @@ impl ColumnMode {
 /// under [`EnvelopeColumnRules::Clipped`], whatever lies above it; under
 /// [`EnvelopeColumnRules::Whole`] it is the highest top of a mode with a τ where that lies above
 /// [`COLUMN_TOP_PA`], so that a haze there is read.
+#[cfg(test)]
 #[must_use]
 pub(crate) fn assemble(
+    air: (f64, f64),
+    scattering: &Absorbers,
+    modes: &[ColumnMode],
+    temperature_at: impl Fn(f64) -> f64,
+    gas_at: impl Fn(f64, f64) -> Absorbers,
+) -> EnvelopeColumn {
+    assemble_under(
+        EnvelopeColumnRules::in_force(),
+        air,
+        scattering,
+        modes,
+        temperature_at,
+        gas_at,
+    )
+}
+
+/// [`assemble`] under the rules `rules`, whatever the rules in force.
+#[must_use]
+pub(crate) fn assemble_under(
+    rules: EnvelopeColumnRules,
     (gravity, molar_mass): (f64, f64),
     scattering: &Absorbers,
     modes: &[ColumnMode],
@@ -705,7 +770,7 @@ pub(crate) fn assemble(
         }
         tau
     };
-    let top = column_top(modes);
+    let top = column_top(rules, modes);
     let (mut low, mut high) = (math::ln(top), math::ln(FLOOR_SEARCH_BOTTOM_PA));
     for _ in 0..FLOOR_BISECTIONS {
         let middle = f64::midpoint(low, high);
@@ -795,36 +860,44 @@ pub(crate) fn assemble(
 }
 
 /// A gas envelope's Bond albedo under the light `shade` in the pass `inputs` describe, and from
-/// 32 its colour: its own column's ([`column::snapshot_light`]), T51.b's class table's
-/// ([`giant_bond`]) where the closed form gives no column (no internal heat to join an adiabat,
-/// an envelope not hydrogen-dominated, abundances refused) or its column no light (labelled).
+/// 32 its colour and its bright haze's share of its hazes' light: its own column's
+/// ([`column::snapshot_light_under`]), T51.b's class table's ([`giant_bond`]) where the closed form
+/// gives no column (no internal heat to join an adiabat, an envelope not hydrogen-dominated,
+/// abundances refused) or its column no light (labelled).
 ///
 /// The colour is its column's spherical albedo in the B, V and R bins
 /// ([`ColourBand`](super::area_mix::ColourBand)) under [`EnvelopeColumnRules::Whole`]; `None` under
 /// [`EnvelopeColumnRules::Clipped`], for the class table, and where those albedos are not a colour
-/// ([`DiscColour::new`]).
+/// ([`DiscColour::new`]). The share is the bright haze's of its photochemical hazes' scattering in
+/// the same bins under [`EnvelopeColumnRules::Whole`] where its column holds a bright haze, `None`
+/// otherwise; the photometry weighs its phase integral by it.
 ///
 /// [`giant_bond`]: super::area_mix::giant_bond
 #[must_use]
 pub(crate) fn gas_envelope_light(
     shade: &HostShade,
     inputs: &crate::planetary::derive::atmosphere::AtmosphereInputs,
-) -> (f64, Option<DiscColour>) {
+) -> (f64, Option<DiscColour>, Option<BrightShare>) {
     use super::area_mix::ColourBand;
-    match column::snapshot_light(inputs, shade) {
-        Some((bond, bins)) => {
-            let colour = match EnvelopeColumnRules::in_force() {
-                EnvelopeColumnRules::Clipped => None,
-                EnvelopeColumnRules::Whole => DiscColour::new(Bands {
-                    b: bins[ColourBand::B.bin()],
-                    v: bins[ColourBand::V.bin()],
-                    r: bins[ColourBand::R.bin()],
-                }),
+    match column::snapshot_light_under(column::ClosedReading::in_force(), inputs, shade) {
+        Some(light) => {
+            let in_bands = |bins: &[f64; OPTICS_BANDS]| Bands {
+                b: bins[ColourBand::B.bin()],
+                v: bins[ColourBand::V.bin()],
+                r: bins[ColourBand::R.bin()],
             };
-            (bond, colour)
+            let (colour, bright) = match EnvelopeColumnRules::in_force() {
+                EnvelopeColumnRules::Clipped => (None, None),
+                EnvelopeColumnRules::Whole => (
+                    DiscColour::new(in_bands(&light.bins)),
+                    BrightShare::new(in_bands(&light.bright_share)),
+                ),
+            };
+            (light.bond, colour, bright)
         }
         None => (
             super::area_mix::giant_bond(shade, inputs.heated, inputs.class),
+            None,
             None,
         ),
     }

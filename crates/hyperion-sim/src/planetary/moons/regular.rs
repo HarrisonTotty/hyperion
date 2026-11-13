@@ -6353,6 +6353,7 @@ mod tests {
             fractions: io.fractions(),
             bond: io.albedo(),
             band_albedo: air.band_albedo(),
+            bright_share: air.bright_share(),
         });
         eprintln!(
             "the table's Io: {:?}, A {:.4}, p_V {:.4}, T_eq {:.2} K, its passes' maturity {:?}; \

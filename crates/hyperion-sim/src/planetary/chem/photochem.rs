@@ -20,6 +20,7 @@
 //! | [`sulphur_dioxide`] | Tsai et al. 2023 | `T_eq` 900–2,500 K, 5–20 × solar | an SO₂ layer, 10–0.01 mbar |
 //! | [`sulphur_haze`] | Gao et al. 2017 | `T_eq` 250–700 K; S₈ saturated aloft | an S₈ haze, 100–0.1 mbar |
 //! | [`soot`], [`hydrocarbon_share`] | Gao et al. 2020 | `T_eq` below 950 K | a soot haze from 1 µbar |
+//! | [`bright_haze`], [`bright_haze_cool_share`] | research-leans-50 | the soot's column, from 32 | a tholin haze on the soot's layer |
 //! | [`ice_giant_haze`] | Irwin et al. 2022 | a CH₄ layer | a haze above it |
 //! | [`chromophore`] | Braude et al. 2020 | an NH₃ layer | a red layer at 0.2 bar or above |
 //! | [`ammonia_haze`] | fitted on Jupiter | an NH₃ layer | an NH₃-ice haze above it, to 0.1 bar |
@@ -48,6 +49,11 @@
 //!   while hydrocarbon aerosols dominate below 950 K due to an increase in methane abundance". The
 //!   silicates are P14.T52.c's decks; this rule gives the haze, formed at 1 µbar from the methane
 //!   there at their diffusion-limited rate.
+//! - **The bright haze** (from generator version 32; research-leans-50's ruling, 2026-11-10): Khare
+//!   et al.'s (1984) tholin on the soot's layer, which takes the share of the soot's column that
+//!   the soot's taper below Gao et al.'s grid drops (`envelope_atmosphere::haze_shares`), cut at its
+//!   cool edge ([`BRIGHT_HAZE_COOL_EDGE`]), its τ(550) fitted on GJ 1214 b's Bond albedo
+//!   (`tables::warm_haze`).
 //! - **The ice giants' haze** (P. G. J. Irwin et al., "Hazy blue worlds: a holistic aerosol model
 //!   for Uranus and Neptune, including dark spots", JGR Planets 127, e2022JE007189, 2022,
 //!   arXiv:2201.04516): their Aerosol-3, "an extended layer of photochemically-produced haze" from
@@ -148,6 +154,8 @@ pub enum EvaluateRuleError {
     Pressure(Pascals),
     /// A mole fraction is not finite and within 0–1.
     MoleFraction(f64),
+    /// An optical depth is not finite and positive.
+    OpticalDepth(f64),
 }
 
 impl fmt::Display for EvaluateRuleError {
@@ -166,6 +174,9 @@ impl fmt::Display for EvaluateRuleError {
             ),
             Self::Pressure(p) => write!(f, "pressure {} Pa is not finite and positive", p.value()),
             Self::MoleFraction(x) => write!(f, "mole fraction {x} is not within 0 to 1"),
+            Self::OpticalDepth(tau) => {
+                write!(f, "optical depth {tau} is not finite and positive")
+            }
         }
     }
 }
@@ -264,8 +275,8 @@ fn log_interpolate(nodes: &[(f64, f64)], x: f64) -> f64 {
 ///
 /// # Panics
 ///
-/// If `key` is not a row: the rules name only `S8`, `soot`, `ice_giant_haze` and `chromophore`,
-/// each a registry row (P14.T49.b), which the tests read.
+/// If `key` is not a row: the rules name only `S8`, `soot`, `tholin`, `ice_giant_haze` and
+/// `chromophore`, each a registry row (P14.T49.b), which the tests read.
 #[must_use]
 fn row(key: &'static str) -> SubstanceId {
     by_key(key).expect("the rules' materials are registry rows")
@@ -429,6 +440,8 @@ pub enum HazeRule {
     Chromophore,
     /// [`ammonia_haze`]: the NH₃-ice haze above a cold giant's ammonia cloud.
     Ammonia,
+    /// [`bright_haze`]: a warm envelope's bright organic haze, from generator version 32.
+    Bright,
 }
 
 /// A haze's vertical extent.
@@ -486,7 +499,8 @@ impl Haze {
         self.rule
     }
 
-    /// Its material, a registry row: `S8`, `soot`, `ice_giant_haze`, `chromophore` or `NH3`.
+    /// Its material, a registry row: `S8`, `soot`, `tholin`, `ice_giant_haze`, `chromophore` or
+    /// `NH3`.
     #[must_use]
     pub const fn material(&self) -> SubstanceId {
         self.material
@@ -770,6 +784,107 @@ pub fn soot(air: &UpperAtmosphere, methane: f64) -> Result<Option<Haze>, Evaluat
             exponent: 0.0,
         },
         amount: HazeAmount::ColumnMass(KilogramsPerSquareMetre::new(column)),
+    }))
+}
+
+/// The bright haze's particles: a narrow gamma distribution of effective radius 0.1 µm and
+/// effective variance 0.05, the soot's variance (research-leans-50's ruling, 2026-11-10). At 50 nm,
+/// the soot's size, Khare et al.'s tholin has ω 0.59–0.71 over 450–650 nm (Mie, the lane's
+/// research) and returns a spherical albedo of only 0.17, 0.21 and 0.25 in B, V and R however
+/// thick; at 0.1 µm its ω is
+/// 0.80, 0.88 and 0.92 and g 0.52, 0.42 and 0.31 at 450, 550 and 650 nm.
+pub const BRIGHT_HAZE_PARTICLES: (Micrometres, f64) = (Micrometres::new(0.1), 0.05);
+
+/// The cool edge of the bright haze in the zero-albedo `T_eq`, K: none at or below 400 K and whole
+/// from 550 K, linear between (a lean of 2026-11-10, research-leans-50, landed as ruled).
+///
+/// - **400 K**: the temperate sub-Neptunes about M dwarfs show their CH₄ and CO₂ features through
+///   no thick haze: TOI-270 d at 350–390 K (Benneke et al. 2024, arXiv:2403.03325) and K2-18 b at
+///   about 260 K (Madhusudhan et al. 2023, ApJL 956, L13), both recalled.
+/// - **550 K**: below GJ 1214 b's 595 K (Cloutier et al. 2021, AJ 162, 174, recalled), whose
+///   Bond albedo of 0.51 ± 0.06 (Kempton et al. 2023, Nature 620, 67, recalled) needs a bright,
+///   high aerosol over its metal-rich gas.
+pub const BRIGHT_HAZE_COOL_EDGE: (Kelvin, Kelvin) = (Kelvin::new(400.0), Kelvin::new(550.0));
+
+/// The share of its rule's τ(550) a bright haze keeps at its cool edge, at zero-albedo
+/// equilibrium temperature `zero_albedo_temperature`: 0 at and below [`BRIGHT_HAZE_COOL_EDGE`]'s
+/// 400 K, 1 from its 550 K, linear between, and 0 for a temperature that is not a number.
+#[must_use]
+pub fn bright_haze_cool_share(zero_albedo_temperature: Kelvin) -> f64 {
+    let (none, whole) = (
+        BRIGHT_HAZE_COOL_EDGE.0.value(),
+        BRIGHT_HAZE_COOL_EDGE.1.value(),
+    );
+    ramp(zero_albedo_temperature.value(), none, whole)
+}
+
+/// The bright organic haze of an envelope with upper atmosphere `air` whose gas holds methane at
+/// mole fraction `methane` at the haze's level, of τ(550) `optical_depth` (the record's is the
+/// fitted `tables::warm_haze::BRIGHT_HAZE_OPTICAL_DEPTH`), or `None` where [`soot`] forms none
+/// (from generator version 32; research-leans-50's ruling, 2026-11-10).
+///
+/// It shares [`soot`]'s column: where the soot's share is below 1, under Gao et al.'s 700 K grid
+/// floor (`envelope_atmosphere::SOOT_GRID_EDGE`), the rest of the column is this haze. Morley et
+/// al. (2015, ApJ 815, 110) draw GJ 1214 b both ways, soot dark everywhere and tholin dark in the
+/// blue and bright in the red; laboratory hazes made from 300–600 K gases of 100–10,000 times solar
+/// metallicity are organic and yellow-brown (Hörst et al. 2018, Nature Astronomy 2, 303; He et al.
+/// 2018, AJ 156, 38). Its material is Khare et al.'s (1984, Icarus 60, 127) Titan tholin, the
+/// registry's `tholin`, its particles [`BRIGHT_HAZE_PARTICLES`], its layer the soot's (a
+/// well-mixed slab from [`SOOT_FORMATION`] down a scale height), its amount the optical depth it
+/// is given, which the caller shares out. Every source is recalled.
+///
+/// # Errors
+///
+/// [`EvaluateRuleError`] for a field of `air` out of its range or a mole fraction not within 0–1,
+/// as [`soot`]'s, and [`EvaluateRuleError::OpticalDepth`] for an optical depth that is not finite
+/// and positive.
+///
+/// # Examples
+///
+/// A warm sub-Neptune with methane at its haze's level carries the haze; one with none does not:
+///
+/// ```
+/// use hyperion_sim::planetary::chem::photochem::{HazeAmount, UpperAtmosphere, bright_haze};
+/// use hyperion_sim::units::{Kelvin, MetresPerSecondSquared};
+///
+/// # fn main() -> Result<(), hyperion_sim::planetary::chem::photochem::EvaluateRuleError> {
+/// let air = UpperAtmosphere {
+///     equilibrium_temperature: Kelvin::new(500.0),
+///     stratosphere_temperature: Kelvin::new(420.0),
+///     metallicity: 100.0,
+///     gravity: MetresPerSecondSquared::new(10.7),
+///     molar_mass_g_per_mol: 3.0,
+/// };
+/// let haze = bright_haze(&air, 0.01, 5.0)?.expect("a haze");
+/// assert!(matches!(
+///     haze.amount(),
+///     HazeAmount::OpticalDepth { optical_depth, .. } if (optical_depth - 5.0).abs() < 1e-12
+/// ));
+/// assert_eq!(bright_haze(&air, 0.0, 5.0)?, None);
+/// # Ok(())
+/// # }
+/// ```
+pub fn bright_haze(
+    air: &UpperAtmosphere,
+    methane: f64,
+    optical_depth: f64,
+) -> Result<Option<Haze>, EvaluateRuleError> {
+    if !(optical_depth.is_finite() && optical_depth > 0.0) {
+        return Err(EvaluateRuleError::OpticalDepth(optical_depth));
+    }
+    let Some(soot) = soot(air, methane)? else {
+        return Ok(None);
+    };
+    let (radius, variance) = BRIGHT_HAZE_PARTICLES;
+    Ok(Some(Haze {
+        rule: HazeRule::Bright,
+        material: row("tholin"),
+        size: gamma(radius, variance),
+        profile: soot.profile,
+        amount: HazeAmount::OpticalDepth {
+            optical_depth,
+            wavelength: Micrometres::new(0.55),
+        },
     }))
 }
 

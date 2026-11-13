@@ -152,6 +152,13 @@ threads-required = 16
 test-group = "@global"
 priority = 50
 
+# The warm sub-Neptunes' haze census, on the same sixteen threads.
+[[profile.default.overrides]]
+filter = "package(hyperion-sim) & test(=planetary::viewer::envelope_census::under_every_32_hold_the_warm_sub_neptunes_take_their_hazes_by_temperature)"
+threads-required = 16
+test-group = "@global"
+priority = 50
+
 # The shell plan's census tests (R06.T8.i), and the census's at a synthetic ceiling (R13.T2.a),
 # census their cells on four threads of their own too.
 [[profile.default.overrides]]

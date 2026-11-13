@@ -35,12 +35,17 @@ REPO = str(HERE.parents[3])
 OUT = REPO + "/crates/hyperion-sim/src/planetary/derive/photometry/envelope_bond/narrow.rs"
 OPACITY = REPO + "/crates/hyperion-sim/src/planetary/derive/photometry/envelope_bond/opacity.rs"
 MAT = REPO + "/apps/hyperion/src/renderer/src/view/atmosphere/materials/"
+FIT = REPO + "/crates/hyperion-fit/data/"
 # `reduce.py`'s: the optics' bin edges (nm), the radii (m), and the materials' rows it reads here
-# (key, client file, infrared source, large-particle g), each with no infrared set.
+# (key, client file, infrared source, large-particle g): soot with no infrared set, and tholin with
+# Khare et al.'s (1984) own index beyond 780 nm (`khare_1984_tholin/nk.csv`, which the regolith's
+# infrared reads), as `reduce.index_at` takes an infrared set: n held at the client file's last, k
+# linear in wavelength.
 EDGES = [300, 390, 495, 595, 700, 780, 1000, 1300, 1700, 2200, 2800, 3500, 5000]
 NB = 12
 RADII = [1e-8, 3e-8, 1e-7, 3e-7, 1e-6, 3e-6, 1e-5, 3e-5, 1e-4]
-MATERIALS = [("soot", "soot.json", None, None)]
+MATERIALS = [("soot", "soot.json", None, None), ("tholin", "tholin.json", "tholin", None)]
+INFRARED = {"tholin": "khare_1984_tholin/nk.csv"}
 WIDE_VEFF = math.exp(math.log(2.0) ** 2) - 1  # sigma_g 2 log-normal, `reduce.VEFF`
 
 
@@ -48,14 +53,27 @@ def sha(path):
     return hashlib.sha256(open(path, "rb").read()).hexdigest()
 
 
-def index_at(fname, lam):
-    """`reduce.index_at` for a material with no infrared set: the file's n and k, linear, held at
-    its last row beyond it."""
+def ir_k(src):
+    """`reduce.ir_k` for the infrared sources here: (lambda nm, k) of the set's rows."""
+    if src is None:
+        return None
+    d = np.loadtxt(FIT + INFRARED[src], delimiter=",", skiprows=1)
+    return d[:, 0] * 1000, d[:, 2]
+
+
+def index_at(fname, lam, ir=None):
+    """`reduce.index_at`: the file's n and k, linear, and beyond its last row its last n and its
+    last k, or with an infrared set `ir` that set's k, linear, from its first row on."""
     d = json.load(open(MAT + fname))
     w = np.array(d["wavelengthsNm"]); n = np.array(d["n"]); k = np.array(d["k"])
     if lam <= w[-1]:
         return complex(np.interp(lam, w, n), np.interp(lam, w, k))
-    return complex(n[-1], k[-1])
+    kk = k[-1]
+    if ir is not None:
+        lw, lk = ir
+        if lam >= lw[0]:
+            kk = float(np.interp(lam, lw, lk))
+    return complex(n[-1], kk)
 
 
 def bin_lams(b, n=5):
@@ -76,10 +94,12 @@ def arr(v):
     return fmt(float(v))
 # The gamma particles' effective variance, every photochemical haze rule's (`photochem::gamma`).
 VEFF = 0.05
-# The materials whose gamma modes read a narrow table: soot alone. The hazes fitted on the cold
+# The materials whose gamma modes read a narrow table: soot, and from the lane
+# `fix-dark-sub-neptune-2` Khare et al.'s tholin, the warm envelopes' bright haze, which has no wide
+# table (`reduce.py` reads no tholin). The hazes fitted on the cold
 # giants' measured albedos and colours (the chromophore, the ammonia and ice giants' hazes) keep
 # the wide table their optical depths were fitted with.
-NARROW = ["soot"]
+NARROW = ["soot", "tholin"]
 # The narrow tables' effective radii, m: eight a decade from 10 nm to 100 um. A narrow small
 # particle's omega rises about as r^3, so the wide table's half-decade steps, read linear in ln r,
 # would put 50 nm soot's V-band omega some 40% high; at eight a decade the error is a few per cent.
@@ -140,10 +160,11 @@ def tables(averaged, radii):
     """`reduce.particle_tables` over the distribution `averaged` gives at the effective radii
     `radii`, for NARROW's materials."""
     out = {}
-    for key, fname, _, g_large in MATERIALS:
+    for key, fname, irsrc, g_large in MATERIALS:
         if key not in NARROW:
             continue
-        m550 = index_at(fname, 550.0)
+        ir = ir_k(irsrc)
+        m550 = index_at(fname, 550.0, ir)
         rows = []
         for r in radii:
             q550, _, _ = averaged(550.0, r, m550, g_large)
@@ -152,7 +173,7 @@ def tables(averaged, radii):
                 acc = [0.0, 0.0, 0.0]
                 lams = bin_lams(b, 3 if r > 3e-6 else 5)
                 for lam in lams:
-                    m = index_at(fname, lam)
+                    m = index_at(fname, lam, ir)
                     q, w, g = averaged(lam, r, m, g_large)
                     acc[0] += q
                     acc[1] += q * w
@@ -164,6 +185,13 @@ def tables(averaged, radii):
             rows.append(per_bin)
         out[key] = rows
     return out
+
+
+def committed_keys():
+    """The committed `opacity.rs`'s PARTICLE_KEYS."""
+    text = open(OPACITY).read()
+    keys = re.search(r"PARTICLE_KEYS: \[&str; \d+\] = \[([^\]]*)\]", text).group(1)
+    return [k.strip().strip('"') for k in keys.split(",") if k.strip()]
 
 
 def committed_wide(key):
@@ -183,12 +211,16 @@ if __name__ == "__main__":
     if "--check" in sys.argv:
         wide = tables(log_normal_averaged, RADII)
         for key in NARROW:
+            if key not in committed_keys():
+                print(f"{key}: no wide table in opacity.rs to check against")
+                continue
             ours = [float(fmt(x)) for r in wide[key] for b in r for x in b]
             theirs = committed_wide(key)
             assert ours == theirs, f"{key}: the restated helpers miss reduce.py's committed table"
             print(f"checked {key}: {len(ours)} figures as reduce.py's")
     narrow = tables(gamma_averaged, NARROW_RADII)
     files = [(key, fname) for key, fname, _, _ in MATERIALS if key in NARROW]
+    infrared = [INFRARED[src] for key, _, src, _ in MATERIALS if key in NARROW and src is not None]
     W = lambda f, s: f.write(s + "\n")
     with open(OUT, "w") as f:
         W(f, "//! The narrow hazes' particle tables on the optics' twelve bins (P14.T24.h.b, from generator")
@@ -197,6 +229,8 @@ if __name__ == "__main__":
         W(f, "//!")
         for key, fname in files:
             W(f, f"//! - `apps/hyperion/src/renderer/src/view/atmosphere/materials/{fname}` `{sha(MAT + fname)}`")
+        for path in infrared:
+            W(f, f"//! - `crates/hyperion-fit/data/{path}` `{sha(FIT + path)}`")
         W(f, "//!")
         W(f, "//! Each is [`super::opacity::PARTICLES`]' table over Hansen and Travis's (1974) gamma")
         W(f, f"//! distribution of effective variance {VEFF} in place of its `σ_g` 2 log-normal, at radii eight a")

@@ -3120,6 +3120,7 @@ mod tests {
             fractions: bulk.fractions(),
             bond: state.albedo(material),
             band_albedo: None,
+            bright_share: None,
         })
     }
 

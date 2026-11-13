@@ -132,6 +132,10 @@ fn rebuilt(
         radius: Metres::from(bulk.radius()),
         gravity: bulk.surface_gravity(),
         equilibrium_temperature: bulk.equilibrium_temperature(),
+        zero_albedo_temperature: crate::planetary::derive::irradiation::equilibrium_temperature(
+            derived.flux(),
+            crate::planetary::derive::irradiation::BondAlbedo::from_fraction(0.0),
+        ),
         internal_luminosity: derived.internal_luminosity(),
         age: ctx.age_at(epoch.t),
         formation: system.formation_zone(body),
@@ -610,6 +614,10 @@ pub(crate) fn table_envelope(name: &str) -> (EnvelopeOf, Envelope) {
         radius: Metres::from(body.radius()),
         gravity: body.surface_gravity(),
         equilibrium_temperature: body.equilibrium_temperature(),
+        zero_albedo_temperature: crate::planetary::derive::irradiation::equilibrium_temperature(
+            body.flux(),
+            crate::planetary::derive::irradiation::BondAlbedo::from_fraction(0.0),
+        ),
         internal_luminosity: body.internal_luminosity(),
         age: SOLAR_AGE,
         formation: FormationZone::new(Metres::new(a * METRES_PER_AU), solar_disc().snow_line())

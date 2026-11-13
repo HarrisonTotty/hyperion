@@ -67,6 +67,10 @@ pub(crate) struct EnvelopeOf {
     /// Its published bulk's equilibrium temperature, from its hosts' light alone with its Bond
     /// albedo (ruling 112.7), from which `T_irr`⁴ = 4 `T_eq`⁴.
     pub(crate) equilibrium_temperature: Kelvin,
+    /// Its equilibrium temperature at zero albedo, of its derivation's flux from its hosts now,
+    /// which its hazes' shares read from generator version 32
+    /// ([`EnvelopeAtmosphereInputs::zero_albedo_temperature`]).
+    pub(crate) zero_albedo_temperature: Kelvin,
     /// Its internal luminosity, the record's (already times `giant_share`; ruling 112.7).
     pub(crate) internal_luminosity: Watts,
     /// Its age at the time.
@@ -216,6 +220,7 @@ pub(crate) fn envelope_of(
         network,
         internal_temperature,
         equilibrium_temperature: of.equilibrium_temperature,
+        zero_albedo_temperature: of.zero_albedo_temperature,
         gravity: of.gravity,
         fe_h: of.fe_h,
         grey: GreyProfile::at_effective_temperature(effective),

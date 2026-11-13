@@ -78,10 +78,14 @@
 //! `A_Bond` could borrow, so each band is its column's own, `p_c` = `a_c` ÷ `q_c` with the
 //! template's q (capped so that `p_c` `q_c` ≤ 1), whatever its hosts' light: its Bond albedo,
 //! which that light weighs, scales none of them. Where the closed form gives no column, the class
-//! table's Bond albedo scales its row as below 32. The template's q is an approximation: a dark
-//! envelope's disc, its light scattered once, is nearer a Lommel–Seeliger sphere's q of 16 (1 −
-//! ln 2) ÷ 3 ≈ 1.64 than Neptune's 1.24, so its p may be some 30% bright (the lane's science
-//! check).
+//! table's Bond albedo scales its row as below 32. The template's q stands for a soot-topped
+//! column (research-leans-50's ruling 2, 2026-11-10): 50 nm soot backscatters like Rayleigh
+//! scattering, not as an isotropic Lommel–Seeliger sphere's q of 1.64 would have it, and the
+//! owner's draw's column has a computed q of 1.33–1.38, 1.19–1.28 and 1.01–1.22 in B, V and R, so
+//! that Neptune's 1.242 draws its p within −19% and +11%. A column with the bright haze
+//! (`photochem::bright_haze`) weighs each band's q between the template's and
+//! [`BRIGHT_HAZE_PHASE_INTEGRAL`] by that haze's share of its hazes' light
+//! ([`PhotometryInputs::bright_share`]), and publishes the q it drew p with.
 //!
 //! From 31 too a weathered lid's colour tends to the mature lunar colour as its npFe⁰
 //! extinguishes its grains' interiors (`area_mix`'s "The weathered area mix"), where the slab alone
@@ -100,6 +104,8 @@ use crate::units::{Kelvin, MetresPerSecondSquared, Pascals, Radians};
 
 pub(crate) mod area_mix;
 pub(crate) mod envelope_bond;
+#[doc(hidden)]
+pub mod warm_haze;
 
 /// The ceiling on the phase factor f: 4, R07's `PHASE_F_CLAMP` (a Lambert crescent vanishes faster
 /// than a cloudy one: Venus's f would reach 61 at 170°).
@@ -816,7 +822,66 @@ pub struct PhotometryInputs {
     /// provisional envelope"). `None` for a disc with no albedos by band (a melt, a gas envelope
     /// below 32 or with no column), which keeps its template's row.
     pub band_albedo: Option<DiscColour>,
+    /// From generator version 32, a gas envelope's bright haze's share of its hazes' light in the
+    /// B, V and R bins ([`Atmosphere::bright_share`](crate::planetary::derive::Atmosphere::bright_share)),
+    /// by which a provisional envelope drawn from its own column weighs its phase integral
+    /// ([`BRIGHT_HAZE_PHASE_INTEGRAL`]); `None` for any other disc, which takes its template's q.
+    pub bright_share: Option<BrightShare>,
 }
+
+/// A gas envelope's bright haze's share of its photochemical hazes' light in the B, V and R bins,
+/// from generator version 32: each band's share finite and within 0–1, and some band's above 0.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BrightShare(Bands);
+
+impl BrightShare {
+    /// The share `share` by band, or `None` where a band's is not finite and within 0–1, or where
+    /// every band's is 0 (no bright haze).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use hyperion_sim::planetary::derive::photometry::{Bands, BrightShare};
+    ///
+    /// assert!(BrightShare::new(Bands { b: 0.9, v: 0.91, r: 0.92 }).is_some());
+    /// assert!(BrightShare::new(Bands { b: 0.0, v: 0.0, r: 0.0 }).is_none());
+    /// assert!(BrightShare::new(Bands { b: 1.5, v: 0.5, r: f64::NAN }).is_none());
+    /// ```
+    #[must_use]
+    pub fn new(share: Bands) -> Option<Self> {
+        let bands = [share.b, share.v, share.r];
+        let valid = bands.iter().all(|w| (0.0..=1.0).contains(w));
+        (valid && bands.iter().any(|&w| w > 0.0)).then_some(Self(share))
+    }
+
+    /// The share by band.
+    #[must_use]
+    pub const fn bands(&self) -> Bands {
+        self.0
+    }
+}
+
+/// The phase integral q of a column topped by the bright haze, in B, V and R: 2.32, 1.82 and
+/// 1.59, from generator version 32 (research-leans-50's ruling 2, 2026-11-10: "a column with the
+/// bright haze takes q from its own phase function").
+///
+/// Computed by `crates/hyperion-fit/data/nicholls_2025_dayspring/phase_integral.py`: Bohren and
+/// Huffman's BHMIE over the haze's gamma distribution (`r_eff` 0.1 µm, `v_eff` 0.05) at the client's
+/// `tholin.json` (Khare et al. 1984) at 450, 550 and 650 nm, its phase function tabulated; a
+/// scalar plane-parallel Monte Carlo with peel-off at opposition of a slab of τ(550) 10 over a
+/// semi-infinite Rayleigh gas of ω 0.9, 150,000 photons a band, q = `A_s` ÷ p, each within about
+/// 1% (its noise; its check gives an isotropic conservative sphere's p as 0.683, 0.690 exact). A
+/// slab of τ 3 gives 2.33, 1.80 and 1.58, and research-leans-50's own code 2.34, 1.82 and 1.59.
+/// Neptune's 1.242, which soot keeps (ruling 2), would draw such a column's p 1.3 to 1.9 times too
+/// bright. The owner's draw's mixed slab (soot τ(550) 2.35 with the bright haze's 2.80, which
+/// scatters 0.91–0.92 of its light) gives 2.53, 2.02 and 1.69, against 2.25, 1.76 and 1.57 for
+/// that share's blend with Neptune's (the photometry's, [`BodyPhotometry::derive`]): its p up to
+/// 15% bright (a finding).
+pub const BRIGHT_HAZE_PHASE_INTEGRAL: Bands = Bands {
+    b: 2.32,
+    v: 1.82,
+    r: 1.59,
+};
 
 /// Where a disc's p takes its bands from ([`BodyPhotometry::derive`]).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -872,6 +937,21 @@ impl BodyPhotometry {
                 let (b, r) = colour.over_v();
                 Drawn::OverV(b, r)
             }),
+        };
+        // From 32 a provisional envelope drawn from its own column weighs its q between its
+        // template's and the bright haze's by that haze's share of its hazes' light (ruling 2).
+        let q = match (drawn, inputs.bright_share) {
+            (Drawn::Own(_), Some(share)) => {
+                let share = share.bands();
+                let blend = |w: f64, template: f64, bright: f64| (1.0 - w) * template + w * bright;
+                let bright = BRIGHT_HAZE_PHASE_INTEGRAL;
+                Bands {
+                    b: blend(share.b, q.b, bright.b),
+                    v: blend(share.v, q.v, bright.v),
+                    r: blend(share.r, q.r, bright.r),
+                }
+            }
+            (Drawn::Own(_) | Drawn::Row | Drawn::OverV(..), _) => q,
         };
         let p = match drawn {
             Drawn::Own(own) => {
@@ -1034,6 +1114,7 @@ mod tests {
             fractions: d.fractions(),
             bond: d.albedo(),
             band_albedo: atmosphere.band_albedo(),
+            bright_share: atmosphere.bright_share(),
         }
     }
 
@@ -1291,6 +1372,7 @@ mod tests {
             fractions: MassFractions::solid(0.1, 0.4, 0.5),
             bond: BondAlbedo::new(bond).unwrap(),
             band_albedo: None,
+            bright_share: None,
         }
     }
 
@@ -1515,6 +1597,52 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// From 32 a provisional envelope's q is weighed between its template's and the bright haze's
+    /// ([`BRIGHT_HAZE_PHASE_INTEGRAL`]) by the bright haze's share of its hazes' light, band by
+    /// band, and published with its p: its template's with no share, the bright haze's at a whole
+    /// share; an envelope at or below [`HOT_GIANT_TEMPERATURE`] keeps its row and its q whatever
+    /// its share.
+    #[test]
+    fn a_bright_haze_weighs_a_provisional_envelope_s_phase_integral() {
+        let colour = DiscColour::new(Bands {
+            b: 0.204,
+            v: 0.325,
+            r: 0.442,
+        });
+        let envelope = |t: f64, bright_share| PhotometryInputs {
+            state: SurfaceState::GasEnvelope,
+            class: PlanetClass::SubNeptune,
+            fractions: MassFractions::of(CoreComposition::new(0.3, 0.5).unwrap(), 0.1),
+            equilibrium_temperature: Kelvin::new(t),
+            surface_temperature: Kelvin::new(t),
+            bond: BondAlbedo::new(0.22).unwrap(),
+            band_albedo: colour,
+            bright_share,
+            ..airless(SurfaceMaterial::Rock, SurfaceState::GasEnvelope, 0.22)
+        };
+        let template = PhaseTemplate::Neptune.row().phase_integral;
+        let a = colour.expect("a colour").albedo();
+        let bright = BRIGHT_HAZE_PHASE_INTEGRAL;
+        let share = |b: f64, v: f64, r: f64| BrightShare::new(Bands { b, v, r });
+        let whole = BodyPhotometry::derive(&envelope(560.0, share(1.0, 1.0, 1.0)));
+        assert_same_bits(whole.phase_integral().v, bright.v);
+        assert_same_bits(whole.geometric_albedo().b, a.b / bright.b);
+        assert_same_bits(whole.geometric_albedo().v, a.v / bright.v);
+        assert_same_bits(whole.geometric_albedo().r, a.r / bright.r);
+        let half = BodyPhotometry::derive(&envelope(560.0, share(0.5, 0.25, 0.0)));
+        let q = half.phase_integral();
+        assert!((q.b - f64::midpoint(template.b, bright.b)).abs() < 1e-12);
+        assert!((q.v - (0.75 * template.v + 0.25 * bright.v)).abs() < 1e-12);
+        assert_same_bits(q.r, template.r);
+        let none = BodyPhotometry::derive(&envelope(560.0, None));
+        assert_same_bits(none.phase_integral().v, template.v);
+        assert_same_bits(none.geometric_albedo().v, a.v / template.v);
+        let cold = BodyPhotometry::derive(&envelope(120.0, share(1.0, 1.0, 1.0)));
+        assert_same_bits(cold.phase_integral().v, template.v);
+        let row = BodyPhotometry::derive(&envelope(120.0, None));
+        assert_same_bits(cold.geometric_albedo().v, row.geometric_albedo().v);
     }
 
     /// Under every 32 hold the Solar System's four giants carry their columns' colours, and each

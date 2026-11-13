@@ -1,7 +1,8 @@
-//! The envelope column read whole, on `RANDOMIZE`'s draws (P14.T24.h.b, the lane
-//! `fix-dark-sub-neptune`; `envelope_bond`'s "The column read whole", held at 32): the warm
-//! soot-hazed sub-Neptune the planet viewer drew teal at 29 and near black once its air came, its
-//! photometry against its disc twin; and the census of what the hold moves.
+//! The envelope column read whole, on `RANDOMIZE`'s draws (P14.T24.h.b, the lanes
+//! `fix-dark-sub-neptune` and `fix-dark-sub-neptune-2`; `envelope_bond`'s "The column read
+//! whole", held at 32): the warm soot-hazed sub-Neptune the planet viewer drew teal at 29 and near
+//! black once its air came, its photometry against its disc twin; the census of what the hold
+//! moves; and the census of the warm sub-Neptunes' hazes, soot and the bright haze, by kind.
 
 use super::tests::{galaxy, grid};
 use super::*;
@@ -30,17 +31,24 @@ const DARK_SUB_NEPTUNE: RawPlanetInputs = RawPlanetInputs {
     nitrogen_rank: None,
 };
 
-/// [`DARK_SUB_NEPTUNE`]'s disc as R08's disc twin draws it under 32's rules (the lane's
-/// measurement, 2026-11-10): the client's `test/discAirCases.ts` (`bakedDiscAir`,
-/// `integratedRadianceAt` at phase 0 from 10⁹ m, `geometricAlbedoOf`, its table's disc) on the
-/// record's air as `body_detail` sends it, assembled by `assembleMedium` under the reference Sun
-/// and drawn on its envelope's closed route above its floor. At 31 it is 0.0226, 0.0169 and 0.0124;
-/// the full passes' march, unrouted, gives 0.0274, 0.0213 and 0.0154.
+/// [`DARK_SUB_NEPTUNE`]'s disc as R08's disc twin draws it under 32's rules (the lane
+/// `fix-dark-sub-neptune-2`'s measurement, 2026-11-10): the client's `test/discAirCases.ts`
+/// (`bakedDiscAir`, `integratedRadianceAt` at phase 0 from 10⁹ m, `geometricAlbedoOf`, its table's
+/// disc) on the record's air as `body_detail` sends it, assembled by `assembleMedium` under the
+/// reference Sun, its upper medium drawn on its floor's datum. Its soot shares its column with the
+/// bright haze (its zero-albedo `T_eq` 672 K, s 0.72): soot τ(550) 2.35 and the bright haze 2.80.
+/// With the soot alone (the lane `fix-dark-sub-neptune`'s rules) it was 0.0224, 0.0166 and 0.0122,
+/// which the same harness gives to within 0.0001; at 31 0.0226, 0.0169 and 0.0124. The full passes'
+/// march, unrouted, gives 0.0309, 0.0494 and 0.0602.
 const DARK_SUB_NEPTUNE_TWIN: Bands = Bands {
-    b: 0.0224,
-    v: 0.0166,
-    r: 0.0122,
+    b: 0.0342,
+    v: 0.0483,
+    r: 0.0553,
 };
+
+/// The Bond albedo under which the owner's draw is still dark (research-leans-50: "stays dark
+/// (`A_B` under about 0.1)"): a GJ 436 b or GJ 3470 b analogue, not a GJ 1214 b one.
+const DARK: f64 = 0.1;
 
 /// A third of a stop, the brief's agreement: a factor of 2^(1/3).
 const THIRD_OF_A_STOP: f64 = 1.0 / 3.0;
@@ -67,23 +75,47 @@ fn stops(p: Bands) -> [f64; 3] {
 }
 
 /// The warm soot-hazed sub-Neptune's photometry meets its disc twin under every 32 hold, each of B,
-/// V and R within a third of a stop, where at 31 its V and B lie a stop above it: its column
-/// started below its soot, which lies above 1 Pa, and the δ-Eddington held its dark layers at R
-/// = 0, so that its p was Neptune's row scaled by a Bond albedo of 0.027 that the gas alone
-/// returned.
+/// V and R within a third of a stop, where at 31 its V and B lie a stop above the soot's twin and
+/// its R a stop under this one: its column started below its soot, which lies above 1 Pa, and the
+/// δ-Eddington held its dark layers at R = 0, so that its p was Neptune's row scaled by a Bond
+/// albedo of 0.027 that the gas alone returned. From 32 its soot keeps 0.72 of its column and the
+/// bright haze the rest (its zero-albedo `T_eq` 672 K), its q weighed toward the bright haze's by
+/// that haze's share of the hazes' light, and it stays dark: its Bond albedo under [`DARK`].
 #[test]
 fn under_every_32_hold_the_dark_sub_neptune_meets_its_disc_twin() {
     let held = photometry_of(DARK_SUB_NEPTUNE);
-    let whole = with_every_32_hold(|| photometry_of(DARK_SUB_NEPTUNE));
+    let (whole, bond, zero_albedo) = with_every_32_hold(|| {
+        let system =
+            ViewerSystem::generate(PlanetInputs::try_from(DARK_SUB_NEPTUNE).expect("in range"))
+                .expect("a drawn planet's system");
+        let index = BodyIndex::try_from(system.planet().body_index()).expect("a planet's index");
+        let record = system
+            .planets()
+            .body_at(system.context(), index, UniverseTime::EPOCH)
+            .expect("the drawn planet's record");
+        let (Section::Ok(photometry), Section::Ok(bulk)) = (record.photometry(), record.bulk())
+        else {
+            panic!("the drawn planet has its photometry and bulk");
+        };
+        let bond = photometry.bond_albedo().value();
+        let t_eq = bulk.equilibrium_temperature().value();
+        (
+            photometry.geometric_albedo(),
+            bond,
+            t_eq / crate::math::powf(1.0 - bond, 0.25),
+        )
+    });
     let (at_31, at_32) = (stops(held), stops(whole));
     eprintln!(
         "at 31: p {held:?}, {at_31:+.2?} stops; under every 32 hold: p {whole:?}, {at_32:+.2?} \
-         stops (B, V, R)"
+         stops (B, V, R), its Bond albedo {bond:.4}, its zero-albedo T_eq {zero_albedo:.1} K"
     );
     for (band, stop) in ["B", "V", "R"].into_iter().zip(at_32) {
         assert!(stop.abs() <= THIRD_OF_A_STOP, "{band}: {stop:+.3} stops");
     }
-    assert!(at_31[0] > 2.0 * THIRD_OF_A_STOP && at_31[1] > 2.0 * THIRD_OF_A_STOP);
+    assert!(at_31[2] < -2.0 * THIRD_OF_A_STOP, "{at_31:?}");
+    assert!(bond < DARK, "{bond}");
+    assert!((zero_albedo - 672.0).abs() < 1.0, "{zero_albedo}");
 }
 
 /// The draws the census takes: `RANDOMIZE`'s draw seeds 1 to 200 of the viewer tests' fixture.
@@ -193,4 +225,109 @@ fn under_every_32_hold_the_envelope_column_moves_only_gas_envelopes_and_their_sa
          by template {moved:?}"
     );
     assert!(total > 0, "the hold moves the census's envelopes");
+}
+
+/// The margin the haze census's edges take, K: a zero-albedo `T_eq` rebuilt from a record's `T_eq`
+/// and Bond albedo, not its flux, as the record's own is.
+const EDGE_MARGIN_K: f64 = 0.01;
+
+/// One warm sub-Neptune of the census: its zero-albedo `T_eq` (K) and whether its record carries
+/// soot and the bright haze.
+struct WarmHazes {
+    zero_albedo: f64,
+    soot: bool,
+    bright: bool,
+}
+
+/// The sub-Neptunes of one draw with a gas envelope section ([`WarmHazes`]); `None` where the draw
+/// finds no planet.
+fn sub_neptunes_of(seed: u64) -> Option<Vec<WarmHazes>> {
+    let drawn = draw_inputs(galaxy(), grid(), seed).ok()?;
+    let system = ViewerSystem::generate(drawn.inputs).ok()?;
+    let (ctx, planets) = (system.context(), system.planets());
+    let mut out = Vec::new();
+    for index in planets.indices() {
+        let Ok(record) = planets.body_at(ctx, index, UniverseTime::EPOCH) else {
+            continue;
+        };
+        let (Section::Ok(bulk), Section::Ok(photometry), Section::Ok(envelope)) =
+            (record.bulk(), record.photometry(), record.envelope())
+        else {
+            continue;
+        };
+        if bulk.class() != crate::planetary::derive::PlanetClass::SubNeptune {
+            continue;
+        }
+        let has = |key: &str| {
+            envelope
+                .atmosphere()
+                .modes()
+                .iter()
+                .any(|mode| mode.material().substance().key().as_str() == key)
+        };
+        out.push(WarmHazes {
+            zero_albedo: bulk.equilibrium_temperature().value()
+                / crate::math::powf(1.0 - photometry.bond_albedo().value(), 0.25),
+            soot: has("soot"),
+            bright: has("tholin"),
+        });
+    }
+    Some(out)
+}
+
+/// The warm sub-Neptunes' hazes by kind (the brief's census): over `RANDOMIZE`'s first 200 draws
+/// under every 32 hold, every sub-Neptune whose record carries an envelope, counted by its
+/// photochemical hazes of the soot's column. Soot keeps a zero-albedo `T_eq` above 600 K and the
+/// bright haze one inside 400–700 K, as `envelope_atmosphere::haze_shares` gives them, and both
+/// lie together only inside 600–700 K. The census's counts and ranges are printed.
+#[test]
+#[ignore = "slow: 200 viewer draws, some minutes"]
+fn under_every_32_hold_the_warm_sub_neptunes_take_their_hazes_by_temperature() {
+    let draws = with_every_32_hold(|| {
+        in_shares(CENSUS_DRAWS, CENSUS_THREADS, |k| {
+            sub_neptunes_of(u64::try_from(k).expect("a share's index fits") + 1)
+        })
+    });
+    let mut kinds: std::collections::BTreeMap<&str, (usize, f64, f64)> =
+        std::collections::BTreeMap::new();
+    let mut warm = 0_usize;
+    for (seed, found) in draws.iter().enumerate() {
+        for body in found.iter().flatten() {
+            // The record's zero-albedo T_eq is its flux's; rebuilt here from its T_eq and Bond
+            // albedo, it may differ in its last digits, so the edges take a margin.
+            let t = body.zero_albedo;
+            if body.soot {
+                assert!(
+                    t > 600.0 - EDGE_MARGIN_K,
+                    "draw {}: soot at {t:.1} K",
+                    seed + 1
+                );
+            }
+            if body.bright {
+                assert!(
+                    t > 400.0 - EDGE_MARGIN_K && t < 700.0 + EDGE_MARGIN_K,
+                    "draw {}: the bright haze at {t:.1} K",
+                    seed + 1
+                );
+            }
+            let kind = match (body.soot, body.bright) {
+                (true, true) => "soot and the bright haze",
+                (true, false) => "soot alone",
+                (false, true) => "the bright haze alone",
+                (false, false) => "neither",
+            };
+            if (400.0..950.0).contains(&t) {
+                warm += 1;
+                let entry = kinds.entry(kind).or_insert((0, f64::INFINITY, 0.0));
+                entry.0 += 1;
+                entry.1 = entry.1.min(t);
+                entry.2 = entry.2.max(t);
+            }
+        }
+    }
+    eprintln!(
+        "{warm} warm sub-Neptunes (zero-albedo T_eq 400–950 K) of the first {CENSUS_DRAWS} draws, \
+         by haze kind (count, coolest K, hottest K): {kinds:?}"
+    );
+    assert!(warm > 0, "the census finds warm sub-Neptunes");
 }

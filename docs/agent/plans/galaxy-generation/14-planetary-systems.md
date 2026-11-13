@@ -3059,7 +3059,8 @@ acid become rows of T52.c's condensation loop, and T24.d's composition is T52.d'
     - _Built_ 2026-11-01, held at 26, but the envelope's own albedo and the refits; the envelope's
       own albedo, the cold giants' clouds, the ice giants' methane layer and the cold envelopes'
       κ₁ built 2026-11-01, held at 27: Risks, "Deviations in P14.T24.h.b, as built". The column
-      read whole built 2026-11-10, held at 32: Risks, "the envelope's column read whole".
+      read whole built 2026-11-10, held at 32: Risks, "the envelope's column read whole". The warm
+      envelopes' haze split built 2026-11-13, held at 32: Risks, "the warm envelopes' haze split".
 - **P14.T24.i An unlit body's mean surface temperature** (23 → 24, before the serve gate; lane
   `p14-gate-24`, with P14.T56.f, one gate; behind a hold at 24 with a tripwire;
   decision-bump-plan-after-22, "Version-24 lanes after 23", V3.3, 2026-10-22).
@@ -34512,3 +34513,27 @@ ACTIVE HOST · HOST LEAVING MAIN SEQUENCE · EXTRAPOLATED ZONE · FROZEN SURFACE
     nextest override go with the hold.
   - _Accept:_ `cargo test -p hyperion-sim --lib --` with the filters `planetary::derive`,
     `planetary::viewer::envelope_census` and `planetary::testing::held`.
+- **P14.T24.h.b's follow-up, the warm envelopes' haze split by temperature (lane
+  `fix-dark-sub-neptune-2`, 2026-11-13; research-leans-50's rulings).** Under the same hold
+  (`ENVELOPE_COLUMN_VERSION` 32); nothing moves at 31.
+  - _New items:_ `photochem::bright_haze` with its particles and cool edge (400–550 K);
+    `envelope_atmosphere::haze_shares`; `tables::warm_haze` (fit task `warm_haze`);
+    `photometry::{BrightShare, BRIGHT_HAZE_PHASE_INTEGRAL}`; `photometry::warm_haze`, the fit's
+    GJ 1214 b fixture (doc-hidden); tholin in `narrow.rs` (`phase_integral.py` beside it).
+  - _Changed contracts:_ `EnvelopeAtmosphereInputs` and `EnvelopeOf` take
+    `zero_albedo_temperature` (by hand: the given `T_eq`); `Atmosphere` and `PhotometryInputs` carry
+    `bright_share`; the closed form takes its rules explicitly (`ClosedReading`, `_under`).
+  - _Rule:_ from 32 the soot's taper reads `T₀`; the bright haze takes (1 − s) × its cool edge of
+    the fitted τ(550), on the soot's layer, wherever `soot()` gives a column, giants included.
+  - _Lean (2026-11-13):_ the bright haze's τ(550) is the table's times its share, whatever the
+    methane column, which only gates it through `soot()`.
+  - _Lean (2026-11-13):_ a provisional envelope's q blends the template's with
+    `BRIGHT_HAZE_PHASE_INTEGRAL` by the bright haze's share of the hazes' τω; not each column's own.
+  - _Deviation:_ `warm_haze` is emitted `--since 31`, the emitter's ceiling, not 32.
+  - _Changed (tests):_ `DARK_SUB_NEPTUNE_TWIN` re-measured under the split.
+  - _At the bump:_ restamp `warm_haze` at 32; fold `haze_shares`' `Clipped` arm, `ClosedReading`'s
+    rules and the `_under` functions; the haze census and its nextest override go with the hold.
+  - _Accept:_ `cargo test -p hyperion-sim --lib --` with the filters `planetary::derive`,
+    `planetary::chem::photochem`, `planetary::hooks::envelope_atmosphere`,
+    `planetary::viewer::envelope_census` and `planetary::testing::held`;
+    `cargo test -p hyperion-fit warm_haze`; `just fit-check`; the slow haze census by name.

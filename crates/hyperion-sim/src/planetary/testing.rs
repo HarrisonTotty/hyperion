@@ -141,6 +141,9 @@ pub fn envelope_by_hand(inputs: &EnvelopeByHand) -> Result<Envelope, DeriveEnvel
         radius: inputs.radius,
         gravity: inputs.gravity,
         equilibrium_temperature: inputs.equilibrium_temperature,
+        // The inputs by hand state no albedo: their equilibrium temperature stands for the
+        // zero-albedo one the hazes' shares read from 32.
+        zero_albedo_temperature: inputs.equilibrium_temperature,
         internal_luminosity: inputs.internal_luminosity,
         age: inputs.age,
         formation: Ok(formation),

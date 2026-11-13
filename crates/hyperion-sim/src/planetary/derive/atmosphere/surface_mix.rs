@@ -912,8 +912,9 @@ pub(super) fn area_mixed(
         }
     };
     let haze = pass_haze(air, inputs);
-    // A gas envelope's colour, from 32 its column's, which no area mix lays.
-    let mut envelope_colour = None;
+    // A gas envelope's colour and its bright haze's share of its hazes' light, from 32 its
+    // column's, which no area mix lays.
+    let (mut envelope_colour, mut bright_share) = (None, None);
     let SurfaceMix {
         disc,
         bands,
@@ -925,8 +926,8 @@ pub(super) fn area_mixed(
         present,
     } = match air.state {
         SurfaceState::GasEnvelope => {
-            let (albedo, colour) = envelope_bond::gas_envelope_light(shade, inputs);
-            envelope_colour = colour;
+            let (albedo, colour, bright) = envelope_bond::gas_envelope_light(shade, inputs);
+            (envelope_colour, bright_share) = (colour, bright);
             SurfaceMix {
                 disc: Disc::Whole {
                     albedo,
@@ -992,6 +993,7 @@ pub(super) fn area_mixed(
         albedo: bond_albedo(albedo, air.state, inputs.material),
         cloud_fraction: disc.cloud_fraction(),
         band_albedo,
+        bright_share,
         runaway_deck,
         liquid_water,
         deck_water,

@@ -762,5 +762,90 @@ fn the_rules_are_pinned() {
     let size = log_normal(SULPHUR_HAZE_PARTICLES.0, SULPHUR_HAZE_PARTICLES.1);
     w.f64("S8 r_eff", size.effective_radius().value());
     w.f64("S8 v_eff", size.effective_variance());
+    pin_the_bright_haze(&mut w);
     golden!("planetary/photochem", w.as_str());
+}
+
+/// [`the_rules_are_pinned`]'s lines of 32's rules (research-leans-50's ruling): the bright haze,
+/// its cool edge and the soot column's shares, under either rules.
+fn pin_the_bright_haze(w: &mut hyperion_testkit::golden::GoldenWriter) {
+    if let Some(Haze {
+        profile: HazeProfile::Layer { base, top, .. },
+        amount: HazeAmount::OpticalDepth { optical_depth, .. },
+        ..
+    }) = bright_haze(&air(560.0, 100.0), 0.01, 10.0).expect("in range")
+    {
+        w.f64("bright haze tau", optical_depth);
+        w.f64("bright haze base", base.value());
+        w.f64("bright haze top", top.value());
+    }
+    for t in [450.0, 475.0, 530.0] {
+        w.f64(
+            &format!("bright haze cool share at {t} K"),
+            bright_haze_cool_share(Kelvin::new(t)),
+        );
+    }
+    let size = gamma(BRIGHT_HAZE_PARTICLES.0, BRIGHT_HAZE_PARTICLES.1);
+    w.f64("bright haze r_eff", size.effective_radius().value());
+    w.f64("bright haze v_eff", size.effective_variance());
+    {
+        use crate::planetary::derive::photometry::envelope_bond::EnvelopeColumnRules;
+        use crate::planetary::hooks::envelope_atmosphere::haze_shares;
+        for (t_eq, t0) in [
+            (650.0, 672.0),
+            (640.0, 655.5),
+            (560.0, 595.0),
+            (450.0, 475.0),
+        ] {
+            for rules in [EnvelopeColumnRules::Clipped, EnvelopeColumnRules::Whole] {
+                let (soot, bright) = haze_shares(rules, Kelvin::new(t_eq), Kelvin::new(t0));
+                let at = format!("{rules:?} at T_eq {t_eq} K, T0 {t0} K");
+                w.f64(&format!("soot share {at}"), soot);
+                w.f64(&format!("bright haze share {at}"), bright);
+            }
+        }
+    }
+}
+
+/// The bright haze (from 32; research-leans-50) shares the soot's column: none where the soot
+/// forms none, the soot's layer, Khare et al.'s tholin of 0.1 µm in a gamma of `v_eff` 0.05, at the
+/// optical depth it is given at 550 nm, and an optical depth that is not positive refused.
+#[test]
+fn the_bright_haze_shares_the_soot_s_column() {
+    let warm = air(560.0, 100.0);
+    let haze = bright_haze(&warm, 0.01, 10.0)
+        .expect("in range")
+        .expect("a haze");
+    let soot = soot(&warm, 0.01).expect("in range").expect("soot");
+    assert_eq!(haze.rule(), HazeRule::Bright);
+    assert_eq!(haze.material(), by_key("tholin").expect("a row"));
+    assert_eq!(haze.profile(), soot.profile());
+    assert!((haze.size().effective_radius().value() - 1.0e-7).abs() < 1e-20);
+    assert!((haze.size().effective_variance() - 0.05).abs() < 1e-15);
+    assert!(matches!(
+        haze.amount(),
+        HazeAmount::OpticalDepth { optical_depth, wavelength }
+            if (optical_depth - 10.0).abs() < 1e-12 && (wavelength.value() - 0.55).abs() < 1e-12
+    ));
+    assert_eq!(bright_haze(&warm, 0.0, 10.0), Ok(None));
+    assert_eq!(bright_haze(&air(1_000.0, 1.0), 0.01, 10.0), Ok(None));
+    for tau in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+        assert!(matches!(
+            bright_haze(&warm, 0.01, tau),
+            Err(EvaluateRuleError::OpticalDepth(_))
+        ));
+    }
+}
+
+/// The bright haze's cool edge: none at or below 400 K, whole from 550 K, linear between, and none
+/// for a temperature that is not a number.
+#[test]
+fn the_bright_haze_s_cool_edge_is_400_to_550_k() {
+    let share = |t: f64| bright_haze_cool_share(Kelvin::new(t));
+    assert_same_bits(share(300.0), 0.0);
+    assert_same_bits(share(400.0), 0.0);
+    assert!((share(475.0) - 0.5).abs() < 1e-12);
+    assert_same_bits(share(550.0), 1.0);
+    assert_same_bits(share(900.0), 1.0);
+    assert_same_bits(share(f64::NAN), 0.0);
 }

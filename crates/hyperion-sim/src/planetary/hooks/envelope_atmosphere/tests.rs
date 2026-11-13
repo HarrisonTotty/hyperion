@@ -586,6 +586,7 @@ impl Case {
             network: network(),
             internal_temperature: Kelvin::new(self.internal),
             equilibrium_temperature: Kelvin::new(self.equilibrium),
+            zero_albedo_temperature: Kelvin::new(self.equilibrium),
             gravity: MetresPerSecondSquared::new(self.gravity),
             fe_h: Dex::ZERO,
             grey: self.grey,
@@ -2055,4 +2056,34 @@ fn the_dayside_decks_move_no_cool_envelope_and_no_volatile_or_haze() {
             );
         }
     }
+}
+
+/// The shares of the soot's column (from 32 keyed on the zero-albedo `T_eq`, research-leans-50):
+/// to 31 the soot's taper of `T_eq` and no bright haze; from 32 the taper of the zero-albedo `T_eq`,
+/// s, and the bright haze 1 − s times its cool edge's share, so that the owner's draw (672 K) is
+/// 0.72 soot and 0.28 bright haze, GJ 1214 b (595 K) all bright haze, and a world at or below
+/// 400 K or from 700 K none of it.
+#[test]
+fn the_soot_s_column_is_shared_by_the_zero_albedo_temperature_from_32() {
+    use crate::planetary::derive::photometry::envelope_bond::EnvelopeColumnRules::{
+        Clipped, Whole,
+    };
+    let shares = |rules, t_eq: f64, t0: f64| haze_shares(rules, Kelvin::new(t_eq), Kelvin::new(t0));
+    let exactly = |(soot, bright): (f64, f64), (want_soot, want_bright): (f64, f64)| {
+        assert_same_bits(soot, want_soot);
+        assert_same_bits(bright, want_bright);
+    };
+    let (soot, bright) = shares(Clipped, 650.0, 700.0);
+    assert!((soot - 0.5).abs() < 1e-12, "{soot}");
+    assert_same_bits(bright, 0.0);
+    let (soot, bright) = shares(Whole, 650.0, 672.0);
+    assert!((soot - 0.72).abs() < 1e-12, "{soot}");
+    assert!((bright - 0.28).abs() < 1e-12, "{bright}");
+    exactly(shares(Whole, 560.0, 595.0), (0.0, 1.0));
+    let (soot, bright) = shares(Whole, 450.0, 475.0);
+    assert_same_bits(soot, 0.0);
+    assert!((bright - 0.5).abs() < 1e-12, "{bright}");
+    exactly(shares(Whole, 380.0, 400.0), (0.0, 0.0));
+    exactly(shares(Whole, 690.0, 700.0), (1.0, 0.0));
+    exactly(shares(Whole, 650.0, f64::NAN), (0.0, 0.0));
 }

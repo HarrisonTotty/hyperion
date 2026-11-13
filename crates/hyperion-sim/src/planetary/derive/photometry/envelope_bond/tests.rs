@@ -93,8 +93,10 @@ fn the_envelope_column_is_held_only_until_the_32_bump() {
         crate::GENERATOR_VERSION < ENVELOPE_COLUMN_VERSION,
         "the 31 → 32 bump reads an envelope's column whole: delete `ENVELOPE_COLUMN_VERSION`, \
          `EnvelopeColumnRules` with its `Clipped` arm and its matches in `layer_two_stream` (and \
-         its `rules` parameter, which `bin_albedos` reads), `column_top`, `table_for` and \
-         `gas_envelope_light`, the tests that call the `Clipped` arm, the tests' \
+         its `rules` parameter, which `bin_albedos` reads), `column_top`, `narrow_table_for`, \
+         `envelope_atmosphere::haze_shares` and `gas_envelope_light`, fold `ClosedReading`'s \
+         rules and the `_under` functions into their plain ones, restamp `tables::warm_haze` \
+         at 32, delete the tests that call the `Clipped` arm, the tests' \
          `with_envelope_column`, its lines in `HeldRules` and `with_every_32_hold`, and this test; \
          have the `under_every_32_hold_` tests read the version's rules alone, re-pin the giants' \
          31 figures at their 32 ones, and have `the_solar_system_draws_itself_in_its_surfaces_\
@@ -260,6 +262,94 @@ fn a_gamma_soot_mode_reads_the_narrow_table_from_32() {
             "bin {bin}: wide {w} against {wide}"
         );
     }
+}
+
+/// The bright haze's tholin has a narrow table and no wide one: from 32 its gamma of `v_eff` 0.05
+/// reads it, its ω at 0.1 µm 0.79, 0.87 and 0.92 in B, V and R (research-leans-50's Mie: 0.80, 0.88
+/// and 0.92 at 450, 550 and 650 nm), and at 31, or in another width, it has no optics.
+#[test]
+fn the_bright_haze_reads_its_narrow_table_from_32() {
+    use crate::substance::SizeDistribution;
+    use crate::units::Metres;
+    assert_eq!(particle_table("tholin", CondensedPhase::Solid), None);
+    let tholin = SizeDistribution::gamma(Metres::new(1.0e-7), 0.05).expect("a gamma");
+    let wider = SizeDistribution::gamma(Metres::new(1.0e-7), 0.2).expect("a gamma");
+    let table = narrow_table_for(EnvelopeColumnRules::Whole, "tholin", &tholin).expect("narrow");
+    assert_eq!(table, ParticleTable::Narrow(1));
+    assert_eq!(
+        narrow_table_for(EnvelopeColumnRules::Clipped, "tholin", &tholin),
+        None
+    );
+    assert_eq!(
+        narrow_table_for(EnvelopeColumnRules::Whole, "tholin", &wider),
+        None
+    );
+    let at = log_bracket(table.radii(), 1.0e-7);
+    for (bin, omega) in [(1, 0.786), (2, 0.870), (3, 0.919)] {
+        let [extinction, w, _] = particle_optics_at(table, at, bin);
+        assert!((w - omega).abs() < 0.002, "bin {bin}: ω {w}");
+        assert!(extinction > 0.0);
+    }
+}
+
+/// The bright haze's share of the hazes' light is its modes' τ ω over its and the soot's, bin by
+/// bin, from their narrow tables, and 0 with no bright haze; and the light gives a share from 32
+/// alone, none to a column with no bright haze (the hot fixture's) and none at 31.
+#[test]
+fn the_bright_haze_s_share_is_its_scattering_over_the_hazes() {
+    use crate::planetary::chem::photochem::{UpperAtmosphere, bright_haze, soot};
+    use crate::planetary::hooks::envelope_atmosphere::haze_mode_at;
+    use crate::units::MetresPerSecondSquared;
+    let air = UpperAtmosphere {
+        equilibrium_temperature: Kelvin::new(650.0),
+        stratosphere_temperature: Kelvin::new(550.0),
+        metallicity: 100.0,
+        gravity: MetresPerSecondSquared::new(11.9),
+        molar_mass_g_per_mol: 3.0,
+    };
+    let mode = |haze, weight| haze_mode_at(&haze, weight, |_| Kelvin::new(600.0)).expect("a mode");
+    let soot_mode = mode(soot(&air, 0.01).expect("in range").expect("soot"), 0.72);
+    let bright_mode = mode(
+        bright_haze(&air, 0.01, 10.0)
+            .expect("in range")
+            .expect("a haze"),
+        0.28,
+    );
+    let rules = EnvelopeColumnRules::Whole;
+    let share = column::bright_share(rules, &[soot_mode, bright_mode]);
+    let scattering = |mode| {
+        let ColumnMode {
+            tau,
+            optics: Some((table, radius)),
+            ..
+        } = column::column_mode_under(rules, mode).expect("a column mode")
+        else {
+            panic!("a mode with optics");
+        };
+        let at = log_bracket(table.radii(), radius);
+        core::array::from_fn::<f64, OPTICS_BANDS, _>(|bin| {
+            let [extinction, omega, _] = particle_optics_at(table, at, bin);
+            tau * extinction * omega
+        })
+    };
+    let (dark, bright) = (scattering(&soot_mode), scattering(&bright_mode));
+    for bin in 0..OPTICS_BANDS {
+        let want = bright[bin] / (dark[bin] + bright[bin]);
+        assert!(
+            (share[bin] - want).abs() < 1e-12,
+            "bin {bin}: {} against {want}",
+            share[bin]
+        );
+    }
+    assert!(share.iter().all(|w| *w > 0.0 && *w < 1.0), "{share:?}");
+    for bin in column::bright_share(rules, &[soot_mode]) {
+        assert_same_bits(bin, 0.0);
+    }
+    let (_, _, at_31) = gas_envelope_light(&sun(), &hot_jupiter_inputs());
+    let (_, _, hot) = with_envelope_column(EnvelopeColumnRules::Whole, || {
+        gas_envelope_light(&sun(), &hot_jupiter_inputs())
+    });
+    assert_eq!((at_31, hot), (None, None));
 }
 
 /// The Rayleigh factor of a bin is its mean of (550 ÷ λ)^4.08: 1 for a bin at 550 nm alone, about

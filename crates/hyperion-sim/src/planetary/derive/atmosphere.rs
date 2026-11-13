@@ -115,8 +115,8 @@ use crate::planetary::derive::PlanetClass;
 use crate::planetary::derive::composition::{MassFractions, SnowLineSide};
 use crate::planetary::derive::irradiation::BondAlbedo;
 use crate::planetary::derive::pass_record::{OpenWater, PassContext, WaterGate};
-use crate::planetary::derive::photometry::DiscColour;
 use crate::planetary::derive::photometry::area_mix::{self, reference_cloud_column};
+use crate::planetary::derive::photometry::{BrightShare, DiscColour};
 use crate::planetary::hooks::crust::CrustLid;
 use crate::planetary::hooks::figures::cover::FillSlot;
 use crate::planetary::hooks::structure::{DRY_LAPSE_FACTOR, adiabat_temperature};
@@ -2572,6 +2572,9 @@ pub struct Atmosphere {
     cloud_fraction: f64,
     /// The disc's albedo in the B, V and R bins ([`Atmosphere::band_albedo`]).
     band_albedo: Option<DiscColour>,
+    /// A gas envelope's bright haze's share of its hazes' light in those bins
+    /// ([`Atmosphere::bright_share`]).
+    bright_share: Option<BrightShare>,
     carbon_carrier: Option<CarbonCarrier>,
     column: PartialPressures,
     escape: Option<EscapeOutcome>,
@@ -2927,6 +2930,16 @@ impl Atmosphere {
     #[must_use]
     pub const fn band_albedo(&self) -> Option<DiscColour> {
         self.band_albedo
+    }
+
+    /// From generator version 32, a gas envelope's bright haze's share of its photochemical hazes'
+    /// scattering in the B, V and R bins (`envelope_bond::gas_envelope_light`), by which the
+    /// photometry weighs its phase integral
+    /// ([`PhotometryInputs::bright_share`](crate::planetary::derive::photometry::PhotometryInputs::bright_share)):
+    /// `None` below 32 and for a disc whose column holds no bright haze.
+    #[must_use]
+    pub const fn bright_share(&self) -> Option<BrightShare> {
+        self.bright_share
     }
 
     /// The species the body's carbon is airborne as (P14.T24.f): [`CarbonCarrier::Methane`] on a

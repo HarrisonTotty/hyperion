@@ -129,6 +129,7 @@ pub mod substance_albedo;
 pub mod thermo;
 pub mod thermo_27;
 pub mod type_ia_delay;
+pub mod warm_haze;
 pub mod wd_cooling;
 
 /// What the fitting toolchain records of one fitted table, shared with the surface crate's
@@ -497,6 +498,12 @@ pub const MANIFEST: &[TableInfo] = &[
         name: "type_ia_yield",
         revision: 0,
         since_generator_version: 28,
+        provisional: false,
+    },
+    TableInfo {
+        name: "warm_haze",
+        revision: 0,
+        since_generator_version: 31,
         provisional: false,
     },
     TableInfo {
