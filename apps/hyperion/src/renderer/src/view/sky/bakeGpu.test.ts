@@ -21,6 +21,8 @@ interface Seen {
   readonly released: string[];
   readonly copies: Array<{ level: number; face: number | undefined; region?: TexelRect }>;
   readonly dispatches: string[];
+  /** Each whole buffer written from offset 0, as f32 values, by name. */
+  readonly writes: Array<{ name: string; values: Float32Array }>;
   splats: number;
 }
 
@@ -43,6 +45,7 @@ async function gpuEngine(
     released: [],
     copies: [],
     dispatches: [],
+    writes: [],
     splats: 0,
   };
   const engine = Object.assign(new FakeRenderEngine(device), {
@@ -79,7 +82,11 @@ async function gpuEngine(
       seen.made.push({ name, category });
       return { kind: "texture", name };
     },
-    writeBuffer: (): void => undefined,
+    writeBuffer: (buffer: BufferHandle, offset: number, data: ArrayBufferView): void => {
+      if (offset === 0 && data instanceof Float32Array) {
+        seen.writes.push({ name: buffer.name, values: Float32Array.from(data) });
+      }
+    },
     dispatch: (kernel: ComputeHandle): void => {
       seen.dispatches.push(kernel.name);
     },
@@ -110,6 +117,16 @@ const INPUT = {
 } as const;
 
 describe("bakeSkyCube on the GPU", () => {
+  it("lays each star out as the splat reads it: its direction, its light, then 1 (perf-long-tasks-2)", async () => {
+    const { engine, seen } = await gpuEngine();
+    bakeSkyCube(engine, INPUT);
+    const points = seen.writes.find((each) => each.values.length === 4 + 2 * 8);
+    expect(points?.values.slice(1, 2)).toStrictEqual(Float32Array.of(8));
+    expect(points?.values.slice(4)).toStrictEqual(
+      Float32Array.of(1, 0, 0, 0, 1e-6, 1e-6, 1e-6, 1, 0, -1, 0, 0, 2e-6, 2e-6, 2e-6, 1),
+    );
+  });
+
   it("splats each face twice and copies every level of each face, one face at a time", async () => {
     const { engine, seen } = await gpuEngine();
     const baked = bakeSkyCube(engine, INPUT);

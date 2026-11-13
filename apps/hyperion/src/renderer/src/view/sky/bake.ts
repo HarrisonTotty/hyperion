@@ -194,13 +194,21 @@ export function bakeTiling(faceSizePx: number, maxTilePx: number = BAKE_TILE_PX)
  * and tile written before each draw, then the stars.
  */
 function headedPoints(input: BakeInput): Float32Array {
-  const count = input.directions.length / 3;
+  const { directions, illuminanceLx } = input;
+  const count = directions.length / 3;
   const points = new Float32Array(4 + count * SPLAT_POINT_FLOATS);
   points[1] = input.faceSizePx;
+  // Element by element, the same f32 values, with no view made a star: a re-bake's 300,000 stars
+  // made 600,000 (perf-long-tasks-2).
   for (let star = 0; star < count; star += 1) {
     const at = 4 + star * SPLAT_POINT_FLOATS;
-    points.set(input.directions.subarray(star * 3, star * 3 + 3), at);
-    points.set(input.illuminanceLx.subarray(star * 3, star * 3 + 3), at + 4);
+    const from = star * 3;
+    points[at] = directions[from] ?? 0;
+    points[at + 1] = directions[from + 1] ?? 0;
+    points[at + 2] = directions[from + 2] ?? 0;
+    points[at + 4] = illuminanceLx[from] ?? 0;
+    points[at + 5] = illuminanceLx[from + 1] ?? 0;
+    points[at + 6] = illuminanceLx[from + 2] ?? 0;
     points[at + 7] = 1;
   }
   return points;

@@ -81,16 +81,21 @@ export function bakeInputOf(sky: DrawnSky, faceSizePx: number): BakeInput {
   const count = sky.selection.baked.length;
   const directions = new Float32Array(count * 3);
   const illuminanceLx = new Float32Array(count * 3);
+  // Element by element, the same f32 values, with no view made a star (perf-long-tasks-2).
   sky.selection.baked.forEach((index, at) => {
-    directions.set(stars.directions.subarray(index * 3, index * 3 + 3), at * 3);
-    illuminanceLx.set(
-      starIlluminanceRgbLx(
-        stars.vMag[index] ?? Number.POSITIVE_INFINITY,
-        stars.chroma[index * 2] ?? 0,
-        stars.chroma[index * 2 + 1] ?? 0,
-      ),
-      at * 3,
+    const from = index * 3;
+    const to = at * 3;
+    directions[to] = stars.directions[from] ?? 0;
+    directions[to + 1] = stars.directions[from + 1] ?? 0;
+    directions[to + 2] = stars.directions[from + 2] ?? 0;
+    const [r, g, b] = starIlluminanceRgbLx(
+      stars.vMag[index] ?? Number.POSITIVE_INFINITY,
+      stars.chroma[index * 2] ?? 0,
+      stars.chroma[index * 2 + 1] ?? 0,
     );
+    illuminanceLx[to] = r;
+    illuminanceLx[to + 1] = g;
+    illuminanceLx[to + 2] = b;
   });
   return { directions, illuminanceLx, faceSizePx, name: "sky cube: view" };
 }
