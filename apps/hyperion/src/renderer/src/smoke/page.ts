@@ -8,8 +8,9 @@
  * `no-subgroups` requests it with subgroups and `depth-clip-control` withheld (T9.c; R10.T9.b's
  * pulled-back cascades). A fixture adds a broken shader to the
  * catalogue or makes external requests, either of which must fail the run. The part does too: the
- * groups are in twenty-eight parts, each a run of its own under the harness's watchdog (perf-smoke,
- * 2026-10-13), parts 2 to 6, 8 to 14 and 30 the atmosphere's CPU-twin groups (R08.T6, R08.T7,
+ * groups are in twenty-nine parts, 1 to 28 and 30, each a run of its own under the harness's
+ * watchdog (perf-smoke, 2026-10-13), parts 2 to 6, 8 to 14 and 30 the atmosphere's CPU-twin groups
+ * (R08.T6, R08.T7,
  * R08.T9.b, R08.T8.a, R08.T8.b, R08.T8.c, R08.T8.e, R08.T11, R08.T14.c, R08.T14.f, R08.T15.a.2),
  * part 4 with R05.T12.e's marches before them and part 6 with R05.T12.c's frames, parts 7, 15, 20
  * and 21 R10's terrain groups and part 16 R14.T3.c's ground under a grounded craft, part 17 R08.T8.d's

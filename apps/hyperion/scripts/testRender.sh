@@ -72,7 +72,7 @@
 # part 26, each alone (2026-11-13). Plan R11's far ocean (R11.T8.b) took part 27, its own.
 # Part 12 stood at 324 to 336 s of its 360 s under a pod's load, and ended two gates on its watchdog
 # with no check failing, so R08.T18.b's thermal forms, their twins and R08.T11's (T) row took part
-# 30 (2026-11-14; parts 28 and 29 are other lanes'). Alone on a pod (48 vCPU), part 12 took 274 s
+# 30 (2026-11-14; parts 28 and 29 then other lanes'). Alone on a pod (48 vCPU), part 12 took 274 s
 # before and 110 s after, and part 30 197 s, (T)'s row 124 s of it (95 s beside part 12's shared
 # read).
 # Plan R11's still mount, its job's small still of flat colours and its PNG round trip through the
