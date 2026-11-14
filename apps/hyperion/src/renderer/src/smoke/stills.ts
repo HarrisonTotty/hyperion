@@ -1,23 +1,50 @@
 /**
- * The smoke page's still checks (plan R11, R11.T10.c), in part 28, alone: a PNG that Chromium's own
- * encoder made, labelled, saved through the harness's main process (`main/stills.ts`, in the run's
- * own user-data directory) and read back, its label equal to its sidecar's and its pixels to those
- * encoded; and `VIEW`'s still mount, its list and its control, on that main process's listing.
+ * The smoke page's still checks (plan R11, R11.T10.c and T10.b), in part 28, alone: a PNG that
+ * Chromium's own encoder made, labelled, saved through the harness's main process (`main/stills.ts`,
+ * in the run's own user-data directory) and read back, its label equal to its sidecar's and its
+ * pixels to those encoded; then `VIEW`'s still mount, its list and its control, on that main
+ * process's listing, its `TAKE STILL` making a small still through the job (`stillJob.ts`) on the
+ * page's own device.
  *
  * @remarks
- * Nothing here draws on the GPU or touches the engine, so no other part's frame or capture moves.
+ * The photorealistic renderer's hook is not built (R11.T10.b's remainder), so the job draws its
+ * tiles through {@link FlatRenderer}, a stand-in of flat colours into R01's render targets, its
+ * pipeline made asynchronously, gated as every still is on the queue's `onSubmittedWorkDone()`, one
+ * batch an animation frame, each tile read back through `readTexture`. It draws only into its own
+ * targets, alone in its part, so no other part's frame or capture moves.
  */
 
 import { createElement } from "react";
 import { createRoot } from "react-dom/client";
 
 import type { StillLabel, StillsApi } from "../../../preload/api";
-import { STILL_RENDERING_NOT_BUILT, ViewStills } from "../displays/view/ViewStills";
+import type { ViewStillsModel } from "../displays/view/useViewStills";
+import { ViewStills } from "../displays/view/ViewStills";
+import type {
+  MaterialHandle,
+  MeshHandle,
+  RenderEngine,
+  RenderTarget,
+  TargetRender,
+} from "../view/engine/types";
 import { scanPng, withStillLabel } from "../view/stills/pngLabel";
 import { stillsOver } from "../view/stills/stillAnswers";
-import { stillLabel, stillLabelText, STILL_TERRAIN_STREAMING } from "../view/stills/stillLabel";
+import {
+  encodeStillPng,
+  type StillDevice,
+  type StillRenderer,
+  StillSession,
+  type StillSource,
+} from "../view/stills/stillJob";
+import {
+  type StillRequest,
+  stillLabel,
+  stillLabelText,
+  STILL_TERRAIN_STREAMING,
+} from "../view/stills/stillLabel";
+import { planTiles, type StillTile, type StillTiling } from "../view/stills/stillPlan";
 import { StillStore } from "../view/stills/stillStore";
-import { type Checks, pause } from "./harness";
+import { type Checks, drawOf, flatSpec, frameOf, fullScreenMesh, pause } from "./harness";
 
 /** The test image's size, px: a width that is no multiple of 64, as a still's need not be. */
 const SIZE = { widthPx: 40, heightPx: 24 } as const;
@@ -71,40 +98,42 @@ function testPixels(): Uint8ClampedArray<ArrayBuffer> {
   return pixels;
 }
 
+/** A request as a view holds it, for a still of `size`. */
+function testRequest(size: { readonly widthPx: number; readonly heightPx: number }): StillRequest {
+  return {
+    time: { seconds: 412_345_678, nanos: 250_000_000 },
+    camera: {
+      frame: { kind: "body", body: "0200080020000000.0100" },
+      positionM: [6_771_000, -12_500.25, 340.5],
+      orientation: { w: 1, x: 0, y: 0, z: 0 },
+      fovXDeg: 60,
+    },
+    exposure: { kind: "manual", ev100: 12 },
+    readings: [
+      { label: "FRAME", value: "BODY TEST EARTH" },
+      { label: "TIME", value: "UT +13 yr 024/06:27:58" },
+      { label: "FOV", value: "60°" },
+      { label: "EXPOSURE", value: "EV100 12.0 MAN" },
+    ],
+    setting: "high",
+    decoration: true,
+    survey: [
+      {
+        body: "0200080020000000.0100",
+        name: "TEST EARTH",
+        level: 7,
+        surveyedFraction: 0.5,
+        bestResolutionM: 1200,
+      },
+    ],
+    annunciations: [],
+    size,
+  };
+}
+
 /** The test still's label, its frustum not streamed in time, so that it says so. */
 function testLabel(): StillLabel {
-  return stillLabel(
-    {
-      time: { seconds: 412_345_678, nanos: 250_000_000 },
-      camera: {
-        frame: { kind: "body", body: "0200080020000000.0100" },
-        positionM: [6_771_000, -12_500.25, 340.5],
-        orientation: { w: 1, x: 0, y: 0, z: 0 },
-        fovXDeg: 60,
-      },
-      exposure: { kind: "manual", ev100: 12 },
-      readings: [
-        { label: "FRAME", value: "BODY TEST EARTH" },
-        { label: "TIME", value: "UT +13 yr 024/06:27:58" },
-        { label: "FOV", value: "60°" },
-        { label: "EXPOSURE", value: "EV100 12.0 MAN" },
-      ],
-      setting: "high",
-      decoration: true,
-      survey: [
-        {
-          body: "0200080020000000.0100",
-          name: "TEST EARTH",
-          level: 7,
-          surveyedFraction: 0.5,
-          bestResolutionM: 1200,
-        },
-      ],
-      annunciations: [],
-      size: SIZE,
-    },
-    false,
-  );
+  return stillLabel(testRequest(SIZE), false);
 }
 
 /** The pixels Chromium decodes `png` to, unconverted and unpremultiplied. */
@@ -196,23 +225,224 @@ async function checkRoundTrip(
   );
 }
 
-/** `VIEW`'s still mount on the main process's listing: the list, a label shown, the control. */
-async function checkMount(checks: Checks, stills: StillsApi, label: StillLabel): Promise<void> {
+/** The job's still: four tiles at a 64 px tile limit, its last column padded. */
+const JOB_SIZE = { widthPx: 100, heightPx: 70 } as const;
+
+/** The tile limit the job's still is cut at, px: R11.T10.a's least, 64. */
+const JOB_TILE_LIMIT_PX = 64;
+
+/** The passes a tile of the job's still takes, each a flat colour of its own over the tile. */
+const JOB_PASSES = ["base", "tint"] as const;
+
+/** The colour pass `pass` of tile `tile` draws, 8-bit: the last pass's is the tile's. */
+function clearColour(tile: number, pass: number): readonly [number, number, number] {
+  return [(40 * (tile + 1)) & 0xff, (60 * (pass + 1)) & 0xff, 200 - 30 * tile];
+}
+
+/**
+ * A still renderer on the page's engine, standing in for the photorealistic renderer's hook: each
+ * tile a render target of R01's `createRenderTarget`, each unit a draw of a flat colour over the
+ * whole tile, a batch one `renderTargets` submission, each tile read back through `readTexture`.
+ * Its one pipeline is made by `createMaterialAsync` in `prepare()`, as every still's are.
+ */
+class FlatRenderer implements StillRenderer {
+  readonly tiling: StillTiling;
+  readonly units: ReadonlyArray<string>;
+  readonly #engine: RenderEngine;
+  readonly #mesh: MeshHandle;
+  readonly #targets: ReadonlyArray<RenderTarget>;
+  #material: MaterialHandle | null = null;
+
+  constructor(engine: RenderEngine) {
+    this.#engine = engine;
+    this.tiling = planTiles(JOB_SIZE, JOB_TILE_LIMIT_PX, "low");
+    this.units = this.tiling.tiles.flatMap((_, tile) =>
+      JOB_PASSES.map((pass) => `${pass} ${String(tile)}`),
+    );
+    this.#mesh = fullScreenMesh(engine, "smoke still triangle");
+    this.#targets = this.tiling.tiles.map((tile, index) =>
+      engine.createRenderTarget({
+        name: `smoke still tile ${String(index)}`,
+        size: tile.texture,
+        format: "rgba8unorm",
+        mips: 1,
+        depth: true,
+        category: "render-targets",
+      }),
+    );
+  }
+
+  async prepare(): Promise<void> {
+    this.#material = await this.#engine.createMaterialAsync(
+      flatSpec("smoke still flat"),
+      ["rgba8unorm"],
+      [this.#mesh],
+    );
+  }
+
+  streamed(): boolean {
+    return true;
+  }
+
+  submit(first: number, count: number): void {
+    const material = this.#material;
+    if (material === null) {
+      throw new Error("a still's batch was submitted before its pipelines were made");
+    }
+    const renders: TargetRender[] = [];
+    for (let unit = first; unit < first + count; unit += 1) {
+      const tile = Math.floor(unit / JOB_PASSES.length);
+      const target = this.#targets[tile];
+      if (target === undefined) {
+        throw new Error(`unit ${String(unit)} has no tile`);
+      }
+      const [r, g, b] = clearColour(tile, unit % JOB_PASSES.length);
+      renders.push({
+        target,
+        frame: frameOf(this.units[unit] ?? "smoke still unit", [
+          drawOf(this.#mesh, material, [r / 255, g / 255, b / 255, 1]),
+        ]),
+      });
+    }
+    this.#engine.renderTargets(renders);
+  }
+
+  async readTile(tile: StillTile): Promise<Uint8Array> {
+    const target = this.#targets[this.tiling.tiles.indexOf(tile)];
+    if (target === undefined) {
+      throw new Error("a tile that is not the still's was read back");
+    }
+    return new Uint8Array(await this.#engine.readTexture(target.colour));
+  }
+
+  dispose(): void {
+    for (const target of this.#targets) {
+      target.dispose();
+    }
+    if (this.#material !== null) {
+      this.#engine.releaseMaterial(this.#material);
+    }
+    this.#engine.releaseMesh(this.#mesh);
+  }
+}
+
+/**
+ * The job's device on the page's own: the queue's `onSubmittedWorkDone()` and empty submits, the
+ * animation frame, the clock and the device's loss; no timestamps, so the batches are sized from
+ * round trips.
+ */
+function pageStillDevice(device: GPUDevice): StillDevice {
+  return {
+    timer: "absent",
+    submittedWorkDone: () => device.queue.onSubmittedWorkDone(),
+    submitEmpty: () => {
+      device.queue.submit([]);
+    },
+    nextFrame: () =>
+      new Promise((resolve) => {
+        requestAnimationFrame(() => {
+          resolve();
+        });
+      }),
+    nowNs: () => performance.now() * 1e6,
+    onPassTimes: () => () => undefined,
+    onLoss: (listener) => {
+      let live = true;
+      device.lost
+        .then(() => {
+          if (live) {
+            listener();
+          }
+          return undefined;
+        })
+        .catch((error: unknown) => {
+          console.error("the device's loss could not be watched:", error);
+        });
+      return () => {
+        live = false;
+      };
+    },
+  };
+}
+
+/** A still source over the page's engine and device: the test request, drawn by {@link FlatRenderer}. */
+function pageStillSource(engine: RenderEngine, device: GPUDevice): StillSource {
+  return {
+    device: pageStillDevice(device),
+    setting: "low",
+    frameIntervalNs: () => 16_683_350,
+    snapshot: () => ({ request: testRequest(JOB_SIZE) }),
+    renderer: () => new FlatRenderer(engine),
+  };
+}
+
+/** The tile of the job's still that the pixel (x, y) lies in, row by row from the top left. */
+function jobTileOf(tiling: StillTiling, x: number, y: number): number {
+  return tiling.tiles.findIndex(
+    ({ rect }) => x >= rect.x0Px && x < rect.x1Px && y >= rect.y0Px && y < rect.y1Px,
+  );
+}
+
+/** How many of the still's pixels are not their tile's last pass's colour: 0 where every one is. */
+function wrongPixels(pixels: ArrayLike<number>): number {
+  const tiling = planTiles(JOB_SIZE, JOB_TILE_LIMIT_PX, "low");
+  let wrong = 0;
+  for (let y = 0; y < JOB_SIZE.heightPx; y += 1) {
+    for (let x = 0; x < JOB_SIZE.widthPx; x += 1) {
+      const at = (y * JOB_SIZE.widthPx + x) * 4;
+      const expected = [...clearColour(jobTileOf(tiling, x, y), JOB_PASSES.length - 1), 255];
+      if (!expected.every((channel, k) => pixels[at + k] === channel)) {
+        wrong += 1;
+      }
+    }
+  }
+  return wrong;
+}
+
+/**
+ * `VIEW`'s still mount on the main process's listing: the list and a label shown, then `TAKE STILL`
+ * making a still through the job on the page's device, saved, listed and read back.
+ */
+async function checkMount(
+  checks: Checks,
+  stills: StillsApi,
+  label: StillLabel,
+  engine: RenderEngine,
+  device: GPUDevice | undefined,
+): Promise<void> {
+  if (device === undefined) {
+    checks.check("R11.T10.b the page has its device for a still", false, "no device recorded");
+    return;
+  }
+  const store = new StillStore(stills);
+  const model: ViewStillsModel = {
+    store,
+    session: new StillSession({
+      source: pageStillSource(engine, device),
+      encode: encodeStillPng,
+      save: (png, still) => store.save(png, still),
+      nowMs: () => performance.now(),
+      reportError: (error) => {
+        console.error("a still could not be made:", error);
+      },
+    }),
+  };
   const host = document.createElement("div");
   document.body.append(host);
   const root = createRoot(host);
   try {
-    root.render(createElement(ViewStills, { designator: "PRIMARY", stills }));
-    const entry = (): HTMLButtonElement | null =>
-      host.querySelector<HTMLButtonElement>(".still-list__still");
-    const listed = await until(() => entry() !== null);
+    root.render(createElement(ViewStills, { designator: "PRIMARY", model }));
+    const entries = (): HTMLButtonElement[] => [
+      ...host.querySelectorAll<HTMLButtonElement>(".still-list__still"),
+    ];
+    const listed = await until(() => entries().length === 1);
     checks.check(
       "R11.T10.c VIEW's still list shows the saved still",
       listed,
       host.querySelector(".still-list, .still-list__empty")?.textContent ?? "nothing drawn",
     );
-    const button = entry();
-    if (button === null) {
+    const [button] = entries();
+    if (button === undefined) {
       return;
     }
     button.click();
@@ -231,12 +461,26 @@ async function checkMount(checks: Checks, stills: StillsApi, label: StillLabel):
     const take = [...host.querySelectorAll("button")].find(
       (each) => each.textContent === "TAKE STILL",
     );
-    const reasonId = take?.getAttribute("aria-describedby") ?? "";
+    const status = (): string => host.querySelector(".still-control__status")?.textContent ?? "";
+    const offered = take !== undefined && take.getAttribute("aria-disabled") === null;
+    take?.click();
+    const saved = await until(() => status() === "STILL SAVED");
     checks.check(
-      "R11.T10.c TAKE STILL is held back, saying why, until the renderer draws a still",
-      take?.getAttribute("aria-disabled") === "true" &&
-        document.getElementById(reasonId)?.textContent === STILL_RENDERING_NOT_BUILT,
-      document.getElementById(reasonId)?.textContent ?? "no reason",
+      "R11.T10.b TAKE STILL makes a still through the job, one batch in flight, and saves it",
+      offered && saved,
+      status(),
+    );
+    const listedBoth = await until(() => entries().length === 2);
+    const [latest] = await stills.listStills();
+    const read = latest === undefined ? null : await store.read(latest.id);
+    const pixels = read?.kind === "read" ? await decoded(new Uint8Array(read.still.png)) : null;
+    const wrong = pixels === null ? null : wrongPixels(pixels);
+    checks.check(
+      "R11.T10.b the still is listed and reads back, every texel its tile's last pass's",
+      listedBoth && wrong === 0,
+      wrong === null
+        ? `read back: ${read?.kind ?? "nothing"}`
+        : `${String(wrong)} of ${String(JOB_SIZE.widthPx * JOB_SIZE.heightPx)} pixels wrong`,
     );
   } finally {
     root.unmount();
@@ -244,8 +488,13 @@ async function checkMount(checks: Checks, stills: StillsApi, label: StillLabel):
   }
 }
 
-/** Part 28's checks (R11.T10.c): the PNG round trip, then the mount. */
-export async function checkStills(checks: Checks, stills: StillsApi | null): Promise<void> {
+/** Part 28's checks (R11.T10.c, T10.b): the PNG round trip, then the mount and the job. */
+export async function checkStills(
+  checks: Checks,
+  stills: StillsApi | null,
+  engine: RenderEngine,
+  device: GPUDevice | undefined,
+): Promise<void> {
   checks.check(
     "R11.T10.c the page has the still functions",
     stills !== null,
@@ -276,5 +525,5 @@ export async function checkStills(checks: Checks, stills: StillsApi | null): Pro
   );
   const label = testLabel();
   await checkRoundTrip(checks, stills, encoded, pixels, label);
-  await checkMount(checks, stills, label);
+  await checkMount(checks, stills, label, engine, device);
 }

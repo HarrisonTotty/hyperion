@@ -50,6 +50,7 @@ import type { WorkerLike } from "../view/terrain/workers/pool";
 import type { OpticsWorkerLike } from "../view/atmosphere/opticsPool";
 import type { TerrainSession } from "../view/terrain/session";
 import type { SceneOption } from "../displays/view/viewRun";
+import type { StillSource } from "../view/stills/stillJob";
 
 /**
  * The stage's laid-out width in the tests, CSS px (and device px, at a ratio of 1): 80 rem, room
@@ -471,6 +472,8 @@ export function renderViewDisplay(options: {
   readonly atmosphereLevers?: AtmosphereLeversOverride;
   /** How the views are paced (`--frame-pacing`, R07.T19): `display`, ViewDisplay's own, by default. */
   readonly framePacing?: FramePacingName;
+  /** Where a still's scene comes from (plan R11, R11.T10.b): none by default, as in the client. */
+  readonly stillSource?: StillSource;
 }): ViewDisplayHarness {
   const advanceTimers = fakeFramesAndTimeouts();
   let viewPx: LaidOutPx = options.viewPx ?? FULL_VIEW_PX;
@@ -512,6 +515,7 @@ export function renderViewDisplay(options: {
                     sceneOptions={options.sceneOptions}
                     watchTerrain={options.watchTerrain}
                     atmosphereLevers={options.atmosphereLevers}
+                    stillSource={options.stillSource}
                   />
                 </main>
               </Activity>

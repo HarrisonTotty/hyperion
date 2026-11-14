@@ -75,8 +75,9 @@
 # 30 (2026-11-14; parts 28 and 29 are other lanes'). Alone on a pod (48 vCPU), part 12 took 274 s
 # before and 110 s after, and part 30 197 s, (T)'s row 124 s of it (95 s beside part 12's shared
 # read).
-# Plan R11's still mount and its PNG round trip through the harness's main process, which draw
-# nothing on the GPU, took part 28 (2026-11-13; parts 25 to 27 are other lanes').
+# Plan R11's still mount, its job's small still of flat colours and its PNG round trip through the
+# harness's main process took part 28, alone, some 2 s on a pod (2026-11-14; parts 25 to 27 are
+# other lanes').
 # --part=N runs that part alone (every part by default).
 #
 # --captures=DIR also renders the capture frames (R05.T12.c's atmosphere comparison, R08.T8.b's

@@ -71,6 +71,9 @@ const IN_PROGRESS = "NOT AVAILABLE: a still is in progress";
 /** Why `TAKE STILL` is held back once stills are disabled: a third loss would disable WebGPU. */
 const DISABLED_REASON = "NOT AVAILABLE: stills disabled by a second device loss, relaunch to retry";
 
+/** Why stills are disabled, and what to do, after `STILLS DISABLED:` away from the panel. */
+const DISABLED_CAUSE = "a second device loss, relaunch to retry";
+
 /** Each step's words on the control's status line. */
 const STEP_WORDS: Readonly<Record<StillStep["kind"], string>> = {
   preparing: "PREPARING",
@@ -101,7 +104,7 @@ function endLine(last: StillEnd, standing: StillStanding): string {
 }
 
 /** The status line: the still's step while one runs, else how the last ended, or `null`. */
-function statusLine(state: StillControlState): string | null {
+export function stillStatusLine(state: StillControlState): string | null {
   const { activity } = state;
   let line: string | null;
   switch (activity.kind) {
@@ -110,6 +113,33 @@ function statusLine(state: StillControlState): string | null {
       break;
     case "idle":
       line = activity.last === null ? null : endLine(activity.last, state.standing);
+      break;
+  }
+  return line;
+}
+
+/**
+ * Where a standing line stands: in the panel, beside `TAKE STILL`, whose held-back reason says
+ * why; or `away`, under the fold row or MAXIMIZE VIEW's line, where the panel is hidden.
+ */
+export type StandingPlace = "panel" | "away";
+
+/**
+ * The session's standing as its line states it, `STILLS SUSPENDED` or `STILLS DISABLED`, or
+ * `null`; away from the panel, `STILLS DISABLED` says its cause and remedy, as the guide's
+ * `GRAPHICS DISABLED` does, since `TAKE STILL`'s reason is not on show there.
+ */
+export function stillsStandingLine(standing: StillStanding, place: StandingPlace): string | null {
+  let line: string | null;
+  switch (standing) {
+    case "available":
+      line = null;
+      break;
+    case "suspended":
+      line = STILLS_SUSPENDED;
+      break;
+    case "disabled":
+      line = place === "panel" ? STILLS_DISABLED : `${STILLS_DISABLED}: ${DISABLED_CAUSE}`;
       break;
   }
   return line;
@@ -170,13 +200,8 @@ function StillProgress({ step }: StillProgressProps) {
 export function StillControl({ state, onTake }: StillControlProps) {
   const reasonId = useId();
   const held = takeStillHeldBack(state);
-  const line = statusLine(state);
-  const standing =
-    state.standing === "suspended"
-      ? STILLS_SUSPENDED
-      : state.standing === "disabled"
-        ? STILLS_DISABLED
-        : null;
+  const line = stillStatusLine(state);
+  const standing = stillsStandingLine(state.standing, "panel");
   return (
     <div className="still-control">
       {standing === null ? null : (

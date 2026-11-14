@@ -45,8 +45,8 @@
  * (on an engine of its own, whose device it destroys), part 15 R10.T16.c's frame with relief and
  * R14's levers' frames on it, and part 20 its surfaces on the datum and its symbology; part 27
  * plan R11's far ocean (R11.T8.b), its kernels and its twin; part 28 R11.T10.c's PNG round trip
- * through the harness's main process and VIEW's still mount, which draw nothing on the GPU. Three
- * groups of part 1 run only when asked:
+ * through the harness's main process and VIEW's still mount, whose R11.T10.b job draws a small
+ * still of flat colours into render targets of its own. Three groups of part 1 run only when asked:
  * R08.T8.c's far limb's timings and, after them, R08.T11's photorealistic frame's timings
  * (`frameTiming.ts`), after the low pick, when the run lifted timestamp quantization (`gpuTiming`,
  * the hardware runs of R01.T11), and R08.T8.c's far limb captures, after R07.T10.c's eclipse
@@ -344,8 +344,8 @@ const VARIANTS: Readonly<Record<string, CapabilityOverrides | undefined>> = {
  * 27, its own (2026-11-14). Part 12 stood at 324 to 336 s of its 360 s under a pod's load and ended
  * gates on its watchdog, so R08.T18.b's thermal forms, their twins and R08.T11's (T) row, which
  * draws by them, took part 30 (2026-11-14; parts 28 and 29 then other lanes'). Plan R11's still
- * mount and its PNG round trip through the harness's main process (R11.T10.c) took part 28, alone
- * (2026-11-13).
+ * mount and its PNG round trip through the harness's main process (R11.T10.c) and its job's small
+ * still of flat colours (R11.T10.b) took part 28, alone (2026-11-14).
  */
 type PagePart =
   | 1
@@ -828,9 +828,10 @@ async function run(
   );
   await group(26, "R11.T7.b the cloud layer drawn", () => checkCloudLayerDraw(engine, checks));
   // In part 28, alone: R11.T10.c's PNG round trip through the harness's main process and VIEW's
-  // still mount, which draw nothing on the GPU (parts 25 to 27 are other lanes').
-  await group(28, "R11.T10.c the still mount and the PNG round trip", () =>
-    checkStills(checks, smokeStills()),
+  // still mount, whose R11.T10.b job draws a small still of flat colours into targets of its own, so
+  // that no other part's frame moves (parts 25 to 27 are other lanes').
+  await group(28, "R11.T10.c the still mount, the job and the PNG round trip", () =>
+    checkStills(checks, smokeStills(), engine, device),
   );
   await group(17, "R08.T8.d the far limb's node rays packed in the general forms", () =>
     checkMarchPackedGeneral(engine, checks, summary.fallback),

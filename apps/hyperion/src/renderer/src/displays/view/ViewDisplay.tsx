@@ -197,6 +197,8 @@ import type { PlacePage } from "./PlaceTabs";
 import { useGroundPage } from "./useGroundPage";
 import { BESIDE_CLASS, COLUMNS_CLASS, ViewRoomSizers } from "./ViewRoomSizers";
 import { ViewStills } from "./ViewStills";
+import { useStillsAwayLines, useViewStills, type ViewStillsModel } from "./useViewStills";
+import type { StillSource } from "../../view/stills/stillJob";
 import { useReasonFolds } from "./reasonFolds";
 import { surveyPassStatement } from "./surveyPassStatement";
 import type { InspectionSurvey } from "../../view/scenes/inspectionSurvey";
@@ -472,6 +474,12 @@ interface ViewDisplayProps {
    * the inspection is of a planet or a moon; absent, and the control with it, otherwise.
    */
   readonly onPlanetViewer?: (() => void) | undefined;
+  /**
+   * Where a still's scene and device come from (plan R11, R11.T10.b), read once at the mount: the
+   * photorealistic renderer's hook, which waits for perf-long-tasks-2's wave 2; none until then,
+   * when `VIEW` offers no still and its `STILLS` panel does not stand.
+   */
+  readonly stillSource?: StillSource | undefined;
 }
 
 /** What a view of the server's scene reads of `useScene`, kept current by its stage. */
@@ -589,6 +597,11 @@ interface ViewStageProps {
    * for any other scene.
    */
   readonly sceneStatements: ReadonlyArray<LabelStatement>;
+  /**
+   * `VIEW`'s stills (plan R11, R11.T10.b), kept through every scene, or `null` where it offers no
+   * still: its `STILLS` panel and fold stand only with them.
+   */
+  readonly stills: ViewStillsModel | null;
 }
 
 /** What the drawing loop reads of the several views' budgets, kept current by an effect. */
@@ -964,8 +977,10 @@ function ViewStage({
   atmosphere,
   linkUp,
   sceneStatements,
+  stills,
 }: ViewStageProps) {
   const legendId = useId();
+  const stillsAway = useStillsAwayLines(stills);
   const maximized = maximize !== "off";
   const server = source.kind === "server" ? source.server : null;
   // A kept scene's terrain fixture follows the script the stage plays (R10.T16.d).
@@ -2163,7 +2178,8 @@ function ViewStage({
   // image only; the style's stands in every engine state (decision-r07-t19b-exposure-fit, item 2).
   // One that goes gives its place to CAMERA; on a switch to the compact layout, the panel holding
   // the focus is the one open.
-  const stands = (panel: FoldPanel): boolean => panel !== "meter" || meterStands;
+  const stands = (panel: FoldPanel): boolean =>
+    panel === "meter" ? meterStands : panel !== "stills" || stills !== null;
   const focusOpens =
     foldLayout !== layout && layout === "compact" && focusedFold !== null && stands(focusedFold)
       ? focusedFold
@@ -2325,6 +2341,22 @@ function ViewStage({
   const orbitOffered = offeredPresets(controlledCamera).includes("orbit");
   // The exposure's status, `AUTO NOT AVAILABLE: …`, which stands under the row while it is folded.
   const exposureStanding = autoNotAvailable(meterShown);
+  // The stills' standing, `STILLS SUSPENDED` or `STILLS DISABLED`, which lasts the session, and a
+  // still's status, its step or how it ended: they stand under the row while their panel is folded,
+  // and under MAXIMIZE VIEW, live regions as in the panel (plan R11, R11.T10.b).
+  const stillsLines = [stillsAway.standing, stillsAway.status].filter((line) => line !== null);
+  const stillsStanding =
+    stillsLines.length === 0 ? null : (
+      <>
+        {stillsLines.map((line) => (
+          <p className="view-stills__standing view-folds__standing" key={line}>
+            <output>
+              <StatusText text={line} />
+            </output>
+          </p>
+        ))}
+      </>
+    );
   // The faults and statuses that stand for the panels hidden, folded in the compact layout or every
   // one under MAXIMIZE VIEW (decision-r07-t19-layout, item 1b); the limit reasons go with their
   // controls.
@@ -2400,6 +2432,7 @@ function ViewStage({
       {folded("style") ? styleStanding : null}
       {folded("exposure") ? exposureStandingLine : null}
       {folded("exposure") ? keyedLine : null}
+      {folded("stills") ? stillsStanding : null}
     </>
   ) : null;
   // Under MAXIMIZE VIEW, after the key legend on its row, what the hidden panels would show (the
@@ -2456,6 +2489,7 @@ function ViewStage({
       {standingPart(styleStanding, "style")}
       {standingPart(exposureStandingLine, "exposure")}
       {standingPart(keyedLine, "keyed")}
+      {standingPart(stillsStanding, "stills")}
     </>
   ) : null;
   const sideFolds: SideFolds = {
@@ -2822,7 +2856,14 @@ function ViewStage({
               hidden={folded("meter")}
             />
           ) : null}
-          <ViewStills designator={PRIMARY_NAME} id={foldIds.stills} hidden={folded("stills")} />
+          {stills === null ? null : (
+            <ViewStills
+              designator={PRIMARY_NAME}
+              id={foldIds.stills}
+              hidden={folded("stills")}
+              model={stills}
+            />
+          )}
         </div>
       </div>
     </div>
@@ -3089,6 +3130,7 @@ function ViewPanels({
   sceneBar = true,
   hostStatements = NO_SCENE_STATEMENTS,
   onPlanetViewer,
+  stillSource,
 }: ViewDisplayProps) {
   const statusId = useId();
   const host = use(ViewSceneContext);
@@ -3097,6 +3139,8 @@ function ViewPanels({
   }
   const { scene, sceneName, keptName, knownSystem, choose, inspection, closeInspection } = host;
   const engineState = useViewEngine(engineSource);
+  // Kept through every scene: a suspension lasts the session (plan R11, R11.T10.b).
+  const stills = useViewStills(stillSource, window.hyperion.stills);
   const [exposure, setExposure] = useState<ExposureControl>(DEFAULT_EXPOSURE);
   // The photorealistic style's white balance, the display's own, kept through every scene.
   const [whiteBalance, setWhiteBalance] = useState<WhiteBalance>(DEFAULT_WHITE_BALANCE);
@@ -3442,6 +3486,7 @@ function ViewPanels({
         atmosphere={atmosphere}
         linkUp={link.status === "connected"}
         sceneStatements={sceneStatements}
+        stills={stills}
       />
     </div>
   );

@@ -5236,6 +5236,12 @@ select.form-field__input:not([aria-disabled="true"]):hover {
   min-height: 0;
 }
 
+/* The stills' lines under the fold row and MAXIMIZE VIEW's, at the other folded lines' size. */
+.view-stills__standing {
+  margin: 0;
+  font-size: 0.875rem;
+}
+
 .still-control__standing,
 .still-control__status {
   margin: 0 0 0.5rem;

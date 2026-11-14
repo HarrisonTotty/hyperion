@@ -1336,6 +1336,7 @@ on it.
   pipeline creation is called during a job; cells surveyed while the job runs are not used; a loss
   mid-job abandons it, reports once and suspends stills, a second disables them; the smoke harness
   completes a small still on SwiftShader with every texel finite.
+  Records: [11-surface-detail-clouds-oceans-rings-stills/records/R11.T10.b.md](11-surface-detail-clouds-oceans-rings-stills/records/R11.T10.b.md).
 - **R11.T10.c Label, store and control.** `StillLabel`, `pngLabel.ts`, `stillStore.ts` over the
   preload's `saveStill`, `listStills` and `readStill`, their handlers in `src/main/stills.ts` (the
   sender frame validated, arguments `unknown` until the size and the label's schema are checked, the
