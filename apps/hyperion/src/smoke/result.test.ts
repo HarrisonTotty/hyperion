@@ -132,8 +132,11 @@ describe("readSmokeImages", () => {
 /** `scripts/testRender.sh`, which sets each run's outer limit. */
 const script = (): string => readFileSync(join(__dirname, "../../scripts/testRender.sh"), "utf8");
 
-/** The parts after the first, 2 to 27, which take neither part 1's captures nor its timings. */
-const LATER_PARTS = Array.from({ length: 26 }, (_, k) => String(k + 2));
+/**
+ * The parts after the first, 2 to 27 and 30 (28 and 29 left to other lanes, 2026-11-14), which take
+ * neither part 1's captures nor its timings.
+ */
+const LATER_PARTS = [...Array.from({ length: 26 }, (_, k) => String(k + 2)), "30"];
 
 describe("smokeWatchdogMs", () => {
   const plain = {
@@ -313,18 +316,18 @@ describe.runIf(process.platform !== "win32")("testRender.sh's scale", () => {
 });
 
 describe.runIf(process.platform !== "win32")("testRender.sh's parts", () => {
-  it("takes every part from 1 to 27 as --part= and refuses 0 and 28, before any run", () => {
+  it("takes every part from 1 to 27 and 30 as --part= and refuses 0, 28, 29 and 31, before any run", () => {
     for (const part of ["1", ...LATER_PARTS]) {
       expect(runScriptAtScale("1", [`--part=${part}`]).stderr).not.toContain("unknown argument");
     }
-    for (const part of ["0", "28"]) {
+    for (const part of ["0", "28", "29", "31"]) {
       const refused = runScriptAtScale("1", [`--part=${part}`]);
       expect(refused.status).toBe(2);
       expect(refused.stderr).toContain(`unknown argument --part=${part}`);
     }
   });
 
-  it("runs every part from 1 to 27 when none is asked for", () => {
+  it("runs every part from 1 to 27 and 30 when none is asked for", () => {
     const parts = /^ {4}parts=\(([\d ]+)\)$/mu.exec(script())?.[1];
     expect(parts).toBe(["1", ...LATER_PARTS].join(" "));
   });

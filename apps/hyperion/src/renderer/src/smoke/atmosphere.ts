@@ -2446,7 +2446,7 @@ export const HOT_COLUMN: MediumTemperature = {
  * same thermal source, at 3,000 K, so that the air's own light is most of each frame's: the measured
  * Earth (its ozone under the Sun's curves, whose absorbers' depth emits) by the thin read, and over
  * the thick table with a patterned scattered thermal light, from 2 km over a surface 60 km ahead and
- * from 400 km at the limb, on high. In part 12, after the forms' catalogue.
+ * from 400 km at the limb, on high. In part 30, after the forms' catalogue.
  *
  * @remarks
  * Not R05's Earth: its ozone's tent falls linearly to 0 at 40 km, so that at the limb a faint texel's

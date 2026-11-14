@@ -8,14 +8,15 @@
  * `no-subgroups` requests it with subgroups and `depth-clip-control` withheld (T9.c; R10.T9.b's
  * pulled-back cascades). A fixture adds a broken shader to the
  * catalogue or makes external requests, either of which must fail the run. The part does too: the
- * groups are in twenty-three parts, each a run of its own under the harness's watchdog (perf-smoke,
- * 2026-10-13), parts 2 to 6 and 8 to 14 the atmosphere's CPU-twin groups (R08.T6, R08.T7,
+ * groups are in twenty-eight parts, each a run of its own under the harness's watchdog (perf-smoke,
+ * 2026-10-13), parts 2 to 6, 8 to 14 and 30 the atmosphere's CPU-twin groups (R08.T6, R08.T7,
  * R08.T9.b, R08.T8.a, R08.T8.b, R08.T8.c, R08.T8.e, R08.T11, R08.T14.c, R08.T14.f, R08.T15.a.2),
  * part 4 with R05.T12.e's marches before them and part 6 with R05.T12.c's frames, parts 7, 15, 20
  * and 21 R10's terrain groups and part 16 R14.T3.c's ground under a grounded craft, part 17 R08.T8.d's
  * packed far limb's kernels and their general forms' check, part 13 R08.T14.c's thick read and R08.T14.f's correction, part 14
- * R08.T15.a.2's deck, part 25 R11.T2.a's decoration library, part 26 R11.T7.b's clouds, and part 1
- * every other; with no part given the page runs them all, in its order.
+ * R08.T15.a.2's deck, part 25 R11.T2.a's decoration library, part 26 R11.T7.b's clouds, part 30
+ * R08.T18.b's thermal forms and R08.T11's (T) row, and part 1 every other; with no part given the
+ * page runs them all, in its order.
  * Each part checks its path (T9.c) itself. R08.T6.f's slices and bands run in two groups: the
  * Saturn-class figure's in part 5, with R08.T6.i's layer edges, and Earth's, which took R08.T6.g's
  * Earth, in part 8, with R07.T8.e–f's cell pass for every record (`cellPass.ts`) after it;
@@ -34,7 +35,7 @@
  * the top, in part 4 after R05.T12.e's marches, and its low pick, which has no twin, in part 1;
  * R08.T8.c's far limb's footprint, its frames from 10⁸ m at the output's own pixel, in part 11;
  * R08.T11's routes' rows, each its twins and its row's frame drawn untimed, last in its part: (T)'s
- * in part 12, whose catalogue compiles its thermal forms, (R)'s in part 13, whose compiles its thick
+ * in part 30, whose catalogue compiles its thermal forms, (R)'s in part 13, whose compiles its thick
  * read, and (S)'s and (U)'s, their deck's marches compiled in their groups, in parts 6 and 2;
  * R08.T14.c's thick read in part 13, its kernels' catalogue first, then its kernels against their
  * twins on Earth, R08.T14.f's correction alone against its twins on Earth and its specialised march, and its kernels against their twins on a Saturn-class
@@ -245,7 +246,7 @@ const VARIANTS: Readonly<Record<string, CapabilityOverrides | undefined>> = {
 };
 
 /**
- * A part of the page's groups: 2 to 6 and 8 to 12 the atmosphere's CPU-twin groups (R08.T6,
+ * A part of the page's groups: 2 to 6, 8 to 14 and 30 the atmosphere's CPU-twin groups (R08.T6,
  * R08.T7, R08.T9.b, R08.T8.a, R08.T8.b, R08.T8.c, R08.T8.e, R08.T11), whose twins outweigh their
  * GPU work (2 R08.T6.b's but its medium of four absorbers, 3 R08.T6.g's, 4 R08.T8.b's far limb, with the
  * composite from above the top, 5 R08.T6.f's Saturn-class figure and R08.T6.i's layer edges, 6
@@ -338,7 +339,9 @@ const VARIANTS: Readonly<Record<string, CapabilityOverrides | undefined>> = {
  * part near its watchdog grows (2026-11-13). Plan R11's clouds (R11.T7.b), their kernels'
  * catalogue, their field, optics and ground's tap against their twins and their layer's draw, took
  * part 26, alone (2026-11-13). Plan R11's far ocean (R11.T8.b), its kernels and its twin, took part
- * 27, its own (2026-11-14).
+ * 27, its own (2026-11-14). Part 12 stood at 324 to 336 s of its 360 s under a pod's load and ended
+ * gates on its watchdog, so R08.T18.b's thermal forms, their twins and R08.T11's (T) row, which
+ * draws by them, took part 30 (2026-11-14; parts 28 and 29 are other lanes').
  */
 type PagePart =
   | 1
@@ -367,7 +370,8 @@ type PagePart =
   | 24
   | 25
   | 26
-  | 27;
+  | 27
+  | 30;
 
 /** The part a run's query names, `all` for none, or `null` for one that is not a part. */
 function partOf(value: string | null): PagePart | "all" | null {
@@ -429,6 +433,8 @@ function partOf(value: string | null): PagePart | "all" | null {
       return 26;
     case "27":
       return 27;
+    case "30":
+      return 30;
     default:
       return null;
   }
@@ -485,7 +491,7 @@ async function run(
     setupError,
   });
   if (part === null) {
-    return failed("the part asked for is not 1 to 27 or all");
+    return failed("the part asked for is not 1 to 27, 30 or all");
   }
   const gpu: unknown = Reflect.get(navigator, "gpu");
   if (gpu === undefined) {
@@ -554,7 +560,7 @@ async function run(
   // on a slower machine (4 vCPU, 2026-10-29). R08.T18.a's emissive forms are compiled in part 9 too,
   // the lightest, beside their twin's group, and R08.T16.b's air forms after them, and R08.T18.b's
   // forms with both after those. R08.T18.b's thermal forms of the per-frame kernels are compiled in
-  // part 12, beside their twins' group.
+  // part 30, beside their twins' group.
   const thin = WGSL_CATALOGUE.filter(
     (entry) =>
       !ATMOSPHERE_LIMB_ENTRIES.includes(entry) &&
@@ -909,12 +915,13 @@ async function run(
   await group(10, "perf-thick-march the thick read's march levers over the shared read", () =>
     checkThickMarchLeversShared(engine, checks, summary.fallback),
   );
-  // R08.T18.b's thermal forms of the per-frame kernels, compiled and held to their twins, in part 12,
-  // the lightest (54 s at 03e12ec's tree).
-  await group(12, "T9.b catalogue: the thermal forms", () =>
+  // R08.T18.b's thermal forms of the per-frame kernels, compiled and held to their twins, in part 30
+  // with (T)'s row, which draws by them: with the three, part 12 stood at 324 to 336 s of its 360 s
+  // under a pod's load (2026-11-14).
+  await group(30, "T9.b catalogue: the thermal forms", () =>
     checkCatalogue(engine, status, ATMOSPHERE_THERMAL_ENTRIES, checks),
   );
-  await group(12, "R08.T18.b the medium's own light against its twins", () =>
+  await group(30, "R08.T18.b the medium's own light against its twins", () =>
     checkThermalFrameTwins(engine, checks, twins),
   );
   // R08.T11's routes' rows on SwiftShader, each its twins and its row's frame, untimed: (T)'s here,
@@ -943,7 +950,7 @@ async function run(
   await group(2, "R08.T11 (U) venus-92bar's deck route's row and its twins", () =>
     routedRow("(U)", venusDeckMedium),
   );
-  await group(12, "R08.T11 (T) a self-luminous medium's row and its twins", () =>
+  await group(30, "R08.T11 (T) a self-luminous medium's row and its twins", () =>
     routedRow("(T)", () => Promise.resolve(selfLuminousEarthMedium())),
   );
   // R11.T2.a's decoration library against its reference, one dispatch, in part 25, alone (part 7,

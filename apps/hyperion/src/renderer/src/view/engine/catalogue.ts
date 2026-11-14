@@ -297,8 +297,9 @@ export const ATMOSPHERE_THICK_LEVER_ENTRIES: ReadonlyArray<CatalogueEntry> = [
 /**
  * R08.T18.b's per-frame atmosphere with the medium's own light (`hillaire.ts`' `withThermalSource`):
  * the sky view, the aerial perspective and both marches' footprints, of the thin read and of the
- * thick, made only for a self-luminous body. The smoke page compiles them in the thick read's part
- * (`smoke/page.ts`), for the watchdog of the part that compiles the rest.
+ * thick, made only for a self-luminous body. The smoke page compiles them in part 30, beside their
+ * twins' group and R08.T11's (T) row (`smoke/page.ts`), for the watchdog of the part that compiles
+ * the rest.
  */
 export const ATMOSPHERE_THERMAL_ENTRIES: ReadonlyArray<CatalogueEntry> = [
   SKY_VIEW_THERMAL_KERNEL,
