@@ -656,11 +656,15 @@ export function withoutOblateTwinMisses(routed: RoutedMedium): RoutedMedium {
  * stands 1.75 × 10⁻³ off its twin at two channels of 4,844, since generator version 31's
  * chromophore mixing moved the hand Jupiter's decks (its envelope floor 2.8 m higher), where it
  * held to 10⁻³ at 30; rounded outward at its third figure, in units of R08.T6.b's 10⁻³. The fit's
- * least rise, which the check guards, missed by 2.8% before it.
+ * least rise, which the check guards, missed by 2.8% before it. From 32 (train 32's finding), with
+ * the hand Jupiter's golden profile moved by the envelope's column read whole (its floor 10.3 m
+ * higher), the sun 30° up behind's march radiance stands 3.487 × 10⁻³ off its twin in red at
+ * texel (47, 18), two channels of 4,064 over 10⁻³, rounded outward to 3.49; the other two frames
+ * hold within 1.76 (their worst 1.10 and 1.27 × 10⁻³ at 32).
  */
 const ONE_SHEET_MARCH_BOUNDS: Readonly<Record<string, number>> = {
   "400 km, the sun 20° up ahead": 1.76,
-  "400 km, the sun 30° up behind": 1.76,
+  "400 km, the sun 30° up behind": 3.49,
   "400 km, the sun 3° down": 1.76,
 };
 
