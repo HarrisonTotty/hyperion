@@ -148,12 +148,12 @@
  * sources' table (its way back), for an A/B of the lit fragment's cost; or, the lit terrain's alone
  * (`terrain-unshaded|terrain-no-cascades|terrain-no-horizon|terrain-no-maturity`;
  * perf-bodies-near-ground), its fragment's light not formed, or no cascade, horizon-map or
- * maturity-node read; it is refused without
- * `--timing`. With `--instance-probe <COUNT>` too (plan R14, R14.T5.d; the owner's Mac pair
- * `instances`) that profile draws COUNT test particles, 1 to 4,194,304, in VIEW's primary each
- * frame, placed, culled and drawn through the instance path where the setting makes one (not on
- * low), for an A/B of the instance path's cost; it is refused without `--timing` and at the low
- * setting, which makes no instance pipeline.
+ * maturity-node read; or a ringed body's with no ring's shadow formed (`no-ring-shadow`; plan R11,
+ * R11.T9.a); it is refused without `--timing`. With `--instance-probe <COUNT>` too (plan R14,
+ * R14.T5.d; the owner's Mac pair `instances`) that profile draws COUNT test particles, 1 to
+ * 4,194,304, in VIEW's primary each frame, placed, culled and drawn through the instance path where
+ * the setting makes one (not on low), for an A/B of the instance path's cost; it is refused without
+ * `--timing` and at the low setting, which makes no instance pipeline.
  *
  * `--hyperion-gpu-timing`, R01's measurement switch, which lifts the timestamps' quantization on
  * every backend but safe mode's (read from Chromium's command line, `GPU_TIMING_SWITCH`), also has a
@@ -685,7 +685,7 @@ export function buildCommand(version: string): Command {
     .addOption(
       new Option(
         "--lit-probe <PROBE>",
-        "the frame profile's lit-pass probe (R08.T9.b): every source's transmittance 1, planetshine at its centre node, no eclipse annuli, the sources' transmittance per fragment, or the lit terrain unshaded or without its cascades, horizon map or maturity nodes",
+        "the frame profile's lit-pass probe (R08.T9.b): every source's transmittance 1, planetshine at its centre node, no eclipse annuli, the sources' transmittance per fragment, or the lit terrain unshaded or without its cascades, horizon map or maturity nodes, or a ringed body without its ring's shadow (R11.T9.a)",
       ).choices(LIT_PROBE_NAMES),
     )
     .addOption(

@@ -4,10 +4,12 @@
  * five pinned geometries to 10⁻⁵ relative, one of them with a law built per texel;
  * `sphere_irradiance` and `eclipse_visible` equal their TypeScript twins (themselves checked
  * against the `f64` oracles) at five points each, and the horizon term at six more, the smooth
- * terminator, a terrain shadow's edge and a point star (T6.d); R11's stub and R08's lookups (plan R08's
- * `surfaceLighting.wgsl` since R08.T9.b) return 1, 1 and 0 on a body without an atmosphere, its
- * one-texel tables bound; and `planetshine_irradiance` equals `planetshineIrradiance` at four
- * points (T11). R08.T9.b's own group holds the lookups against a body's tables' twin
+ * terminator, a terrain shadow's edge and a point star (T6.d); R11's ring shadow at a point its
+ * pinned ring does not shade and R08's lookups (plan R08's `surfaceLighting.wgsl` since R08.T9.b)
+ * return 1, 1 and 0 on a body without an atmosphere, its one-texel tables bound;
+ * `ring_shadow_on_body` (`rings/shaders/ringShadow.wgsl` since R11.T9.a) equals `ringShadowOnBody`
+ * at six points under a pinned Saturn-like ring; and `planetshine_irradiance` equals
+ * `planetshineIrradiance` at four points (T11). R08.T9.b's own group holds the lookups against a body's tables' twin
  * ({@link probeSurfaceLighting}, `smoke/atmosphere.ts`).
  */
 
@@ -20,8 +22,9 @@ import {
   packBrdfProbeCases,
   packLightingProbeCases,
   packPhaseFactorRows,
+  PROBE_RING_SHADOW,
 } from "../view/appearance/litBodyProbe";
-import { type Vec3, vec3 } from "../geometry/vec3";
+import { add, cross, dot, normalise, scale, sub, type Vec3, vec3 } from "../geometry/vec3";
 import {
   AIRLESS_LIGHTING,
   createAirlessTables,
@@ -94,6 +97,12 @@ const ECLIPSE_TOLERANCE = 2e-4;
  */
 const HORIZON_TOLERANCE = 2e-6;
 
+/**
+ * The ring's shadow's agreement with its twin, absolute (R11.T9.a): one `f32` `exp` of a slant
+ * optical depth of at most about 5 and the crossing's radius, held away from every band's edge.
+ */
+const RING_TOLERANCE = 1e-5;
+
 /** The agreement a lighting case's term is held to; 0 for those that must return a value exactly. */
 function lightingTolerance(probe: LightingProbeCase): number {
   let tolerance: number;
@@ -108,6 +117,9 @@ function lightingTolerance(probe: LightingProbeCase): number {
     case "hooks":
     case "atmosphere":
       tolerance = 0;
+      break;
+    case "ring":
+      tolerance = RING_TOLERANCE;
       break;
   }
   return tolerance;
@@ -153,13 +165,35 @@ function lightingTermName(probe: LightingProbeCase): string {
     case "planetshine":
       name = "T11 planetshine_irradiance";
       break;
+    case "ring":
+      name = "R11.T9.a ring_shadow_on_body";
+      break;
   }
   return name;
 }
 
 /**
+ * R11.T9.a: a point on the probe ring's planet, a unit sphere, whose ray towards a star at
+ * `elevationDeg` above the ring plane, outward along the crossing's radius, crosses the plane at
+ * `crossingOverA` and `phiRad` from the plane's first axis: the ray's first hit on the sphere back
+ * from the crossing, on the lit side. The ray meets the sphere while r cos B′ ≥ √(r² − 1).
+ */
+function ringCase(crossingOverA: number, phiRad: number, elevationDeg: number): LightingProbeCase {
+  const n = PROBE_RING_SHADOW.normal;
+  const e1 = normalise(cross(n, vec3(1, 0, 0)));
+  const e2 = cross(n, e1);
+  const outward = add(scale(e1, Math.cos(phiRad)), scale(e2, Math.sin(phiRad)));
+  const c = scale(outward, crossingOverA);
+  const b = elevationDeg * RAD_PER_DEG;
+  const s = add(scale(outward, Math.cos(b)), scale(n, Math.sin(b)));
+  const along = dot(c, s);
+  const t = along - Math.sqrt(along * along - (crossingOverA * crossingOverA - 1));
+  return { kind: "ring", p: sub(c, scale(s, t)), sun: s };
+}
+
+/**
  * T6.c: five horizon factors, five eclipse terms and the stubs; T6.d: six more horizon factors;
- * T11: four planetshine factors.
+ * T11: four planetshine factors; R11.T9.a: six ring shadows.
  */
 const LIGHTING_CASES: ReadonlyArray<LightingProbeCase> = [
   { kind: "sphere", h: 3, phiRad: 0.4, horizonRad: 0 },
@@ -194,6 +228,15 @@ const LIGHTING_CASES: ReadonlyArray<LightingProbeCase> = [
     separationRad: separation * 4.65e-3,
   })),
   { kind: "hooks" },
+  // R11.T9.a: the probe ring's shadow through its C, B and A rings and its Division, a crossing
+  // beyond the ring (1), and a star on the point's side of the plane, whose light never crosses
+  // the plane (1).
+  ringCase(1.4, 2.0, 30),
+  ringCase(1.7, 2.3, 20),
+  ringCase(1.99, 2.6, 15),
+  ringCase(2.15, 2.9, 20),
+  ringCase(2.6, 2.4, 10),
+  { kind: "ring", p: vec3(0, 0.5, 0.866), sun: normalise(vec3(0.3, 0.6, 0.4)) },
   // T11: a neighbour 30 of its radii off, wholly up, then cut by the horizon, then at Earth from the
   // Moon's scale (in lunar radii) in its soft band, then behind a local horizon of 3°.
   planetshineCase(vec3(30, 0.5, 0), 1, 30, 40, 0),

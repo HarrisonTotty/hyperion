@@ -12,7 +12,7 @@ import {
   warmAirlessSurface,
 } from "../../test/thermalSurfaces";
 import type { DiscRecord } from "../bodies/discShading";
-import { discCellJobs, packDiscRecords, shadeDiscPoint } from "../bodies/discShading";
+import { DISC_ROWS, discCellJobs, packDiscRecords, shadeDiscPoint } from "../bodies/discShading";
 import {
   BODY_DISC_CELLS_EMISSIVE_KERNEL,
   BODY_DISC_CELLS_KERNEL,
@@ -186,13 +186,17 @@ function digestOf(source: string): string {
  * as written, whose table-only twins the lever's second step draws a body of one band by. The
  * figure and the terrain's again by the shared stride bands (fix-r14-t3c-shared-bands): the
  * record's `edgeBands` and the slot record's `blockErrors`, which the figure's structs step over,
- * and the stride morph's bands from them, which an instance with no scale skips.
+ * and the stride morph's bands from them, which an instance with no scale skips. Every one
+ * re-pinned by plan R11's ring shadow (R11.T9.a): `litBody.wgsl`'s stub of 1 taken out, which the
+ * terrain never called (its `terrain_ring_shadow` is 1); and the disc's three and the figure by
+ * `ringShadow.wgsl` in its place, which returns 1 before any arithmetic for a record with no ring
+ * band, and by the record's ten ring rows (`DISC_ROWS` 318), every other row where it was.
  */
 const PLAIN_DIGESTS: ReadonlyArray<readonly [string, string, string]> = [
-  ["the disc's interior", BODY_DISC_MATERIALS.interior.fragmentWgsl, "e7b14fcb5f01f65b"],
-  ["the disc's limb", BODY_DISC_MATERIALS.limb.fragmentWgsl, "e7b14fcb5f01f65b"],
-  ["the mesh regime's figure", SMOOTH_MESH_MATERIAL.fragmentWgsl, "49927419c3954ac3"],
-  ["the disc cells", BODY_DISC_CELLS_KERNEL.reference, "46e64646aac1ecc4"],
+  ["the disc's interior", BODY_DISC_MATERIALS.interior.fragmentWgsl, "e2670a01d9fe159d"],
+  ["the disc's limb", BODY_DISC_MATERIALS.limb.fragmentWgsl, "e2670a01d9fe159d"],
+  ["the mesh regime's figure", SMOOTH_MESH_MATERIAL.fragmentWgsl, "65c9bfd8b2ca0da1"],
+  ["the disc cells", BODY_DISC_CELLS_KERNEL.reference, "b27a7af5e525ddae"],
   // Re-pinned by plan R14's `@invariant` clip position (terrainLit.wgsl's `LitVertexOut`), which
   // holds every pipeline that places a patch's vertex to the same bits; the arithmetic is as before.
   // And by the seamless lane's sub-patches (R10.T16.h): the instance record's `sub` and a
@@ -206,19 +210,19 @@ const PLAIN_DIGESTS: ReadonlyArray<readonly [string, string, string]> = [
   // stands, are the texel's own place, map and normal, bit for bit; the depth and the casters
   // compose the shared module alone.
   ...[
-    ["terrain-lit-baked-offsets", "668eed68be5a355d"],
-    ["terrain-lit-face-differences", "5f0040c820c8d3b0"],
+    ["terrain-lit-baked-offsets", "aa44f0e9728ad539"],
+    ["terrain-lit-face-differences", "900476b3dd137fcc"],
     // Re-pinned by R10.T16.c's grazing fix, whose depth is pushed by its constant fraction alone.
-    ["terrain-depth-baked-offsets", "11f7131327ee7353"],
-    ["terrain-depth-face-differences", "e7fd37f97c3e8d7e"],
-    ["terrain-shadow-baked-offsets", "e74780fb767c0151"],
-    ["terrain-shadow-face-differences", "c752b29432651eb4"],
-    ["terrain-lit-baked-offsets-still", "4042cbc54a28d19a"],
-    ["terrain-lit-face-differences-still", "6c8f6c1ec962836b"],
-    ["terrain-depth-baked-offsets-still", "bdeb8d4bd738941a"],
-    ["terrain-depth-face-differences-still", "b5f1320f459781eb"],
-    ["terrain-shadow-baked-offsets-still", "11e8146a4feb4a0a"],
-    ["terrain-shadow-face-differences-still", "b387aed1b874bb5b"],
+    ["terrain-depth-baked-offsets", "2c86297bc09f0c97"],
+    ["terrain-depth-face-differences", "6ee8b4694d084902"],
+    ["terrain-shadow-baked-offsets", "ca6816ccda49d8b5"],
+    ["terrain-shadow-face-differences", "4167533837daf318"],
+    ["terrain-lit-baked-offsets-still", "5a7fbc913637657e"],
+    ["terrain-lit-face-differences-still", "beb3fdd3f65db4bf"],
+    ["terrain-depth-baked-offsets-still", "ad7de12551cacea6"],
+    ["terrain-depth-face-differences-still", "23b978d32f334277"],
+    ["terrain-shadow-baked-offsets-still", "9ea431afa5bc6226"],
+    ["terrain-shadow-face-differences-still", "27f603b3d0680df7"],
   ].map(([name = "", digest = ""]): readonly [string, string, string] => {
     const still = name.endsWith("-still");
     const spec = [
@@ -312,10 +316,10 @@ describe("the disc's emission (R08.T18.a)", () => {
       throw new Error("the lava world is above the cut");
     }
     const packed = packDiscRecords([record]);
-    // Row 46's y: the block's first row, the record's 308 rows being the buffer's first.
-    expect(packed[46 * 4 + 1]).toBe(308);
-    expect(packed.length).toBe((308 + DISC_EMISSION_ROWS) * 4);
-    expect([...packed.subarray(308 * 4)]).toEqual([...packDiscEmission(emission, EXPOSURE)]);
+    // Row 46's y: the block's first row, the record's DISC_ROWS rows being the buffer's first.
+    expect(packed[46 * 4 + 1]).toBe(DISC_ROWS);
+    expect(packed.length).toBe((DISC_ROWS + DISC_EMISSION_ROWS) * 4);
+    expect([...packed.subarray(DISC_ROWS * 4)]).toEqual([...packDiscEmission(emission, EXPOSURE)]);
   });
 
   it("lights a young magma ocean's night side by itself alone: its radiance there is the emission term, its reflected light 0", () => {
@@ -462,7 +466,9 @@ describe("the lit bodies' renderer's emissive forms (R08.T18.a)", () => {
       "bodies:discLimbEmissive",
     ]);
     const rewritten = engine.writes.findLast((write) => write.buffer === "bodies:discs");
-    expect(new Float32Array(rewritten?.data.buffer ?? new ArrayBuffer(0))[46 * 4 + 1]).toBe(308);
+    expect(new Float32Array(rewritten?.data.buffer ?? new ArrayBuffer(0))[46 * 4 + 1]).toBe(
+      DISC_ROWS,
+    );
     renderer.dispose();
   });
 

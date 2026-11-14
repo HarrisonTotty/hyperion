@@ -49,7 +49,9 @@ export const SURFACE_LIGHTING_WGSL = `${preciseTrigWgsl}\n${commonWgsl}\n${oblat
  * (perf-bodies-near-ground, the owner's Mac): `terrain-unshaded`, its fragment's light not formed,
  * its shading normal and cascades' lit fraction alone; `terrain-no-cascades`, the cascades not
  * read; `terrain-no-horizon`, the horizon map not read; and `terrain-no-maturity`, each class's
- * albedo its law's, its maturity nodes not read. It is check-only: an inspection profile's
+ * albedo its law's, its maturity nodes not read; and `no-ring-shadow`, a ringed body's disc and
+ * figure with no ring's shadow formed (plan R11, R11.T9.a; `ringShadow.wgsl`), the owner's Mac pair
+ * `ring-shadow-on-body`. It is check-only: an inspection profile's
  * `--lit-probe`, never drawn on a player's launch.
  */
 export type LitProbe =
@@ -60,7 +62,8 @@ export type LitProbe =
   | "terrain-unshaded"
   | "terrain-no-cascades"
   | "terrain-no-horizon"
-  | "terrain-no-maturity";
+  | "terrain-no-maturity"
+  | "no-ring-shadow";
 
 /** The line of `surfaceLighting.wgsl` a probe's module replaces. */
 const LIT_PROBE_LINE = "const LIT_PROBE : u32 = 0u;";
@@ -68,7 +71,8 @@ const LIT_PROBE_LINE = "const LIT_PROBE : u32 = 0u;";
 /**
  * `wgsl` under `probe`: `surfaceLighting.wgsl`'s `LIT_PROBE` set, 1 for `transmittance-one`, 2 for
  * `planetshine-centre`, 3 for `no-annuli`, 4 for `per-fragment`, 5 for `terrain-unshaded`, 6 for
- * `terrain-no-cascades`, 7 for `terrain-no-horizon` and 8 for `terrain-no-maturity`, where `wgsl` composes
+ * `terrain-no-cascades`, 7 for `terrain-no-horizon`, 8 for `terrain-no-maturity` and 9 for
+ * `no-ring-shadow`, where `wgsl` composes
  * {@link SURFACE_LIGHTING_WGSL}; any other module as it is.
  */
 export function litProbedWgsl(wgsl: string, probe: LitProbe): string {
@@ -97,6 +101,9 @@ export function litProbedWgsl(wgsl: string, probe: LitProbe): string {
       break;
     case "terrain-no-maturity":
       value = 8;
+      break;
+    case "no-ring-shadow":
+      value = 9;
       break;
   }
   return wgsl.replace(LIT_PROBE_LINE, `const LIT_PROBE : u32 = ${String(value)}u;`);

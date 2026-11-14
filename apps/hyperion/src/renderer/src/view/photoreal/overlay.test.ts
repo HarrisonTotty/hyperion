@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { add, normalise, vec3 } from "../../geometry/vec3";
 import type { ColourTokens } from "../../spatial/paint";
 import { countingRenderEngine } from "../../test/countingRenderEngine";
+import { aViewRing } from "../../test/ringFixtures";
 import {
   aBody,
   aMarkedViewScene,
@@ -62,14 +63,7 @@ const CAMERA = OFF_PLANET_CAMERA;
  */
 function scene(): ViewScene {
   return aMarkedViewScene({
-    rings: [
-      {
-        body: FIXTURE_PLANET,
-        innerRadiusM: 1e7,
-        outerRadiusM: 1.4e7,
-        normal: normalise(vec3(0, 0.5, 0.866)),
-      },
-    ],
+    rings: [aViewRing(FIXTURE_PLANET, 1e7, 1.4e7, normalise(vec3(0, 0.5, 0.866)))],
   });
 }
 

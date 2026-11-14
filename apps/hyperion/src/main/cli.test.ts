@@ -1040,6 +1040,7 @@ describe("the several-views check's options", () => {
     "terrain-no-cascades",
     "terrain-no-horizon",
     "terrain-no-maturity",
+    "no-ring-shadow",
   ] as const)(
     "takes --lit-probe %s, the frame profile's probe of the lit passes (R08.T9.b)",
     (probe) => {

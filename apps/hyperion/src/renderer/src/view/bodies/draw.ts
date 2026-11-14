@@ -70,6 +70,8 @@
 import type { BodyIdHex } from "@hyperion/protocol";
 
 import { dot, norm, normalise, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
+import type { RingProfile } from "../rings/ringProfile";
+import { ringShadowRecordOf } from "../rings/ringShadows";
 import type { DiscNormalMap, DiscSurface } from "../appearance/bodyAppearance";
 import type { BodyFigure, BodyPhotometry } from "../appearance/fromWire";
 import { lawFor } from "../appearance/phase";
@@ -147,6 +149,7 @@ import { type SpriteRecord, spriteRecord } from "../wireframe/drawList";
 import { HDR_COLOUR_FORMAT, type Rgb } from "../photometry/toneCurve";
 import frameWgsl from "../shaders/frame.wgsl?raw";
 import litBodyWgsl from "../shaders/litBody.wgsl?raw";
+import ringShadowWgsl from "../rings/shaders/ringShadow.wgsl?raw";
 import bodyDiscWgsl from "../shaders/bodyDisc.wgsl?raw";
 import cubeTexelWgsl from "../shaders/cubeTexel.wgsl?raw";
 import maturityNodesWgsl from "../shaders/maturityNodes.wgsl?raw";
@@ -275,6 +278,20 @@ export interface LitBodyInput {
    * covers ground); absent, it never hands over.
    */
   readonly handoverReliefM?: number;
+  /**
+   * The ring whose shadow falls on it (plan R11, R11.T9.a; `rings/ringShadows.ts`'
+   * `shadowingRing`): its profile and its plane's unit normal along the galactic axes, which its
+   * disc and mesh regimes read through their records' ring rows. Absent for a body with no ring,
+   * and for every body where R11's `ringShadowOnBody` is off (the low setting).
+   */
+  readonly ring?: LitBodyRing;
+}
+
+/** A lit body's ring as its shadow on the body reads it (R11.T9.a). */
+export interface LitBodyRing {
+  readonly profile: RingProfile;
+  /** The ring plane's unit normal, along the galactic axes. */
+  readonly normal: Vec3;
 }
 
 /** A mesh body's coverage mask and the body-fixed axes it is read in (R10.T10.c). */
@@ -984,6 +1001,9 @@ function discRecordOf(
     ...(body.atmosphere === undefined ? {} : { atmosphere: body.atmosphere }),
     ...(emission === null ? {} : { emission }),
     ...(air === undefined ? {} : { air }),
+    ...(body.ring === undefined
+      ? {}
+      : { ring: ringShadowRecordOf(body.ring.profile, body.ring.normal, a) }),
   };
 }
 
@@ -1277,14 +1297,15 @@ export function planLitBodies(
 /**
  * What every lit-body module composes before its own: R01's frame, R08's surface lighting (plan
  * R08, R08.T9.b: `preciseTrig.wgsl`, `common.wgsl`, `oblate.wgsl` and `surfaceLighting.wgsl`, in
- * place of `litBody.wgsl`'s stubs), the lit-body library, the cube sphere's texel lookup
- * (`cubeTexel.wgsl`, R10.T11), the maturity nodes' formula (`maturityNodes.wgsl`, R10.T1.c) and
- * the disc's shading.
+ * place of `litBody.wgsl`'s stubs), the lit-body library, R11's ring shadow (`ringShadow.wgsl`,
+ * R11.T9.a, in place of `litBody.wgsl`'s stub), the cube sphere's texel lookup (`cubeTexel.wgsl`,
+ * R10.T11), the maturity nodes' formula (`maturityNodes.wgsl`, R10.T1.c) and the disc's shading.
  */
 const LIT_SOURCE =
   frameWgsl +
   SURFACE_LIGHTING_WGSL +
   litBodyWgsl +
+  ringShadowWgsl +
   cubeTexelWgsl +
   maturityNodesWgsl +
   bodyDiscWgsl;

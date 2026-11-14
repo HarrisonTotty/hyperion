@@ -1281,9 +1281,10 @@ Files: `ocean/*`, R01's `WGSL_CATALOGUE`, tests. Acceptance: `pnpm test`, `just 
   0.20°, 0.26° and 0.28° for the three ring kinds and its amplitude falls with τ; a dense ring is
   darker from its unlit side than a sparse one, and a dusty ring is brighter back-lit than
   front-lit; the planet's shadow on the ring against a ray–sphere oracle, with a penumbra of the
-  stellar disc's angular diameter times the distance; the ring's shadow on the planet is exp(−τ(r) ÷
-  |μ₀|) at the plane crossing; each gap of a `RingDto` fixture is a band starting at its radius,
-  0.039 of the radius wide, at 0.1 of the ring's τ.
+  stellar disc's angular diameter times the distance; the ring's shadow on the planet is
+  exp(−τ(r) ÷ |μ₀|) at the plane crossing; each gap of a `RingDto` fixture is a band starting at
+  its radius, 0.039 of the radius wide, at 0.1 of the ring's τ.
+  Records: [11-surface-detail-clouds-oceans-rings-stills/records/R11.T9.a.md](11-surface-detail-clouds-oceans-rings-stills/records/R11.T9.a.md).
 - **R11.T9.b The shadowing table.** A `ring-shadowing` subcommand of `hyperion-fit`, beside R08's
   reference tracer and outside the table manifest (Design note 15): photon tracing with multiple
   scattering, tallied by order, through a vertically Gaussian layer (H_eff ≡ √(2π) σ) of R⁻³

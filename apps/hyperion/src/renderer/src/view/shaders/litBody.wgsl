@@ -1,7 +1,8 @@
 // The shading of a lit body's surface (plan R07, Design notes 5, 6, 7 and 24): the body BRDF, a
 // lunar-Lambert disc term times a phase factor f read from a table, as reflectance I/F; the horizon
-// and eclipse terms of a lit point; planetshine's irradiance; and R11's hook, as a stub (R08's are
-// `surfaceLighting.wgsl`'s since plan R08's R08.T9.b).
+// and eclipse terms of a lit point; and planetshine's irradiance. R08's hooks are
+// `surfaceLighting.wgsl`'s since plan R08's R08.T9.b, and R11's ring shadow is `ringShadow.wgsl`'s
+// since plan R11's R11.T9.a.
 //
 // A library composed by concatenation: it declares no binding of its own. Its includer declares
 // `phase_factor_table : texture_2d<f32>` at the includer's own group and binding (an
@@ -288,11 +289,9 @@ fn local_azimuth(frame : LocalFrame, d : vec3f) -> f32 {
   return select(azimuth, -azimuth, towards_east < 0.0);
 }
 
-// R11's hook (its Design note 14): the ring's shadow on the body, 1 until `ringShadow.wgsl`
-// replaces this stub, and not called where R11's `ringShadowOnBody` setting is off.
-fn ring_shadow_on_body(p : vec3f, sun : vec3f) -> vec3f {
-  return vec3f(1.0);
-}
+// R11's hook (its Design note 14), the ring's shadow on the body, was a stub of 1 here until plan
+// R11's R11.T9.a: `ring_shadow_on_body` is now `view/rings/shaders/ringShadow.wgsl`'s, which every
+// module that calls it composes after this one, with the two functions it asks of its includer.
 
 // R08's hooks, each source's transmittance through the atmosphere and the sky's irradiance, were
 // stubs of 1 and 0 here until plan R08's R08.T9.b: `atmosphere_sun_transmittance`,

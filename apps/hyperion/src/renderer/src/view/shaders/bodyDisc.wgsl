@@ -26,7 +26,8 @@
 // the rows and law 0 stay as they are. With no maturity (row 25's w 0) every value is as before.
 //
 // A library composed by concatenation after frame.wgsl, preciseTrig.wgsl, R08's common.wgsl,
-// oblate.wgsl and surfaceLighting.wgsl (plan R08, R08.T9.b), litBody.wgsl, cubeTexel.wgsl (the
+// oblate.wgsl and surfaceLighting.wgsl (plan R08, R08.T9.b), litBody.wgsl, R11's ringShadow.wgsl
+// (R11.T9.a, whose two functions it defines from the record's ring rows), cubeTexel.wgsl (the
 // cube sphere's texel lookup, moved out of this file by R10.T11) and maturityNodes.wgsl (the
 // maturity nodes' formula, R10.T1.c), with no entry point of
 // its own: its includer declares `draw`, a `Draw` whose `disc` is the body's record in `discs`, and
@@ -79,7 +80,10 @@
 //      top, px, and w −1; x −1 for a disc whose draws sum their own cells;
 //   52 + K k + j, class k's maturity node j (R10.T1.c, K = MATURITY_NODES): its A per channel at
 //      the node's maturity, scaled as the class's; node 0's w 1 where the class is drawn from its
-//      nodes; written only where row 25's w is 1, and 0 otherwise.
+//      nodes; written only where row 25's w is 1, and 0 otherwise;
+//   308 to 317  R11's ring as its shadow on the body reads it (plan R11, R11.T9.a;
+//      `ringShadow.wgsl`'s `ring_shadow_row`, `ringShadows.ts`' `packRingShadowRows`), along the
+//      galactic axes over a, all 0 for a body that casts none.
 // Past the records, the spans of the large discs whose row 51 points at them (T8.f–g;
 // `discShading.ts`' `packDiscRecords`): four rows a pixel row, the limb draw's two spans of it and
 // then the face's near-limb band's two, each the index in `cell_sums` of its first pixel's sums,
@@ -129,7 +133,7 @@
 // texture where it is 0, unread.
 @group(2) @binding(14) var surface_normals : texture_2d_array<f32>;
 
-const DISC_ROWS : u32 = 308u;
+const DISC_ROWS : u32 = 318u;
 const FIRST_LIGHT_ROW : u32 = 6u;
 const LIGHT_ROWS : u32 = 8u;
 const FIRST_OCCLUDER_ROW : u32 = 22u;
@@ -141,6 +145,7 @@ const FIRST_SECONDARY_ROW : u32 = 47u;
 const SECONDARY_ROWS : u32 = 2u;
 const CELL_SUMS_ROW : u32 = 51u;
 const FIRST_NODE_ROW : u32 = 52u;
+const FIRST_RING_SHADOW_ROW : u32 = 308u;
 const MAX_DISC_LIGHTS : u32 = 2u;
 const MAX_DISC_OCCLUDERS : u32 = 2u;
 const MAX_DISC_SECONDARIES : u32 = 2u;
@@ -162,6 +167,15 @@ const LIT_IRRADIANCE : f32 = 1e-5;
 
 fn disc_row(i : u32) -> vec4f {
   return discs[draw.disc * DISC_ROWS + i];
+}
+
+// `ringShadow.wgsl`'s rows, the record's own (R11.T9.a), and its axes, the galactic, into the view's.
+fn ring_shadow_row(i : u32) -> vec4f {
+  return disc_row(FIRST_RING_SHADOW_ROW + min(i, RING_SHADOW_ROWS - 1u));
+}
+
+fn ring_shadow_axes(v : vec3f) -> vec3f {
+  return to_view(v);
 }
 
 // A direction along the galactic axes in the view's axes.

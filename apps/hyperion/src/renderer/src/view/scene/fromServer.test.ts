@@ -410,6 +410,27 @@ describe("the server's scene as the view draws it", () => {
     ]);
   });
 
+  it("carries a ring's kind, material, optical depth and gaps' radii, which its photometry and shadows read (R11.T9.a)", () => {
+    const model = sceneModelOf(statePopulated());
+    const record = model.system?.bodies.bodies.find(
+      (body) => body.population.state === "ok" && body.population.value.kind === "ring",
+    );
+    if (record?.population.state !== "ok" || record.population.value.kind !== "ring") {
+      throw new Error("the fixture's scene holds a ring");
+    }
+    const sent = record.population.value;
+    const [ring] = viewSceneOf(model, shipFrameOf(model)).rings;
+    expect(ring).toMatchObject({
+      ringKind: sent.ringKind,
+      material: sent.material,
+      innerRadiusM: sent.innerEdgeM,
+      outerRadiusM: sent.outerEdgeM,
+      opticalDepth: sent.opticalDepth,
+      gapRadiiM: sent.gaps.map((gap) => gap.radiusM),
+    });
+    expect(sent.opticalDepth).toBeGreaterThan(0);
+  });
+
   it("draws a ring an older server sends without a normal in its planet's orbital plane", () => {
     const model = sceneModelOf(statePopulated(populatedBodiesWith(withoutRingNormal)));
     const planet = recordOf(model, `${FIXTURE_SYSTEM}.0100`);

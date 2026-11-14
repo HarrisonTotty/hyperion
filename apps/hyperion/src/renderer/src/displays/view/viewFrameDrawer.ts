@@ -157,6 +157,11 @@ export interface ViewFrameInputs {
    */
   readonly floorLowest?: boolean | undefined;
   /**
+   * Whether its frame-rate floor has stepped it down (`BudgetedScale.airStepped`), which sheds the
+   * ring's shadow on its planet (plan R11, R11.T9.a); `false` where absent.
+   */
+  readonly floorStepped?: boolean | undefined;
+  /**
    * Its budget's internal scale, a photorealistic frame's (`ViewBudget.renderScale`), of the render
    * resolution (`renderViewport`).
    */
@@ -814,6 +819,7 @@ export class ViewFrameDrawer {
         atmosphereSetting: inputs.atmosphereSetting,
         atmosphereLevers: inputs.atmosphereLevers,
         floorLowest: inputs.floorLowest,
+        floorStepped: inputs.floorStepped,
         exposureScale: exposed,
         white: inputs.white,
         list: { ...list, sprites: spritesAtScale(list.sprites, viewport, internal) },

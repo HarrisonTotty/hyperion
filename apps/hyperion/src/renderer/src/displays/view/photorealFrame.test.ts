@@ -55,7 +55,8 @@ import { IDENTITY_ROTATION } from "../../view/coords/rotation";
 import type { TextureHandle } from "../../view/engine/types";
 import type { ClassMapSource } from "../../view/terrain/classMap";
 import { sceneHostDiscs } from "../../view/lighting/hostLights";
-import type { ViewScene } from "../../view/scene/model";
+import type { ViewRing, ViewScene } from "../../view/scene/model";
+import { aViewRing } from "../../test/ringFixtures";
 import {
   frameGlareAir,
   glareOccluders,
@@ -112,12 +113,19 @@ function phaseRun(rotated: boolean): ReturnType<typeof startRun> {
 }
 
 async function frameOfPhaseScene(
-  sources: Pick<PhotorealInputs, "classMaps" | "reliefs" | "terrain" | "atmosphereFailed"> = {},
+  sources: Partial<
+    Pick<
+      PhotorealInputs,
+      "classMaps" | "reliefs" | "terrain" | "atmosphereFailed" | "setting" | "floorStepped"
+    >
+  > = {},
   rotated = false,
   presentedPx: Viewport = VIEWPORT,
+  rings: ReadonlyArray<ViewRing> = [],
 ): Promise<ReturnType<typeof photorealFrame>> {
   const engine = await countingRenderEngine();
-  const run = phaseRun(rotated);
+  const plain = phaseRun(rotated);
+  const run = rings.length === 0 ? plain : { ...plain, scene: { ...plain.scene, rings } };
   const pose = runPose(run);
   const camera = { pose, fovXRad: (run.camera.fovDeg * Math.PI) / 180 };
   const list = buildWireframeDrawList(run.scene, camera, VIEWPORT, TOKENS, {
@@ -323,6 +331,40 @@ function sliceScene() {
   const scene = viewSceneOf(model, shipFrameOf(model));
   return { scene, pose: runPose(startServerRun(scene)) };
 }
+
+/** The phase scene's giant's ring, from 1.2 to 2.3 of its radius, in its equator's plane. */
+function giantRing(): ViewRing {
+  const giant = startRun(phaseScene()).scene.bodies.find((body) => body.id === PHASE_GIANT);
+  const radiusM = giant?.radiusM ?? 0;
+  return aViewRing(PHASE_GIANT, 1.2 * radiusM, 2.3 * radiusM, vec3(0, 0, 1));
+}
+
+describe("the ring's shadow on its planet in a frame (R11.T9.a)", () => {
+  /** Which of the frame's lit bodies carry a ring for its shadow. */
+  async function ringedBodies(
+    inputs: Pick<PhotorealInputs, "setting" | "floorStepped">,
+  ): Promise<ReadonlyArray<string>> {
+    const frame = await frameOfPhaseScene(inputs, false, VIEWPORT, [giantRing()]);
+    return frame.bodies.filter((body) => body.ring !== undefined).map((body) => body.id);
+  }
+
+  it("gives the ringed body its ring on the high setting, and no other body one", async () => {
+    expect(await ringedBodies({ setting: "high" })).toEqual([PHASE_GIANT]);
+    const giant = (await frameOfPhaseScene({}, false, VIEWPORT, [giantRing()])).bodies.find(
+      (body) => body.id === PHASE_GIANT,
+    );
+    expect(giant?.ring?.normal).toEqual(vec3(0, 0, 1));
+  });
+
+  it("gives none on the low setting, whose ringShadowOnBody is off", async () => {
+    expect(await ringedBodies({ setting: "low" })).toEqual([]);
+  });
+
+  it("sheds it while the frame-rate floor holds the view stepped down, and gives it back once calm", async () => {
+    expect(await ringedBodies({ setting: "high", floorStepped: true })).toEqual([]);
+    expect(await ringedBodies({ setting: "high", floorStepped: false })).toEqual([PHASE_GIANT]);
+  });
+});
 
 describe("a server scene's lit bodies (R07.T2.b)", () => {
   it("shade a body with its sections' figure and photometry, and pass its rotation", () => {

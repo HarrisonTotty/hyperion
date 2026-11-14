@@ -10,6 +10,7 @@ import type {
 } from "@hyperion/protocol";
 
 import type { Vec3 } from "../../geometry/vec3";
+import type { RingShape } from "../rings/ringProfile";
 import type { KeplerOrbit } from "../../lib/orbit";
 import type { SystemPlace } from "../../lib/scene/model";
 import type { WireAppearance } from "../appearance/fromWire";
@@ -216,15 +217,13 @@ export function bodyKindSymbol(kind: ViewBodyKind): BodyMarkSymbol {
 /**
  * A body's ring: an annulus in its own plane, the one its normal gives: its planet's local
  * Laplace plane, the equatorial plane well inside the planet's Laplace radius (plan 14,
- * P14.T56.a), or the planet's orbital plane from a server that sends no ring normal.
+ * P14.T56.a), or the planet's orbital plane from a server that sends no ring normal. Its kind,
+ * material, optical depth and gaps (plan 14's `RingDto`) are what its photometry and shadows read
+ * (plan R11, R11.T9; `rings/ringProfile.ts`' {@link RingShape}).
  */
-export interface ViewRing {
+export interface ViewRing extends RingShape {
   /** The ringed body. */
   readonly body: BodyIdHex;
-  /** The inner edge's radius, m. */
-  readonly innerRadiusM: number;
-  /** The outer edge's radius, m. */
-  readonly outerRadiusM: number;
   /** The ring plane's unit normal, along the galactic axes. */
   readonly normal: Vec3;
 }

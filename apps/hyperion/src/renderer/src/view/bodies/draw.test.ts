@@ -105,6 +105,9 @@ import {
   HOT_GIANT_DAYSIDE_K,
   HOT_GIANT_RADIUS_M,
 } from "../../test/glowingAirs";
+import { aViewRing } from "../../test/ringFixtures";
+import { ringProfile } from "../rings/ringProfile";
+import { ringShadowRecordOf } from "../rings/ringShadows";
 
 const VIEWPORT: Viewport = { widthPx: 1920, heightPx: 1080 };
 const CAMERA: ProjectionCamera = { orientation: IDENTITY_QUATERNION, fovXRad: Math.PI / 3 };
@@ -1427,6 +1430,21 @@ function f32(values: ReadonlyArray<number>): number[] {
 }
 
 describe("the records", () => {
+  it("gives a ringed body's record its ring in units of its own a, and a body without none (R11.T9.a)", () => {
+    const { body, hosts } = scene(6.371e6 / Math.sin(40 / PX_PER_RAD), 0);
+    const a = body.figure.equatorialRadiusM;
+    const ring = aViewRing(body.id, 1.2 * a, 2.3 * a, vec3(0, 0, 1));
+    const ringed: LitBodyInput = {
+      ...body,
+      ring: { profile: ringProfile(ring), normal: ring.normal },
+    };
+    const [withRing] = planLitBodies([ringed], hosts, OPTIONS, new Map([[body.id, "disc"]])).discs;
+    const [without] = planLitBodies([body], hosts, OPTIONS, new Map([[body.id, "disc"]])).discs;
+    expect(withRing?.ring).toEqual(ringShadowRecordOf(ringProfile(ring), ring.normal, a));
+    expect(withRing?.ring?.innerOverA).toBeCloseTo(1.2, 12);
+    expect(without?.ring).toBeUndefined();
+  });
+
   it("packs DISC_ROWS rows per disc with the law, the lights, the annuli and the occluders where the shader reads them", () => {
     const { body, hosts } = scene(6.371e6 / Math.sin(40 / PX_PER_RAD), 0);
     const second: PlacedLight = {
@@ -2178,7 +2196,7 @@ describe("the renderer", () => {
         released.push(event.name);
       }
     });
-    // Sixteen discs need 16 × 4,928 bytes (DISC_ROWS rows of 16), past the 16,384 two took.
+    // Sixteen discs need 16 × 5,088 bytes (DISC_ROWS rows of 16), past the 16,384 two took.
     const many = planOf(16);
     expect(many.discs).toHaveLength(16);
     renderer.draws(many);

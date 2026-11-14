@@ -1672,8 +1672,9 @@ export interface AtmosphereLeversOverride {
  * table, the lever's way back; and the lit terrain's alone (perf-bodies-near-ground):
  * `terrain-unshaded` forms its fragment's shading normal and cascades' lit fraction but not its
  * light, `terrain-no-cascades` reads no cascade, `terrain-no-horizon` no horizon map and
- * `terrain-no-maturity` no maturity node. Each but `per-fragment` is a measurement's picture, never
- * a player's.
+ * `terrain-no-maturity` no maturity node; and `no-ring-shadow` forms no ring's shadow on a ringed
+ * body's disc and figure (plan R11, R11.T9.a). Each but `per-fragment` is a measurement's picture,
+ * never a player's.
  */
 export type LitProbeName =
   | "transmittance-one"
@@ -1683,7 +1684,8 @@ export type LitProbeName =
   | "terrain-unshaded"
   | "terrain-no-cascades"
   | "terrain-no-horizon"
-  | "terrain-no-maturity";
+  | "terrain-no-maturity"
+  | "no-ring-shadow";
 
 /**
  * The terrain golden a terrain run's kept scene serves in the server's place: `TERRAIN TEST`'s

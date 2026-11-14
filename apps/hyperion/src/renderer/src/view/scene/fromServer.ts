@@ -500,11 +500,16 @@ export function viewSceneFromServer(
     if (planet === undefined) {
       continue;
     }
+    const ring = record.population.value;
     rings.push({
       body: planet.id,
-      innerRadiusM: record.population.value.innerEdgeM,
-      outerRadiusM: record.population.value.outerEdgeM,
-      normal: record.population.value.normal ?? planet.orbitNormal ?? GALACTIC_NORTH,
+      ringKind: ring.ringKind,
+      material: ring.material,
+      innerRadiusM: ring.innerEdgeM,
+      outerRadiusM: ring.outerEdgeM,
+      opticalDepth: ring.opticalDepth,
+      gapRadiiM: ring.gaps.map((gap) => gap.radiusM),
+      normal: ring.normal ?? planet.orbitNormal ?? GALACTIC_NORTH,
     });
   }
 

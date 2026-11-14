@@ -24,6 +24,13 @@ import type { Rgb } from "../photometry/toneCurve";
 import { AU_M } from "../scenes/kept";
 import bodyDiscWgsl from "../shaders/bodyDisc.wgsl?raw";
 import maturityNodesWgsl from "../shaders/maturityNodes.wgsl?raw";
+import {
+  MAX_RING_SHADOW_BANDS,
+  packRingShadowRows,
+  RING_SHADOW_ROWS,
+  type RingShadowRecord,
+} from "../rings/ringShadows";
+import ringShadowWgsl from "../rings/shaders/ringShadow.wgsl?raw";
 import { faceUvToXyz, stToUv } from "../terrain/cube";
 import {
   MATURITY_CODE_MAX,
@@ -44,6 +51,7 @@ import {
   discSamples,
   FINE_DISC_PX,
   FIRST_NODE_ROW,
+  FIRST_RING_SHADOW_ROW,
   type OrientedClassMap,
   packDiscRecords,
   pointSampleDisc,
@@ -574,6 +582,55 @@ function slopeAt(
   return mapped(constantNormalMap(5, normal, q, 0.3), law, elsewhere);
 }
 
+/** A record's ring rows as `packDiscRecords` writes them (R11.T9.a). */
+function ringRowsOf(record: DiscRecord): number[] {
+  return [
+    ...packDiscRecords([record]).subarray(
+      FIRST_RING_SHADOW_ROW * 4,
+      (FIRST_RING_SHADOW_ROW + RING_SHADOW_ROWS) * 4,
+    ),
+  ];
+}
+
+describe("a ringed body's disc under its ring's shadow (R11.T9.a)", () => {
+  /** A ring in the body's equatorial plane z = 0, from 1.2 to 2.3 radii, τ 0.8. */
+  const RING: RingShadowRecord = {
+    normal: vec3(0, 0, 1),
+    innerOverA: 1.2,
+    bands: [{ outerOverA: 2.3, tau: 0.8 }],
+  };
+  /** A star above the ring plane, its μ₀ against the plane's normal 1 ÷ √5. */
+  const TOWARDS = normalise(vec3(1, 0, 0.5));
+
+  it("packs the record's ring in its ring rows, and none for a body that casts none", () => {
+    const open = litBy(TOWARDS);
+    expect(ringRowsOf({ ...open, ring: RING })).toEqual([...packRingShadowRows(RING)]);
+    expect(ringRowsOf(open)).toEqual(Array.from({ length: RING_SHADOW_ROWS * 4 }, () => 0));
+  });
+
+  it("dims a point whose star shines through the ring by exp(−τ ÷ μ₀), its sky light with it, and leaves one the ring does not shade", () => {
+    const open = litBy(TOWARDS);
+    const ringed: DiscRecord = { ...open, ring: RING };
+    // South of the plane, 20° down: its ray to the star crosses the plane at 1.62 radii.
+    const south = vec3(Math.cos(20 * RAD), 0, -Math.sin(20 * RAD));
+    // North of it, on the star's side: its ray never crosses the plane.
+    const north = vec3(Math.cos(20 * RAD), 0, Math.sin(20 * RAD));
+    // The star 10⁶ radii off ({@link litBy}): its direction from the point, parallax and all.
+    const towardsFrom = (q: Vec3): Vec3 => normalise(sub(scale(TOWARDS, 1e6), q));
+    for (const [q, expected] of [
+      [south, Math.exp(-0.8 / towardsFrom(south).z)],
+      [north, 1],
+    ] as const) {
+      const lit = shadeDiscPoint(open, CAMERA, q, scale(q, -1), AIR).radiance;
+      const shaded = shadeDiscPoint(ringed, CAMERA, q, scale(q, -1), AIR).radiance;
+      for (const c of [0, 1, 2] as const) {
+        expect(lit[c]).toBeGreaterThan(0);
+        expect(shaded[c] / lit[c]).toBeCloseTo(expected, 12);
+      }
+    }
+  });
+});
+
 /** {@link litBy}'s sphere under `surface`, lit by one point-like star towards `towards`. */
 function recordOver(
   towards: Vec3,
@@ -833,12 +890,22 @@ function matured(
 describe("a disc under its class map's maturity (R10.T1.c)", () => {
   const NODES = oneClassNodes([0.3, 0.25, 0.2]);
 
-  it("carries as many rows as the shader, its node rows from the shader's first", () => {
+  it("carries as many rows as the shader, its node rows and ring rows from the shader's first", () => {
     expect([
       wgslConstant(bodyDiscWgsl, "DISC_ROWS"),
       wgslConstant(bodyDiscWgsl, "FIRST_NODE_ROW"),
-    ]).toEqual([DISC_ROWS, FIRST_NODE_ROW]);
-    expect(DISC_ROWS).toBe(FIRST_NODE_ROW + MAX_DISC_CLASSES * MATURITY_NODES);
+      wgslConstant(bodyDiscWgsl, "FIRST_RING_SHADOW_ROW"),
+      wgslConstant(ringShadowWgsl, "RING_SHADOW_ROWS"),
+      wgslConstant(ringShadowWgsl, "RING_SHADOW_MAX_BANDS"),
+    ]).toEqual([
+      DISC_ROWS,
+      FIRST_NODE_ROW,
+      FIRST_RING_SHADOW_ROW,
+      RING_SHADOW_ROWS,
+      MAX_RING_SHADOW_BANDS,
+    ]);
+    expect(FIRST_RING_SHADOW_ROW).toBe(FIRST_NODE_ROW + MAX_DISC_CLASSES * MATURITY_NODES);
+    expect(DISC_ROWS).toBe(FIRST_RING_SHADOW_ROW + RING_SHADOW_ROWS);
     // K from the nodes' library, which the shader composes and does not restate.
     expect(wgslConstant(maturityNodesWgsl, "MATURITY_NODES")).toBe(MATURITY_NODES);
     expect(bodyDiscWgsl).not.toMatch(/const MATURITY_NODES/u);

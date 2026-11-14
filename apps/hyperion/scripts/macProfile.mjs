@@ -24,6 +24,13 @@
 //       --out target/mac-profile-decked --settings none --no-sweep
 //       --levers surface-lobes,decked-air-surface,limb-rays,march-sources
 //
+// The third is the ringed giant's, the served giant 41ffecb1ffc00013.0400 (plan R11, R11.T9.a),
+// whose disc alone the ring-shadow-on-body pair's sides draw apart, its ring's shadow formed and
+// not (`MAC_PROFILE_BODY_LEVERS` again):
+//
+//   node --no-warnings scripts/macProfile.mjs --machine <text> --body 41ffecb1ffc00013.0400
+//       --out target/mac-profile-ringed --settings none --no-sweep --levers ring-shadow-on-body
+//
 // --out
 // (default target/mac-profile/; a relative path is the shell's, made absolute once as the batch
 // starts, so the server's data and every launch's files land under the one directory) holds the batch: each kept run under runs/<id>/ (its timing file and
@@ -59,8 +66,9 @@
 // names of `MAC_PROFILE_LEVERS` (limb-rays, march-sources, surface-lobes, decked-air-surface,
 // lit-per-fragment, composite-per-pixel, occlusion, strides, far-cascades, disc-cells,
 // figure-shading, the lit terrain's probes terrain-unshaded, terrain-no-cascades,
-// terrain-no-horizon and terrain-no-maturity, terrain-planetshine, selection-scale, shading,
-// shading-occlusion, decoration-sets, pacing-120); with none given it runs every pair but decked-air-surface, and --levers all runs
+// terrain-no-horizon and terrain-no-maturity, ring-shadow-on-body, terrain-planetshine,
+// selection-scale, shading, shading-occlusion, decoration-sets, pacing-120); with none given it runs
+// every pair but decked-air-surface and ring-shadow-on-body, and --levers all runs
 // every pair; --settings none and --levers none drop those runs. pacing-120
 // (R07.T19) runs both sides on a 120 Hz offscreen frame clock (`--frame-rate 120`), frames counted
 // (`--frame-pacing display`) against each view at its own rate (`rate`), each window's callbacks,

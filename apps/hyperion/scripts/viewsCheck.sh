@@ -22,7 +22,7 @@
 #                              [--march-sources table|per-step]
 #                              [--lit-probe transmittance-one|planetshine-centre|no-annuli|per-fragment
 #                                           |terrain-unshaded|terrain-no-cascades|terrain-no-horizon
-#                                           |terrain-no-maturity]
+#                                           |terrain-no-maturity|no-ring-shadow]
 #                              [--instance-probe <COUNT>]]]
 #
 # --setting is VIEW's quality setting and the window's size: high 1920 x 1080, low 1280 x 720.
@@ -177,8 +177,9 @@
 # sources' table, the lever's way back (per-fragment), the A/B of the lit fragment's cost; or, the
 # lit terrain's material alone (perf-bodies-near-ground), with its fragment's light not formed
 # (terrain-unshaded), or with no cascade (terrain-no-cascades), horizon-map (terrain-no-horizon) or
-# maturity-node (terrain-no-maturity) read; its files end -lit-<probe>, and every picture but
-# per-fragment's is not a player's.
+# maturity-node (terrain-no-maturity) read; or, a ringed body's disc and figure alone (plan R11,
+# R11.T9.a), with no ring's shadow formed (no-ring-shadow); its files end -lit-<probe>, and every
+# picture but per-fragment's is not a player's.
 # --instance-probe <COUNT> (plan R14, R14.T5.d; the Mac pair instances) draws COUNT test particles,
 # 1 to 4194304, in VIEW's primary each frame, placed on the GPU in its view, culled by the instance
 # cull and drawn by bucket, in a pass of their own before the discs ("instance probe"), where the

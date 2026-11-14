@@ -198,6 +198,15 @@ export const MAC_PROFILE_LEVERS: ReadonlyArray<MacProfileLever> = [
     countSides: false,
   })),
   {
+    name: "ring-shadow-on-body",
+    decides:
+      "R11.T9.a, the ring's shadow on its planet: as drawn (A) against not formed (B), a probe of its cost (lean: 0.1 ms at most); its sides differ on a ringed body alone",
+    a: [],
+    b: ["--lit-probe", "no-ring-shadow"],
+    ratios: [1],
+    countSides: false,
+  },
+  {
     name: "terrain-planetshine",
     decides:
       "perf-bodies-near-ground, the terrain's planetshine: every source its record carries (A) against the brightest alone (B)",
@@ -318,11 +327,16 @@ export interface MacProfileMatrixOptions {
 }
 
 /**
- * The pairs the defaults leave out: decked-air-surface, whose sides draw apart only on a decked
- * air's body, such as 42002cae00000004.0300, and alike on the default body, which has no deck.
- * `--levers` names it, on such a body's batch.
+ * The pairs the defaults leave out, whose sides draw apart only on a body of a kind the default
+ * body is not, and alike on it: decked-air-surface, on a decked air's body, such as
+ * 42002cae00000004.0300; and ring-shadow-on-body (R11.T9.a), on a ringed body whose ring's shadow
+ * crosses its lit disc, such as the served giant 41ffecb1ffc00013.0400 (a lean, 2026-11-13: its
+ * rings were drawn on 2026-11-04, not checked since). `--levers` names each, on such a body's batch.
  */
-export const MAC_PROFILE_BODY_LEVERS: ReadonlyArray<string> = ["decked-air-surface"];
+export const MAC_PROFILE_BODY_LEVERS: ReadonlyArray<string> = [
+  "decked-air-surface",
+  "ring-shadow-on-body",
+];
 
 /**
  * The owner's batch: both settings at both ratios, every pair but {@link MAC_PROFILE_BODY_LEVERS}'

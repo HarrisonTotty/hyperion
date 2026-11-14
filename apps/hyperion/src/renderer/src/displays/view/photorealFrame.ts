@@ -60,7 +60,9 @@ import {
   type QualitySetting,
   SETTINGS,
 } from "../../view/quality/qualitySetting";
-import { sceneOrigins, type ViewScene } from "../../view/scene/model";
+import { ringProfile } from "../../view/rings/ringProfile";
+import { shadowingRing } from "../../view/rings/ringShadows";
+import { sceneOrigins, type ViewRing, type ViewScene } from "../../view/scene/model";
 import type { BandLayer } from "../../view/sky/band";
 import type { ClassMapSource } from "../../view/terrain/classMap";
 import type { HandoverReliefSource } from "../../view/terrain/handover";
@@ -107,6 +109,12 @@ export interface PhotorealInputs {
   readonly atmosphereLevers?: AtmosphereLeversOverride | undefined;
   /** Whether its frame-rate floor stands at its lowest step (`PhotorealFrame.floorLowest`). */
   readonly floorLowest?: boolean | undefined;
+  /**
+   * Whether its frame-rate floor has stepped it down (`BudgetedScale.airStepped`), which sheds the
+   * ring's shadow on its planet (plan R11, R11.T9.a; {@link withRingShadows}) until it is calm
+   * again; `false` where absent.
+   */
+  readonly floorStepped?: boolean | undefined;
   /** The exposure scale (`exposureScale`), the target's pre-exposure. */
   readonly exposureScale: number;
   /**
@@ -430,6 +438,34 @@ export function framePlacedLights(
   return placeLights(hostLights(scene, discs), centreOf);
 }
 
+/**
+ * Each lit body with the ring whose shadow falls on it (plan R11, R11.T9.a; Design note 14), where
+ * `ringShadowOnBody` is on: the setting's, as it is on the high setting, while the view's frame-rate
+ * floor has not stepped it down (`PhotorealInputs.floorStepped`). Each takes its densest ring's
+ * provisional profile and plane (`shadowingRing`, `ringProfile`). Off, the low setting or a stepped
+ * floor, no body carries one, and its records' ring rows read none.
+ *
+ * @remarks
+ * Its cost is one `exp` a star a lit fragment of a ringed body, after a walk of at most
+ * `RING_SHADOW_MAX_BANDS` bands (`ringShadow.wgsl`): at most 0.1 ms on the target, a lean
+ * (2026-11-13) that the owner's Mac pair `ring-shadow-on-body` measures (`main/macProfile.ts`).
+ */
+export function withRingShadows(
+  bodies: ReadonlyArray<LitBodyInput>,
+  rings: ReadonlyArray<ViewRing>,
+  ringShadowOnBody: boolean,
+): LitBodyInput[] {
+  if (!ringShadowOnBody || rings.length === 0) {
+    return [...bodies];
+  }
+  return bodies.map((body) => {
+    const ring = shadowingRing(rings.filter((each) => each.body === body.id));
+    return ring === null
+      ? body
+      : { ...body, ring: { profile: ringProfile(ring), normal: ring.normal } };
+  });
+}
+
 /** The photorealistic frame of a stage's run. */
 export function photorealFrame(inputs: PhotorealInputs): PhotorealFrame {
   const { run, pose, viewport, sky, exposureScale } = inputs;
@@ -494,14 +530,19 @@ export function photorealFrame(inputs: PhotorealInputs): PhotorealFrame {
   // A disc stands on its ground beneath a gas envelope's air only where the frame draws that air.
   const withAir = new Set(atmospheres.map((each) => each.id));
   const groundOf = inputs.discGrounds;
-  const litBodies = litBodiesOf(
-    scene,
-    pose,
-    discs,
-    inputs.classMaps,
-    { reliefs: inputs.reliefs, terrain: inputs.terrain },
-    inputs.groundFields,
-    groundOf === undefined ? undefined : (id) => (withAir.has(id) ? groundOf(id) : null),
+  const litBodies = withRingShadows(
+    litBodiesOf(
+      scene,
+      pose,
+      discs,
+      inputs.classMaps,
+      { reliefs: inputs.reliefs, terrain: inputs.terrain },
+      inputs.groundFields,
+      groundOf === undefined ? undefined : (id) => (withAir.has(id) ? groundOf(id) : null),
+    ),
+    scene.rings,
+    // Shed with the floor's step, as decoration is (`decorationAllowed`; the frame rate first).
+    SETTINGS[inputs.setting].ringShadowOnBody && inputs.floorStepped !== true,
   );
   // A disc's glare is of the light that reaches the camera past the frame's bodies.
   const occluders = glareOccluders(litBodies, withAir);

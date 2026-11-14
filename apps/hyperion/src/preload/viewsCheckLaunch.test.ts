@@ -269,6 +269,7 @@ describe("the views check's launch switch", () => {
       "terrain-no-cascades",
       "terrain-no-horizon",
       "terrain-no-maturity",
+      "no-ring-shadow",
     ] as const) {
       const launch: ViewsCheckLaunch = { ...profile, litProbe };
       expect(viewsCheckLaunchFromArgv([viewsCheckSwitch(launch)])).toEqual(launch);

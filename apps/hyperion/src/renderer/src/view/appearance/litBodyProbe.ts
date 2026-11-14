@@ -13,11 +13,13 @@
  * stub and R08's lookups against a body's lighting reader ({@link expectedLighting}), and the
  * `atmosphere` cases each of R08's three lookups, which `smoke/atmosphere.ts` holds against the
  * tables' twin (`tablesCpu.ts`'s `surfaceLightingTwin`) and `smoke/litBody.ts` against a body
- * without an atmosphere. The kernel's results are a pure function of its inputs on one path, so
- * its readback is `bit-exact`.
+ * without an atmosphere. Since R11.T9.a the kernel composes R11's `ringShadow.wgsl` in place of the
+ * stub, its rows {@link PROBE_RING_SHADOW}'s as a private array, and the `ring` cases hold
+ * `ring_shadow_on_body` against `ringShadowOnBody`. The kernel's results are a pure function of its
+ * inputs on one path, so its readback is `bit-exact`.
  */
 import type { KernelPair } from "../engine/kernels";
-import type { Vec3 } from "../../geometry/vec3";
+import { type Vec3, vec3 } from "../../geometry/vec3";
 import {
   AIRLESS_LIGHTING,
   SURFACE_LIGHTING_WGSL,
@@ -28,6 +30,13 @@ import { planetshineIrradiance } from "../lighting/planetshine";
 import { sphereIrradianceFactor } from "../lighting/sphereIrradiance";
 import type { Rgb } from "../photometry/toneCurve";
 import litBodyWgsl from "../shaders/litBody.wgsl?raw";
+import {
+  packRingShadowRows,
+  RING_SHADOW_ROWS,
+  ringShadowOnBody,
+  type RingShadowRecord,
+} from "../rings/ringShadows";
+import ringShadowWgsl from "../rings/shaders/ringShadow.wgsl?raw";
 import { brdfFromTable } from "./brdf";
 import { PHASE_TABLE_SAMPLES, phaseFactorTableOf, type PhotometricLaw } from "./law";
 
@@ -135,8 +144,10 @@ const LOOKUP_CODES: Readonly<Record<AtmosphereLookup, number>> = { sun: 0, sky: 
 const HOOKS_ARGUMENTS = { altitudeM: 1_000, mu: 0.5, latitudeRad: 0.3, azimuthRad: 1.2 } as const;
 
 /**
- * One pinned evaluation of the lighting terms (T6.c), of the hooks (R11's ring-shadow stub and
- * R08's lookups at fixed arguments), of planetshine's (T11), or of one of R08's lookups (R08.T9.b).
+ * One pinned evaluation of the lighting terms (T6.c), of the hooks (R11's ring shadow at a point
+ * {@link PROBE_RING_SHADOW} does not shade, and R08's lookups at fixed arguments), of the ring's
+ * shadow on its planet under {@link PROBE_RING_SHADOW} (R11.T9.a), of planetshine's (T11), or of
+ * one of R08's lookups (R08.T9.b).
  */
 export type LightingProbeCase =
   | {
@@ -155,6 +166,13 @@ export type LightingProbeCase =
       readonly separationRad: number;
     }
   | { readonly kind: "hooks" }
+  | {
+      readonly kind: "ring";
+      /** The lit point from the planet's centre over a, along {@link PROBE_RING_SHADOW}'s axes. */
+      readonly p: Vec3;
+      /** The unit direction towards the star. */
+      readonly sun: Vec3;
+    }
   | {
       readonly kind: "planetshine";
       /** From the point to the source's centre, in the unit of the two lengths below. */
@@ -228,6 +246,11 @@ export function packLightingProbeCases(cases: ReadonlyArray<LightingProbeCase>):
       case "hooks":
         u32[base] = 3;
         break;
+      case "ring":
+        u32[base] = 6;
+        f32.set([probe.p.x, probe.p.y, probe.p.z], base + 8);
+        f32.set([probe.sun.x, probe.sun.y, probe.sun.z], base + 12);
+        break;
       case "planetshine":
         u32[base] = 4;
         f32.set([probe.sourceRadius, probe.centreDistance, probe.horizonRad], base + 2);
@@ -291,10 +314,38 @@ function froundVec3(v: Vec3): Vec3 {
 }
 
 /**
+ * The ring the kernel's `ring_shadow_on_body` reads (R11.T9.a), every figure exact in `f32`: a
+ * Saturn-like ring tilted 26.7° about x, its C, B and A rings with the Cassini Division between B
+ * and A, in Saturn radii.
+ */
+export const PROBE_RING_SHADOW: RingShadowRecord = {
+  normal: froundVec3({ x: 0, y: Math.sin(0.466), z: Math.cos(0.466) }),
+  innerOverA: Math.fround(1.24),
+  bands: [
+    { outerOverA: Math.fround(1.53), tau: Math.fround(0.1) },
+    { outerOverA: Math.fround(1.95), tau: Math.fround(2.2) },
+    { outerOverA: Math.fround(2.03), tau: Math.fround(0.1) },
+    { outerOverA: Math.fround(2.27), tau: Math.fround(0.6) },
+  ],
+};
+
+/** {@link PROBE_RING_SHADOW}'s rows as a WGSL private array, every float exact. */
+function probeRingRowsWgsl(): string {
+  const rows = packRingShadowRows(PROBE_RING_SHADOW);
+  const values = Array.from({ length: RING_SHADOW_ROWS }, (_, i) => {
+    const row = Array.from(rows.subarray(4 * i, 4 * i + 4), (x) => x.toPrecision(9));
+    return `vec4f(${row.join(", ")})`;
+  });
+  return `var<private> probe_ring_rows = array<vec4f, ${RING_SHADOW_ROWS}>(\n  ${values.join(",\n  ")}\n);`;
+}
+
+/**
  * The reference's values for each lighting case, at its inputs rounded to `f32`: the horizon
- * factor, the eclipse term's visible fraction, the hooks' (R11's ring-shadow stub, 1, and R08's
- * sun transmittance and sky irradiance at the hooks' arguments, each's first channel), planetshine's
- * irradiance factor, or an R08 lookup's three channels (R08.T9.b).
+ * factor, the eclipse term's visible fraction, the hooks' (R11's ring shadow at a point the pinned
+ * ring does not shade, 1, and R08's sun transmittance and sky irradiance at the hooks' arguments,
+ * each's first channel), the ring's shadow at the case's point and star (R11.T9.a, its twin
+ * `ringShadowOnBody`), planetshine's irradiance factor, or an R08 lookup's three channels
+ * (R08.T9.b).
  *
  * @param lighting - The lookups of the body whose tables the kernel binds: a twin of them, or
  *   {@link AIRLESS_LIGHTING} (R07's stubs' 1 and 0) for the one-texel defaults.
@@ -327,9 +378,16 @@ export function expectedLighting(
       case "hooks": {
         const { altitudeM, mu, latitudeRad, azimuthRad } = HOOKS_ARGUMENTS;
         const args = [altitudeM, mu, latitudeRad, azimuthRad, 0, 0] as const;
-        values = [1, lookupOf(lighting, "sun", ...args)[0], lookupOf(lighting, "sky", ...args)[0]];
+        values = [
+          ringShadowOnBody(PROBE_RING_SHADOW, vec3(1, 2, 3), vec3(0, 0, 1)),
+          lookupOf(lighting, "sun", ...args)[0],
+          lookupOf(lighting, "sky", ...args)[0],
+        ];
         break;
       }
+      case "ring":
+        values = [ringShadowOnBody(PROBE_RING_SHADOW, froundVec3(probe.p), froundVec3(probe.sun))];
+        break;
       case "atmosphere":
         values = [
           ...lookupOf(
@@ -368,7 +426,18 @@ export function expectedLighting(
  */
 export const LIT_BODY_PROBE: KernelPair = {
   name: "R07 lit body twin",
-  reference: `${SURFACE_LIGHTING_WGSL}${litBodyWgsl}
+  reference: `${SURFACE_LIGHTING_WGSL}${litBodyWgsl}${ringShadowWgsl}
+// R11's ring rows (\`ringShadow.wgsl\`), the probe's pinned ring, in the probe's own axes.
+${probeRingRowsWgsl()}
+
+fn ring_shadow_row(i : u32) -> vec4f {
+  return probe_ring_rows[min(i, RING_SHADOW_ROWS - 1u)];
+}
+
+fn ring_shadow_axes(v : vec3f) -> vec3f {
+  return v;
+}
+
 struct ProbeCase {
   a : vec3f,
   l : f32,
@@ -418,7 +487,7 @@ fn run_lighting(index : u32) {
   } else if (c.kind == 2u) {
     value.x = eclipse_visible(c.p0, DiscAnnuli(c.outer, c.flux, c.annuli), c.p3, c.p4);
   } else if (c.kind == 3u) {
-    // R11's stub ignores its arguments; R08's lookups take the hooks' (litBodyProbe.ts).
+    // R11's ring at a point it does not shade; R08's lookups take the hooks' (litBodyProbe.ts).
     value.x = ring_shadow_on_body(vec3f(1.0, 2.0, 3.0), vec3f(0.0, 0.0, 1.0)).x;
     value.y = atmosphere_sun_transmittance(1000.0, 0.5, 0.3, 1.2, 0u).x;
     value.z = atmosphere_sky_irradiance(1000.0, 0.5, 0.3, 0u).x;
@@ -435,6 +504,9 @@ fn run_lighting(index : u32) {
     } else {
       value = vec4f(atmosphere_source_transmittance(c.p0, c.p1, c.p2, c.p3, c.p4, curve), 0.0);
     }
+  } else if (c.kind == 6u) {
+    // R11's ring shadow (R11.T9.a): the point in outer, the star's direction in flux.
+    value.x = ring_shadow_on_body(c.outer.xyz, c.flux.xyz).x;
   }
   lighting_results[index] = value;
 }

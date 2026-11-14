@@ -146,14 +146,18 @@ describe("the Mac batch's matrix", () => {
     expect(MAC_PROFILE_DEFAULTS.levers).toContain("decoration-sets");
   });
 
-  it("leaves the decked air's ground out of the defaults, whose body has no deck, and runs it when named (R08)", () => {
-    expect(MAC_PROFILE_BODY_LEVERS).toEqual(["decked-air-surface"]);
+  it("leaves the decked air's ground and the ring's shadow out of the defaults, whose body has no deck or ring, and runs each when named (R08, R11.T9.a)", () => {
+    expect(MAC_PROFILE_BODY_LEVERS).toEqual(["decked-air-surface", "ring-shadow-on-body"]);
     expect(MAC_PROFILE_DEFAULTS.levers).toEqual(
-      MAC_PROFILE_LEVERS.map((lever) => lever.name).filter((name) => name !== "decked-air-surface"),
+      MAC_PROFILE_LEVERS.map((lever) => lever.name).filter(
+        (name) => name !== "decked-air-surface" && name !== "ring-shadow-on-body",
+      ),
     );
     expect(
       macProfileMatrix(MAC_PROFILE_DEFAULTS).some(
-        (run) => run.place.kind === "pair" && run.place.lever === "decked-air-surface",
+        (run) =>
+          run.place.kind === "pair" &&
+          (run.place.lever === "decked-air-surface" || run.place.lever === "ring-shadow-on-body"),
       ),
     ).toBe(false);
     expect([
@@ -173,6 +177,15 @@ describe("the Mac batch's matrix", () => {
       "decked-air-surface-high-dpr1-b1",
       "decked-air-surface-high-dpr1-a2",
       "decked-air-surface-high-dpr1-b2",
+    ]);
+    const ringed = macProfileMatrix({ ...MAC_PROFILE_DEFAULTS, levers: ["ring-shadow-on-body"] });
+    expect(
+      ringed.filter((run) => run.place.kind === "pair").map((run) => [run.id, run.args]),
+    ).toEqual([
+      ["ring-shadow-on-body-high-dpr1-a1", []],
+      ["ring-shadow-on-body-high-dpr1-b1", ["--lit-probe", "no-ring-shadow"]],
+      ["ring-shadow-on-body-high-dpr1-a2", []],
+      ["ring-shadow-on-body-high-dpr1-b2", ["--lit-probe", "no-ring-shadow"]],
     ]);
   });
 

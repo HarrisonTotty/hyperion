@@ -5,6 +5,7 @@ import { wgslFunctions, wgslReached } from "../../test/atmosphereWgsl";
 import { type CountingRenderEngine, countingRenderEngine } from "../../test/countingRenderEngine";
 import { aHostDisc, aLitBody } from "../../test/litFixtures";
 import {
+  DISC_ROWS,
   type DiscRecord,
   discCellJobs,
   packDiscRecords,
@@ -302,16 +303,16 @@ describe("the disc's air in its twin (R08.T16.b)", () => {
     const { air: _air, ...plain } = aired;
     const packed = packDiscRecords([plain, aired]);
     const rows = packed.length / 4;
-    const discRows = 2 * 308;
+    const discRows = 2 * DISC_ROWS;
     expect(rows).toBe(discRows + DISC_AIR_ROWS);
     expect(packed[46 * 4 + 2]).toBe(0);
-    expect(packed[(308 + 46) * 4 + 2]).toBe(discRows);
+    expect(packed[(DISC_ROWS + 46) * 4 + 2]).toBe(discRows);
     expect(Array.from(packed.subarray(discRows * 4))).toEqual(
       Array.from(packDiscAir(AIR)).map((v) => Math.fround(v)),
     );
     // A plan without air packs as it did: no block, row 46's z 0.
     const bare = packDiscRecords([plain]);
-    expect([bare.length / 4, bare[46 * 4 + 2]]).toEqual([308, 0]);
+    expect([bare.length / 4, bare[46 * 4 + 2]]).toEqual([DISC_ROWS, 0]);
   });
 
   it("shades a record with air's cells with the kernel's air form alone, and none without it", () => {

@@ -102,6 +102,12 @@ import {
 import { oblateAlbedoScale } from "./oblate";
 import { discAzimuthOf, discTableAt, discThermalAt } from "../atmosphere/discTable";
 import { gravityRatio } from "../atmosphere/oblate";
+import {
+  packRingShadowRows,
+  RING_SHADOW_ROWS,
+  ringShadowOnBody,
+  type RingShadowRecord,
+} from "../rings/ringShadows";
 
 /**
  * A sample is lit directly where a star's horizon and eclipse terms exceed this share of the
@@ -116,11 +122,18 @@ export const LIT_IRRADIANCE = 1e-5;
 export const FIRST_NODE_ROW = 52;
 
 /**
- * `vec4f` rows per disc in the shader's `discs` buffer: R07's and R10's 52 and a maturity node row
- * for each of K nodes of each of {@link MAX_DISC_CLASSES} classes, 308 rows, 4,928 bytes a disc
- * (832 before R10.T1.c).
+ * The first of a record's ring rows (plan R11, R11.T9.a; `ringShadow.wgsl`'s `ring_shadow_row`),
+ * past the maturity nodes: R11's ring as its shadow on the body reads it, all 0 for a body that
+ * casts none ({@link DiscRecord.ring}).
  */
-export const DISC_ROWS = FIRST_NODE_ROW + MAX_DISC_CLASSES * MATURITY_NODES;
+export const FIRST_RING_SHADOW_ROW = FIRST_NODE_ROW + MAX_DISC_CLASSES * MATURITY_NODES;
+
+/**
+ * `vec4f` rows per disc in the shader's `discs` buffer: R07's and R10's 52, a maturity node row
+ * for each of K nodes of each of {@link MAX_DISC_CLASSES} classes, and R11's ring rows
+ * (`RING_SHADOW_ROWS`), 318 rows, 5,088 bytes a disc (308 before R11.T9.a, 832 before R10.T1.c).
+ */
+export const DISC_ROWS = FIRST_RING_SHADOW_ROW + RING_SHADOW_ROWS;
 
 /** The stars that light one disc at most: the brightest two, `MAX_BODY_LIGHTS`. */
 export const MAX_DISC_LIGHTS = MAX_BODY_LIGHTS;
@@ -1136,6 +1149,12 @@ export interface DiscRecord {
    * airless, or by the full passes inside the boundary, when the plain kernels draw it as before.
    */
   readonly air?: DiscAir;
+  /**
+   * Its ring as the ring's shadow on it reads it (plan R11, R11.T9.a; `ringShadows.ts`), along the
+   * galactic axes and in units of a, which the record's ring rows carry; absent for a body that
+   * casts none, and for every body where R11's `ringShadowOnBody` is off.
+   */
+  readonly ring?: RingShadowRecord;
 }
 
 /** The pole's stretch M x = x + (a ÷ c − 1)(x · p) p. */
@@ -1336,6 +1355,9 @@ export function packDiscRecords(
       const c = occluder.centre;
       put(FIRST_OCCLUDER_ROW + slot, [c.x, c.y, c.z, occluder.radius]);
     });
+    if (record.ring !== undefined) {
+      out.set(packRingShadowRows(record.ring), base + FIRST_RING_SHADOW_ROW * 4);
+    }
     const secondaries = record.secondaries.slice(0, MAX_DISC_SECONDARIES);
     // y: the first row of its emission block, 0 for none (R08.T18.a); z: of its air block, 0 for
     // none (R08.T16.b).
@@ -1414,6 +1436,8 @@ interface ViewBody {
   readonly lighting: SurfaceLightingReader;
   /** Its emission's star in the view's axes (R08.T18.a); `null` for a record with no emission. */
   readonly emissionStar: Vec3 | null;
+  /** Its ring's shadow record in the view's axes (R11.T9.a); `null` for a record with no ring. */
+  readonly ring: RingShadowRecord | null;
 }
 
 function viewBodyOf(
@@ -1451,6 +1475,7 @@ function viewBodyOf(
     classMap,
     lighting,
     emissionStar: record.emission === undefined ? null : toView(record.emission.star),
+    ring: record.ring === undefined ? null : { ...record.ring, normal: toView(record.ring.normal) },
     lights: record.lights
       .slice(0, MAX_DISC_LIGHTS)
       .map((light) => ({ place: scale(toView(light.direction), light.distance), light })),
@@ -1791,6 +1816,15 @@ function eclipseVisibleAt(
 }
 
 /**
+ * The ring's shadow on the body at `q` towards a star (plan R11, R11.T9.a; `ringShadow.wgsl`'s
+ * `ring_shadow_on_body`), 1 for a body that carries no ring, in the view's axes as the shader takes
+ * it (`ring_shadow_axes`).
+ */
+function ringShadowAt(body: ViewBody, q: Vec3, towards: Vec3): number {
+  return body.ring === null ? 1 : ringShadowOnBody(body.ring, q, towards);
+}
+
+/**
  * The sample's light beyond the boundary (plan R08, R08.T16.b; `discAir.wgsl`'s `disc_air`): its
  * ground's light `ground` dimmed by the march's mean transmittance (the table's alpha at light slot
  * 0), and each light's air: a star's under its eclipse, at its light slot; a planetshine source's at
@@ -1826,6 +1860,7 @@ function airAt(
     }
     const starAngularRadiusRad = Math.asin(Math.min(1, light.radius / distance));
     const visible = eclipseVisibleAt(body, light, q, towards, distance, starAngularRadiusRad);
+    const ring = ringShadowAt(body, q, towards);
     const lit = discTableAt(
       table,
       lnBands,
@@ -1836,7 +1871,7 @@ function airAt(
       discAzimuthOf(normal, toCamera, towards),
     );
     for (const c of CHANNELS) {
-      out[c] += light.illuminance[c] * record.exposureOverPi * lit[c] * visible[c];
+      out[c] += light.illuminance[c] * record.exposureOverPi * lit[c] * visible[c] * ring;
     }
   }
   for (const { place, source } of body.secondaries) {
@@ -1932,9 +1967,12 @@ function shade(body: ViewBody, record: DiscRecord, q: Vec3, ray: Vec3): Shaded {
     }
     const starRadius = Math.asin(Math.min(1, light.radius / distance));
     const visible = eclipseVisibleAt(body, light, q, towards, distance, starRadius);
-    // The sky light shares the point's eclipse: the air above the point lies in the shadow with it.
+    const ring = ringShadowAt(body, q, towards);
+    // The sky light shares the point's eclipse and ring shadow: the air above the point lies in the
+    // shadow with it.
     for (const c of CHANNELS) {
-      radiance[c] += light.illuminance[c] * record.exposureOverPi * meanA[c] * sky[c] * visible[c];
+      radiance[c] +=
+        light.illuminance[c] * record.exposureOverPi * meanA[c] * sky[c] * visible[c] * ring;
     }
     if (horizon <= 0) {
       continue;
@@ -1952,7 +1990,7 @@ function shade(body: ViewBody, record: DiscRecord, q: Vec3, ray: Vec3): Shaded {
     for (const c of CHANNELS) {
       const v = visible[c];
       radiance[c] +=
-        light.illuminance[c] * record.exposureOverPi * reflectance[c] * v * transmitted[c];
+        light.illuminance[c] * record.exposureOverPi * reflectance[c] * v * transmitted[c] * ring;
       lit ||= horizon > LIT_IRRADIANCE && v > LIT_IRRADIANCE;
     }
   }

@@ -438,7 +438,8 @@ const SPLAT_ENTRIES: ReadonlyArray<CatalogueEntry> = [
 /**
  * R07's lit-body shading library (`shaders/litBody.wgsl`, R07.T4.c and T6.c), compiled and run
  * inside its probe kernel, since a library of functions is no material of its own, with R08's
- * surface lighting (`surfaceLighting.wgsl`, R08.T9.b), which every one of these composes.
+ * surface lighting (`surfaceLighting.wgsl`, R08.T9.b) and R11's ring shadow
+ * (`rings/shaders/ringShadow.wgsl`, R11.T9.a), which every one of these composes.
  */
 const LIT_BODY_ENTRIES: ReadonlyArray<CatalogueEntry> = [
   { kind: "compute", spec: LIT_BODY_PROBE },

@@ -1720,6 +1720,8 @@ function ViewStage({
           atmosphereSetting: primaryScale.airStepped ? "low" : paced.setting,
           // Its large discs' limbs at fewer cells while the floor holds its lowest step (R07.T8.i).
           floorLowest: primaryScale.atLowestStep,
+          // The ring's shadow on its planet shed while the floor holds it stepped down (R11.T9.a).
+          floorStepped: primaryScale.airStepped,
           // The scene target at the render resolution times the budget's or controller's scale.
           renderScale,
           // That scale snapped to the floor's steps and held, at whose rendered pixel its lit

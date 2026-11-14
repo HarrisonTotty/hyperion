@@ -16,6 +16,7 @@ import {
   NO_TURN,
   OFF_PLANET_CAMERA,
 } from "../../test/viewFixtures";
+import { aViewRing } from "../../test/ringFixtures";
 import { quaternionFromAxisAngle } from "../camera/quaternion";
 import {
   DEFAULT_FOV_DEG,
@@ -609,9 +610,7 @@ describe("buildWireframeDrawList", () => {
 function ringedScene(): ViewScene {
   return {
     ...scene(),
-    rings: [
-      { body: FIXTURE_PLANET, innerRadiusM: 1e7, outerRadiusM: 1.5e7, normal: vec3(0, 0, 1) },
-    ],
+    rings: [aViewRing(FIXTURE_PLANET, 1e7, 1.5e7, vec3(0, 0, 1))],
   };
 }
 
@@ -678,9 +677,7 @@ describe("buildWireframeDrawList's strokes (R07.T16.d; decision-thin-line-contra
           line.dash === null ? null : { onPx: 2 * line.dash.onPx, offPx: 2 * line.dash.offPx },
         ]);
     const ringed = aMarkedViewScene({
-      rings: [
-        { body: FIXTURE_PLANET, innerRadiusM: 1e7, outerRadiusM: 1.4e7, normal: vec3(0, 0, 1) },
-      ],
+      rings: [aViewRing(FIXTURE_PLANET, 1e7, 1.4e7, vec3(0, 0, 1))],
     });
     const atTwo = build({ ...selected, strokeScale: 2 }, ringed);
     expect({

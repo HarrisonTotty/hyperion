@@ -607,8 +607,12 @@ function ringScene(): ViewScene {
     rings: [
       {
         body: FIXTURE_PLANET,
+        ringKind: "massive",
+        material: "porous_ice",
         innerRadiusM: metresAt(RING_PX.inner),
         outerRadiusM: metresAt(RING_PX.outer),
+        opticalDepth: 1,
+        gapRadiiM: [],
         normal: vec3(0, 0, 1),
       },
     ],
