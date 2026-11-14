@@ -104,8 +104,8 @@ const EXACT_DIFFUSE: [(f64, f64, f64, f64); 12] = [
 ];
 
 /// The δ-PIFM is honest for a dark layer: on each of [`EXACT_DIFFUSE`]'s layers it lies within 10%
-/// below the exact reflectance (0.5–9%), where the δ-Eddington lies up to 0.06 below it and returns
-/// nothing for the darkest (soot's ω about 0.25 among them).
+/// below the exact reflectance (0.5–9%), soot's ω of about 0.25 among them (the δ-Eddington, read
+/// before 32, lay up to 0.06 below it and returned nothing for the darkest).
 #[test]
 fn the_closure_is_honest_for_a_dark_layer() {
     for (tau, omega, g, exact) in EXACT_DIFFUSE {

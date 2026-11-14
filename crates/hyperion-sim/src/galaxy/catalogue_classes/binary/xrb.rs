@@ -13,14 +13,17 @@
 //! The low-mass kinds (a neutron star or a black hole, persistent or transient, and from 27 an
 //! ultracompact or a symbiotic one) are the old populations' and the high-mass kinds (Be/X and
 //! supergiant, and from 27 a black hole beside a supergiant) the young disc's. The class draws all
-//! nine kinds the carving counts from 27 ([`XRB_SAMPLER`],
-//! fitted at 27), each in its share of the engine's members but the black-hole transients, pinned
-//! at the observed share, so that the hosts its row counts are the hosts it draws (P11.T8.b's
-//! fix). The class's total
+//! nine kinds the carving counts from 27 ([`XRB_SAMPLER`], refitted at 32 on the engine's own
+//! pairs, P15.T10.b), each side pinned to its own count, so that the hosts its row counts are the
+//! hosts it draws (P11.T8.b's fix): the black-hole transients at the observed 1,300 of the row's
+//! 10⁴ (Corral-Santana et al. 2016, A&A 587, A61), and from generator version 32 the high-mass
+//! kinds together at 3,000, about the log-centre of the Galaxy's intrinsic 10³–10⁴ Be/X-ray
+//! binaries (Rappaport and van den Heuvel 1982, IAU Symp. 98, 327; recalled, not read at source),
+//! each other kind in its census share of its side ([`XRB_SAMPLER`]'s documentation gives the
+//! pinned supergiant and black-hole high-mass hosts). The class's total
 //! is its row's, `Σ_c r_c n_c` over every component c, with `r_c` the row's hosts per solar mass
 //! formed in c's population × the mass formed per system × its born fraction; the high-mass side
-//! takes its sampler's high-mass share of it over the young thin disc's components (from
-//! generator version 32 the intrinsic 3,000 of the row's 10⁴, P11.T8.b's fix: below),
+//! takes its sampler's high-mass share of it over the young thin disc's components,
 //! and the low-mass side the rest over every other component, each side's components in
 //! proportion to `r_c n_c` (lean, 2026-10-31). A row equal in every population would give the
 //! young disc, a few tenths of a per cent of the mass formed, about 25 high-mass hosts, fewer
