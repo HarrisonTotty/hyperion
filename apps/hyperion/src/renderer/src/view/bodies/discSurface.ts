@@ -1242,25 +1242,17 @@ export interface ClassMapReconstruction {
   readonly latticeSt: number;
 }
 
-/** No offset along a face's cell coordinates. */
-const NO_OFFSET: readonly [number, number] = [0, 0];
-
 /**
  * {@link classMapSharesAt}'s reconstruction at `direction`, with its terms' mean purity and its
  * lattice's spacing (lane fix-jagged-biome-edges), which `surface_at` shapes its classes' edges by.
  *
  * @param direction - Along the body-fixed axes, z the pole; it need not be unit.
- * @param offsetSt - Added to the direction's cell coordinates (s, t) on its own face before the
- *   reconstruction, as `surface_at` reads the points about it by which it box-smoothes the classes'
- *   edges: a point off the face reads its own face's gutter, not the face beside it, and a refined
- *   texel at its cells' corners holds it within its span.
  */
 export function classMapReconstructionAt(
   map: ClassMapTexels,
   direction: Xyz,
-  offsetSt: readonly [number, number] = NO_OFFSET,
 ): ClassMapReconstruction {
-  const { face, holding } = reconstructionCorners(map, direction, offsetSt);
+  const { face, holding } = reconstructionCorners(map, direction);
   const own = storedTile(map, face, holding[0] + 1, holding[1] + 1);
   const latticeSt =
     map.fine !== undefined && own >= 0 ? 1 / (map.faceTexels * map.fine.side) : 1 / map.faceTexels;
@@ -1269,7 +1261,7 @@ export function classMapReconstructionAt(
     meanPurity: null,
     latticeSt,
   });
-  const terms = reconstructionTerms(map, direction, offsetSt);
+  const terms = reconstructionTerms(map, direction);
   if (terms === null) {
     return elsewhere();
   }
@@ -1318,19 +1310,12 @@ interface ReconstructionCorners {
   readonly tN: number;
 }
 
-/**
- * The texels the reconstruction reads at `direction`, its cell coordinates offset by `offsetSt` on
- * its face, as `surface_at` finds them.
- */
-function reconstructionCorners(
-  map: ClassMapTexels,
-  direction: Xyz,
-  offsetSt: readonly [number, number],
-): ReconstructionCorners {
+/** The texels the reconstruction reads at `direction`, as `surface_at` finds them. */
+function reconstructionCorners(map: ClassMapTexels, direction: Xyz): ReconstructionCorners {
   const n = map.faceTexels;
   const { face, u, v } = xyzToFaceUv(direction);
-  const sN = uvToSt(u) * n + offsetSt[0] * n;
-  const tN = uvToSt(v) * n + offsetSt[1] * n;
+  const sN = uvToSt(u) * n;
+  const tN = uvToSt(v) * n;
   const holding = [
     Math.min(Math.max(Math.floor(sN), 0), n - 1),
     Math.min(Math.max(Math.floor(tN), 0), n - 1),
@@ -1359,16 +1344,15 @@ interface ReconstructionTerm {
 }
 
 /**
- * The terms of the survey-masked reconstruction at `direction`, its cell coordinates offset by
- * `offsetSt` ({@link classMapSharesAt}'s remarks), in the shader's order; `null` where the texel or
- * cell holding the point holds no weight, and `elsewhere` takes it all.
+ * The terms of the survey-masked reconstruction at `direction` ({@link classMapSharesAt}'s
+ * remarks), in the shader's order; `null` where the texel or cell holding the point holds no
+ * weight, and `elsewhere` takes it all.
  */
 function reconstructionTerms(
   map: ClassMapTexels,
   direction: Xyz,
-  offsetSt: readonly [number, number],
 ): ReadonlyArray<ReconstructionTerm> | null {
-  const { face, holding, i0, j0, fx, fy, sN, tN } = reconstructionCorners(map, direction, offsetSt);
+  const { face, holding, i0, j0, fx, fy, sN, tN } = reconstructionCorners(map, direction);
   const { fine } = map;
   const own = storedTile(map, face, holding[0] + 1, holding[1] + 1);
   if (fine !== undefined && own >= 0) {
@@ -1488,11 +1472,8 @@ function cornerCellTerms(
   tN: number,
 ): ReadonlyArray<ReconstructionTerm> | null {
   const r = fine.side;
-  // A point off the face, as a point about another reads (lane fix-jagged-biome-edges), held to
-  // the texel's span: the point itself lies within it.
-  const within = (v: number): number => Math.min(Math.max(v, 0), r);
-  const x = within(sN * r - r * texel[0]);
-  const y = within(tN * r - r * texel[1]);
+  const x = sN * r - r * texel[0];
+  const y = tN * r - r * texel[1];
   const held = (v: number): number => Math.min(Math.max(Math.floor(v), 0), r - 1);
   const cx = held(x);
   const cy = held(y);
@@ -1654,7 +1635,7 @@ export function classMapAlbedoAt(
   if (maturity === undefined) {
     return null;
   }
-  const terms = reconstructionTerms(map, direction, NO_OFFSET);
+  const terms = reconstructionTerms(map, direction);
   if (terms === null) {
     return null;
   }

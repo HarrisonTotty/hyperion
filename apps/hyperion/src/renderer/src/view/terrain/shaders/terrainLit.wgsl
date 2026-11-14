@@ -476,7 +476,7 @@ fn edge_shape_terrain(
     return;
   }
   let plan = edge_plan(footprint_rad);
-  let q = edge_sharpness(lattice_rad / footprint_rad, plan, 0.0);
+  let q = edge_sharpness(lattice_rad / footprint_rad, plan);
   var logits : array<f32, TERRAIN_LAWS>;
   var largest = -3.4e38;
   for (var m = 1u; m < TERRAIN_LAWS; m = m + 1u) {

@@ -292,31 +292,6 @@ function texelAgreement(drawn: Drawn): {
   return { worst, classes, seen, mismatches };
 }
 
-/** The pixels of a draw over {@link texelAgreement}'s tolerance: their count and the worst few. */
-function overTolerance(drawn: Drawn): string {
-  const over: Array<{ readonly error: number; readonly text: string }> = [];
-  for (const pixel of drawn.expected) {
-    const at = (pixel.yPx * drawn.viewport.widthPx + pixel.xPx) * 4;
-    const gpu = drawn.texels[at + 1] ?? Number.NaN;
-    const error = Math.abs(gpu - pixel.rgb[1]) / (TEXEL_ABSOLUTE + TEXEL_RELATIVE * pixel.rgb[1]);
-    if (!(error <= 1)) {
-      over.push({
-        error,
-        text: `(${String(pixel.xPx)}, ${String(pixel.yPx)}) ${gpu.toPrecision(5)} for ${pixel.rgb[1].toPrecision(5)}`,
-      });
-    }
-  }
-  over.sort((a, b) => b.error - a.error);
-  return `${String(over.length)} pixels over the tolerance${
-    over.length > 0
-      ? `, the worst ${over
-          .slice(0, 4)
-          .map((one) => one.text)
-          .join("; ")}`
-      : ""
-  }`;
-}
-
 /** T8.a: the disc regime on the GPU. */
 export async function checkBodies(engine: RenderEngine, checks: Checks): Promise<void> {
   const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
@@ -655,10 +630,7 @@ function worstRelative(a: Float32Array, b: Float32Array): number {
  * shaped by the noise and sharpened to the lattice's width, on the GPU and in the rasteriser alike;
  * a two-class map of four texels a face split along i = 2, drawn 240 px across in a 256 px view,
  * where the noise's first octave is drawn and a texel spans some 90 px. The same map with no keys
- * draws its edges as the reconstruction leaves them, which the shaped draw must move. Then a map of
- * R10's 64 texels a face in diagonal bands, its edges staircases and a one-texel island among
- * them, drawn alike, where a texel spans 3 px or fewer and the edges are box-smoothed from the
- * points about each pixel, compared off the limb.
+ * draws its edges as the reconstruction leaves them, which the shaped draw must move.
  */
 async function checkEdgeKeys(
   engine: RenderEngine,
@@ -724,47 +696,6 @@ async function checkEdgeKeys(
     "fix-jagged-biome-edges a disc under a class map with its edges keyed equals the CPU rasteriser's, and its edges move",
     agreement.worst <= 1 && agreement.classes && drawn.expected.length > 0 && moved > 0,
     `${String(drawn.expected.length)} pixels; worst error ${agreement.worst.toFixed(3)} of the tolerance; classes as the rasteriser's ${String(agreement.classes)}; ${String(moved)} pixels moved by the shaping${agreement.mismatches.length > 0 ? `: ${agreement.mismatches.slice(0, 6).join("; ")}` : ""}`,
-  );
-  const bands = packClassMap(64, 2, ({ i, j }) =>
-    (i + 2 * j) % 24 < 12 || (i === 40 && j === 20) ? [1, 0] : [0, 1],
-  );
-  const banded = classMapSurface(
-    engine,
-    "smoke class map in bands, its edges keyed",
-    bands,
-    laws,
-    PROVISIONAL_PHOTOMETRY.law,
-  );
-  made.push(banded);
-  const smoothed = await drawDisc(
-    engine,
-    renderer,
-    viewport,
-    240,
-    60,
-    TILTED_OBLATE,
-    [0, 0],
-    CAMERA,
-    null,
-    {
-      surface: { ...banded, edgeKeys: [0x51f00d, 0x2c0ffe] },
-      rotation: TILTED,
-      texels: bands,
-    },
-  );
-  // Within 100 px of the disc's centre, off the limb: there a pixel's limb samples move by whole
-  // samples with its figure, unshaped too, so that a texel's boundary through them steps.
-  const inner: Drawn = {
-    ...smoothed,
-    expected: smoothed.expected.filter(
-      (pixel) => Math.hypot(pixel.xPx + 0.5 - 128, pixel.yPx + 0.5 - 128) < 100,
-    ),
-  };
-  const fine = texelAgreement(inner);
-  checks.check(
-    "fix-jagged-biome-edges a disc whose texels span 3 px or fewer, its keyed edges box-smoothed, equals the CPU rasteriser's off its limb",
-    fine.worst <= 1 && fine.classes && inner.expected.length > 0,
-    `${String(inner.expected.length)} pixels within 100 px of its centre; worst error ${fine.worst.toFixed(3)} of the tolerance; ${overTolerance(inner)}; classes as the rasteriser's ${String(fine.classes)}${fine.mismatches.length > 0 ? `: ${fine.mismatches.slice(0, 6).join("; ")}` : ""}`,
   );
 }
 

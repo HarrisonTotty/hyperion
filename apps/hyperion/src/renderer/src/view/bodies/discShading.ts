@@ -93,13 +93,7 @@ import type { CloudBodyGpu } from "../clouds/cloudLayer";
 import type { ScreenRect } from "../wireframe/submit";
 import { MATURITY_NODES } from "../terrain/maturityNodes";
 import { type NormalMapTexels, normalMapNormalAt } from "./discNormals";
-import {
-  classPurity,
-  EDGE_GRAZING_MU,
-  edgeGate,
-  edgeShapedShares,
-  edgeSmoothing,
-} from "./classEdge";
+import { EDGE_GRAZING_MU, edgeShapedShares } from "./classEdge";
 import {
   classMapAlbedoAt,
   classMapReconstructionAt,
@@ -1596,21 +1590,12 @@ interface Shaded {
   readonly lit: boolean;
 }
 
-/** The four points about a point that `surface_at` box-smoothes by, in its order, ± 1 a side. */
-const AROUND: ReadonlyArray<readonly [number, number]> = [
-  [1, -1],
-  [-1, 1],
-  [1, 1],
-  [-1, -1],
-];
-
 /**
  * The share of each of the body's laws at the point `q` (from the centre ÷ a): the uniform law's
  * alone, or under a class map the shares the survey-masked bilinear reconstruction gives at the
  * point's cube-sphere direction (`classMapSharesAt`, R10.T10.d), their classes' edges shaped at the
  * pixel's footprint, of the datum's μ `muDatum`, as `surface_at` shapes them (lane
- * fix-jagged-biome-edges; none where the body was seen through no viewport), box-smoothed by the
- * reconstructions half a lattice spacing about the point where it draws them so. R05's spheroid point
+ * fix-jagged-biome-edges; none where the body was seen through no viewport). R05's spheroid point
  * of the unit direction d is M d (`spheroidPoint`), so d is q stretched along the pole by a ÷ c,
  * taken along the body-fixed axes.
  */
@@ -1636,26 +1621,11 @@ function sharesAt(body: ViewBody, q: Vec3, muDatum: number): number[] {
     ) *
       body.pixelRad) /
     Math.max(muDatum, EDGE_GRAZING_MU);
-  const latticeRad = reconstruction.latticeSt * (Math.PI / 2);
-  // The points half a lattice spacing off along its diagonals, read only where the shares are
-  // box-smoothed, in `surface_at`'s order.
-  const smoothed =
-    edgeGate(reconstruction.meanPurity, classPurity(reconstruction.shares)) *
-      edgeSmoothing(latticeRad / footprintRad) >
-    0;
-  const { texels } = body.classMap;
-  const half = 0.5 * reconstruction.latticeSt;
-  const around = smoothed
-    ? AROUND.map(
-        ([s, t]) => classMapReconstructionAt(texels, direction, [s * half, t * half]).shares,
-      )
-    : [];
   return edgeShapedShares(reconstruction.shares, body.classMap.edgeKeys, {
     direction: normaliseXyz(direction),
     footprintRad,
-    latticeRad,
+    latticeRad: reconstruction.latticeSt * (Math.PI / 2),
     meanPurity: reconstruction.meanPurity,
-    around,
   });
 }
 
