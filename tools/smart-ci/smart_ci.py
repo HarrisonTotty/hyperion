@@ -133,11 +133,13 @@ RUST_READERS: List[Tuple[str, str, str, str]] = [
 # code they reach (the sky's modules, the sim's shared test fixtures, the surface worker that they
 # reach since R10.T4.b, the steepness tails' hold switch that `with_every_27_hold` reaches since
 # R10.T6.a's, and the weathering law, whose mature colour the sim's weathered lid reaches since
-# P14.T47's surface colour) and of the testkit's golden checks and pins: smart-ci's tests hold each
-# such test to pinning no value (`test_smart_ci.py`'s guard, which checks that it reads no other
-# file), so a change here runs them.
+# P14.T47's surface colour, and the rocks' hold switch, whose `thread_local!` the sky caps' tests
+# reach by the macro's name since R11.T3) and of the testkit's golden checks and pins: smart-ci's
+# tests hold each such test to pinning no value (`test_smart_ci.py`'s guard, which checks that it
+# reads no other file), so a change here runs them.
 WASM_SKY_SOURCES = re.compile(
-    r"^crates/hyperion-(sim/src/.*\.rs|surface/src/(worker|material/(weights|weathering))\.rs|"
+    r"^crates/hyperion-(sim/src/.*\.rs|"
+    r"surface/src/(worker|material/(weights|weathering)|scatter/hold)\.rs|"
     r"testkit/src/(golden|pins)\.rs)$"
 )
 # GENERATOR_VERSION heads every golden file, so a change to it runs every crate's tests.
