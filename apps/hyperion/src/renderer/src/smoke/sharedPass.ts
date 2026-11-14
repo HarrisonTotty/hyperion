@@ -50,7 +50,6 @@ import { viewRotation4 } from "../view/camera/projection";
 import { quaternionFromRows } from "../view/camera/quaternion";
 import { viewId } from "../view/camera/state";
 import { IDENTITY_ROTATION } from "../view/coords/rotation";
-import type { MemoryCategory } from "../view/engine/memory";
 import { BUFFER_USAGE } from "../view/engine/gpuFlags";
 import type { KernelPair } from "../view/engine/kernels";
 import type { DrawItem, RenderEngine, TextureHandle } from "../view/engine/types";
@@ -105,6 +104,7 @@ import {
 import { MOON_LIKE } from "./litTerrain";
 import { smokeGeometry } from "./geometry";
 import { LaneHold, settleInLockstep } from "./lockstep";
+import { CATEGORIES } from "./tallyCategories";
 
 /** Each view's frame, pixels. */
 const FRAME = { widthPx: 64, heightPx: 48 } as const;
@@ -121,23 +121,6 @@ const STREAM_TIMEOUT_MS = 90_000;
 
 /** How long the engine may take to rebuild after its device is destroyed, milliseconds. */
 const RESTORE_TIMEOUT_MS = 10_000;
-
-/** Every memory category, for the tally's bytes. */
-const CATEGORIES: ReadonlyArray<MemoryCategory> = [
-  "render-targets",
-  "other",
-  "atmosphere-tables",
-  "atmosphere-view",
-  "coarse-field-gpu",
-  "decoration",
-  "geometry-clusters",
-  "geometry-pages",
-  "height-cache",
-  "ocean",
-  "shadows",
-  "sky-cube",
-  "sky-scratch",
-];
 
 /** The patch the views look at: level 7 over the first survey's cells of face +y. */
 const CENTRE: PatchKey = { face: 1, level: 7, i: 45, j: 45 };
