@@ -308,6 +308,14 @@ export interface GeometrySettings {
    * settings until the owner's Mac pair (a lean, 2026-11-10).
    */
   readonly selectionScale: "presented" | "rendered";
+  /**
+   * The classes' edges (lane fix-jagged-biome-edges): `shaped`, the settings' own, draws each
+   * keyed class's edge on the disc and the terrain noise-shaped and, on a disc's lattice of few
+   * pixels, box-smoothed (`classEdge.wgsl`); `off` keys no class, so that both draw their shares as
+   * the reconstruction leaves them, for the owner's Mac pair `biome-edges`. The disc takes it from
+   * its next plan, the terrain from the next slot it writes.
+   */
+  readonly classEdges: "shaped" | "off";
 }
 
 /**
@@ -344,6 +352,7 @@ export const GEOMETRY_BEFORE_R14: GeometrySettings = {
   terrainPlanetshine: "record",
   decorationSets: "generated",
   selectionScale: "presented",
+  classEdges: "shaped",
 };
 
 /**
@@ -532,6 +541,7 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       terrainPlanetshine: "record",
       decorationSets: "generated",
       selectionScale: "presented",
+      classEdges: "shaped",
     },
     decoration: true,
     scatterDensity: 1,
@@ -590,6 +600,7 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       terrainPlanetshine: "record",
       decorationSets: "generated",
       selectionScale: "presented",
+      classEdges: "shaped",
     },
     decoration: false,
     scatterDensity: 0,

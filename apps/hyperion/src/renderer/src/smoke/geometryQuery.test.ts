@@ -37,6 +37,13 @@ describe("the smoke page's geometry override (plan R14, Design note 17)", () => 
     });
   });
 
+  it("reads the classes' edges from the query (fix-jagged-biome-edges)", () => {
+    expect([
+      queryOverride(new URLSearchParams("geometry-classEdges=off")),
+      queryOverride(new URLSearchParams("geometry-classEdges=noise")),
+    ]).toEqual([{ classEdges: "off" }, {}]);
+  });
+
   it("leaves out a value that is not its field's, and a field the query does not give", () => {
     expect([
       queryOverride(

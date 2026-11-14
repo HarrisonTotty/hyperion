@@ -202,7 +202,7 @@ describe("the geometry override's hand-off (plan R14, Design note 17)", () => {
     }
   });
 
-  it("reads and writes the lit terrain's selection scale, last in the fields' order (perf-terrain-selection-scale)", () => {
+  it("reads and writes the lit terrain's selection scale, after the detail sets in the fields' order (perf-terrain-selection-scale)", () => {
     const override = parseGeometryOverride("selectionScale=rendered,terrainPlanetshine=brightest");
     expect([
       override,
@@ -215,6 +215,21 @@ describe("the geometry override's hand-off (plan R14, Design note 17)", () => {
     ]);
     for (const text of ["selectionScale=device", "selectionScale=css", "selectionScale="]) {
       expect(() => parseGeometryOverride(text)).toThrow("selectionScale is presented or rendered");
+    }
+  });
+
+  it("reads and writes the classes' edges, last in the fields' order (fix-jagged-biome-edges)", () => {
+    const override = parseGeometryOverride("classEdges=off,terrainPlanetshine=brightest");
+    expect([override, geometryText(override), parseGeometryOverride("classEdges=shaped")]).toEqual([
+      { classEdges: "off", terrainPlanetshine: "brightest" },
+      "terrainPlanetshine=brightest,classEdges=off",
+      { classEdges: "shaped" },
+    ]);
+  });
+
+  it("refuses the classes' edges other than shaped or off (fix-jagged-biome-edges)", () => {
+    for (const text of ["classEdges=on", "classEdges=noise", "classEdges="]) {
+      expect(() => parseGeometryOverride(text)).toThrow("classEdges is shaped or off");
     }
   });
 

@@ -225,6 +225,15 @@ export const MAC_PROFILE_LEVERS: ReadonlyArray<MacProfileLever> = [
     countSides: false,
   },
   {
+    name: "biome-edges",
+    decides:
+      "lane fix-jagged-biome-edges, the classes' edges: noise-shaped and, on a disc's lattice of few pixels, box-smoothed, the settings' (A), against as the reconstruction leaves them (B)",
+    a: [],
+    b: ["--geometry", "classEdges=off"],
+    ratios: [1],
+    countSides: false,
+  },
+  {
     name: "shading",
     decides:
       "R14.T2.e, the terrain's shading: forward, T2.a's (A), against the visibility buffer (B)",

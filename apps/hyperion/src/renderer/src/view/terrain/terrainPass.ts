@@ -2294,6 +2294,7 @@ export class TerrainPass {
    */
   setGeometry(geometry: GeometrySettings): void {
     this.#geometry = geometry;
+    this.#device.resources.setClassEdges(geometry.classEdges);
     // A change of the settings is a cut of the far cascades' holds (plan R14, R14.T6.b).
     for (const state of this.#views.values()) {
       state.farHolds.cut();
@@ -3745,6 +3746,7 @@ export class TerrainPass {
         // the wireframe's draw on it (plan R14, R14.T4.c).
         this.#shading === "lit" || this.#shading === "wire",
       );
+    made.setClassEdges(this.#geometry.classEdges);
     const { layout } = made;
     const cache = new PatchCache(layout.slots);
     const pool = this.#createPool({

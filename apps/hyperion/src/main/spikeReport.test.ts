@@ -170,6 +170,7 @@ describe("the spike report's check", () => {
         terrainPlanetshine: "record",
         decorationSets: "generated",
         selectionScale: "presented",
+        classEdges: "shaped",
       },
       segments: [
         {
@@ -191,7 +192,8 @@ describe("the spike report's check", () => {
     // selection's budget (T3.e), its patches, the stand-ins' strides (T3.c's stand-ins), off, and
     // the overlay's hidden marks (R10.T16.c), drawn, the edge bakes' stand-ins (T3.c's edge
     // stand-ins), off, plan R07's disc cells, per cell, its figure's shading, forward, the terrain's
-    // planetshine, every source the record carries, and the lit terrain's τ, at the presented CSS px.
+    // planetshine, every source the record carries, the lit terrain's τ, at the presented CSS px,
+    // and the classes' edges (fix-jagged-biome-edges), shaped.
     const {
       figureClusters: _figureClusters,
       hullClusters: _hullClusters,
@@ -210,6 +212,7 @@ describe("the spike report's check", () => {
       terrainPlanetshine: _terrainPlanetshine,
       decorationSets: _decorationSets,
       selectionScale: _selectionScale,
+      classEdges: _classEdges,
       ...beforeT4
     } = geometry.settings;
     expect([

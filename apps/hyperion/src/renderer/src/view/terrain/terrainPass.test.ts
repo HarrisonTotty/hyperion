@@ -1845,6 +1845,34 @@ describe("the lit terrain of a body (R10.T10.b)", () => {
     ]);
   });
 
+  it("keys no class of a bake's slots where the geometry turns the classes' edges off, as a bake of no edge seed (fix-jagged-biome-edges)", async () => {
+    /** The class laws a lit pass on low writes for `layers`, under `classEdges`. */
+    const lawsOf = async (
+      layers: TerrainLayers,
+      classEdges: "shaped" | "off",
+    ): Promise<Uint8Array | undefined> => {
+      const { pass, pool, engine } = await passOn("low", { source: BODY });
+      pass.setGeometry({ ...SETTINGS.low.geometry, classEdges });
+      pool().layers = layers;
+      const view = northPole(2_000_000);
+      pass.frame({ ...inputAt(view), lighting: LIGHTING });
+      pool().bakeDemand(pass);
+      pass.frame({ ...inputAt(view), lighting: LIGHTING });
+      return engine.writes.findLast(
+        (w) => w.buffer === "terrain class-layers" && w.bytes === CLASS_LAWS_BYTES,
+      )?.data;
+    };
+    const seeded = { ...edgeLayers(), edgeSeed: 0x5eed };
+    const [shaped, off, unseeded] = [
+      await lawsOf(seeded, "shaped"),
+      await lawsOf(seeded, "off"),
+      await lawsOf(edgeLayers(), "shaped"),
+    ];
+    // A seeded bake keys its slots' classes, which the lever off leaves unkeyed.
+    expect(shaped).not.toEqual(unseeded);
+    expect(off).toEqual(unseeded);
+  });
+
   it("draws nothing lit until a frame gives its lights, and binds the frame's atmosphere where given", async () => {
     const { pass, pool, engine } = await passOn("low", { source: BODY });
     pool().layers = edgeLayers();

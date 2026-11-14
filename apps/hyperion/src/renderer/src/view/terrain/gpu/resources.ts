@@ -1122,6 +1122,11 @@ export class TerrainResources {
   readonly #planet: PlanetGeometry;
   /** One slot's cluster records, written whole at each upload. */
   readonly #clusterRecord = new ArrayBuffer(CLUSTER_RECORDS_SLOT_BYTES);
+  /**
+   * Whether a slot's laws carry its classes' edge keys (lane fix-jagged-biome-edges;
+   * `GeometrySettings.classEdges`), from the next slot written.
+   */
+  #classEdges = true;
 
   /**
    * @param clustered - Whether a lit or wireframe layout's slots hold the cluster path's records
@@ -1157,6 +1162,14 @@ export class TerrainResources {
         listener(this.#made.layout);
       }
     });
+  }
+
+  /**
+   * Keys the classes' edges of each slot written from now on, so that the lit terrain shapes them
+   * (`shaped`, as made), or keys none (`off`), the owner's Mac pair `biome-edges`.
+   */
+  setClassEdges(classEdges: "shaped" | "off"): void {
+    this.#classEdges = classEdges === "shaped";
   }
 
   /** The layout on the current device. */
@@ -1709,8 +1722,11 @@ export class TerrainResources {
             c / a,
             maturity !== undefined,
             paletteMeltSlots(layers.palette),
-            // A bake of no edge seed keys no slot: its edges are drawn as its weights leave them.
-            layers.edgeSeed === undefined ? [] : paletteEdgeKeys(layers.palette, layers.edgeSeed),
+            // A bake of no edge seed keys no slot, nor does the lever off: its edges are drawn as
+            // its weights leave them.
+            layers.edgeSeed === undefined || !this.#classEdges
+              ? []
+              : paletteEdgeKeys(layers.palette, layers.edgeSeed),
           ),
           CLASS_WEIGHTS_BYTES,
         );

@@ -2198,6 +2198,16 @@ function withoutAir(record: DiscRecord): DiscRecord {
   return plain;
 }
 
+/**
+ * A record whose class map keys no class's edges (lane fix-jagged-biome-edges;
+ * `GeometrySettings.classEdges` `off`), drawn as its reconstruction leaves them.
+ */
+function unkeyedEdges(record: DiscRecord): DiscRecord {
+  return record.surface.kind === "class-map"
+    ? { ...record, surface: { ...record.surface, edgeKeys: [] } }
+    : record;
+}
+
 /** The forms a record is drawn by: its air's, its emission's, or the plain ones. */
 function formsOf(
   record: DiscRecord,
@@ -2770,7 +2780,9 @@ export class LitBodyRenderer {
     const resources = this.#resources;
     this.#writeTable(plan.laws);
     const drawn = this.#drawnPlan(plan);
-    resources.discs = this.#write(resources.discs, packDiscRecords(drawn.records, cells));
+    const discRecords =
+      this.#geometry.classEdges === "off" ? drawn.records.map(unkeyedEdges) : drawn.records;
+    resources.discs = this.#write(resources.discs, packDiscRecords(discRecords, cells));
     const records = packSmoothMeshes(plan.meshes.map(({ mesh }) => mesh));
     resources.slots = this.#write(resources.slots, records.slots);
     resources.instances = this.#write(resources.instances, records.instances);

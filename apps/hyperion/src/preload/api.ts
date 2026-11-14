@@ -674,6 +674,12 @@ export interface GeometryOverride {
   readonly decorationSets?: "generated" | "off";
   /** The pixel the lit terrain's τ is counted in: the presented CSS px, or the rendered one too. */
   readonly selectionScale?: "presented" | "rendered";
+  /**
+   * Lane fix-jagged-biome-edges: the classes' edges on the disc and the terrain shaped by their
+   * noise and, on a disc's lattice of few pixels, box-smoothed; or drawn as the reconstruction
+   * leaves them, no class keyed.
+   */
+  readonly classEdges?: "shaped" | "off";
 }
 
 /** A mesh's DAG-cut tolerance (plan R14, R14.T5.f), px: in its camera pass, and as an occluder. */

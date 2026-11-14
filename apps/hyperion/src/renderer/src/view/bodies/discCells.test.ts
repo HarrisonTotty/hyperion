@@ -28,6 +28,7 @@ import { packFrame } from "../engine/webgpu/uniforms";
 import type { DrawItem, TextureHandle } from "../engine/types";
 import type { PlacedLight } from "../lighting/hostLights";
 import { PLANETSHINE_SOURCES_HIGH } from "../lighting/planetshine";
+import { SETTINGS } from "../quality/qualitySetting";
 import { AU_M } from "../scenes/kept";
 import type { ScreenRect } from "../wireframe/submit";
 import { WIREFRAME_MATERIALS } from "../wireframe/submit";
@@ -39,6 +40,7 @@ import {
   DISC_ROWS,
   discCellJobs,
   drawnThroughCells,
+  FIRST_EDGE_KEY_ROW,
   faceBandSpans,
   LIMB_SPAN_ROWS,
   type LimbSpans,
@@ -1558,5 +1560,35 @@ describe("the cell pass's workgroups (R07.T8.g)", () => {
       cells.sets.map((set) => [set.first, set.first + set.count]),
       groups.length,
     ]);
+  });
+});
+
+describe("the lit bodies' renderer's classes' edges (lane fix-jagged-biome-edges)", () => {
+  /** The first class's edge key the renderer packs for a keyed map, its geometry's lever at `classEdges`. */
+  async function packedKey(classEdges: "shaped" | "off"): Promise<number | undefined> {
+    const engine = await countingRenderEngine();
+    const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
+    renderer.setGeometry({ ...SETTINGS.high.geometry, classEdges });
+    const { bodies, hosts } = bodiesOf([13]);
+    const [body] = bodies;
+    if (body === undefined) {
+      throw new Error("no body");
+    }
+    const drawn: LitBodyInput = {
+      ...body,
+      surface: { ...classMapOf(`${body.id} class map`), edgeKeys: [0x51f00d] },
+      rotation: IDENTITY_ROTATION,
+    };
+    renderer.draws(planLitBodies([drawn], hosts, OPTIONS, new Map([[drawn.id, "disc"]])));
+    renderer.dispose();
+    return new Float32Array(lastWrite(engine, "bodies:discs").data.buffer)[FIRST_EDGE_KEY_ROW * 4];
+  }
+
+  it("packs each class's edge key with its edges shaped, the settings' own", async () => {
+    expect(await packedKey("shaped")).toBe(0x51f00d);
+  });
+
+  it("packs no class's edge key where the geometry turns the classes' edges off", async () => {
+    expect(await packedKey("off")).toBe(0);
   });
 });
