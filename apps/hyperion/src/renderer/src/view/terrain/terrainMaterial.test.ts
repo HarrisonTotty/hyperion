@@ -15,7 +15,14 @@ import {
 import { packPhaseFactorRows } from "../appearance/litBodyProbe";
 import { geometricAlbedo, lawFor, lawPhaseIntegral, withTemplateCurve } from "../appearance/phase";
 import { shapeGeometricAlbedo } from "../appearance/shapes";
-import { edgeKey, edgeSeedOf, edgeShapedShares } from "../bodies/classEdge";
+import {
+  edgeFootprintRad,
+  edgeKey,
+  edgeLatticeRad,
+  edgeSeedOf,
+  edgeShapedShares,
+} from "../bodies/classEdge";
+import { faceUvToXyz, stToUv } from "./cube";
 import { oblateAlbedoScale } from "../bodies/oblate";
 import { TERRAIN_DEPTH_FRACTION } from "../depth/groundPull";
 import { WGSL_CATALOGUE } from "../engine/catalogue";
@@ -92,6 +99,8 @@ import {
   TerrainPhaseRows,
   terrainDepthMaterialSpec,
   terrainEdgeShapedShares,
+  terrainEdgeSite,
+  terrainQuadSt,
   terrainLitEmissiveMaterialSpec,
   terrainLitMaterialSpec,
   terrainReflectance,
@@ -2096,6 +2105,102 @@ describe("the visibility buffer's resolve of terrain (plan R14, R14.T2.d)", () =
   });
 });
 
+/** Face 2's unit direction at (s, t). */
+function onFaceTwo(s: number, t: number): readonly [number, number, number] {
+  const [x, y, z] = faceUvToXyz(2, stToUv(s), stToUv(t));
+  const n = Math.hypot(x, y, z);
+  return [x / n, y / n, z / n];
+}
+
+describe("a coast's shaped edge at the hand-over (lane fix-jagged-biome-edges, part 2)", () => {
+  // One hand-over frame: the served wet world's 6,417 km figure seen from its hand-over range,
+  // 6,744 km to the limb, a pixel 1.4151 × 10⁻³ rad (the hand-over check's look at 90°, low). The
+  // terrain draws its patches of level 4 by their ancestors of the field's cells' level, 2, whose
+  // quads are the disc's refined cells: 64 texels a face, 4 cells a texel.
+  const RADIUS_M = 6.4169e6;
+  const LIMB_M = 6.744e6;
+  const PIXEL_RAD = 1.4151e-3;
+  const CELL_ST = 1 / (64 * 4);
+  const KEYS = [101, 202, 0, 0, 0, 0, 0, 0];
+  const NAMED = Array.from({ length: TERRAIN_CLASSES }, () => true);
+  const SEA = [1, 0, 0, 0, 0, 0, 0, 0];
+  const LAND = [0, 1, 0, 0, 0, 0, 0, 0];
+
+  // The camera over face 2's centre, at the hand-over range.
+  const cameraM = onFaceTwo(0.5, 0.5).map((c) => c * Math.hypot(LIMB_M, RADIUS_M));
+
+  /** The disc's and the terrain's sites at (s, t): the disc's from its hit, the terrain's texel's. */
+  const sitesAt = (s: number, t: number): ReturnType<typeof terrainEdgeSite>[] => {
+    const d = onFaceTwo(s, t);
+    const fromCameraM: readonly [number, number, number] = [
+      d[0] * RADIUS_M - (cameraM[0] ?? 0),
+      d[1] * RADIUS_M - (cameraM[1] ?? 0),
+      d[2] * RADIUS_M - (cameraM[2] ?? 0),
+    ];
+    const distanceM = Math.hypot(...fromCameraM);
+    const mu = -(d[0] * fromCameraM[0] + d[1] * fromCameraM[1] + d[2] * fromCameraM[2]) / distanceM;
+    const disc = {
+      direction: d,
+      footprintRad: edgeFootprintRad(distanceM / RADIUS_M, PIXEL_RAD, mu),
+      latticeRad: edgeLatticeRad(CELL_ST),
+    };
+    // The texel's patch of level 4 by its rates across a pixel, its ancestor two levels up.
+    const quadSt = terrainQuadSt(2.3e-4, 16 * 2.3e-4 * 0.96);
+    const terrain = terrainEdgeSite(
+      {
+        face: 2,
+        st: [s, t],
+        fromCameraM,
+        datumNormal: d,
+        radiusM: RADIUS_M,
+        pixelRad: PIXEL_RAD,
+        quadSt,
+      },
+      2,
+    );
+    return [disc, terrain];
+  };
+
+  it("takes the disc's footprint, lattice and direction at the sub-camera point and toward the limb", () => {
+    for (const [s, t] of [
+      [0.503, 0.497],
+      [0.86, 0.52],
+    ] as const) {
+      const [disc, terrain] = sitesAt(s, t);
+      expect([
+        terrain?.footprintRad ?? Number.NaN,
+        terrain?.latticeRad ?? Number.NaN,
+        ...(terrain?.direction ?? []),
+      ]).toEqual(
+        [disc?.footprintRad, disc?.latticeRad, ...(disc?.direction ?? [])].map((v) =>
+          expect.closeTo(v ?? Number.NaN, 12),
+        ),
+      );
+    }
+  });
+
+  it("draws a coast's shaped shares as the disc does from the same cell's corners", () => {
+    // A coast between a column of sea cells and one of land, at fractions across the cell.
+    const [, terrain] = sitesAt(0.86, 0.52);
+    const [disc] = sitesAt(0.86, 0.52);
+    if (terrain === undefined || disc === undefined) {
+      throw new Error("no sites");
+    }
+    for (const fx of [0.2, 0.45, 0.5, 0.55, 0.8]) {
+      const fromDisc = edgeShapedShares([0, 1 - fx, fx], KEYS, { ...disc, meanPurity: 1 });
+      const fromTerrain = terrainEdgeShapedShares(
+        [SEA, LAND, SEA, LAND],
+        fx,
+        0.3,
+        NAMED,
+        KEYS,
+        terrain,
+      );
+      expect(fromTerrain.slice(0, 3)).toEqual(fromDisc.map((v) => expect.closeTo(v, 12)));
+    }
+  });
+});
+
 describe("a texel's classes' edges (lane fix-jagged-biome-edges)", () => {
   const A = [1, 0, 0, 0, 0, 0, 0, 0];
   const B = [0, 1, 0, 0, 0, 0, 0, 0];
@@ -2133,9 +2238,27 @@ describe("a texel's classes' edges (lane fix-jagged-biome-edges)", () => {
     expect(moved[1]).not.toBeCloseTo(0.5, 3);
   });
 
+  it("takes its patch's quad as the fragment does, its rates' ratio held to its power of 2", () => {
+    // A patch of level 4 spans 2⁻⁴ of a face: its place moves 16 times as fast as its cell
+    // coordinates, give or take the cube's stretch across it.
+    expect([terrainQuadSt(3.1e-4, 16 * 3.1e-4 * 1.07), terrainQuadSt(1, 0)]).toEqual([
+      2 ** -4 / 64,
+      0,
+    ]);
+  });
+
+  it("takes a pixel's footprint and its ancestor's lattice as the shader does", () => {
+    expect(collapseWhitespace(wgslFunction(terrainLitWgsl, "class_sets"))).toContain(
+      "let footprint = edge_footprint(length(in.fromCameraBf) * draw.cameraBodyFixedM.w, pixel_rad, edge_mu);",
+    );
+    expect(collapseWhitespace(wgslFunction(bodyDiscWgsl, "shade"))).toContain(
+      "let footprint = edge_footprint(length(q + body.centre / body.radius), pixel_rad, mu_datum);",
+    );
+  });
+
   it("is drawn by each set's shares in the lit shader", () => {
     expect(collapseWhitespace(wgslFunction(terrainLitWgsl, "class_sets"))).toContain(
-      "edge_shape_terrain(&at, sets.slot[s], edge_d, footprint, sets.lattice[s] * 1.5707963267948966); } sets.shares[s] = at.shares;",
+      "edge_shape_terrain(&at, sets.slot[s], edge_d, footprint, edge_lattice_rad(sets.lattice[s])); } sets.shares[s] = at.shares;",
     );
   });
 

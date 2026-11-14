@@ -655,7 +655,7 @@ fn surface_at(body : Body, q : vec3f, classes : u32, footprint : f32) -> Surface
   }
   if (sums.purity_norm > 0.0) {
     // A cell coordinate's step is about π ÷ 2 rad on the unit sphere: a face spans a quarter turn.
-    edge_shape_disc(&out, count, p, footprint, lattice_st * 1.5707963267948966, sums.purity / sums.purity_norm);
+    edge_shape_disc(&out, count, p, footprint, edge_lattice_rad(lattice_st), sums.purity / sums.purity_norm);
   }
   if (!body.maturity) {
     return out;
@@ -876,8 +876,8 @@ fn shade(body : Body, q : vec3f, ray : vec3f) -> Shaded {
   // A pixel's footprint on the unit sphere, rad (lane fix-jagged-biome-edges): its angle at the
   // camera, 2 ÷ (H P₁₁) at the view's centre, times the point's distance in units of a, over the
   // datum's μ held at EDGE_GRAZING_MU.
-  let pixel_rad = 2.0 / (frame.viewport.y * frame.clipProjection[1][1]);
-  let footprint = length(q + body.centre / body.radius) * pixel_rad / max(mu_datum, EDGE_GRAZING_MU);
+  let pixel_rad = edge_pixel_rad(frame.viewport.y, frame.clipProjection[1][1]);
+  let footprint = edge_footprint(length(q + body.centre / body.radius), pixel_rad, mu_datum);
   let surface = surface_at(body, q, laws - 1u, footprint);
   // The surface's mean A, for R08's sky light on the Lambert share's flat term.
   var mean_a = vec3f(0.0);

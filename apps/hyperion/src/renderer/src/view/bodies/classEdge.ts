@@ -360,3 +360,30 @@ export function edgeSeedOf(detailSeed: string): number {
  * `EDGE_GRAZING_MU`), so that the limb's foreshortened pixels take a finite one.
  */
 export const EDGE_GRAZING_MU = 0.2;
+
+/**
+ * A pixel's angle, rad, in a view `viewportHeightPx` high under the projection's y scale
+ * `projectionY` (`edge_pixel_rad`), as R07's disc and R10's terrain both take it.
+ */
+export function edgePixelRad(viewportHeightPx: number, projectionY: number): number {
+  return 2 / (viewportHeightPx * projectionY);
+}
+
+/**
+ * A pixel's footprint on the unit sphere, rad, at a point `distanceOverRadius` body radii from the
+ * camera whose datum's μ is `datumMu` (`edge_footprint`): its angle `pixelRad` times the distance,
+ * over the μ held at {@link EDGE_GRAZING_MU}. The disc and the terrain take it alike, so that both
+ * draw one edge at the hand-over.
+ */
+export function edgeFootprintRad(
+  distanceOverRadius: number,
+  pixelRad: number,
+  datumMu: number,
+): number {
+  return (distanceOverRadius * pixelRad) / Math.max(datumMu, EDGE_GRAZING_MU);
+}
+
+/** A lattice's spacing on the unit sphere, rad, of `latticeSt` cell coordinates (`edge_lattice_rad`). */
+export function edgeLatticeRad(latticeSt: number): number {
+  return latticeSt * (Math.PI / 2);
+}

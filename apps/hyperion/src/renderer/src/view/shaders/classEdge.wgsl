@@ -27,6 +27,26 @@ const EDGE_OCTAVE_OFFSET : vec3f = vec3f(0.618034, 0.414214, 0.732051);
 // pixels take a finite one.
 const EDGE_GRAZING_MU : f32 = 0.2;
 
+// A pixel's angle, rad, in a view `viewport_y` px high under the projection's y scale `p11`
+// (`edgePixelRad`): R07's disc's and R10's terrain's alike.
+fn edge_pixel_rad(viewport_y : f32, p11 : f32) -> f32 {
+  return 2.0 / (viewport_y * p11);
+}
+
+// A pixel's footprint on the unit sphere, rad, at a point `distance_a` body radii from the camera
+// whose datum's μ is `mu` (`edgeFootprintRad`): its angle `pixel_rad` times the distance, over the
+// μ held at EDGE_GRAZING_MU; the disc's and the terrain's alike, so that both draw one edge at the
+// hand-over.
+fn edge_footprint(distance_a : f32, pixel_rad : f32, mu : f32) -> f32 {
+  return distance_a * pixel_rad / max(mu, EDGE_GRAZING_MU);
+}
+
+// A lattice's spacing on the unit sphere, rad, of `lattice_st` cell coordinates: a face spans about
+// a quarter turn (`edgeLatticeRad`).
+fn edge_lattice_rad(lattice_st : f32) -> f32 {
+  return lattice_st * 1.5707963267948966;
+}
+
 // Wellons' `lowbias32`: a 32-bit word's avalanche (`classEdge.ts`' `mix32`).
 fn edge_mix32(x : u32) -> u32 {
   var h = x;

@@ -686,10 +686,9 @@ fn class_sets(in : LitVertexOut, reference : bool, quad_st : f32) -> ClassSets {
   let axes = horizon_face(in.horizonFace);
   let edge_d =
     normalize(axes.centre + stToUv(in.horizonSt.x) * axes.u + stToUv(in.horizonSt.y) * axes.v);
-  let pixel_rad = 2.0 / (frame.viewport.y * frame.clipProjection[1][1]);
+  let pixel_rad = edge_pixel_rad(frame.viewport.y, frame.clipProjection[1][1]);
   let edge_mu = dot(normalize(in.datumNormal), -normalize(in.fromCameraBf));
-  let footprint =
-    length(in.fromCameraBf) * draw.cameraBodyFixedM.w * pixel_rad / max(edge_mu, EDGE_GRAZING_MU);
+  let footprint = edge_footprint(length(in.fromCameraBf) * draw.cameraBodyFixedM.w, pixel_rad, edge_mu);
   var c = 0.0;
   var mu = 0.0;
   var ancestor_uv = in.patchUv;
@@ -733,7 +732,7 @@ fn class_sets(in : LitVertexOut, reference : bool, quad_st : f32) -> ClassSets {
       var at = terrain_shares(sets.slot[s], sets.uv[s]);
       // Each set on its own patch's lattice, a cell coordinate's step about π ÷ 2 rad.
       if (sets.lattice[s] > 0.0) {
-        edge_shape_terrain(&at, sets.slot[s], edge_d, footprint, sets.lattice[s] * 1.5707963267948966);
+        edge_shape_terrain(&at, sets.slot[s], edge_d, footprint, edge_lattice_rad(sets.lattice[s]));
       }
       sets.shares[s] = at.shares;
     }

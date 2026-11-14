@@ -93,7 +93,7 @@ import type { CloudBodyGpu } from "../clouds/cloudLayer";
 import type { ScreenRect } from "../wireframe/submit";
 import { MATURITY_NODES } from "../terrain/maturityNodes";
 import { type NormalMapTexels, normalMapNormalAt } from "./discNormals";
-import { EDGE_GRAZING_MU, edgeShapedShares } from "./classEdge";
+import { edgeFootprintRad, edgeLatticeRad, edgePixelRad, edgeShapedShares } from "./classEdge";
 import {
   classMapAlbedoAt,
   classMapReconstructionAt,
@@ -1500,10 +1500,10 @@ function viewBodyOf(
   const pixelRad =
     viewport === null
       ? Infinity
-      : 2 /
-        (viewport.heightPx *
-          (1 / Math.tan(camera.fovXRad / 2)) *
-          (viewport.widthPx / viewport.heightPx));
+      : edgePixelRad(
+          viewport.heightPx,
+          (1 / Math.tan(camera.fovXRad / 2)) * (viewport.widthPx / viewport.heightPx),
+        );
   return {
     centre,
     pole,
@@ -1611,20 +1611,17 @@ function sharesAt(body: ViewBody, q: Vec3, muDatum: number): number[] {
     return [...reconstruction.shares];
   }
   // The pixel's footprint on the unit sphere, as `shade` takes it (lane fix-jagged-biome-edges).
-  const footprintRad =
-    (norm(
-      vec3(
-        q.x + body.centre.x / body.radius,
-        q.y + body.centre.y / body.radius,
-        q.z + body.centre.z / body.radius,
-      ),
-    ) *
-      body.pixelRad) /
-    Math.max(muDatum, EDGE_GRAZING_MU);
+  const distanceOverRadius = norm(
+    vec3(
+      q.x + body.centre.x / body.radius,
+      q.y + body.centre.y / body.radius,
+      q.z + body.centre.z / body.radius,
+    ),
+  );
   return edgeShapedShares(reconstruction.shares, body.classMap.edgeKeys, {
     direction: normaliseXyz(direction),
-    footprintRad,
-    latticeRad: reconstruction.latticeSt * (Math.PI / 2),
+    footprintRad: edgeFootprintRad(distanceOverRadius, body.pixelRad, muDatum),
+    latticeRad: edgeLatticeRad(reconstruction.latticeSt),
     meanPurity: reconstruction.meanPurity,
   });
 }

@@ -190,13 +190,18 @@ function digestOf(source: string): string {
  * re-pinned by plan R11's ring shadow (R11.T9.a): `litBody.wgsl`'s stub of 1 taken out, which the
  * terrain never called (its `terrain_ring_shadow` is 1); and the disc's three and the figure by
  * `ringShadow.wgsl` in its place, which returns 1 before any arithmetic for a record with no ring
- * band, and by the record's ten ring rows (`DISC_ROWS` 318), every other row where it was.
+ * band, and by the record's ten ring rows (`DISC_ROWS` 318), every other row where it was. The
+ * disc's three, the figure and the terrain's again by lane fix-jagged-biome-edges (2026-11-10 to
+ * 14): the classes' edges noise-shaped (`classEdge.wgsl`), which a map or a palette of no edge keys
+ * skips, every lookup as before, a pixel's footprint and a lattice's spacing by the library's own
+ * functions, the disc's and the terrain's alike, the terrain's texel's quad from its rates, and the
+ * record's four edge key rows past the ring's (`DISC_ROWS` 322).
  */
 const PLAIN_DIGESTS: ReadonlyArray<readonly [string, string, string]> = [
-  ["the disc's interior", BODY_DISC_MATERIALS.interior.fragmentWgsl, "2616afbd91b417cb"],
-  ["the disc's limb", BODY_DISC_MATERIALS.limb.fragmentWgsl, "2616afbd91b417cb"],
-  ["the mesh regime's figure", SMOOTH_MESH_MATERIAL.fragmentWgsl, "39a3629cb40bae93"],
-  ["the disc cells", BODY_DISC_CELLS_KERNEL.reference, "d882ef2e22ff0e34"],
+  ["the disc's interior", BODY_DISC_MATERIALS.interior.fragmentWgsl, "4555688090d45e0d"],
+  ["the disc's limb", BODY_DISC_MATERIALS.limb.fragmentWgsl, "4555688090d45e0d"],
+  ["the mesh regime's figure", SMOOTH_MESH_MATERIAL.fragmentWgsl, "68b5e1faa3c508f1"],
+  ["the disc cells", BODY_DISC_CELLS_KERNEL.reference, "3a2b5a6fe6fa831e"],
   // Re-pinned by plan R14's `@invariant` clip position (terrainLit.wgsl's `LitVertexOut`), which
   // holds every pipeline that places a patch's vertex to the same bits; the arithmetic is as before.
   // And by the seamless lane's sub-patches (R10.T16.h): the instance record's `sub` and a
@@ -210,19 +215,19 @@ const PLAIN_DIGESTS: ReadonlyArray<readonly [string, string, string]> = [
   // stands, are the texel's own place, map and normal, bit for bit; the depth and the casters
   // compose the shared module alone.
   ...[
-    ["terrain-lit-baked-offsets", "776b7949ab402567"],
-    ["terrain-lit-face-differences", "a8b3ea38ab6bc392"],
+    ["terrain-lit-baked-offsets", "7ed78a13985f7083"],
+    ["terrain-lit-face-differences", "33bcc35701ab472e"],
     // Re-pinned by R10.T16.c's grazing fix, whose depth is pushed by its constant fraction alone.
-    ["terrain-depth-baked-offsets", "43e43b0ec87865ee"],
-    ["terrain-depth-face-differences", "248c64cc786419af"],
-    ["terrain-shadow-baked-offsets", "6095b496afcedf2e"],
-    ["terrain-shadow-face-differences", "480170a764de7f6f"],
-    ["terrain-lit-baked-offsets-still", "766c1cefda540e7e"],
-    ["terrain-lit-face-differences-still", "d8ea67dc196d9dbf"],
-    ["terrain-depth-baked-offsets-still", "88f82ef90e8864c9"],
-    ["terrain-depth-face-differences-still", "6c31c1677cea29dc"],
-    ["terrain-shadow-baked-offsets-still", "bd69a8629d3e7c0b"],
-    ["terrain-shadow-face-differences-still", "a5dde8c1c5130226"],
+    ["terrain-depth-baked-offsets", "99cef9ca1fb32e4a"],
+    ["terrain-depth-face-differences", "7e9d62788bb0a81b"],
+    ["terrain-shadow-baked-offsets", "66a517b99389069a"],
+    ["terrain-shadow-face-differences", "9da907c49fa4f86b"],
+    ["terrain-lit-baked-offsets-still", "43d49a8bef5e0804"],
+    ["terrain-lit-face-differences-still", "f17ddd9fbc6d14ad"],
+    ["terrain-depth-baked-offsets-still", "509e4f49bf037c67"],
+    ["terrain-depth-face-differences-still", "bbaf4931183bda92"],
+    ["terrain-shadow-baked-offsets-still", "65d233a1e92aade5"],
+    ["terrain-shadow-face-differences-still", "aa07c8d776c4f548"],
   ].map(([name = "", digest = ""]): readonly [string, string, string] => {
     const still = name.endsWith("-still");
     const spec = [

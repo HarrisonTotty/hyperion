@@ -121,7 +121,16 @@ import terrainStridesWgsl from "./shaders/terrainStrides.wgsl?raw";
 import terrainSurveyWgsl from "./shaders/terrainSurvey.wgsl?raw";
 import { CLASS_NODES_BYTES, PATCH_VERTICES_PER_SIDE } from "./slotLayout";
 import { PALETTE_NONE, PHOTOMETRY_STRIDE, type TerrainMaturity } from "./workers/messages";
-import { classPurity, type EdgeSite, edgeKey, edgeShapedShares } from "../bodies/classEdge";
+import {
+  classPurity,
+  type EdgeSite,
+  edgeFootprintRad,
+  edgeKey,
+  edgeLatticeRad,
+  edgeShapedShares,
+} from "../bodies/classEdge";
+import { faceUvToXyz, stToUv } from "./cube";
+import type { Face } from "./patchKey";
 
 /** A palette's slots: `hyperion_surface`'s `MAX_CLASSES`. */
 export const TERRAIN_CLASSES = 8;
@@ -1919,6 +1928,59 @@ export function terrainEdgeShapedShares(
     meanPurity: purity / purityNorm,
     mixPurity: classPurity([0, ...weights]),
   });
+}
+
+/**
+ * A lit texel's patch's quad in cell coordinates, as `terrainLitShade.wgsl`'s fragment takes it
+ * from its cell coordinates' rate `stRate` and its place's rate `placeRate` across the pixel
+ * (`fwidth`, each the larger component; lane fix-jagged-biome-edges): the patch's side, their
+ * ratio rounded to its power of 2, over its 64 quads; 0 where the place does not move.
+ */
+export function terrainQuadSt(stRate: number, placeRate: number): number {
+  const ratio = placeRate > 0 ? stRate / placeRate : 0;
+  return ratio > 0 ? 2 ** Math.round(Math.log2(ratio)) / 64 : 0;
+}
+
+/** Where a lit texel is, as `terrainLit.wgsl`'s `class_sets` reads it for its classes' edges. */
+export interface TerrainEdgeTexel {
+  /** Its face and cell coordinates there (`horizonFace`, `horizonSt`). */
+  readonly face: Face;
+  readonly st: readonly [number, number];
+  /** The camera to it, body-fixed, m (`fromCameraBf`). */
+  readonly fromCameraM: readonly [number, number, number];
+  /** The datum's normal there, body-fixed, unit (`datumNormal`). */
+  readonly datumNormal: readonly [number, number, number];
+  /** The body's equatorial radius, m (1 ÷ `draw.cameraBodyFixedM.w`). */
+  readonly radiusM: number;
+  /** A pixel's angle, rad (`edgePixelRad`). */
+  readonly pixelRad: number;
+  /** Its patch's quad in cell coordinates ({@link terrainQuadSt}). */
+  readonly quadSt: number;
+}
+
+/**
+ * A class set's {@link EdgeSite} at a lit texel, as `class_sets` takes it (lane
+ * fix-jagged-biome-edges): the texel's cube-sphere direction from its cell coordinates, a pixel's
+ * footprint from its distance in radii and the datum's μ ({@link edgeFootprintRad}, the disc's
+ * own), and the lattice of the set's patch `levelsUp` levels above the texel's own, 0 its own, 1
+ * its parent and d its ancestor of the field's cells' level, L − 6, whose quad is the disc's
+ * refined cell at the hand-over.
+ */
+export function terrainEdgeSite(
+  texel: TerrainEdgeTexel,
+  levelsUp: number,
+): Pick<EdgeSite, "direction" | "footprintRad" | "latticeRad"> {
+  const [x, y, z] = faceUvToXyz(texel.face, stToUv(texel.st[0]), stToUv(texel.st[1]));
+  const length = Math.hypot(x, y, z);
+  const [cx, cy, cz] = texel.fromCameraM;
+  const distanceM = Math.hypot(cx, cy, cz);
+  const [nx, ny, nz] = texel.datumNormal;
+  const mu = -(nx * cx + ny * cy + nz * cz) / (Math.hypot(nx, ny, nz) * distanceM);
+  return {
+    direction: [x / length, y / length, z / length],
+    footprintRad: edgeFootprintRad(distanceM / texel.radiusM, texel.pixelRad, mu),
+    latticeRad: edgeLatticeRad(texel.quadSt * 2 ** levelsUp),
+  };
 }
 
 /** One of a texel's laws as the twin reads it: its A and its own row's table. */
