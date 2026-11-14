@@ -1,11 +1,11 @@
 # Checks
 
-| Command      | Rust                      | TypeScript                    |
-| ------------ | ------------------------- | ----------------------------- |
-| `just check` | `cargo check`             | `tsc --noEmit` (TypeScript 7) |
-| `just lint`  | `cargo clippy` (pedantic) | `oxlint --type-aware`         |
-| `just fmt`   | `cargo fmt`               | `prettier`                    |
-| `just test`  | `cargo test`              | `vitest`                      |
+| Command      | Rust                      | TypeScript                      |
+| ------------ | ------------------------- | ------------------------------- |
+| `just check` | `cargo check`             | `tsc -b --force` (TypeScript 7) |
+| `just lint`  | `cargo clippy` (pedantic) | `oxlint --type-aware`           |
+| `just fmt`   | `cargo fmt`               | `prettier`                      |
+| `just test`  | `cargo test`              | `vitest`                        |
 
 `just ci` is the gate before a commit: the four checks above, a check that the fitted tables are
 fresh, a check that the generated protocol bindings are up to date, `just cross-clippy`,
@@ -16,6 +16,12 @@ it took 57 minutes on the recommended machine with nothing else running and its 
 them in the suites, most of those the sim's (below). A task's gate is `just smart-ci`, the part of
 it that the change needs (below); integration runs the whole.
 
+- The type check (`pnpm typecheck`, which `just check`, `just ci`, smart-ci and the commit hook
+  run) builds each package's projects with `tsc -b --force`, from scratch: TypeScript 7.0.2's
+  incremental cache, kept warm, misses a change to a module that declares globals (such as
+  `preload/api.ts`) in the files that read its globals and, under `isolatedModules`, in those that
+  import it, and so passed a broken tree.
+  It takes about 7 s; `tools/smart-ci/test_typecheck.py` holds the packages' scripts to it.
 - `just cross-clippy`, part of `just ci`, runs Clippy over every target of the workspace and of
   `tools/gpu-replay` for the other two platforms, of Linux (x86-64), macOS (Apple silicon) and
   Windows (x86-64, MSVC): macOS and Windows from Linux, Windows and Linux from a Mac. Code gated

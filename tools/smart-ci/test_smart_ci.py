@@ -44,12 +44,15 @@ from smart_ci import Crate, Plan, Workspace, make_plan  # noqa: E402
 import stamp  # noqa: E402
 import test_rust_graph  # noqa: E402
 import test_stamp  # noqa: E402
+import test_typecheck  # noqa: E402
 
 
 def load_tests(loader: unittest.TestLoader, tests: unittest.TestSuite, pattern: Optional[str]) -> unittest.TestSuite:
-    """These tests, the Rust graph's and the gate stamps', every class of them: `just ci` runs this file."""
+    """These tests, the Rust graph's, the gate stamps' and the type check's, every class of them: `just ci`
+    runs this file."""
     tests.addTests(loader.loadTestsFromModule(test_rust_graph))
     tests.addTests(loader.loadTestsFromModule(test_stamp))
+    tests.addTests(loader.loadTestsFromModule(test_typecheck))
     return tests
 
 
