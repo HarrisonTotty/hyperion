@@ -24,6 +24,11 @@
 //! hyperion-fit atmosphere-sweep --smoke --out <sweep.json> [--threads N]
 //!                                        # R08.T13's sweep of the analytic term's drift (plan
 //!                                        # R08, R08.T13.a), resumable from <dir>; not a fit
+//! hyperion-fit ring-shadowing --out <shadowingTable.ts> [--smoke] [--threads N]
+//! hyperion-fit ring-shadowing --check [--radii MIN,MAX] [--box M] [--threads N]
+//!                                        # the rings' shadowing table (plan R11, R11.T9.b), a
+//!                                        # client module outside `tables.lock`, or its
+//!                                        # acceptance figures alone; not a fit
 //! ```
 //!
 //! `run` writes into the `tables/` of its table's crate unless `--out` says otherwise, and then
@@ -136,6 +141,35 @@ pub enum Command {
     ///
     /// Not a fit: its output is a client fixture, outside `tables.lock`.
     AtmosphereSweep(AtmosphereSweepArgs),
+    /// Run the rings' shadowing Monte Carlo (plan R11, R11.T9.b) and write its client module, or
+    /// with `--check` print its acceptance figures alone.
+    ///
+    /// Not a fit: its output is a client module, outside `tables.lock`.
+    RingShadowing(RingShadowingArgs),
+}
+
+/// `ring-shadowing`'s arguments.
+#[derive(Debug, Clone, PartialEq, Eq, Args)]
+pub struct RingShadowingArgs {
+    /// Where to write the module; the committed one is
+    /// `apps/hyperion/src/renderer/src/view/rings/shadowingTable.ts`.
+    #[arg(long, required_unless_present = "check", conflicts_with = "check")]
+    pub out: Option<PathBuf>,
+    /// Run the smoke table, a few nodes at small counts, in seconds.
+    #[arg(long, conflicts_with = "check")]
+    pub smoke: bool,
+    /// Run the acceptance alone, at the committed table's statistics, and print its figures.
+    #[arg(long)]
+    pub check: bool,
+    /// The acceptance's particle radii, m, as `MIN,MAX`: 0.5,5 by default.
+    #[arg(long, conflicts_with = "out", value_delimiter = ',')]
+    pub radii: Vec<PositiveFigure>,
+    /// The acceptance's box side, m: 160 by default.
+    #[arg(long = "box", conflicts_with = "out")]
+    pub box_m: Option<PositiveFigure>,
+    /// Threads for the run; the output is the same for any number.
+    #[arg(long)]
+    pub threads: Option<NonZeroUsize>,
 }
 
 /// `atmosphere-sweep`'s arguments.
@@ -330,6 +364,7 @@ pub fn run_in(cli: &Cli, workspace: &Workspace, out: &mut dyn Write) -> Result<(
         ),
         Command::AtmosphereReference(args) => atmosphere_reference(args, out),
         Command::AtmosphereSweep(args) => atmosphere_sweep(args, out),
+        Command::RingShadowing(args) => ring_shadowing(args, out),
         Command::Fingerprint { task } => {
             let task = find(task)?;
             let fingerprint = task.fingerprint();
@@ -478,6 +513,158 @@ fn atmosphere_reference(
         case.wavelengths_nm().len(),
     )?;
     Ok(())
+}
+
+/// `ring-shadowing`: runs the table and writes its module, printing each τ node as it finishes and
+/// how long the run took; or with `--check`, runs the acceptance alone and prints its figures.
+fn ring_shadowing(args: &RingShadowingArgs, out: &mut dyn Write) -> Result<(), RunFitError> {
+    use crate::rings::{FULL, SMOKE, TauNode, acceptance, render_module, run_table};
+    let threads = threads_or_all(args.threads);
+    let start = Instant::now();
+    if args.check {
+        let radii = match args.radii.as_slice() {
+            [] => crate::rings::RADII_M,
+            [min, max] => (min.get(), max.get()),
+            _ => return Err(RunFitError::RadiiNeedTwo(args.radii.len())),
+        };
+        let statistics = match args.box_m {
+            Some(box_m) => FULL.acceptance().in_box(box_m.get()),
+            None => FULL.acceptance(),
+        };
+        let figures = acceptance(radii, statistics, FULL.seed(), threads)
+            .map_err(RunFitError::RingShadowingCheck)?;
+        writeln!(out, "{}", describe_acceptance(&figures))?;
+        writeln!(
+            out,
+            "radii {}–{} m, {} fields of {} m, {} photons a field and elevation, {threads} threads, \
+             {:.1} s",
+            radii.0,
+            radii.1,
+            statistics.realisations(),
+            statistics.box_m(),
+            statistics.photons(),
+            start.elapsed().as_secs_f64()
+        )?;
+        return Ok(());
+    }
+    let path = args
+        .out
+        .as_ref()
+        .expect("clap requires --out unless --check is given");
+    let spec = if args.smoke { SMOKE } else { FULL };
+    // Each node as it finishes, for a run of several minutes; the first error writing is kept, and
+    // returned once the module is written.
+    let mut failed: Option<std::io::Error> = None;
+    let mut progress = |node: &TauNode| {
+        let line = match node.layer() {
+            None => format!("τ_phot {:.4}: no layer", node.target()),
+            Some(layer) => format!(
+                "τ_phot {:.4}: measured {:.4} ± {:.4}, τ_dyn {:.4}, D₀ {:.4}, H_eff {:.2} m, {} \
+                 spheres a field, {:.1} s",
+                node.target(),
+                node.measured(),
+                node.measured_error(),
+                layer.dynamical_optical_depth(),
+                layer.central_filling_factor(),
+                layer.effective_thickness_m(),
+                node.particles(),
+                start.elapsed().as_secs_f64()
+            ),
+        };
+        if failed.is_none()
+            && let Err(error) = writeln!(out, "{line}").and_then(|()| out.flush())
+        {
+            failed = Some(error);
+        }
+    };
+    let table = run_table(&spec, threads, &mut progress)?;
+    let text = render_module(&table)?;
+    std::fs::write(path, &text).map_err(|source| RunFitError::WriteShadowing {
+        path: path.clone(),
+        source,
+    })?;
+    if let Some(error) = failed {
+        return Err(error.into());
+    }
+    writeln!(out, "{}", describe_acceptance(table.acceptance()))?;
+    let checks = table.checks();
+    let (lost, photons) = table.lost();
+    let ((near_max, near_rms), (all_max, all_rms)) = (checks.hapke_near(), checks.hapke_all());
+    let (dense_max, dense_rms) = checks.hapke_dense();
+    let [[order_lit, order_unlit], [order_lit_one, order_unlit_one]] = checks.order_model_max();
+    let [reduction_lit, reduction_unlit] = checks.reduction_max();
+    writeln!(
+        out,
+        "Hapke's fallback against the table: |B_H − f_e| at most {near_max:.4} (RMS \
+         {near_rms:.4}) at α ≤ 30°, at most {all_max:.4} (RMS {all_rms:.4}) at every α, at most \
+         {dense_max:.4} (RMS {dense_rms:.4}) at α ≤ 30° where τ_phot ≥ 1; the order model at most \
+         {order_lit:.4} lit and {order_unlit:.4} unlit at ϖ 0.57, {order_lit_one:.4} and \
+         {order_unlit_one:.4} at ϖ = 1; the μ_eff reduction at ϖ 0.57 at most {reduction_lit:.4} \
+         lit and {reduction_unlit:.4} unlit; {lost} of {photons} photons lost or truncated"
+    )?;
+    writeln!(
+        out,
+        "wrote {} ({} bytes, sha256 {}), {threads} threads, {:.1} s",
+        path.display(),
+        text.len(),
+        crate::emit::sha256_hex(text.as_bytes()),
+        start.elapsed().as_secs_f64()
+    )?;
+    Ok(())
+}
+
+/// The acceptance figures, one line each.
+fn describe_acceptance(figures: &crate::rings::Acceptance) -> String {
+    use crate::rings::{Tilt, TiltElevation, TiltPhase};
+    let reference = figures.reference();
+    let (field_tau, field_d0) = figures.field_layer();
+    let (narrow, wide) = (TiltPhase::Narrow, TiltPhase::Wide);
+    let ratio = |tilt: &Tilt| {
+        format!(
+            "f_e(4.5°) {:.4} and {:.4}, f_e(26°) {:.4} and {:.4} at α 0.5° and 6°; ratio {:.4} at \
+             6° and {:.4} at 0.5° (τ_phot {:.4})",
+            tilt.shadowing(TiltElevation::Low, narrow),
+            tilt.shadowing(TiltElevation::Low, wide),
+            tilt.shadowing(TiltElevation::High, narrow),
+            tilt.shadowing(TiltElevation::High, wide),
+            tilt.ratio(wide),
+            tilt.ratio(narrow),
+            tilt.tau_phot()
+        )
+    };
+    let (cross, cross_layer) = figures.cross_check();
+    let (photometry, photometry_layer) = figures.photometry();
+    [
+        format!(
+            "D₀ {:.4} at τ_dyn {} with H_eff {:.3} m; the first field's τ_dyn {field_tau:.4} and D₀ \
+             {field_d0:.4}",
+            reference.central_filling_factor(),
+            reference.dynamical_optical_depth(),
+            reference.effective_thickness_m()
+        ),
+        format!("layer: {}", ratio(figures.tilt())),
+        format!("uniform layer at D 0.05: {}", ratio(figures.uniform())),
+        format!(
+            "0.1–5 m cross-check (H_eff {:.2} m): {}",
+            cross_layer.effective_thickness_m(),
+            ratio(cross)
+        ),
+        format!(
+            "I/F at B 4.5°, α 6°, τ_dyn 2.0 (D₀ {:.3}): {:.4} at ϖ 0.57, {:.4} at ϖ 0.21; by the \
+             table's order model {:.4} and {:.4}",
+            photometry_layer.central_filling_factor(),
+            photometry[0],
+            photometry[1],
+            figures.photometry_model()[0],
+            figures.photometry_model()[1]
+        ),
+        format!(
+            "Hapke's tilt ratio: {:.4} at 6°, {:.4} at 0.5°",
+            figures.hapke_ratio(wide),
+            figures.hapke_ratio(narrow)
+        ),
+    ]
+    .join("\n")
 }
 
 /// The SHA-256 of the running binary, which keys a sweep's work directory (main's reading 4).
@@ -676,6 +863,69 @@ mod tests {
         assert!(parse(&["fit", "mge"]).is_err());
         assert!(parse(&["run"]).is_err());
         assert!(parse(&["run", "mge", "--threads", "0"]).is_err());
+    }
+
+    #[test]
+    fn ring_shadowing_parses() {
+        use clap::error::ErrorKind;
+
+        let figure = |x: f64| PositiveFigure::new(x).unwrap();
+        assert_eq!(
+            parse(&["ring-shadowing", "--out", "table.ts", "--threads", "4"])
+                .unwrap()
+                .command,
+            Command::RingShadowing(RingShadowingArgs {
+                out: Some("table.ts".into()),
+                smoke: false,
+                check: false,
+                radii: Vec::new(),
+                box_m: None,
+                threads: NonZeroUsize::new(4),
+            })
+        );
+        assert_eq!(
+            parse(&[
+                "ring-shadowing",
+                "--check",
+                "--radii",
+                "0.01,5",
+                "--box",
+                "60"
+            ])
+            .unwrap()
+            .command,
+            Command::RingShadowing(RingShadowingArgs {
+                out: None,
+                smoke: false,
+                check: true,
+                radii: vec![figure(0.01), figure(5.0)],
+                box_m: Some(figure(60.0)),
+                threads: None,
+            })
+        );
+        // `--out` or `--check`, never both or neither; `--radii` and `--box` only with `--check`.
+        for (args, kind) in [
+            (&["ring-shadowing"][..], ErrorKind::MissingRequiredArgument),
+            (
+                &["ring-shadowing", "--out", "a.ts", "--check"],
+                ErrorKind::ArgumentConflict,
+            ),
+            (
+                &["ring-shadowing", "--out", "a.ts", "--radii", "0.1,5"],
+                ErrorKind::ArgumentConflict,
+            ),
+            (
+                &["ring-shadowing", "--check", "--radii", "0,5"],
+                ErrorKind::ValueValidation,
+            ),
+        ] {
+            assert_eq!(parse(args).unwrap_err().kind(), kind, "{args:?}");
+        }
+        // Three radii are refused by the command, as a bad command line.
+        let cli = parse(&["ring-shadowing", "--check", "--radii", "0.1,1,5"]).unwrap();
+        let error = run(&cli, &mut Vec::new()).unwrap_err();
+        assert!(matches!(error, RunFitError::RadiiNeedTwo(3)), "{error}");
+        assert_eq!(error.exit_code(), 2);
     }
 
     #[test]

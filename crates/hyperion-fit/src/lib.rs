@@ -30,6 +30,8 @@
 //! - [`materials`]: rendering plan R08's committed material files, read as a fit's input;
 //! - [`parallel`]: the deterministic map-reduce;
 //! - [`optimise`]: hand-written optimisers (golden section, Nelder–Mead);
+//! - [`rings`]: the rings' shadowing table (plan R11, R11.T9.b), an offline Monte Carlo whose
+//!   output is a client module, outside `tables.lock` like [`atmosphere`]'s references;
 //! - [`cli`]: the command line, which `main.rs` parses and hands to [`cli::run`].
 
 pub mod atmosphere;
@@ -43,6 +45,7 @@ pub mod materials;
 pub mod optimise;
 pub mod parallel;
 pub mod pipeline;
+pub mod rings;
 pub mod task;
 pub mod tasks;
 
@@ -121,6 +124,25 @@ pub enum RunFitError {
         #[source]
         source: io::Error,
     },
+    /// `ring-shadowing --radii` was given other than two radii.
+    #[error("`--radii` takes two radii, `MIN,MAX`, not {0}")]
+    RadiiNeedTwo(usize),
+    /// The rings' shadowing Monte Carlo could not be run.
+    #[error(transparent)]
+    RingShadowing(#[from] rings::RunShadowingError),
+    /// `ring-shadowing --check`'s acceptance could not be run: a layer or a box out of its
+    /// domain is a bad command line there, since `--radii` and `--box` set them.
+    #[error(transparent)]
+    RingShadowingCheck(rings::RunShadowingError),
+    /// The rings' shadowing module could not be written.
+    #[error("cannot write the shadowing module {}", path.display())]
+    WriteShadowing {
+        /// Where it was to go.
+        path: std::path::PathBuf,
+        /// Why it could not.
+        #[source]
+        source: io::Error,
+    },
     /// The command's output could not be written.
     #[error("cannot write the output")]
     Output(#[from] io::Error),
@@ -131,10 +153,14 @@ impl RunFitError {
     ///
     /// For `atmosphere-reference`, `--stokes` on a case the Stokes mode cannot trace and a
     /// `--samples` past [`atmosphere::MAX_SAMPLES`] are bad command lines; for
-    /// `atmosphere-sweep`, a missing argument and a point the case does not hold.
+    /// `atmosphere-sweep`, a missing argument and a point the case does not hold; for
+    /// `ring-shadowing --check`, other than two radii, radii out of their domain and a box too
+    /// small or too large for them.
     #[must_use]
     pub fn exit_code(&self) -> u8 {
         use atmosphere::sweep::RunSweepError;
+        use rings::RunShadowingError;
+        use rings::layer::BuildFieldError;
         match self {
             Self::UnknownTask(_)
             | Self::OtherManifestNeedsOut
@@ -144,6 +170,15 @@ impl RunFitError {
                 | atmosphere::TraceReferenceError::TooManySamples { .. },
             )
             | Self::SweepNeeds(_)
+            | Self::RadiiNeedTwo(_)
+            | Self::RingShadowingCheck(
+                RunShadowingError::Layer(_)
+                | RunShadowingError::Field(
+                    BuildFieldError::Box { .. }
+                    | BuildFieldError::TooManyParticles(_)
+                    | BuildFieldError::TooFewParticles(_),
+                ),
+            )
             | Self::Sweep(RunSweepError::UnknownPoint(_)) => 2,
             Self::Manifest(_)
             | Self::Task(_)
@@ -170,6 +205,20 @@ impl RunFitError {
             )
             | Self::HashBinary { .. }
             | Self::WriteSweep { .. }
+            | Self::RingShadowing(
+                RunShadowingError::Layer(_)
+                | RunShadowingError::Field(_)
+                | RunShadowingError::Pool(_)
+                | RunShadowingError::Opaque { .. }
+                | RunShadowingError::Encode { .. },
+            )
+            | Self::RingShadowingCheck(
+                RunShadowingError::Field(BuildFieldError::Jammed { .. })
+                | RunShadowingError::Pool(_)
+                | RunShadowingError::Opaque { .. }
+                | RunShadowingError::Encode { .. },
+            )
+            | Self::WriteShadowing { .. }
             | Self::Output(_) => 1,
         }
     }

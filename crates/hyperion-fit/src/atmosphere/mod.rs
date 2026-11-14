@@ -60,7 +60,7 @@ mod absorber;
 #[cfg(test)]
 mod benchmarks;
 pub mod case;
-mod geometry;
+pub(crate) mod geometry;
 mod importance;
 pub(crate) mod metric;
 mod optics;

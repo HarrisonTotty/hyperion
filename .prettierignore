@@ -102,3 +102,7 @@ apps/hyperion/src/renderer/src/view/atmosphere/fixtures/air-switch/
 
 # The lanes' inbox, checked out beside the repository's code but not part of it
 /.lc-inbox/
+
+# Written by `hyperion-fit ring-shadowing`, whose emitter prints Prettier's layout already: the
+# committed bytes stay the tool's own (plan R11, R11.T9.b)
+apps/hyperion/src/renderer/src/view/rings/shadowingTable.ts

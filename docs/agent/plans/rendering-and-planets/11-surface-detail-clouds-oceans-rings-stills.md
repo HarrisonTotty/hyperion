@@ -1254,7 +1254,8 @@ Files: `ocean/*`, R01's `WGSL_CATALOGUE`, tests. Acceptance: `pnpm test`, `just 
   0.44 ± 0.05 at 814 nm and 0.16 ± 0.03 at 336 nm; the 0.1–5 m cross-check is recorded beside them;
   a uniform layer at D = 0.05 fails the ratio (so the test has teeth); a fast Vitest reads the
   committed module and checks its header, size and bounds. Hapke's fallback is measured against the
-  table and its error recorded.
+  table and its error recorded. _Built 2026-11-14._
+  Records: [11-surface-detail-clouds-oceans-rings-stills/records/R11.T9.b.md](11-surface-detail-clouds-oceans-rings-stills/records/R11.T9.b.md).
 - **R11.T9.c The slab.** `ringSlab.wgsl`: the annulus in the ring plane with the profile texture at
   the pixel's footprint, both faces, the planet's shadow on the ring on both settings and the ring's
   on the planet where `ringShadowOnBody` is on (the high setting, Design note 18), the table on both
