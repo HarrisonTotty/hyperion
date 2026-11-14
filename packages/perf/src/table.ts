@@ -18,7 +18,7 @@ import type { BudgetRow, MemoryItem } from "./rows.ts";
 import { median, monotoneTrend, throttleMarks } from "./stats.ts";
 
 /** The generated sections of `budget.md`, in the order the file holds them. */
-export const GENERATED_SECTIONS = ["frame-time", "memory", "streaming", "runs"] as const;
+export const GENERATED_SECTIONS = ["frame-time", "frames", "memory", "streaming", "runs"] as const;
 
 /** A generated section of `budget.md`. */
 export type GeneratedSection = (typeof GENERATED_SECTIONS)[number];
@@ -32,65 +32,75 @@ export function sectionMarker(section: GeneratedSection): string {
 export interface Estimate {
   /** The figure as the brainstorm states it. */
   readonly text: string;
-  /** Its upper end, ms or bytes as the table is, where it states one: the ladder's excess rule. */
-  readonly upper: number | null;
+}
+
+/**
+ * A frame-time estimate with its upper end, where the brainstorm states one: the ladder's excess
+ * rule (Design note 10) sets a row's measured median against it.
+ */
+export interface FrameEstimate extends Estimate {
+  readonly upperMs: number | null;
 }
 
 /** A row of one of the brainstorm's tables, by its name there, with its two estimates. */
-export interface BrainstormRow {
+export interface BrainstormRow<E extends Estimate = Estimate> {
   /** The row's name in the brainstorm's table, its citation; `null` for a row measured only. */
   readonly brainstorm: string | null;
   /** The row's name in `budget.md`. */
   readonly label: string;
-  readonly discrete: Estimate | null;
-  readonly uhd620: Estimate | null;
+  readonly discrete: E | null;
+  readonly uhd620: E | null;
 }
 
-function est(text: string, upper: number | null): Estimate {
-  return { text, upper };
+function est(text: string): Estimate {
+  return { text };
 }
 
-function row(brainstorm: string, discrete: Estimate, uhd620: Estimate): BrainstormRow {
+function ms(text: string, upperMs: number): FrameEstimate {
+  return { text, upperMs };
+}
+
+function row<E extends Estimate>(brainstorm: string, discrete: E, uhd620: E): BrainstormRow<E> {
   return { brainstorm, label: brainstorm, discrete, uhd620 };
 }
 
-function measuredOnly(label: string): BrainstormRow {
+function measuredOnly(label: string): BrainstormRow<never> {
   return { brainstorm: null, label: `${label} (measured only)`, discrete: null, uhd620: null };
 }
 
 /**
  * The brainstorm's frame-time table (Performance budget: "Discrete target, 1080p, 16.7 ms budget"
- * and "UHD 620 low setting, 720p, 33 ms budget"), by row, upper ends in ms; estimates, not
+ * and "UHD 620 low setting, 720p, 33 ms budget"), by row, with upper ends: estimates, not
  * measurements.
  */
-export const FRAME_ESTIMATES: Readonly<Record<BudgetRow, BrainstormRow>> = {
-  terrain: row("Terrain geometry and patches", est("3–5 ms", 5), est("8–14 ms", 14)),
-  "atmosphere-frame": row("Atmosphere, per frame", est("0.5–1 ms", 1), est("2–4 ms", 4)),
+export const FRAME_ESTIMATES: Readonly<Record<BudgetRow, BrainstormRow<FrameEstimate>>> = {
+  terrain: row("Terrain geometry and patches", ms("3–5 ms", 5), ms("8–14 ms", 14)),
+  "atmosphere-frame": row("Atmosphere, per frame", ms("0.5–1 ms", 1), ms("2–4 ms", 4)),
   "atmosphere-tables": row(
     "Atmosphere, per-planet tables",
-    est("under 0.1 ms, when the atmosphere changes", 0.1),
-    est("about 1 ms, on the same occasions", 1),
+    ms("under 0.1 ms, when the atmosphere changes", 0.1),
+    ms("about 1 ms, on the same occasions", 1),
   ),
   clouds: row(
     "Volumetric clouds",
-    est("1.5–3 ms at quarter resolution", 3),
-    est("cut: a two-dimensional layer at about 1 ms", 1),
+    ms("1.5–3 ms at quarter resolution", 3),
+    ms("cut: a two-dimensional layer at about 1 ms", 1),
   ),
-  ocean: row("Ocean", est("1–2 ms, Gerstner", 2), est("2–3 ms", 3)),
-  shadows: row("Shadows", est("1.5–3 ms", 3), est("0.3–0.6 ms", 0.6)),
+  ocean: row("Ocean", ms("1–2 ms, Gerstner", 2), ms("2–3 ms", 3)),
+  shadows: row("Shadows", ms("1.5–3 ms", 3), ms("0.3–0.6 ms", 0.6)),
   stars: row(
     "Star field and galactic band",
-    est("under 0.2 ms near the Sun", 0.2),
-    est("under 0.5 ms", 0.5),
+    ms("under 0.2 ms near the Sun", 0.2),
+    ms("under 0.5 ms", 0.5),
   ),
-  "exposure-histogram": row("Exposure histogram", est("0.3–0.5 ms", 0.5), est("about 1 ms", 1)),
-  "bloom-tonemap": row("Bloom and tone mapping", est("under 1 ms", 1), est("2–3 ms", 3)),
-  scatter: row("Scatter instances", est("1–2 ms", 2), est("off, or a token density under 1 ms", 1)),
-  rings: row("Rings, when in view", est("0.5–1 ms", 1), est("under 0.5 ms", 0.5)),
+  "exposure-histogram": row("Exposure histogram", ms("0.3–0.5 ms", 0.5), ms("about 1 ms", 1)),
+  "bloom-tonemap": row("Bloom and tone mapping", ms("under 1 ms", 1), ms("2–3 ms", 3)),
+  scatter: row("Scatter instances", ms("1–2 ms", 2), ms("off, or a token density under 1 ms", 1)),
+  rings: row("Rings, when in view", ms("0.5–1 ms", 1), ms("under 0.5 ms", 0.5)),
   "station-wireframe": row(
     "Station wireframe view",
-    est("under 3 ms at 1080p", 3),
-    est("4–9 ms at 1080p, against its own 16.7 ms frame", 9),
+    ms("under 3 ms at 1080p", 3),
+    ms("4–9 ms at 1080p, against its own 16.7 ms frame", 9),
   ),
   "cockpit-instruments": measuredOnly("Cockpit instruments"),
   compositing: measuredOnly("Consoles' compositing"),
@@ -98,54 +108,37 @@ export const FRAME_ESTIMATES: Readonly<Record<BudgetRow, BrainstormRow>> = {
 };
 
 const MB = 1_000_000;
-const MiB = 1_048_576;
 
 /**
  * The brainstorm's memory table (Performance budget: "Discrete target" and "UHD 620 low setting"),
- * by item, upper ends in bytes; computed from formats and sizes, not measured. R08's per-view
+ * by item: computed from formats and sizes, not measured. R08's per-view
  * tables are the atmosphere row's "0.43 MB a view".
  */
 export const MEMORY_ESTIMATES: Readonly<Record<MemoryItem, BrainstormRow>> = {
-  "star-cubemap": row(
-    "Star cubemap",
-    est("about 300 MB with mips", 300 * MB),
-    est("34 MB with mips", 34 * MB),
-  ),
-  "height-cache": row(
-    "Height-texture cache",
-    est("about 400 MB", 400 * MB),
-    est("about 64 MB", 64 * MB),
-  ),
+  "star-cubemap": row("Star cubemap", est("about 300 MB with mips"), est("34 MB with mips")),
+  "height-cache": row("Height-texture cache", est("about 400 MB"), est("about 64 MB")),
   "atmosphere-tables": row(
     "Atmosphere tables",
-    est("about 0.4 MB a planet on an Earth, under 2 MB", 2 * MB),
-    est("smaller tables, within the discrete figures", 2 * MB),
+    est("about 0.4 MB a planet on an Earth, under 2 MB"),
+    est("smaller tables, within the discrete figures"),
   ),
   "atmosphere-view": {
     brainstorm: "Atmosphere tables",
     label: "Atmosphere tables, per view",
-    discrete: est("0.43 MB a view, summed over suns", null),
-    uhd620: est("within the discrete figures", null),
+    discrete: est("0.43 MB a view, summed over suns"),
+    uhd620: est("within the discrete figures"),
   },
   "coarse-field-gpu": row(
     "Coarse field, GPU copy",
-    est("at most 384 KiB at level 8", 384 * 1024),
-    est("the same", 384 * 1024),
+    est("at most 384 KiB at level 8"),
+    est("the same"),
   ),
-  "render-targets": row(
-    "Render targets",
-    est("about 70 MB at 1080p", 70 * MB),
-    est("about 30 MB at 720p", 30 * MB),
-  ),
-  shadows: row(
-    "Shadows",
-    est("four 2,048² cascades, 64 MB", 64 * MiB),
-    est("none beyond the patch cache", 0),
-  ),
+  "render-targets": row("Render targets", est("about 70 MB at 1080p"), est("about 30 MB at 720p")),
+  shadows: row("Shadows", est("four 2,048² cascades, 64 MB"), est("none beyond the patch cache")),
   clouds: row(
     "Clouds",
-    est("3D noise volumes, 10–20 MB", 20 * MB),
-    est("a two-dimensional layer, under 16 MB", 16 * MB),
+    est("3D noise volumes, 10–20 MB"),
+    est("a two-dimensional layer, under 16 MB"),
   ),
   ocean: measuredOnly("Ocean"),
   rings: measuredOnly("Rings"),
@@ -157,16 +150,16 @@ export const MEMORY_ESTIMATES: Readonly<Record<MemoryItem, BrainstormRow>> = {
 /** The brainstorm's GPU total (the memory table's "Total, GPU" row). */
 export const MEMORY_TOTAL_ESTIMATE: BrainstormRow = row(
   "Total, GPU",
-  est("about 0.75–1.25 GB", 1.25e9),
-  est("about 150–300 MB", 300 * MB),
+  est("about 0.75–1.25 GB"),
+  est("about 150–300 MB"),
 );
 
 /** The brainstorm's coarse-field copies on the CPU (the paragraph under its memory table). */
 export const WORKER_FIELD_ESTIMATE: BrainstormRow = {
   brainstorm: "On the CPU side each height worker holds its own copy of the surveyed coarse field",
   label: "Coarse field, the workers' copies (CPU)",
-  discrete: est("4–15 MB a worker; about 45 MB for an Earth in three", 45 * MB),
-  uhd620: est("the same", 45 * MB),
+  discrete: est("4–15 MB a worker; about 45 MB for an Earth in three"),
+  uhd620: est("the same"),
 };
 
 /** How a column recognises its machine: by its GPU's PCI IDs, or by platform and CPU model. */
@@ -377,11 +370,20 @@ function frameCell(
         inColumn(record, column) &&
         record.runs.some((run) => run.rows.some((r) => r.row === budgetRow)),
     );
-  const pick =
-    latest(candidates.filter(({ record }) => record.harness.timer === "full")) ??
-    latest(candidates);
+  // A station run whose server shared its machine is shown, never counted as the station's
+  // figure (Design note 8): it fills the station's cell only where no other record does, marked.
+  const counted =
+    budgetRow === "station-wireframe"
+      ? candidates.filter(({ record }) => record.harness.server.placement !== "co-resident")
+      : candidates;
+  const pool = counted.length > 0 ? counted : candidates;
+  const pick = latest(pool.filter(({ record }) => record.harness.timer === "full")) ?? latest(pool);
   if (pick === undefined) return "—";
   const { record } = pick;
+  const coResident =
+    budgetRow === "station-wireframe" && record.harness.server.placement === "co-resident"
+      ? " (co-resident: not the station's figure)"
+      : "";
   let cell: string;
   switch (record.harness.timer) {
     case "quantized":
@@ -394,7 +396,7 @@ function frameCell(
       cell = `${rowFigures(record, budgetRow)} (${record.id})${forcedMark(record)}`;
       break;
   }
-  return cell;
+  return `${cell}${coResident}`;
 }
 
 function frameTimeSection(records: ReadonlyArray<PerfRunRecord>): string {
@@ -407,6 +409,70 @@ function frameTimeSection(records: ReadonlyArray<PerfRunRecord>): string {
     "repetitions, with the record's ID; `—` where no record has the row yet.",
     "",
     table(header("Pass (the brainstorm's row)", columns, "p50 / p95 / p99, ms"), body),
+  ].join("\n");
+}
+
+function spread(values: ReadonlyArray<number | null>, digits: number): string {
+  const known = values.filter((v): v is number => v !== null);
+  const middle = median(known);
+  if (middle === null) return "—";
+  return `${middle.toFixed(digits)} [${Math.min(...known).toFixed(digits)}, ${Math.max(...known).toFixed(digits)}]`;
+}
+
+function framesSection(records: ReadonlyArray<PerfRunRecord>): string {
+  const body: string[][] = [];
+  for (const column of shownColumns(records)) {
+    const inIt = records
+      .map((record, index) => ({ record, index }))
+      .filter(({ record }) => inColumn(record, column));
+    for (const scene of new Set(inIt.map(({ record }) => record.scene.id))) {
+      const pick = latest(inIt.filter(({ record }) => record.scene.id === scene));
+      if (pick === undefined) continue;
+      const { record } = pick;
+      body.push([
+        column.label,
+        `${record.id}${forcedMark(record)}`,
+        String(record.pooledFrames.count),
+        spread(
+          record.runs.map((run) => run.frames.p50Ms),
+          2,
+        ),
+        spread(
+          record.runs.map((run) => run.frames.p95Ms),
+          2,
+        ),
+        spread(
+          record.runs.map((run) => run.frames.p99Ms),
+          2,
+        ),
+        fixed(record.pooledFrames.p99Ms, 2),
+        spread(
+          record.runs.map((run) => run.frames.missedFraction),
+          4,
+        ),
+      ]);
+    }
+  }
+  return [
+    "Frame intervals, R05's percentiles (Design note 7): the median over repetitions of each",
+    "repetition's p50, p95 and p99 with their range, the frames pooled, and p99 over the pooled",
+    "frames beside the median of the repetitions' p99s; the latest record of each scene a column holds.",
+    "",
+    body.length === 0
+      ? "No record yet."
+      : table(
+          [
+            "Column",
+            "Record",
+            "Frames",
+            "p50, ms [range]",
+            "p95, ms [range]",
+            "p99, ms [range]",
+            "Pooled p99, ms",
+            "Missed fraction [range]",
+          ],
+          body,
+        ),
   ].join("\n");
 }
 
@@ -595,12 +661,27 @@ function runsSection(records: ReadonlyArray<PerfRunRecord>): string {
   ].join("\n");
 }
 
+/** `budget.md` has lost a generated section's marker, or holds one twice. */
+export class BudgetMarkerError extends Error {
+  /** The section whose markers are wrong. */
+  readonly section: GeneratedSection;
+
+  constructor(section: GeneratedSection, found: number) {
+    super(
+      `budget.md holds ${String(found)} ${sectionMarker(section)} markers, not the 2 that bound its section`,
+    );
+    this.name = "BudgetMarkerError";
+    this.section = section;
+  }
+}
+
 /** Every generated section's text from the records. */
 export function budgetSections(
   records: ReadonlyArray<PerfRunRecord>,
 ): Readonly<Record<GeneratedSection, string>> {
   return {
     "frame-time": frameTimeSection(records),
+    frames: framesSection(records),
     memory: memorySection(records),
     streaming: streamingSection(records),
     runs: runsSection(records),
@@ -611,7 +692,8 @@ export function budgetSections(
  * `budget.md` with every generated section written from the records and the prose around them
  * kept as it is.
  *
- * @throws Error if a section's two markers are not in the text exactly once each.
+ * @throws {@link BudgetMarkerError} if a section's two markers are not in the text, each once: a
+ *   hand edit broke the file.
  */
 export function writeBudget(markdown: string, records: ReadonlyArray<PerfRunRecord>): string {
   const sections = budgetSections(records);
@@ -619,11 +701,7 @@ export function writeBudget(markdown: string, records: ReadonlyArray<PerfRunReco
   for (const section of GENERATED_SECTIONS) {
     const marker = sectionMarker(section);
     const parts = out.split(marker);
-    if (parts.length !== 3) {
-      throw new Error(
-        `budget.md holds ${String(parts.length - 1)} ${marker} markers, not the 2 that bound its section`,
-      );
-    }
+    if (parts.length !== 3) throw new BudgetMarkerError(section, parts.length - 1);
     const [before, , after] = parts;
     out = [
       before,

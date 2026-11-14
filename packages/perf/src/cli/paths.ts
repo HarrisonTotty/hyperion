@@ -37,3 +37,8 @@ export function takeFlag(args: string[], flag: string): boolean {
   args.splice(at, 1);
   return true;
 }
+
+/** A file the system could not read or write (`ENOENT`, `EACCES`, …), as Node reports it. */
+export function isFileError(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error && "code" in error && typeof error.code === "string";
+}

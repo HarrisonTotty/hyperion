@@ -11,8 +11,8 @@ import { readFileSync, writeFileSync } from "node:fs";
 
 import { PerfRecordError, parsePerfRecords } from "../record.ts";
 import { appendRecords, recordsOfFile } from "../store.ts";
-import { writeBudget } from "../table.ts";
-import { BUDGET_PATH, STORE_PATH, takeOption } from "./paths.ts";
+import { BudgetMarkerError, writeBudget } from "../table.ts";
+import { BUDGET_PATH, isFileError, STORE_PATH, takeOption } from "./paths.ts";
 
 function main(argv: ReadonlyArray<string>): number {
   const args = [...argv];
@@ -37,6 +37,12 @@ function main(argv: ReadonlyArray<string>): number {
   try {
     const records = recordsOfFile(readFileSync(file, "utf8"));
     const appended = appendRecords(readFileSync(store, "utf8"), records);
+    if (appended.kind === "duplicate") {
+      process.stderr.write(
+        `perf-record: ${file} is already in the store, as ${appended.existing}\n`,
+      );
+      return 1;
+    }
     const table = writeBudget(readFileSync(budget, "utf8"), parsePerfRecords(appended.text));
     writeFileSync(store, appended.text);
     writeFileSync(budget, table);
@@ -46,10 +52,10 @@ function main(argv: ReadonlyArray<string>): number {
     return 0;
   } catch (error) {
     if (error instanceof PerfRecordError) {
-      process.stderr.write(`perf-record: ${file} refused: ${error.message}\n`);
+      process.stderr.write(`perf-record: refused: ${error.message}\n`);
       return 1;
     }
-    if (error instanceof Error) {
+    if (error instanceof BudgetMarkerError || isFileError(error)) {
       process.stderr.write(`perf-record: ${error.message}\n`);
       return 1;
     }

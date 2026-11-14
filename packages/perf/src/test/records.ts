@@ -57,6 +57,9 @@ export function sampleRepetition(index: number, metrics: RepetitionMetrics): Per
       },
       appPeakBytes: 900_000_000,
       workerFieldBytes: [15_100_000, 15_100_000],
+      workerWasmBytes: [40_000_000, 40_000_000],
+      nvidiaDeviceLessBaselinePeakBytes: null,
+      displayServer: { residentPeakBytes: 30_000_000, renderBusyMs: 1200 },
     },
     streaming: [{ segment: "orbit coast", patchesPerS: 4, demandPerS: 4.2, streamingSeconds: 0 }],
     throttle: {

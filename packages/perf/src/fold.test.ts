@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
@@ -109,6 +109,23 @@ describe("foldSpikeResult", () => {
     };
     const record = foldSpikeResult({ ...file, gpu: { ...gpu, clocks } });
     expect(record.runs[0]?.throttle).toMatchObject({ gpuMinMHz: 900, gpuMedianMHz: 1000 });
+  });
+
+  it("folds every results file R05 committed", () => {
+    const dir = new URL("../../../docs/measurements/descent-spike/", import.meta.url);
+    const folded = readdirSync(dir)
+      .filter((name) => name.endsWith(".json"))
+      .map((name): unknown => JSON.parse(readFileSync(new URL(name, dir), "utf8")))
+      .filter(
+        (file) =>
+          typeof file === "object" &&
+          file !== null &&
+          "schema" in file &&
+          file.schema === "hyperion.descent-spike.results",
+      )
+      .map((file) => foldSpikeResult(file).source);
+    expect(folded.length).toBeGreaterThanOrEqual(12);
+    expect(new Set(folded)).toEqual(new Set(["descent-spike"]));
   });
 
   it("refuses a file that is not R05's results or of a version it does not read", () => {

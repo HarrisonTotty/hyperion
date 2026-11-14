@@ -27,16 +27,6 @@ export function rangeOf(values: ReadonlyArray<number>): ValueRange | null {
   return { min: Math.min(...values), max: Math.max(...values) };
 }
 
-/** The values, or `null` if any is missing: a metric is compared only where every repetition has it. */
-export function complete(values: ReadonlyArray<number | null>): ReadonlyArray<number> | null {
-  const out: number[] = [];
-  for (const value of values) {
-    if (value === null) return null;
-    out.push(value);
-  }
-  return out;
-}
-
 /**
  * The repetitions the trend screen needs: at five, a monotone sequence is Mann–Kendall's |S| = 10,
  * p = 2/120 ≈ 0.017 two-sided under exchangeability (Mann 1945; Kendall, _Rank Correlation

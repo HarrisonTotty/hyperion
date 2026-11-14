@@ -144,6 +144,27 @@ describe("the run record", () => {
     ).toBe("generatorVersion");
   });
 
+  it("refuses a perf-run record whose warm-up is unjudged or whose height workers are unstated", () => {
+    const record = sampleRecord();
+    const unjudged = {
+      ...record,
+      harness: { ...record.harness, warmUp: { seconds: 150, steady: null } },
+    };
+    expect(errorOf(() => validatePerfRecord(unjudged)).field).toBe("harness.warmUp.steady");
+    const unstated = { ...record, harness: { ...record.harness, heightWorkers: null } };
+    expect(errorOf(() => validatePerfRecord(unstated)).field).toBe("harness.heightWorkers");
+  });
+
+  it("refuses a perf-run record whose wireframe view does not state its line antialiasing", () => {
+    const record = sampleRecord();
+    const views = record.views.map((view) =>
+      view.style === "wireframe" ? Object.assign({}, view, { lineAntialiasing: null }) : view,
+    );
+    expect(errorOf(() => validatePerfRecord({ ...record, views })).field).toBe(
+      "views[1].lineAntialiasing",
+    );
+  });
+
   it("accepts a fold's record without its commit", () => {
     const record = sampleRecord(undefined, {
       source: "descent-spike",
@@ -168,13 +189,19 @@ describe("the run record", () => {
     expect(error.field).toBe("harness.forcedReasons");
   });
 
-  it("names the store's line and refuses a repeated ID", () => {
+  it("names the store's line at fault", () => {
     const line = serialisePerfRecord(sampleRecord());
-    const bad = errorOf(() => parsePerfRecords(`${line}\n\n{"version":1}\n`));
-    expect(bad.line).toBe(3);
+    expect(errorOf(() => parsePerfRecords(`${line}\n\n{"version":1}\n`)).line).toBe(3);
+  });
+
+  it("refuses a store that repeats an ID", () => {
+    const line = serialisePerfRecord(sampleRecord());
     const twice = errorOf(() => parsePerfRecords(`${line}\n${line}\n`));
     expect({ line: twice.line, field: twice.field }).toEqual({ line: 2, field: "id" });
-    expect(parsePerfRecords(`${line}\n`)).toHaveLength(1);
+  });
+
+  it("reads a store of one record", () => {
+    expect(parsePerfRecords(`${serialisePerfRecord(sampleRecord())}\n`)).toHaveLength(1);
   });
 
   it("refuses a line that is not JSON", () => {

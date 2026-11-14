@@ -430,6 +430,11 @@ export function foldSpikeResult(json: unknown): PerfRunRecord {
                 },
           appPeakBytes: numberOrNull(measured(memory["peakAppBytes"])),
           workerFieldBytes: [],
+          workerWasmBytes: [],
+          nvidiaDeviceLessBaselinePeakBytes: numberOrNull(
+            measured(memory["peakNvidiaDeviceLessBaselineBytes"]),
+          ),
+          displayServer: null,
         },
         streaming,
         throttle: {

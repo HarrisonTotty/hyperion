@@ -12,7 +12,7 @@
 import { readFileSync } from "node:fs";
 
 import { perfCompare } from "../compare.ts";
-import { STORE_PATH, takeOption } from "./paths.ts";
+import { isFileError, STORE_PATH, takeOption } from "./paths.ts";
 
 function main(argv: ReadonlyArray<string>): number {
   const args = [...argv];
@@ -36,9 +36,8 @@ function main(argv: ReadonlyArray<string>): number {
   try {
     text = readFileSync(store, "utf8");
   } catch (error) {
-    process.stderr.write(
-      `perf-compare: ${error instanceof Error ? error.message : String(error)}\n`,
-    );
+    if (!isFileError(error)) throw error;
+    process.stderr.write(`perf-compare: ${error.message}\n`);
     return 1;
   }
   const outcome = perfCompare(text, id, against.length > 0 ? against : null);

@@ -207,13 +207,24 @@ describe("perf-compare", () => {
     expect(outcome.text).toContain("For reading, without a verdict:");
   });
 
-  it("exits 0 for a scene's first record and 1 for a refusal or an unknown record", () => {
+  it("exits 0 for a scene's first record", () => {
     expect(perfCompare(store, first.id, null)).toMatchObject({ exitCode: 0 });
+  });
+
+  it("exits 1 for a refusal, naming the field", () => {
     const battery = withGpu(OLD, 3, { state: { ...first.state, supply: "battery" } });
     const refused = perfCompare(`${store}${serialisePerfRecord(battery)}\n`, battery.id, null);
     expect(refused.exitCode).toBe(1);
     expect(refused.text).toContain("differs in state.supply");
+  });
+
+  it("exits 1 for a record not in the store", () => {
     expect(perfCompare(store, "2026-11-13-uhd620-cockpit-descent-9", null).exitCode).toBe(1);
-    expect(perfCompare(store, regressed.id, first.id).exitCode).toBe(0);
+  });
+
+  it("compares against the record named", () => {
+    expect(perfCompare(store, regressed.id, first.id).text).toContain(
+      `${regressed.id} against ${first.id}`,
+    );
   });
 });

@@ -94,6 +94,17 @@ describe("the brainstorm's estimates", () => {
   });
 });
 
+describe("the frame estimates' upper ends", () => {
+  it("are each a figure of its estimate's text", () => {
+    for (const r of BUDGET_ROWS) {
+      for (const estimate of [FRAME_ESTIMATES[r].discrete, FRAME_ESTIMATES[r].uhd620]) {
+        if (estimate === null) continue;
+        expect(figuresIn(estimate.text)).toContain(String(estimate.upperMs));
+      }
+    }
+  });
+});
+
 describe("the table writer", () => {
   it("is a pure function of the records", () => {
     const records = [UHD620];
@@ -145,6 +156,39 @@ describe("the table writer", () => {
     );
     expect(frameRow([UHD620, quantised], "Terrain geometry and patches")).toContain(
       `(${UHD620.id})`,
+    );
+  });
+
+  it("shows a co-resident station run but never counts it as the station's figure", () => {
+    const station = (placement: "co-resident" | "remote", n: number): PerfRunRecord =>
+      sampleRecord(undefined, {
+        id: `2026-11-13-uhd620-station-wireframe-descent-${String(n)}`,
+        date: `2026-11-13T1${String(n)}:00:00.000Z`,
+        scene: { ...UHD620.scene, id: "station-wireframe-descent" },
+        harness: {
+          ...UHD620.harness,
+          server: { placement, numWorkers: 1, restartedPerRepetition: true },
+        },
+        runs: UHD620.runs.map((run) =>
+          Object.assign({}, run, {
+            rows: [
+              { row: "station-wireframe", frames: 1000, meanMs: 5, p50Ms: 5, p95Ms: 6, p99Ms: 7 },
+            ],
+          }),
+        ),
+      });
+    const coResident = station("co-resident", 2);
+    expect(frameRow([coResident], "Station wireframe view")).toContain(
+      `(${coResident.id}) (co-resident: not the station's figure)`,
+    );
+    const remote = station("remote", 1);
+    expect(frameRow([remote, coResident], "Station wireframe view")).toContain(`(${remote.id})`);
+    expect(frameRow([remote, coResident], "Station wireframe view")).not.toContain(coResident.id);
+  });
+
+  it("reports each record's percentiles with their ranges and the pooled p99", () => {
+    expect(sectionOf([UHD620], "frames")).toContain(
+      "| UHD 620, low | 2026-11-13-uhd620-cockpit-descent-1 | 180000 | 33.30 [33.30, 33.30]",
     );
   });
 

@@ -12,11 +12,13 @@ import {
 } from "./record.ts";
 import type { PerfRunRecord } from "./record.ts";
 
-/** The store's text with records appended, and the IDs they took. */
-export interface Appended {
-  readonly text: string;
-  readonly ids: ReadonlyArray<string>;
-}
+/**
+ * What appending gave: the store's text with the records appended and the IDs they took, or the
+ * ID under which one of them is already in the store, the store unchanged.
+ */
+export type Appended =
+  | { readonly kind: "appended"; readonly text: string; readonly ids: ReadonlyArray<string> }
+  | { readonly kind: "duplicate"; readonly existing: string };
 
 function withoutId(record: PerfRunRecord): string {
   return serialisePerfRecord({ ...record, id: "" });
@@ -27,7 +29,6 @@ function withoutId(record: PerfRunRecord): string {
  * scene (`…-1`, `…-2`), and one whose content, its ID aside, is already in the store is refused.
  *
  * @throws {@link PerfRecordError} if the store's text is not a valid store.
- * @throws Error naming the record already in the store.
  */
 export function appendRecords(store: string, records: ReadonlyArray<PerfRunRecord>): Appended {
   const existing = parsePerfRecords(store);
@@ -37,7 +38,7 @@ export function appendRecords(store: string, records: ReadonlyArray<PerfRunRecor
   const added: string[] = [];
   for (const record of records) {
     const already = contents.get(withoutId(record));
-    if (already !== undefined) throw new Error(`the record is already in the store, as ${already}`);
+    if (already !== undefined) return { kind: "duplicate", existing: already };
     let n = 1;
     let id = perfRecordId(record.date, record.machine.name, record.scene.id, n);
     while (ids.has(id)) {
@@ -51,7 +52,7 @@ export function appendRecords(store: string, records: ReadonlyArray<PerfRunRecor
     added.push(id);
   }
   const base = store.length === 0 || store.endsWith("\n") ? store : `${store}\n`;
-  return { text: base + lines.map((line) => `${line}\n`).join(""), ids: added };
+  return { kind: "appended", text: base + lines.map((line) => `${line}\n`).join(""), ids: added };
 }
 
 /**

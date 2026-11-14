@@ -19,9 +19,9 @@ export class PerfRecordError extends Error {
   /** What is wrong with it. */
   readonly reason: string;
 
-  constructor(field: string, reason: string, line: number | null = null) {
+  constructor(field: string, reason: string, line: number | null = null, options?: ErrorOptions) {
     const where = line === null ? "" : `line ${String(line)}: `;
-    super(`${where}${field.length > 0 ? field : "the record"}: ${reason}`);
+    super(`${where}${field.length > 0 ? field : "the record"}: ${reason}`, options);
     this.name = "PerfRecordError";
     this.line = line;
     this.field = field;

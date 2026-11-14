@@ -339,6 +339,19 @@ export interface MemoryFigures {
   readonly appPeakBytes: number | null;
   /** Each height worker's coarse-field copy. */
   readonly workerFieldBytes: ReadonlyArray<number>;
+  /** Each height worker's `WebAssembly.Memory` byte length, at its peak. */
+  readonly workerWasmBytes: ReadonlyArray<number>;
+  /** `nvidia-smi`'s device `memory.used` less the idle baseline before launch, at its peak. */
+  readonly nvidiaDeviceLessBaselinePeakBytes: number | null;
+  /** The display server's line (Xorg's fdinfo, where readable); `null` elsewhere. */
+  readonly displayServer: DisplayServerFigures | null;
+}
+
+/** The display server's own GPU memory and render time, outside the GPU process's (Design note 6). */
+export interface DisplayServerFigures {
+  readonly residentPeakBytes: number;
+  /** Its `drm-engine-render` time over the span. */
+  readonly renderBusyMs: number | null;
 }
 
 /** One segment's streaming against the demand (Design note 9). */
@@ -526,6 +539,11 @@ const repetition = object<PerfRepetition>({
     ),
     appPeakBytes: nCount,
     workerFieldBytes: array(count),
+    workerWasmBytes: array(count),
+    nvidiaDeviceLessBaselinePeakBytes: nCount,
+    displayServer: nullable(
+      object<DisplayServerFigures>({ residentPeakBytes: count, renderBusyMs: nNonNegative }),
+    ),
   }),
   streaming: array(
     object<StreamingFigures>({
@@ -724,6 +742,23 @@ function checkRecord(record: PerfRunRecord): void {
     if (record.harness.repetitionSeconds === null) {
       throw new PerfRecordError("harness.repetitionSeconds", "a perf-run record states its span");
     }
+    if (record.harness.warmUp.steady === null) {
+      throw new PerfRecordError("harness.warmUp.steady", "a perf-run record judges its warm-up");
+    }
+    if (record.harness.heightWorkers === null) {
+      throw new PerfRecordError(
+        "harness.heightWorkers",
+        "a perf-run record states its height workers",
+      );
+    }
+    record.views.forEach((view, i) => {
+      if (view.style === "wireframe" && view.lineAntialiasing === null) {
+        throw new PerfRecordError(
+          `views[${String(i)}].lineAntialiasing`,
+          "a perf-run's wireframe view states its line antialiasing",
+        );
+      }
+    });
   }
   if (record.runs.length !== record.harness.repetitions) {
     throw new PerfRecordError(
@@ -761,7 +796,7 @@ export function validatePerfRecord(value: unknown, line: number | null = null): 
     return record;
   } catch (error) {
     if (error instanceof PerfRecordError && line !== null) {
-      throw new PerfRecordError(error.field, error.reason, line);
+      throw new PerfRecordError(error.field, error.reason, line, { cause: error });
     }
     throw error;
   }
@@ -779,7 +814,7 @@ export function parsePerfRecord(text: string, line: number | null = null): PerfR
     value = JSON.parse(text);
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
-    throw new PerfRecordError("", `not JSON: ${reason}`, line);
+    throw new PerfRecordError("", `not JSON: ${reason}`, line, { cause: error });
   }
   return validatePerfRecord(value, line);
 }

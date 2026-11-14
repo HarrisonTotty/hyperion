@@ -10,9 +10,9 @@
 
 import { readFileSync, writeFileSync } from "node:fs";
 
-import { parsePerfRecords } from "../record.ts";
-import { writeBudget } from "../table.ts";
-import { BUDGET_PATH, STORE_PATH, takeFlag, takeOption } from "./paths.ts";
+import { parsePerfRecords, PerfRecordError } from "../record.ts";
+import { BudgetMarkerError, writeBudget } from "../table.ts";
+import { BUDGET_PATH, isFileError, STORE_PATH, takeFlag, takeOption } from "./paths.ts";
 
 function main(argv: ReadonlyArray<string>): number {
   const args = [...argv];
@@ -46,7 +46,11 @@ function main(argv: ReadonlyArray<string>): number {
     process.stdout.write(`${after === before ? "unchanged" : "regenerated"}: ${budget}\n`);
     return 0;
   } catch (error) {
-    if (error instanceof Error) {
+    if (
+      error instanceof PerfRecordError ||
+      error instanceof BudgetMarkerError ||
+      isFileError(error)
+    ) {
       process.stderr.write(`perf-table: ${error.message}\n`);
       return 1;
     }

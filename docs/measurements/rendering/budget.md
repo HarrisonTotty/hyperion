@@ -54,6 +54,18 @@ repetitions, with the record's ID; `—` where no record has the row yet.
 <!-- prettier-ignore-end -->
 <!-- generated:frame-time -->
 
+## Frame intervals
+
+<!-- generated:frames -->
+<!-- prettier-ignore-start -->
+Frame intervals, R05's percentiles (Design note 7): the median over repetitions of each
+repetition's p50, p95 and p99 with their range, the frames pooled, and p99 over the pooled
+frames beside the median of the repetitions' p99s; the latest record of each scene a column holds.
+
+No record yet.
+<!-- prettier-ignore-end -->
+<!-- generated:frames -->
+
 ## Memory
 
 <!-- generated:memory -->

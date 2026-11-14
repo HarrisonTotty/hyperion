@@ -3,11 +3,14 @@
  * to its row (plan R12, Design notes 4 and 6).
  */
 
-/** A view's role in a run (R07 Design note 14), the first half of a {@link PassKey}. */
-export type ViewRole = "primary" | "instrument" | "station";
+/**
+ * Every role a view has in a run (R07 Design note 14): the client's `primary` and `instrument`
+ * slots, and `station`, a station machine's wireframe primary.
+ */
+export const VIEW_ROLES = ["primary", "instrument", "station"] as const;
 
-/** Every {@link ViewRole}, for validators. */
-export const VIEW_ROLES: ReadonlyArray<ViewRole> = ["primary", "instrument", "station"];
+/** A view's role in a run, the first half of a {@link PassKey}. */
+export type ViewRole = (typeof VIEW_ROLES)[number];
 
 /**
  * Every row of the frame-time table, in the brainstorm's order (Performance budget, the frame-time
