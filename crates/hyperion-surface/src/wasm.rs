@@ -225,9 +225,9 @@ use crate::synth::BandLevel;
 use crate::test_planet::{Ridges, TEST_PLANET};
 use crate::worker::{
     BodyBake, CLASS_MAP_LEVEL, ClassMap, DrawnPhotometry, FineLattice, FineTexel, GroundAtSight,
-    GroundProperties, GroundReadout, GroundReadoutQuery, LEVEL_TABLE_ROWS, NormalMap, OceanMap,
-    QueryBodyError, RefinedTexel, SeasonAnomaly, SigmaSurvey, SlopeBaseline, SurveyChange,
-    SurveyedMaterial, WorkerFields,
+    GroundProperties, GroundReadout, GroundReadoutQuery, LEVEL_TABLE_ROWS, NormalMap,
+    OCEAN_MAP_MONTHS, OceanMap, QueryBodyError, RefinedTexel, SeasonAnomaly, SigmaSurvey,
+    SlopeBaseline, SurveyChange, SurveyedMaterial, WorkerFields,
 };
 
 /// A refined texel's readings as `map`'s lattice holds them: its cells' at their centres, or its
@@ -308,7 +308,7 @@ pub fn month_blend(
 
 /// A time's place between the two nearest months ([`month_blend_of`]'s `MonthBlend`).
 #[wasm_bindgen]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct MonthBlendAnswer {
     from: u8,
     to: u8,
@@ -2243,17 +2243,25 @@ impl OceanMapAnswer {
     /// Each cell's twelve winds, 24 bytes a cell: month k's azimuth code then its speed code.
     #[must_use]
     pub fn winds(&self) -> Vec<u8> {
-        self.map
-            .winds()
-            .iter()
-            .flat_map(|months| months.iter().flat_map(|w| [w.azimuth, w.speed]))
-            .collect()
+        let winds = self.map.winds();
+        let mut bytes = Vec::with_capacity(2 * OCEAN_MAP_MONTHS * winds.len());
+        bytes.extend(
+            winds
+                .iter()
+                .flat_map(|months| months.iter().flat_map(|w| [w.azimuth, w.speed])),
+        );
+        bytes
     }
 
     /// The speed of each of [`Wind`]'s 256 speed codes, m/s, code c's at c ([`Wind::speed`]): the
     /// table the client decodes [`winds`](Self::winds)' speeds by.
     #[wasm_bindgen(js_name = windSpeedsMps)]
     #[must_use]
+    #[expect(
+        clippy::unused_self,
+        reason = "a method of the answer, so that the worker, whose module interface names the \
+                  answer's getters, reads the table beside the winds it decodes"
+    )]
     pub fn wind_speeds_mps(&self) -> Vec<f64> {
         (0..=u8::MAX)
             .map(|speed| Wind { azimuth: 0, speed }.speed().value())

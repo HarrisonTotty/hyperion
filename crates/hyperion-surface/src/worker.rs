@@ -1167,9 +1167,12 @@ impl NormalMap {
 }
 
 /// `x` rounded to the nearest `f32`: a depth or level of metres, far inside its range.
+#[must_use]
 #[expect(
     clippy::cast_possible_truncation,
-    reason = "the rounding to the nearest f32 is the map's precision"
+    reason = "x is a difference of heights of i32 millimetres, metres within ±4.3e6, far inside an \
+              f32's range, which it can only round, never overflow; the rounding is the map's \
+              precision"
 )]
 fn nearest_f32(x: f64) -> f32 {
     x as f32
@@ -1191,7 +1194,8 @@ pub const OCEAN_MAP_MONTHS: usize = 12;
 /// decides, and open water where the ice code is also at most 127, the classifier's majority rule
 /// for a point under water (`classify.rs`' `ice_placement`): the client's ocean mask decides so,
 /// and no shader decides again. A margin cell, a cell not held and a cell whose climate is not held
-/// are left out, the last making the map not [complete](Self::is_complete).
+/// are left out, the last making the map not [complete](Self::is_complete): never over a field built
+/// from the wire, whose every block carries the climate over its cells (`wire.rs`, item 4).
 ///
 /// It reads the field's records alone, with no synthesis, so it takes no detail seed.
 #[derive(Debug, Clone, PartialEq)]

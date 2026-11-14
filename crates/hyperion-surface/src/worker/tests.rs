@@ -4664,17 +4664,47 @@ fn worker_ocean_map_holds_each_surveyed_cell_s_water_ice_and_winds() {
 #[test]
 fn worker_ocean_map_of_a_body_not_held_is_not_started() {
     let f = fixture();
-    let fields = WorkerFields::new();
     assert_eq!(
-        fields.ocean_map(f.body),
+        WorkerFields::new().ocean_map(f.body),
         Err(QueryBodyError::NotStarted(f.body))
     );
-    // The Moon-like world holds no water: every surveyed cell is dry.
+}
+
+/// The Moon-like world holds no water: every surveyed cell of its map is dry.
+#[test]
+fn worker_ocean_map_of_a_dry_world_holds_every_surveyed_cell_dry() {
+    let f = fixture();
     let map = f.worker().ocean_map(f.body).unwrap();
-    assert_ne!(map.cells().len(), 0);
+    let surveyed: BTreeSet<PatchKey> = f.first.union(&f.second).copied().collect();
+    assert_eq!(map.cells(), indices(&surveyed).as_slice());
     assert!(
         map.depth_m().iter().all(|&d| bits_f32(d) == bits_f32(0.0)),
         "{:?}",
         map.depth_m()
     );
+}
+
+/// Each block carries the climate over its cells (`wire.rs`, item 4), so a map over any block's
+/// cells is complete: each cell a block brings surveyed is answered with its winds at once.
+#[test]
+fn worker_ocean_map_is_complete_after_every_block() {
+    let f = fixture();
+    let full = f.worker().ocean_map(f.body).unwrap();
+    assert!(full.is_complete());
+    for (k, block) in f.first_blocks.iter().enumerate().skip(1) {
+        let mut fields = WorkerFields::new();
+        fields
+            .init(f.body, &f.first_blocks[0], SigmaSurvey::Surveyed)
+            .unwrap();
+        fields.chunk(f.body, block).unwrap();
+        let partial = fields.ocean_map(f.body).unwrap();
+        assert!(partial.is_complete(), "block {k}");
+        let field = fields.field(f.body).unwrap();
+        let surveyed = (0..field.header().level().cell_count())
+            .filter(|&index| {
+                cell_at_index(partial.level(), index).is_some_and(|c| field.is_surveyed(c))
+            })
+            .count();
+        assert_eq!(partial.cells().len(), surveyed, "block {k}");
+    }
 }

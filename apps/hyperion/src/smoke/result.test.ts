@@ -132,8 +132,8 @@ describe("readSmokeImages", () => {
 /** `scripts/testRender.sh`, which sets each run's outer limit. */
 const script = (): string => readFileSync(join(__dirname, "../../scripts/testRender.sh"), "utf8");
 
-/** The parts after the first, 2 to 26, which take neither part 1's captures nor its timings. */
-const LATER_PARTS = Array.from({ length: 25 }, (_, k) => String(k + 2));
+/** The parts after the first, 2 to 27, which take neither part 1's captures nor its timings. */
+const LATER_PARTS = Array.from({ length: 26 }, (_, k) => String(k + 2));
 
 describe("smokeWatchdogMs", () => {
   const plain = {
@@ -162,7 +162,7 @@ describe("smokeWatchdogMs", () => {
     }
   });
 
-  it("adds nothing for the captures to parts 2 to 24 and 26, which take none", () => {
+  it("adds nothing for the captures to the later parts, which take none", () => {
     for (const part of LATER_PARTS) {
       expect(smokeWatchdogMs({ ...plain, part, captures: true })).toBe(180_000);
     }
@@ -179,7 +179,7 @@ describe("smokeWatchdogMs", () => {
     }
   });
 
-  it("adds nothing for the GPU timings to parts 2 to 24 and 26, which take none", () => {
+  it("adds nothing for the GPU timings to the later parts, which take none", () => {
     for (const part of LATER_PARTS) {
       expect(smokeWatchdogMs({ ...plain, part, gpuTiming: true })).toBe(180_000);
     }
@@ -313,18 +313,18 @@ describe.runIf(process.platform !== "win32")("testRender.sh's scale", () => {
 });
 
 describe.runIf(process.platform !== "win32")("testRender.sh's parts", () => {
-  it("takes every part from 1 to 26 as --part= and refuses 0 and 27, before any run", () => {
+  it("takes every part from 1 to 27 as --part= and refuses 0 and 28, before any run", () => {
     for (const part of ["1", ...LATER_PARTS]) {
       expect(runScriptAtScale("1", [`--part=${part}`]).stderr).not.toContain("unknown argument");
     }
-    for (const part of ["0", "27"]) {
+    for (const part of ["0", "28"]) {
       const refused = runScriptAtScale("1", [`--part=${part}`]);
       expect(refused.status).toBe(2);
       expect(refused.stderr).toContain(`unknown argument --part=${part}`);
     }
   });
 
-  it("runs every part from 1 to 26 when none is asked for", () => {
+  it("runs every part from 1 to 27 when none is asked for", () => {
     const parts = /^ {4}parts=\(([\d ]+)\)$/mu.exec(script())?.[1];
     expect(parts).toBe(["1", ...LATER_PARTS].join(" "));
   });

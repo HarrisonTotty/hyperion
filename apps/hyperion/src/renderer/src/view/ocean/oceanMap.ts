@@ -490,7 +490,10 @@ export class OceanMapStore {
         this.#take(body, held, answer);
       }
     } catch (error: unknown) {
-      this.#refused(body, error);
+      // A refusal of a body released, asked for afresh or disposed since is not its to report.
+      if (this.#bodies.get(body) === held && !this.#disposed) {
+        this.#refused(body, error);
+      }
     }
     held.asking = false;
     if (held.again && this.#bodies.get(body) === held) {

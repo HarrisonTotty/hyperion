@@ -59,6 +59,7 @@ import { MARCH_CENSUS_KERNEL } from "../atmosphere/marchProbe";
 import { LIT_BODY_PROBE } from "../appearance/litBodyProbe";
 import { CLOUD_LAYER_MATERIAL } from "../clouds/cloudLayer";
 import { CLOUD_PROBE_MATERIAL } from "../clouds/cloudProbe";
+import { OCEAN_FAR_PROBE } from "../ocean/oceanFarProbe";
 import {
   BODY_DISC_AIR_MATERIALS,
   BODY_DISC_CELLS_AIR_KERNEL,
@@ -575,6 +576,15 @@ export const MARCH_TABLE_ONLY_ENTRIES: ReadonlyArray<CatalogueEntry> = MARCH_TAB
   (spec): CatalogueEntry => ({ kind: "compute", spec }),
 );
 
+/**
+ * Plan R11's ocean (R11.T8.b): `oceanFar.wgsl`, the far ocean's library, inside its probe kernel,
+ * as R07's lit-body library is held. The smoke page compiles it in part 27 with its twin's check
+ * (`smoke/ocean.ts`), not in part 1, for that part's watchdog.
+ */
+export const OCEAN_ENTRIES: ReadonlyArray<CatalogueEntry> = [
+  { kind: "compute", spec: OCEAN_FAR_PROBE },
+];
+
 /** Every shader the engine can create; later plans add theirs here. */
 export const WGSL_CATALOGUE: ReadonlyArray<CatalogueEntry> = [
   ...TWIN_ENTRIES,
@@ -601,4 +611,5 @@ export const WGSL_CATALOGUE: ReadonlyArray<CatalogueEntry> = [
   ...TABLE_ONLY_ENTRIES,
   ...MARCH_TABLE_ONLY_ENTRIES,
   ...CLOUD_ENTRIES,
+  ...OCEAN_ENTRIES,
 ];

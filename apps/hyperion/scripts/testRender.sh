@@ -8,7 +8,7 @@
 #   testRender.sh [--variant=NAME]... [--part=N]... [--fixture=broken-wgsl|external-fetch]
 #                 [--drop-adapter-switches] [--captures=DIR] [--geometry=FIELD=VALUE[,...]]
 #
-# The page's groups are in twenty-six parts (`src/renderer/src/smoke/page.ts`), each a run of its
+# The page's groups are in twenty-seven parts (`src/renderer/src/smoke/page.ts`), each a run of its
 # own under its own watchdog, the harness's hang detector (perf-smoke, 2026-10-13): parts 2 to 6 and
 # 8 to 14 hold the atmosphere's CPU-twin groups (2 R08.T6.b but its four absorbers, 3 R08.T6.g and
 # R08.T14.c's thick read on a Saturn-class figure, 4 R08.T8.b's far limb, 5 R08.T6.f's
@@ -65,8 +65,8 @@
 # (2026-11-05; their lane's parts 20 and 21, renumbered when both lanes landed).
 # Plan R07's packed disc cells' kernels and their twins (some 63 s on a pod) took parts 9, 16 and
 # 17 past their watchdogs under a pod's load, so they took part 24 (2026-11-05; their lane's part
-# 20, renumbered when both lanes landed). Plan R11's clouds took part 26, alone (2026-11-13; part
-# 25 left to a lane beside it).
+# 20, renumbered when both lanes landed). Plan R11's decoration library took part 25 and its clouds
+# part 26, each alone (2026-11-13). Plan R11's far ocean (R11.T8.b) took part 27, its own.
 # --part=N runs that part alone (every part by default).
 #
 # --captures=DIR also renders the capture frames (R05.T12.c's atmosphere comparison, R08.T8.b's
@@ -122,7 +122,7 @@ geometry=()
 for arg in "$@"; do
     case "$arg" in
         --variant=*) variants+=("${arg#--variant=}") ;;
-        --part=[1-9] | --part=1[0-9] | --part=2[0-6]) parts+=("${arg#--part=}") ;;
+        --part=[1-9] | --part=1[0-9] | --part=2[0-7]) parts+=("${arg#--part=}") ;;
         --fixture=*) fixture="${arg#--fixture=}" ;;
         --drop-adapter-switches) adapter_switches=() ;;
         --captures=*) captures=("--smoke-captures=${arg#--captures=}") ;;
@@ -134,7 +134,7 @@ if [[ ${#variants[@]} -eq 0 ]]; then
     variants=(default no-subgroups)
 fi
 if [[ ${#parts[@]} -eq 0 ]]; then
-    parts=(1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26)
+    parts=(1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27)
 fi
 
 # Each run's outer limit, s: 120 s (`outer_margin_s`) over its watchdog (`src/smoke/result.ts`'s

@@ -42,7 +42,8 @@
  * classes' curve in the lit-body kernel, R10.T10.c's
  * survey edge, R10.T11's wireframe terrain and R10.T9.b's cascades, part 21 R10.T16.b's shared pass
  * (on an engine of its own, whose device it destroys), part 15 R10.T16.c's frame with relief and
- * R14's levers' frames on it, and part 20 its surfaces on the datum and its symbology. Three groups
+ * R14's levers' frames on it, and part 20 its surfaces on the datum and its symbology; part 27
+ * plan R11's far ocean (R11.T8.b), its kernels and its twin. Three groups
  * of part 1 run only when asked:
  * R08.T8.c's far limb's timings and, after them, R08.T11's photorealistic frame's timings
  * (`frameTiming.ts`), after the low pick, when the run lifted timestamp quantization (`gpuTiming`,
@@ -67,6 +68,7 @@ import {
   THERMAL_ENTRIES,
   TABLE_ONLY_ENTRIES,
   MARCH_TABLE_ONLY_ENTRIES,
+  OCEAN_ENTRIES,
   PACKED_CELL_ENTRIES,
   CLOUD_ENTRIES,
   DECORATION_ENTRIES,
@@ -165,6 +167,7 @@ import { addCanvas, checkClearAndTriangle, checkDepthCullBias, checkThreeCanvase
 import { Checks } from "./harness";
 import { checkHeightWorker } from "./heightWorker";
 import { checkHistogram } from "./histogram";
+import { checkOceanFar } from "./ocean";
 import { checkClassCurveSeam, checkLitBody } from "./litBody";
 import { checkLitTerrain } from "./litTerrain";
 import { checkClusterCull } from "./clusterCull";
@@ -334,7 +337,8 @@ const VARIANTS: Readonly<Record<string, CapabilityOverrides | undefined>> = {
  * its kernels' catalogue and the generated detail sets (R11.T2.c) took part 25, alone, so that no
  * part near its watchdog grows (2026-11-13). Plan R11's clouds (R11.T7.b), their kernels'
  * catalogue, their field, optics and ground's tap against their twins and their layer's draw, took
- * part 26, alone (2026-11-13).
+ * part 26, alone (2026-11-13). Plan R11's far ocean (R11.T8.b), its kernels and its twin, took part
+ * 27, its own (2026-11-14).
  */
 type PagePart =
   | 1
@@ -362,7 +366,8 @@ type PagePart =
   | 23
   | 24
   | 25
-  | 26;
+  | 26
+  | 27;
 
 /** The part a run's query names, `all` for none, or `null` for one that is not a part. */
 function partOf(value: string | null): PagePart | "all" | null {
@@ -422,6 +427,8 @@ function partOf(value: string | null): PagePart | "all" | null {
       return 25;
     case "26":
       return 26;
+    case "27":
+      return 27;
     default:
       return null;
   }
@@ -478,7 +485,7 @@ async function run(
     setupError,
   });
   if (part === null) {
-    return failed("the part asked for is not 1 to 26 or all");
+    return failed("the part asked for is not 1 to 27 or all");
   }
   const gpu: unknown = Reflect.get(navigator, "gpu");
   if (gpu === undefined) {
@@ -563,7 +570,8 @@ async function run(
       !PACKED_CELL_ENTRIES.includes(entry) &&
       !CLOUD_ENTRIES.includes(entry) &&
       !DECORATION_ENTRIES.includes(entry) &&
-      !ATMOSPHERE_THICK_LEVER_ENTRIES.includes(entry),
+      !ATMOSPHERE_THICK_LEVER_ENTRIES.includes(entry) &&
+      !OCEAN_ENTRIES.includes(entry),
   );
   const entries = fixture === "broken-wgsl" ? [...thin, BROKEN_ENTRY] : thin;
   await group(1, "T9.b catalogue", () => checkCatalogue(engine, status, entries, checks));
@@ -581,6 +589,11 @@ async function run(
   await group(16, "T9.b catalogue: the march's table-only twins", () =>
     checkCatalogue(engine, status, MARCH_TABLE_ONLY_ENTRIES, checks),
   );
+  // R11.T8.b's far ocean, in part 27 with its twin's check (plan R11's own part).
+  await group(27, "T9.b catalogue: the ocean's kernels", () =>
+    checkCatalogue(engine, status, OCEAN_ENTRIES, checks),
+  );
+  await group(27, "R11.T8.b the far ocean against its twin", () => checkOceanFar(engine, checks));
   // R08.T15.a.2's deck's marches, in part 14 with its twins, first.
   await group(14, "T9.b catalogue: the deck's marches", () =>
     checkCatalogue(engine, status, ATMOSPHERE_DECK_ENTRIES, checks),

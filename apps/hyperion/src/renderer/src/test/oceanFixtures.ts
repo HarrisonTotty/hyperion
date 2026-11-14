@@ -73,3 +73,50 @@ export function oceanCellCentre(face: Face, i: number, j: number): Xyz {
   const n = 2 ** OCEAN_FIXTURE_LEVEL;
   return faceUvToXyz(face, stToUv((i + 0.5) / n), stToUv((j + 0.5) / n));
 }
+
+/**
+ * A world all open water at the fixtures' level, `depthM` deep, under one wind (towards `azimuth`,
+ * R09's code, at speed code `speed`) every month, with `cells` in place of the sea where given.
+ */
+export function waterWorldAnswer(
+  depthM: number,
+  azimuth: number,
+  speed: number,
+  cells: ReadonlyArray<OceanFixtureCell> = [],
+): OceanMapAnswer {
+  const n = 2 ** OCEAN_FIXTURE_LEVEL;
+  const winds: ReadonlyArray<readonly [number, number]> = Array.from(
+    { length: OCEAN_MAP_MONTHS },
+    () => [azimuth, speed],
+  );
+  const own = new Set(cells.map((cell) => `${cell.face} ${cell.i} ${cell.j}`));
+  const all: OceanFixtureCell[] = [...cells];
+  for (let face = 0; face < 6; face += 1) {
+    for (let j = 0; j < n; j += 1) {
+      for (let i = 0; i < n; i += 1) {
+        if (!own.has(`${face} ${i} ${j}`)) {
+          all.push({ face: faceOf(face), i, j, depthM, levelM: 0, ice: 0, winds });
+        }
+      }
+    }
+  }
+  return oceanAnswerOf(all);
+}
+
+/** Face `n` of the cube sphere. */
+function faceOf(n: number): Face {
+  switch (n) {
+    case 0:
+      return 0;
+    case 1:
+      return 1;
+    case 2:
+      return 2;
+    case 3:
+      return 3;
+    case 4:
+      return 4;
+    default:
+      return 5;
+  }
+}

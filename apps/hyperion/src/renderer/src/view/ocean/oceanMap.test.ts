@@ -132,14 +132,19 @@ class ScriptedOceanPool implements OceanMapPool {
     return this.#listeners.size;
   }
 
-  change(body: string, sequence: number, surveyed: ReadonlyArray<number>): void {
+  change(
+    body: string,
+    sequence: number,
+    surveyed: ReadonlyArray<number>,
+    held: ReadonlyArray<number> = [],
+  ): void {
     for (const listener of this.#listeners) {
       listener({
         body,
         sequence,
         fieldLevel: 5,
         newlySurveyed: Uint32Array.from(surveyed),
-        newlyHeld: new Uint32Array(),
+        newlyHeld: Uint32Array.from(held),
         levels: new Float64Array(100),
         sigmaM: new Float64Array(25),
         chargeM: new Float64Array(25),
@@ -156,6 +161,24 @@ async function settle(store: OceanMapStore): Promise<void> {
   await Promise.resolve();
   await Promise.resolve();
   store.step(Number.POSITIVE_INFINITY, () => 0);
+}
+
+/** A store over a counting engine and a scripted pool, `MOON` wanted and its first query out. */
+async function wanted(): Promise<{
+  readonly engine: Awaited<ReturnType<typeof countingRenderEngine>>;
+  readonly pool: ScriptedOceanPool;
+  readonly store: OceanMapStore;
+}> {
+  const engine = await countingRenderEngine();
+  const pool = new ScriptedOceanPool();
+  const store = new OceanMapStore(engine, pool);
+  store.want(MOON);
+  return { engine, pool, store };
+}
+
+/** `answer` at another field level, its cells' indices kept. */
+function atLevel(answer: OceanMapAnswer, level: number): OceanMapAnswer {
+  return { ...answer, level };
 }
 
 describe("the ocean-map store (R11.T8.b)", () => {
@@ -180,75 +203,154 @@ describe("the ocean-map store (R11.T8.b)", () => {
     expect(events.filter((e) => e.kind === "created")).toEqual([
       { kind: "created", name: `ocean map ${MOON}`, bytes: 6 * 32 * 32 * 8, category: "ocean" },
     ]);
-    expect(engine.staged.map((s) => s.label)).toEqual(["ocean map upload"]);
+    expect(engine.staged.map((scope) => scope.label)).toEqual(["ocean map upload"]);
     const held = store.oceanMapOf(MOON);
     expect(held?.mask.openCells).toBe(2);
     expect(held?.texels.blend).toEqual(monthBlend(12, 0.0167, 0));
+  });
+
+  it("releases a body's texture, and every texture and listener at its disposal", async () => {
+    const { engine, pool, store } = await wanted();
+    pool.asked[0]?.resolve(seaAnswer());
+    await settle(store);
     store.release(MOON);
-    expect(engine.live.textures).toBe(0);
+    expect([store.oceanMapOf(MOON), engine.live.textures]).toEqual([null, 0]);
+    store.want(MOON);
+    pool.asked[1]?.resolve(seaAnswer());
+    await settle(store);
     store.dispose();
-    expect(pool.listening).toBe(0);
+    expect([engine.live.textures, pool.listening]).toEqual([0, 0]);
+  });
+
+  it("refuses to be asked for a body once disposed", async () => {
+    const { store } = await wanted();
+    store.dispose();
+    expect(() => {
+      store.want(MOON);
+    }).toThrow(/disposed/u);
   });
 
   it("blends the winds again once the season moves a step, and not before", async () => {
-    const engine = await countingRenderEngine();
-    const pool = new ScriptedOceanPool();
-    const store = new OceanMapStore(engine, pool);
-    store.want(MOON);
+    const { engine, pool, store } = await wanted();
     pool.asked[0]?.resolve(seaAnswer());
     await settle(store);
     const writes = engine.textureWritten.length;
     const first = store.oceanMapOf(MOON)?.texels.blend;
-    // Within a step of the weight: the texels stand.
     store.season(MOON, 1e-4);
     expect(store.packing).toBe(false);
-    // A month on: packed again and written again.
     store.season(MOON, (2 * Math.PI) / 12 + OCEAN_WIND_WEIGHT_STEP);
     expect(store.packing).toBe(true);
     store.step(Number.POSITIVE_INFINITY, () => 0);
     expect(engine.textureWritten.length).toBe(writes + 1);
     expect(store.oceanMapOf(MOON)?.texels.blend).not.toEqual(first);
+  });
+
+  it("refuses a season whose mean anomaly is not finite", async () => {
+    const { store } = await wanted();
     expect(() => {
       store.season(MOON, Number.NaN);
     }).toThrow(RangeError);
-    store.dispose();
   });
 
-  it("asks again after a block that surveys cells or starts the field, and remakes its texture on a restore", async () => {
-    const engine = await countingRenderEngine();
-    const pool = new ScriptedOceanPool();
-    const store = new OceanMapStore(engine, pool);
-    store.want(MOON);
+  it("asks again after a block that surveys cells or starts the field afresh, and not after one that does neither", async () => {
+    const { pool, store } = await wanted();
     pool.asked[0]?.resolve(seaAnswer());
     await settle(store);
     pool.change(MOON, 3, []);
     expect(pool.asked.length).toBe(1);
     pool.change(MOON, 3, [7]);
     expect(pool.asked.length).toBe(2);
-    pool.change("0200080020000000.0302", 0, [7]);
-    expect(pool.asked.length).toBe(2);
     pool.asked[1]?.resolve(seaAnswer());
     await settle(store);
-    const made = engine.textureSpecs.length;
-    engine.restore();
-    expect(engine.textureSpecs.length).toBe(made + 1);
-    expect(store.oceanMapOf(MOON)).not.toBeNull();
-    store.dispose();
+    pool.change(MOON, 0, []);
+    expect(pool.asked.length).toBe(3);
+    pool.change("0200080020000000.0302", 0, [7]);
+    expect(pool.asked.length).toBe(3);
   });
 
-  it("reports a refused query once, and keeps the body without a map", async () => {
-    const engine = await countingRenderEngine();
-    const pool = new ScriptedOceanPool();
-    const store = new OceanMapStore(engine, pool);
-    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+  it("asks again for an incomplete map at a block that brings cells", async () => {
+    const { pool, store } = await wanted();
+    pool.asked[0]?.resolve({ ...seaAnswer(), complete: false });
+    await settle(store);
+    pool.change(MOON, 2, [], [9]);
+    expect(pool.asked.length).toBe(2);
+  });
+
+  it("asks once more after a query that a block came during, and only once", async () => {
+    const { pool, store } = await wanted();
+    pool.change(MOON, 1, [7]);
+    pool.change(MOON, 2, [8]);
+    expect(pool.asked.length).toBe(1);
+    pool.asked[0]?.resolve(seaAnswer());
+    await settle(store);
+    expect(pool.asked.length).toBe(2);
+  });
+
+  it("drops an answer to a body released, asked for afresh or disposed since it was asked", async () => {
+    const { engine, pool, store } = await wanted();
+    store.release(MOON);
     store.want(MOON);
+    expect(pool.asked.length).toBe(2);
+    pool.asked[0]?.resolve(seaAnswer());
+    await settle(store);
+    expect(store.oceanMapOf(MOON)).toBeNull();
+    store.dispose();
+    pool.asked[1]?.resolve(seaAnswer());
+    await settle(store);
+    expect(engine.textureSpecs).toEqual([]);
+  });
+
+  it("makes its texture afresh for an answer at another field level", async () => {
+    const { engine, pool, store } = await wanted();
+    pool.asked[0]?.resolve(seaAnswer());
+    await settle(store);
+    pool.change(MOON, 0, [7]);
+    pool.asked[1]?.resolve(atLevel(seaAnswer(), 6));
+    await settle(store);
+    expect(engine.textureSpecs.map((spec) => spec.size)).toEqual([
+      { width: 32, height: 32, depthOrArrayLayers: 6 },
+      { width: 64, height: 64, depthOrArrayLayers: 6 },
+    ]);
+    expect(engine.live.textures).toBe(1);
+  });
+
+  it("makes no texture while the device is lost, and makes it on the restore", async () => {
+    const { engine, pool, store } = await wanted();
+    engine.loseDevice();
+    pool.asked[0]?.resolve(seaAnswer());
+    await settle(store);
+    expect(store.oceanMapOf(MOON)).toBeNull();
+    engine.restore();
+    expect(store.oceanMapOf(MOON)?.texture).toBeDefined();
+    expect(engine.textureSpecs.length).toBe(1);
+  });
+
+  it("makes a texture it held again after a later loss, the lost handle dropped", async () => {
+    const { engine, pool, store } = await wanted();
+    pool.asked[0]?.resolve(seaAnswer());
+    await settle(store);
+    engine.loseDevice();
+    engine.restore();
+    expect(engine.textureSpecs.length).toBe(2);
+    expect(engine.live.textures).toBe(1);
+    expect(store.oceanMapOf(MOON)).not.toBeNull();
+  });
+
+  it("reports a refused query once a body, and not for a body released since", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const { pool, store } = await wanted();
     pool.asked[0]?.reject(new Error("refused"));
     await settle(store);
     expect(store.oceanMapOf(MOON)).toBeNull();
     pool.change(MOON, 0, [7]);
+    expect(pool.asked.length).toBe(2);
     pool.asked[1]?.reject(new Error("refused again"));
     await settle(store);
     expect(error).toHaveBeenCalledTimes(1);
-    store.dispose();
+    pool.change(MOON, 0, [7]);
+    store.release(MOON);
+    pool.asked[2]?.reject(new Error("refused after the release"));
+    await settle(store);
+    expect(error).toHaveBeenCalledTimes(1);
   });
 });
