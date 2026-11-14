@@ -27,6 +27,7 @@ import type {
   CullPass,
   CullPassPlace,
 } from "./cullPass";
+import { FOLDED_GROUP_WGSL } from "./fold";
 import type { ClusterLod, ClusterRecord } from "./record";
 import { CLUSTER_SHAPE_CODE } from "./record";
 import { NO_DISCARD_TEMPLATE } from "./cullPass";
@@ -69,10 +70,36 @@ fn occlusion_refuses(centre : vec3f, radius : f32) -> bool {
 fn occlusion_write(word : u32, bit : u32, visible : bool) {}
 `;
 
+/** The markers of `clusterCull.wgsl`'s pass tests, which the instance cull composes (R14.T5.d). */
+const PASS_TESTS_BEGIN = "//PASS TESTS BEGIN//";
+const PASS_TESTS_END = "//PASS TESTS END//";
+
+/**
+ * The cull's pass tests (plan R14, R14.T5.d): `clusterCull.wgsl`'s `CullPass`, the passes' kinds,
+ * its `f32` allowances and its tests of a sphere against a pass (`pass_keeps`, `group_distance`),
+ * between its markers, which the instance cull composes (`instanceCull.wgsl`), so that an
+ * instance's bounds are tested as a cluster's sphere is. A kernel composing it declares `params`
+ * with a `viewAxis : vec3f`, which the receivers' test reads, and `ROUNDING_M`, the absolute part
+ * of its allowance, for what its positions carry besides their `f32` rounding.
+ */
+export const CULL_PASS_TESTS_WGSL: string = (() => {
+  const begin = clusterCullWgsl.indexOf(PASS_TESTS_BEGIN);
+  const end = clusterCullWgsl.indexOf(PASS_TESTS_END);
+  if (begin < 0 || end < begin) {
+    throw new Error("clusterCull.wgsl's pass tests are not between their markers");
+  }
+  return clusterCullWgsl.slice(begin + PASS_TESTS_BEGIN.length, end);
+})();
+
+/** The cull's source with its fold's index (`fold.ts`) and the occlusion's bindings `occlusion`. */
+function clusterCullSource(occlusion: string): string {
+  return FOLDED_GROUP_WGSL + clusterCullWgsl.replace("//OCCLUSION//", occlusion);
+}
+
 /** The cull's kernel: the reference alone, `presentation-only`, its appends' order not reproducible. */
 export const CLUSTER_CULL_KERNEL: KernelPair = {
   name: "cluster cull",
-  reference: clusterCullWgsl.replace("//OCCLUSION//", NO_OCCLUSION),
+  reference: clusterCullSource(NO_OCCLUSION),
   subgroup: null,
   readback: "presentation-only",
 };
@@ -84,7 +111,7 @@ export const CLUSTER_CULL_KERNEL: KernelPair = {
  */
 export const CLUSTER_CULL_OCCLUSION_KERNEL: KernelPair = {
   name: "cluster cull occlusion",
-  reference: clusterCullWgsl.replace("//OCCLUSION//", clusterOcclusionWgsl),
+  reference: clusterCullSource(clusterOcclusionWgsl),
   subgroup: null,
   readback: "presentation-only",
 };
@@ -92,7 +119,11 @@ export const CLUSTER_CULL_OCCLUSION_KERNEL: KernelPair = {
 /** The kernel's widening per metre of the lengths a test forms (`clusterCull.wgsl`'s). */
 export const CULL_ROUNDING_FRACTION = 1e-6;
 
-/** And its least widening, m. */
+/**
+ * And its least widening, m: the cluster cull's, above the ulp of a terrain patch's half-size in
+ * its narrowed offsets; the instance cull's is its own (`instanceCull.ts`' `INSTANCE_ROUNDING_M`),
+ * the tests' `roundingM`.
+ */
 export const CULL_ROUNDING_M = 1;
 
 /** The receivers' tests' least widening, m (T1.c): their lengths' ulps are the fraction's. */
@@ -236,6 +267,7 @@ export function cascadeKeeps(
   centreM: Vec3,
   radiusM: number,
   slackScale = 1,
+  roundingM = CULL_ROUNDING_M,
 ): boolean {
   const [xL, yL, zL] = pass.axes;
   const o = pass.centreFromCameraLightM;
@@ -246,7 +278,7 @@ export function cascadeKeeps(
     slackScale *
     (CULL_ROUNDING_FRACTION *
       (Math.hypot(centreM.x, centreM.y, centreM.z) + Math.hypot(o.x, o.y, o.z) + pass.radiusM) +
-      CULL_ROUNDING_M);
+      roundingM);
   const reach = pass.radiusM + radiusM + slack;
   return (
     Math.abs(vx) <= reach && Math.abs(vy) <= reach && vz >= -(pass.depthFarM + radiusM + slack)
@@ -310,12 +342,13 @@ export function horizonRefuses(
   centreM: Vec3,
   radiusM: number,
   slackScale = 1,
+  roundingM = CULL_ROUNDING_M,
 ): boolean {
   const span = centreM.x * centreM.x + centreM.y * centreM.y + centreM.z * centreM.z;
   const { axis } = horizon;
   const a = centreM.x * axis.x + centreM.y * axis.y + centreM.z * axis.z;
   const slack =
-    slackScale * (CULL_ROUNDING_FRACTION * (Math.sqrt(span) + horizon.planeM) + CULL_ROUNDING_M);
+    slackScale * (CULL_ROUNDING_FRACTION * (Math.sqrt(span) + horizon.planeM) + roundingM);
   if (a - radiusM - slack <= horizon.planeM) {
     return false;
   }
@@ -333,9 +366,10 @@ export function cameraKeeps(
   centreM: Vec3,
   radiusM: number,
   slackScale = 1,
+  roundingM = CULL_ROUNDING_M,
 ): boolean {
   const distanceM = Math.hypot(centreM.x, centreM.y, centreM.z);
-  const reach = radiusM + slackScale * (CULL_ROUNDING_FRACTION * distanceM + CULL_ROUNDING_M);
+  const reach = radiusM + slackScale * (CULL_ROUNDING_FRACTION * distanceM + roundingM);
   if (distanceM <= reach) {
     return true;
   }
@@ -344,13 +378,15 @@ export function cameraKeeps(
       ({ normal: n, offsetM }) =>
         n.x * centreM.x + n.y * centreM.y + n.z * centreM.z + offsetM >= -reach,
     ) &&
-    (pass.horizon === null || !horizonRefuses(pass.horizon, centreM, radiusM, slackScale))
+    (pass.horizon === null ||
+      !horizonRefuses(pass.horizon, centreM, radiusM, slackScale, roundingM))
   );
 }
 
 /**
  * Whether a sphere may draw into `pass` where anything reads it, by the pass's kind, at
- * `slackScale` times the kernel's allowance (`pass_keeps`).
+ * `slackScale` times the kernel's allowance (`pass_keeps`), its absolute part `roundingM` (the
+ * cluster cull's {@link CULL_ROUNDING_M} by default; the instance cull's its own).
  */
 export function passKeeps(
   pass: CullPass,
@@ -358,16 +394,17 @@ export function passKeeps(
   centreM: Vec3,
   radiusM: number,
   slackScale = 1,
+  roundingM = CULL_ROUNDING_M,
 ): boolean {
   let keeps: boolean;
   switch (pass.kind) {
     case "cascade":
       keeps =
-        cascadeKeeps(pass, centreM, radiusM, slackScale) &&
+        cascadeKeeps(pass, centreM, radiusM, slackScale, roundingM) &&
         !receiversRefuse(pass, viewAxis, centreM, radiusM, slackScale);
       break;
     case "camera":
-      keeps = cameraKeeps(pass, centreM, radiusM, slackScale);
+      keeps = cameraKeeps(pass, centreM, radiusM, slackScale, roundingM);
       break;
   }
   return keeps;

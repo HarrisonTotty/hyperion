@@ -75,6 +75,7 @@ import {
   PACKED_CELL_ENTRIES,
   CLOUD_ENTRIES,
   DECORATION_ENTRIES,
+  INSTANCE_ENTRIES,
   WGSL_CATALOGUE,
 } from "../view/engine/catalogue";
 import { loadRenderEngine } from "../view/engine/loadEngine";
@@ -162,6 +163,7 @@ import { checkBloom } from "./bloom";
 import { checkCloudCatalogue, checkCloudLayerDraw, checkCloudTwins } from "./clouds";
 import { BROKEN_ENTRY, checkCatalogue, makeExternalRequests, type SmokeFixture } from "./catalogue";
 import { checkIdTarget } from "./idTarget";
+import { checkInstanceCull, checkInstancesAboveClusters, checkParticleFaces } from "./instances";
 import { checkDepthLayers } from "./depthLayers";
 import { captureEclipse, checkEclipse } from "./eclipse";
 import { captureViewLight } from "./viewLight";
@@ -346,7 +348,10 @@ const VARIANTS: Readonly<Record<string, CapabilityOverrides | undefined>> = {
  * gates on its watchdog, so R08.T18.b's thermal forms, their twins and R08.T11's (T) row, which
  * draws by them, took part 30 (2026-11-14; parts 28 and 29 then other lanes'). Plan R11's still
  * mount and its PNG round trip through the harness's main process (R11.T10.c) and its job's small
- * still of flat colours (R11.T10.b) took part 28, alone (2026-11-14).
+ * still of flat colours (R11.T10.b) took part 28, alone (2026-11-14). Plan R14's instance path
+ * (R14.T5.d) took part 29, alone: its kernels' catalogue, the instance cull against its twin over
+ * 10⁶ instances and their SwiftShader frame, a particle's faces, and the instances above the
+ * cluster cull folded past 65,535 (2026-11-13; parts 25 to 28 are the lanes' beside it).
  */
 type PagePart =
   | 1
@@ -377,6 +382,7 @@ type PagePart =
   | 26
   | 27
   | 28
+  | 29
   | 30;
 
 /** The part a run's query names, `all` for none, or `null` for one that is not a part. */
@@ -441,6 +447,8 @@ function partOf(value: string | null): PagePart | "all" | null {
       return 27;
     case "28":
       return 28;
+    case "29":
+      return 29;
     case "30":
       return 30;
     default:
@@ -499,7 +507,7 @@ async function run(
     setupError,
   });
   if (part === null) {
-    return failed("the part asked for is not 1 to 28, 30 or all");
+    return failed("the part asked for is not 1 to 30 or all");
   }
   const gpu: unknown = Reflect.get(navigator, "gpu");
   if (gpu === undefined) {
@@ -584,6 +592,7 @@ async function run(
       !PACKED_CELL_ENTRIES.includes(entry) &&
       !CLOUD_ENTRIES.includes(entry) &&
       !DECORATION_ENTRIES.includes(entry) &&
+      !INSTANCE_ENTRIES.includes(entry) &&
       !ATMOSPHERE_THICK_LEVER_ENTRIES.includes(entry) &&
       !OCEAN_ENTRIES.includes(entry),
   );
@@ -834,6 +843,19 @@ async function run(
   // into targets of its own, so that no other part's frame moves (parts 25 to 27 are other lanes').
   await group(28, "R11.T10.c the still mount, the job, the hook and the PNG round trip", () =>
     checkStills(checks, smokeStills(), engine, device),
+  );
+  // Plan R14's instance path (R14.T5.d) in part 29, alone: its kernels' catalogue, the instance
+  // cull against its twin over 10⁶ instances and their SwiftShader frame, a particle's faces, and
+  // the instances above the cluster cull folded past 65,535.
+  await group(29, "T9.b catalogue: the instance path's kernels", () =>
+    checkCatalogue(engine, status, INSTANCE_ENTRIES, checks),
+  );
+  await group(29, "R14.T5.d the instance cull against its twin over 10⁶ instances", () =>
+    checkInstanceCull(engine, checks),
+  );
+  await group(29, "R14.T5.d a particle's faces", () => checkParticleFaces(engine, checks));
+  await group(29, "R14.T5.d instances above the cluster cull, folded past 65,535", () =>
+    checkInstancesAboveClusters(engine, checks),
   );
   await group(17, "R08.T8.d the far limb's node rays packed in the general forms", () =>
     checkMarchPackedGeneral(engine, checks, summary.fallback),

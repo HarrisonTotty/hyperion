@@ -22,7 +22,8 @@
 #                              [--march-sources table|per-step]
 #                              [--lit-probe transmittance-one|planetshine-centre|no-annuli|per-fragment
 #                                           |terrain-unshaded|terrain-no-cascades|terrain-no-horizon
-#                                           |terrain-no-maturity]]]
+#                                           |terrain-no-maturity]
+#                              [--instance-probe <COUNT>]]]
 #
 # --setting is VIEW's quality setting and the window's size: high 1920 x 1080, low 1280 x 720.
 # --geometry, passed to the client, draws VIEW's terrain with those fields of its geometry over the
@@ -178,6 +179,11 @@
 # (terrain-unshaded), or with no cascade (terrain-no-cascades), horizon-map (terrain-no-horizon) or
 # maturity-node (terrain-no-maturity) read; its files end -lit-<probe>, and every picture but
 # per-fragment's is not a player's.
+# --instance-probe <COUNT> (plan R14, R14.T5.d; the Mac pair instances) draws COUNT test particles,
+# 1 to 4194304, in VIEW's primary each frame, placed on the GPU in its view, culled by the instance
+# cull and drawn by bucket, in a pass of their own before the discs ("instance probe"), where the
+# setting makes an instance pipeline: the client refuses it at the low setting, which makes none, so
+# give --setting high; its files end -instances-<count>, and its pictures are not a player's.
 #
 # --device-pixel-ratio <N> draws a hidden run's page at a device-pixel ratio of N, 1 to 3, as a HiDPI
 # display does (the owner's Retina report, 2026-11-01): its offscreen window N times the setting's

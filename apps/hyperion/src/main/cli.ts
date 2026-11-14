@@ -149,7 +149,11 @@
  * (`terrain-unshaded|terrain-no-cascades|terrain-no-horizon|terrain-no-maturity`;
  * perf-bodies-near-ground), its fragment's light not formed, or no cascade, horizon-map or
  * maturity-node read; it is refused without
- * `--timing`.
+ * `--timing`. With `--instance-probe <COUNT>` too (plan R14, R14.T5.d; the owner's Mac pair
+ * `instances`) that profile draws COUNT test particles, 1 to 4,194,304, in VIEW's primary each
+ * frame, placed, culled and drawn through the instance path where the setting makes one (not on
+ * low), for an A/B of the instance path's cost; it is refused without `--timing` and at the low
+ * setting, which makes no instance pipeline.
  *
  * `--hyperion-gpu-timing`, R01's measurement switch, which lifts the timestamps' quantization on
  * every backend but safe mode's (read from Chromium's command line, `GPU_TIMING_SWITCH`), also has a
@@ -206,6 +210,7 @@ import {
   COMPOSITE_PROBE_NAMES,
   LIT_PROBE_NAMES,
   MARCH_PROBE_NAMES,
+  MAX_INSTANCE_PROBE,
   MAX_RANDOMIZE_DRAWS,
   NAMED_HANDOVER_LOOK_NAMES,
   type ViewsCheckLaunch,
@@ -377,6 +382,20 @@ export function parseRandomize(value: string): number {
   if (!Number.isInteger(count) || count < 1 || count > MAX_RANDOMIZE_DRAWS) {
     throw new InvalidArgumentError(
       `expected a count of draws from 1 to ${String(MAX_RANDOMIZE_DRAWS)}`,
+    );
+  }
+  return count;
+}
+
+/**
+ * Reads an `--instance-probe` count: the test particles an inspection profile draws (plan R14,
+ * R14.T5.d), 1 to {@link MAX_INSTANCE_PROBE}.
+ */
+export function parseInstanceProbe(value: string): number {
+  const count = /^\d{1,7}$/.test(value) ? Number(value) : Number.NaN;
+  if (!Number.isInteger(count) || count < 1 || count > MAX_INSTANCE_PROBE) {
+    throw new InvalidArgumentError(
+      `expected a count of test particles from 1 to ${String(MAX_INSTANCE_PROBE)}`,
     );
   }
   return count;
@@ -669,6 +688,12 @@ export function buildCommand(version: string): Command {
         "the frame profile's lit-pass probe (R08.T9.b): every source's transmittance 1, planetshine at its centre node, no eclipse annuli, the sources' transmittance per fragment, or the lit terrain unshaded or without its cascades, horizon map or maturity nodes",
       ).choices(LIT_PROBE_NAMES),
     )
+    .addOption(
+      new Option(
+        "--instance-probe <COUNT>",
+        "the frame profile's test particles (R14.T5.d): that many placed, culled and drawn in VIEW's primary each frame through the instance path",
+      ).argParser(parseInstanceProbe),
+    )
     .addOption(new Option("--seed <U64>", "the spike's seed").argParser(parseSeed))
     .addOption(new Option("--smoke", "a short hidden spike or check run that exits with a status"))
     .addOption(
@@ -888,6 +913,15 @@ export function parseClientArgs(args: readonly string[], version: string): Clien
   }
   if (options["litProbe"] !== undefined && options["timing"] !== true) {
     command.error("error: --lit-probe is an option of --timing, which was not given");
+  }
+  if (options["instanceProbe"] !== undefined && options["timing"] !== true) {
+    command.error("error: --instance-probe is an option of --timing, which was not given");
+  }
+  // The low setting makes no instance pipeline (R11 Design note 18): its run would draw none.
+  if (options["instanceProbe"] !== undefined && settingOf(options) === "low") {
+    command.error(
+      "error: --instance-probe draws on the high setting alone: the low setting makes no instance pipeline",
+    );
   }
   if (options["look"] !== undefined && options["handover"] !== true) {
     command.error("error: --look is an option of --handover, which was not given");
@@ -1159,6 +1193,10 @@ function viewsCheckLaunchOf(options: Readonly<Record<string, unknown>>): ViewsCh
     ...marchProbeOf(options),
     ...atmosphereLeversOf(options),
     ...litProbeOf(options),
+    // Refused without `--timing` before this is reached; its parser has checked its count.
+    ...(typeof options["instanceProbe"] === "number"
+      ? { instanceProbe: options["instanceProbe"] }
+      : {}),
     // Refused without `--handover` before this is reached; commander holds it to the three names.
     ...lookOf(options),
     // Refused without `--planet-viewer` before this is reached; commander has checked its count.

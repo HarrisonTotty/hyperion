@@ -34,6 +34,12 @@ export type {
 /** The most draws `--randomize` may ask a planet viewer run for (`MAX_RANDOMIZE_DRAWS`). */
 export const MAX_RANDOMIZE_DRAWS = 32;
 
+/**
+ * The most test particles `--instance-probe` may ask an inspection profile for (plan R14, R14.T5.d):
+ * the instance path's lists hold a pass's four templates' entries within 2²⁴ (`clusters/buckets.ts`).
+ */
+export const MAX_INSTANCE_PROBE = 4_194_304;
+
 /** The switch carrying the options. */
 const VIEWS_CHECK_SWITCH = "--hyperion-views-check=";
 
@@ -158,8 +164,10 @@ export const NAMED_HANDOVER_LOOK_NAMES = [
  * look (`look`) a hand-over check alone may name (R10.T15.b.2's runs), the GPU time by pass
  * (`passTimes`, `true`) a terrain run alone may record (R14's Mac measurements), the count of
  * WebGPU calls (`countGpuCalls`, `true`) an inspection profile alone may make (plan R14), and the
- * lit passes' probe (`litProbe`, R08.T9.b's measurement) an inspection's frame profile alone may
- * draw under, and the `RANDOMIZE` draws (`randomize`, 1 to {@link MAX_RANDOMIZE_DRAWS}) a planet
+ * lit passes' probe (`litProbe`, R08.T9.b's measurement) and the test particles
+ * (`instanceProbe`, 1 to {@link MAX_INSTANCE_PROBE}, at the high setting, since the low one makes no
+ * instance pipeline; R14.T5.d) an inspection's frame profile alone may draw under, and the
+ * `RANDOMIZE` draws (`randomize`, 1 to {@link MAX_RANDOMIZE_DRAWS}) a planet
  * viewer run alone may capture.
  */
 export function readViewsCheckLaunch(value: unknown): ViewsCheckLaunch | null {
@@ -178,8 +186,22 @@ export function readViewsCheckLaunch(value: unknown): ViewsCheckLaunch | null {
   if (value["litProbe"] !== undefined && (litProbe === undefined || base.timing !== true)) {
     return null;
   }
+  const { instanceProbe } = value;
+  if (
+    instanceProbe !== undefined &&
+    (typeof instanceProbe !== "number" ||
+      !Number.isInteger(instanceProbe) ||
+      instanceProbe < 1 ||
+      instanceProbe > MAX_INSTANCE_PROBE ||
+      base.timing !== true ||
+      base.setting === "low")
+  ) {
+    return null;
+  }
   const counted: ViewsCheckLaunch = countGpuCalls === true ? { ...base, countGpuCalls } : base;
-  const probed: ViewsCheckLaunch = litProbe === undefined ? counted : { ...counted, litProbe };
+  const lit: ViewsCheckLaunch = litProbe === undefined ? counted : { ...counted, litProbe };
+  const probed: ViewsCheckLaunch =
+    typeof instanceProbe === "number" ? { ...lit, instanceProbe } : lit;
   const timed: ViewsCheckLaunch = passTimes === true ? { ...probed, passTimes } : probed;
   const { randomize } = value;
   if (randomize !== undefined) {

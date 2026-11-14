@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  MAX_INSTANCE_PROBE,
   readViewsCheckLaunch,
   type ViewsCheckLaunch,
   viewsCheckLaunchFromArgv,
@@ -284,6 +285,26 @@ describe("the views check's launch switch", () => {
     const { timing: _, ...inspection } = profile;
     expect(readViewsCheckLaunch({ ...inspection, litProbe: "no-annuli" })).toBeNull();
     expect(readViewsCheckLaunch({ ...LAUNCH, litProbe: "no-annuli" })).toBeNull();
+  });
+
+  it("carries the frame profile's test particles, 1 to the most, on that profile alone (R14.T5.d)", () => {
+    const profile: ViewsCheckLaunch = {
+      ...LAUNCH,
+      setting: "high",
+      run: "inspection",
+      served: { universe: "3504954ff4feabf4", body: "61ffd967fe000023.0100" },
+      timing: true,
+    };
+    for (const instanceProbe of [1, 1_000_000, MAX_INSTANCE_PROBE]) {
+      const launch: ViewsCheckLaunch = { ...profile, instanceProbe, litProbe: "no-annuli" };
+      expect(viewsCheckLaunchFromArgv([viewsCheckSwitch(launch)])).toEqual(launch);
+    }
+    for (const instanceProbe of [0, 1.5, MAX_INSTANCE_PROBE + 1, "1000"]) {
+      expect(readViewsCheckLaunch({ ...profile, instanceProbe })).toBeNull();
+    }
+    const { timing: _, ...inspection } = profile;
+    expect(readViewsCheckLaunch({ ...inspection, instanceProbe: 1000 })).toBeNull();
+    expect(readViewsCheckLaunch({ ...profile, setting: "low", instanceProbe: 1000 })).toBeNull();
   });
 
   it("carries the hand-over check's one look, on a hand-over check alone (R10.T15.b.2)", () => {

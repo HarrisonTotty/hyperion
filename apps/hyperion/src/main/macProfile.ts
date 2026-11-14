@@ -59,7 +59,8 @@ export interface MacProfileLever {
 
 /**
  * The lever pairs, each A the setting's own way unless it names one and B the lever, with the
- * switches `viewsCheck.sh` takes. Shading names both sides (main's ask, 2026-11-05): forward is
+ * switches `viewsCheck.sh` takes; `instances` (R14.T5.d) the other way round, its A side the 10⁶
+ * test particles and its B the setting's own. Shading names both sides (main's ask, 2026-11-05): forward is
  * R14.T2.a's, against which T2.e's acceptance reads the visibility buffer at both ratios; and
  * shading with the occlusion, which neither pair draws together (R14.T2.d), names both levers on
  * both sides, at both ratios as shading's, its sides counted as theirs.
@@ -154,6 +155,16 @@ export const MAC_PROFILE_LEVERS: ReadonlyArray<MacProfileLever> = [
     b: ["--geometry", "farCascadeRate=1"],
     ratios: [1],
     countSides: false,
+  },
+  {
+    name: "instances",
+    decides:
+      "R14.T5.d, the instance path: 10⁶ test particles placed, culled and drawn in the primary (A) against none, the setting's own (B), within R11's scatter row of 1–2 ms on the discrete target",
+    a: ["--instance-probe", "1000000"],
+    b: [],
+    ratios: [1],
+    // Its A side's own pass loads and stores the primary's attachments (Design note 7).
+    countSides: true,
   },
   {
     name: "disc-cells",

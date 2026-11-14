@@ -1578,6 +1578,16 @@ export interface ViewsCheckLaunch {
    */
   readonly litProbe?: LitProbeName;
   /**
+   * The frame profile's instance probe (`--instance-probe <count>`; plan R14, R14.T5.d, the owner's
+   * Mac pair `instances`): present only on an `--inspection --timing` launch at the high setting
+   * that asks for it, 1 to `MAX_INSTANCE_PROBE`, whose `VIEW` then draws that many test particles
+   * in its primary's frame, placed, culled and drawn each frame through the instance path
+   * (`clusters/instanceScene.ts`); absent on every other launch, the low setting's among them, which
+   * makes no instance pipeline.
+   * Check-only: not the picture a player sees.
+   */
+  readonly instanceProbe?: number;
+  /**
    * The one look a `--terrain --handover` launch runs (`--look`; R10.T15.b.2's runs), absent for all
    * three in order: a served look on SwiftShader at the high setting takes over an hour, so that
    * three in one launch pass its watchdog, and a look a launch makes each run resumable by look.

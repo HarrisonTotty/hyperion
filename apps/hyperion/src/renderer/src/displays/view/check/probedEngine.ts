@@ -16,6 +16,11 @@
  * lit material and kernel under the lit one. It also takes the march's far-limb census beside a
  * march's dispatch when asked ({@link ProbedEngine.marchCensus}), a dispatch of its own after it,
  * and the composite's census of the same frame after that (perf-composite-close).
+ * An inspection profile's `--instance-probe` (plan R14, R14.T5.d; the owner's Mac pair `instances`)
+ * adds the instance path's test field to the primary's frame: before each `discs` pass into the
+ * primary's scene target, the field placed and culled for that pass's view (two dispatches) and its
+ * bucket draws rendered into the target in a pass of their own, {@link INSTANCE_PROBE_LABEL},
+ * loading its colour and depth (`clusters/instanceScene.ts`); a device restore makes it again.
  */
 
 import type {
@@ -46,7 +51,10 @@ import {
   marchProbedKernel,
 } from "../../../view/atmosphere/marchProbe";
 import { type LitProbe, litProbedWgsl } from "../../../view/atmosphere/surfaceLighting";
+import { InstanceScene } from "../../../view/clusters/instanceScene";
 import type { KernelPair } from "../../../view/engine/kernels";
+import { PHOTOREAL_PASS_LABELS } from "../../../view/photoreal/passes";
+import { PRIMARY_VIEW_NAME } from "../viewNames";
 import type { GraphicsFault } from "../../../view/engine/status";
 import type {
   BufferHandle,
@@ -122,6 +130,15 @@ export interface EngineProbe {
  */
 export const AIR_BINDING = "oblateBody";
 
+/** The pass label of the instance probe's test field (plan R14, R14.T5.d), drawn before `discs`. */
+export const INSTANCE_PROBE_LABEL = "instance probe";
+
+/** The target the instance probe draws into: the primary's scene target (`sceneTarget.ts`). */
+const INSTANCE_PROBE_TARGET = `${PRIMARY_VIEW_NAME}:hdr`;
+
+/** A pass a target renders before `frame`, of its size, or `null` for none. */
+type BeforeRender = (frame: FrameSubmission, size: ViewSize) => FrameSubmission | null;
+
 /** A view that reports its renders and sizes. */
 class ProbedView implements RenderView {
   readonly name: string;
@@ -170,13 +187,24 @@ class ProbedTarget implements RenderTarget {
   readonly #engine: RenderEngine;
   readonly #probe: EngineProbe;
   readonly #nowMs: () => number;
+  readonly #before: BeforeRender | null;
+  #size: ViewSize;
 
-  constructor(inner: RenderTarget, engine: RenderEngine, probe: EngineProbe, nowMs: () => number) {
+  constructor(
+    inner: RenderTarget,
+    engine: RenderEngine,
+    probe: EngineProbe,
+    nowMs: () => number,
+    size: ViewSize,
+    before: BeforeRender | null = null,
+  ) {
     this.name = inner.name;
     this.#inner = inner;
     this.#engine = engine;
     this.#probe = probe;
     this.#nowMs = nowMs;
+    this.#size = size;
+    this.#before = before;
     INNER_TARGETS.set(this, inner);
   }
 
@@ -191,10 +219,20 @@ class ProbedTarget implements RenderTarget {
 
   resize(size: ViewSize): void {
     this.#probe.sized(this.name, "target", size);
+    this.#size = size;
     this.#inner.resize(size);
   }
 
   render(frame: FrameSubmission): void {
+    const before = this.#before?.(frame, this.#size) ?? null;
+    if (before !== null) {
+      this.#renderInner(before);
+    }
+    this.#renderInner(frame);
+  }
+
+  /** Renders `frame` through the inner target, the probe told of it. */
+  #renderInner(frame: FrameSubmission): void {
     const first = this.#engine.passTimesFrame;
     const startMs = this.#nowMs();
     this.#inner.render(frame);
@@ -268,6 +306,12 @@ export class ProbedEngine implements RenderEngine {
   readonly #compositeProbe: CompositeProbe | null;
   readonly #marchProbe: MarchProbe | null;
   readonly #litProbe: LitProbe | null;
+  /** The instance probe's test particles, or `null` for none (`--instance-probe`; R14.T5.d). */
+  readonly #instanceProbe: number | null;
+  /** The instance probe's scene, made at its first `discs` pass and again after a restore. */
+  #instanceScene: InstanceScene | null = null;
+  /** Stops following the inner engine's restores, which drop the instance probe's scene. */
+  readonly #unfollowRestores: () => void;
   /** The censuses asked for and not yet taken, each settled by the next march's census. */
   #censusesAsked: Array<{
     readonly resolve: (census: MarchCensus) => void;
@@ -286,6 +330,9 @@ export class ProbedEngine implements RenderEngine {
    * @param litProbe - The inspection profile's probe of the lit passes (`--lit-probe`; R08.T9.b's
    *   measurement): each material and kernel made through this engine that reads the surface's
    *   lighting is made under it ({@link litProbedWgsl}); `null`, the default, as drawn.
+   * @param instanceProbe - The inspection profile's test particles (`--instance-probe`; plan R14,
+   *   R14.T5.d), drawn in the primary's frame before each `discs` pass (see the module's remarks);
+   *   `null`, the default, none, and nothing of the instance path made.
    */
   constructor(
     inner: RenderEngine,
@@ -294,6 +341,7 @@ export class ProbedEngine implements RenderEngine {
     compositeProbe: CompositeProbe | null = null,
     marchProbe: MarchProbe | null = null,
     litProbe: LitProbe | null = null,
+    instanceProbe: number | null = null,
   ) {
     this.#inner = inner;
     this.#probe = probe;
@@ -301,6 +349,40 @@ export class ProbedEngine implements RenderEngine {
     this.#compositeProbe = compositeProbe;
     this.#marchProbe = marchProbe;
     this.#litProbe = litProbe;
+    this.#instanceProbe = instanceProbe;
+    // A restore's engine has none of the lost device's handles: the scene is made again.
+    this.#unfollowRestores =
+      instanceProbe === null
+        ? () => undefined
+        : inner.onRestored(() => {
+            this.#instanceScene = null;
+          });
+  }
+
+  /**
+   * The instance probe's pass before `frame` (see the module's remarks): where it is the primary's
+   * `discs` pass, the test field placed and culled for its view, and its draws in a pass that loads
+   * the target's colour and depth; `null` for any other pass.
+   */
+  #instancePass(frame: FrameSubmission, size: ViewSize): FrameSubmission | null {
+    const count = this.#instanceProbe;
+    if (count === null || frame.label !== PHOTOREAL_PASS_LABELS.discs) {
+      return null;
+    }
+    this.#instanceScene ??= new InstanceScene(this, `${PRIMARY_VIEW_NAME} instance probe`, count);
+    const draws = this.#instanceScene.frame({
+      viewRotation: frame.viewRotation,
+      projection: frame.projection,
+      widthPx: size.widthPx,
+    });
+    return {
+      label: INSTANCE_PROBE_LABEL,
+      viewRotation: frame.viewRotation,
+      projection: frame.projection,
+      draws,
+      postProcesses: [],
+      colourLoad: "load",
+    };
   }
 
   /**
@@ -480,7 +562,11 @@ export class ProbedEngine implements RenderEngine {
   createRenderTarget(spec: RenderTargetSpec): RenderTarget {
     const target = this.#inner.createRenderTarget(spec);
     this.#probe.sized(spec.name, "target", spec.size);
-    const probed = new ProbedTarget(target, this, this.#probe, this.#nowMs);
+    const before =
+      this.#instanceProbe !== null && spec.name === INSTANCE_PROBE_TARGET
+        ? (frame: FrameSubmission, size: ViewSize) => this.#instancePass(frame, size)
+        : null;
+    const probed = new ProbedTarget(target, this, this.#probe, this.#nowMs, spec.size, before);
     this.#probe.madeTarget(spec, probed);
     return probed;
   }
@@ -691,6 +777,9 @@ export class ProbedEngine implements RenderEngine {
   }
 
   dispose(): void {
+    this.#unfollowRestores();
+    this.#instanceScene?.dispose();
+    this.#instanceScene = null;
     this.#inner.dispose();
   }
 }

@@ -417,6 +417,7 @@ function inputOf(
     marchProbe,
     atmosphereLevers,
     litProbe,
+    instanceProbe: null,
     record,
     pageProfile: profile,
     traces: new Map([
@@ -1191,9 +1192,36 @@ describe("the frame profile's timing file (the owner's report)", () => {
     ]);
     expect(JSON.parse(written.get(first.json) ?? "{}")).toMatchObject({
       schema: "hyperion.views-check.inspection-timing",
-      version: 10,
-      run: { compositeProbe: null, marchProbe: null, atmosphereLevers: null, litProbe: null },
+      version: 11,
+      run: {
+        compositeProbe: null,
+        marchProbe: null,
+        atmosphereLevers: null,
+        litProbe: null,
+        instanceProbe: null,
+      },
     });
+  });
+
+  it("names and states a run drawn with the instance probe's test particles (R14.T5.d)", async () => {
+    const written = new Map<string, string>();
+    const files = {
+      mkdir: () => Promise.resolve(),
+      exists: (path: string) => Promise.resolve(written.has(path)),
+      writeFile: (path: string, text: string) => {
+        written.set(path, text);
+        return Promise.resolve();
+      },
+    };
+    const probed = buildInspectionTimingResults({ ...inputOf(), instanceProbe: 1_000_000 });
+    const paths = await writeInspectionTimingResults("/timing", probed, files);
+    expect([paths.json, probed.run.instanceProbe]).toEqual([
+      "/timing/2026-11-01-pod-low-inspection-timing-instances-1000000.json",
+      1_000_000,
+    ]);
+    expect(written.get(paths.markdown)).toContain(
+      "; instance probe 1000000 test particles, not the picture a player sees",
+    );
   });
 
   it("names and states a run drawn under a composite probe (the owner's priority)", async () => {

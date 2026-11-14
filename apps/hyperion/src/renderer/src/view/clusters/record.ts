@@ -57,10 +57,12 @@ export type ClusterLodMode = "strided" | "dag";
 
 /**
  * A cluster's shape: the template family it is drawn by; `terrain-fin` an edge patch's survey fins
- * along half a fin line, and `terrain-head` its skirt heads along half an edge (plan R14, R14.T1.g).
+ * along half a fin line, and `terrain-head` its skirt heads along half an edge (plan R14, R14.T1.g);
+ * `particle` an instanced particle's, a template a size, which the instance cull picks by its
+ * projected size and no record holds (plan R14, R14.T5.d; `clusters/particles.ts`).
  */
 export type ClusterShape =
-  "terrain-block" | "terrain-skirt" | "mesh" | "terrain-fin" | "terrain-head";
+  "terrain-block" | "terrain-skirt" | "mesh" | "terrain-fin" | "terrain-head" | "particle";
 
 /** Each shape's code in a record's flags, bits 0–3. */
 export const CLUSTER_SHAPE_CODE: Readonly<Record<ClusterShape, number>> = {
@@ -69,6 +71,7 @@ export const CLUSTER_SHAPE_CODE: Readonly<Record<ClusterShape, number>> = {
   mesh: 2,
   "terrain-fin": 3,
   "terrain-head": 4,
+  particle: 5,
 };
 
 /** Bit 4 of the flags: the DAG-cut mode (see the module's remarks). */

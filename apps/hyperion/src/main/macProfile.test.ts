@@ -128,11 +128,11 @@ describe("the Mac batch's matrix", () => {
       "limb-rays-high-dpr1-a2",
       "limb-rays-high-dpr1-b2",
     ]);
-    // Four own runs, 23 pairs at DPR 1 (the terrain's four probes, its selection scale, the
-    // decoration sets' pair and the composite's five among them) and the two shading pairs at 1 and
-    // 2, four runs each; then two counted settings and the occlusion's, figure-shading's and both
-    // shading pairs' two counted sides each.
-    expect(matrix).toHaveLength(4 + 23 * 4 + 2 * 2 * 4 + 2 + 4 * 2);
+    // Four own runs, 24 pairs at DPR 1 (the terrain's four probes, its selection scale, the
+    // decoration sets' pair, the composite's five and R14.T5.d's instances among them) and the two
+    // shading pairs at 1 and 2, four runs each; then two counted settings and the occlusion's, the
+    // instances', figure-shading's and both shading pairs' two counted sides each.
+    expect(matrix).toHaveLength(4 + 24 * 4 + 2 * 2 * 4 + 2 + 5 * 2);
     expect(new Set(matrix.map((run) => run.id)).size).toBe(matrix.length);
   });
 
@@ -187,6 +187,11 @@ describe("the Mac batch's matrix", () => {
     expect(args("composite-scene-only-high-dpr1-a1")).toEqual([]);
     expect(args("composite-scene-only-high-dpr1-b1")).toEqual(["--composite-probe", "scene-only"]);
     expect(args("occlusion-high-dpr1-b1")).toEqual(["--geometry", "occlusion=hzb"]);
+    // The instance path's pair (R14.T5.d): its A side the 10⁶ test particles, its B the setting's.
+    expect([args("instances-high-dpr1-a1"), args("instances-high-dpr1-b2")]).toEqual([
+      ["--instance-probe", "1000000"],
+      [],
+    ]);
     expect(args("shading-high-dpr2-a1")).toEqual([
       "--device-pixel-ratio",
       "2",
@@ -255,7 +260,7 @@ describe("the Mac batch's matrix", () => {
   it("counts each setting's own way and each side of a pass-splitting pair last, at DPR 1, apart from the pairs (R14.T2.e)", () => {
     const matrix = macProfileMatrix(MAC_PROFILE_DEFAULTS);
     const counted = matrix.filter(isCounted);
-    expect(matrix.slice(-10)).toEqual(counted);
+    expect(matrix.slice(-12)).toEqual(counted);
     expect(counted.map((run) => [run.id, run.setting, run.ratio, run.args, run.place])).toEqual([
       ["counted-high-dpr1", "high", 1, ["--count-gpu-calls"], { kind: "counted" }],
       ["counted-low-dpr1", "low", 1, ["--count-gpu-calls"], { kind: "counted" }],
@@ -272,6 +277,20 @@ describe("the Mac batch's matrix", () => {
         1,
         ["--count-gpu-calls", "--geometry", "occlusion=hzb"],
         { kind: "counted side", lever: "occlusion", side: "b" },
+      ],
+      [
+        "counted-instances-high-dpr1-a",
+        "high",
+        1,
+        ["--count-gpu-calls", "--instance-probe", "1000000"],
+        { kind: "counted side", lever: "instances", side: "a" },
+      ],
+      [
+        "counted-instances-high-dpr1-b",
+        "high",
+        1,
+        ["--count-gpu-calls"],
+        { kind: "counted side", lever: "instances", side: "b" },
       ],
       [
         "counted-figure-shading-high-dpr1-a",
@@ -522,7 +541,7 @@ describe("a lever's pair", () => {
     });
     const text = lines.join("\n");
     expect(lines[0]).toBe("# The Mac batch: Apple M5, 16 GiB");
-    expect(text).toContain("Tree e9966e0, body 41ffecb200000002.0400; 5 of 122 runs kept");
+    expect(text).toContain("Tree e9966e0, body 41ffecb200000002.0400; 5 of 128 runs kept");
     expect(text).toContain("| high-dpr1 | high | 1 | — | not kept |");
     // A run kept with its windows though its views check failed after them.
     expect(text).toContain(

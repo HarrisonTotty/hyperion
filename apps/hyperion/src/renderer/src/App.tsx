@@ -46,8 +46,9 @@ import { ServerLinkContext, useServerLinkValue } from "./lib/serverLink";
 import { useDisplayKeys } from "./lib/useDisplayKeys";
 import { GraphicsStatusProvider } from "./view/engine/GraphicsStatusProvider";
 import { navigatorGpu } from "./view/engine/status";
+import { instancePathOn } from "./view/clusters/particles";
 import { PhotorealStills } from "./view/photoreal/renderer";
-import type { QualitySetting } from "./view/quality/qualitySetting";
+import { type QualitySetting, SETTINGS } from "./view/quality/qualitySetting";
 import { selectionViewport } from "./view/terrain/handover";
 import type {
   AtmosphereLeversOverride,
@@ -168,14 +169,19 @@ function checkProbesOf(
   // An inspection profile's `--count-gpu-calls` counts its engine's device's calls (plan R14).
   const calls = launch.countGpuCalls === true ? new GpuCallCounter() : null;
   // An inspection profile's `--composite-probe` makes VIEW's composite under it (the owner's
-  // priority, 2026-11-01), its `--march-probe` VIEW's march (plan R08, R08.T8.d), and its
-  // `--lit-probe` VIEW's lit materials and kernels (R08.T9.b).
+  // priority, 2026-11-01), its `--march-probe` VIEW's march (plan R08, R08.T8.d), its
+  // `--lit-probe` VIEW's lit materials and kernels (R08.T9.b), and its `--instance-probe` draws
+  // test particles in VIEW's primary where the setting makes an instance pipeline (R14.T5.d; not on
+  // low, which draws no instanced particle).
   const views = new ViewsProbe(
     calls === null ? undefined : countedEngineSource(calls),
     undefined,
     launch.compositeProbe ?? null,
     launch.marchProbe ?? null,
     launch.litProbe ?? null,
+    launch.instanceProbe !== undefined && instancePathOn(SETTINGS[launch.setting])
+      ? launch.instanceProbe
+      : null,
   );
   // A `--weathered` launch's probe serves `TEST MOON` weathered's field in TERRAIN TEST's place.
   const terrainProbe = (checkScenes: ReadonlyArray<SceneOption>): TerrainProbe =>

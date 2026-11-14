@@ -1079,6 +1079,41 @@ describe("the several-views check's options", () => {
     ]);
   });
 
+  it("takes --instance-probe, the frame profile's test particles (R14.T5.d), and refuses it without the profile or past its most", () => {
+    const profile = [
+      "--views-check",
+      "--inspection",
+      "--universe",
+      UNIVERSE,
+      "--body",
+      BODY,
+      "--timing",
+    ];
+    expect(parse([...profile, "--instance-probe", "1000000"]).viewsCheck).toEqual({
+      setting: "high",
+      smoke: false,
+      out: null,
+      run: "inspection",
+      fixture: "terrain-test",
+      served: { universe: UNIVERSE, body: BODY },
+      timing: true,
+      instanceProbe: 1_000_000,
+    });
+    const without = refusal([...profile.slice(0, -1), "--instance-probe", "1000"]);
+    expect([without.exitCode, without.message]).toEqual([
+      1,
+      "error: --instance-probe is an option of --timing, which was not given",
+    ]);
+    for (const count of ["0", "4194305", "1e6", "many"]) {
+      expect(refusal([...profile, "--instance-probe", count]).exitCode).toBe(1);
+    }
+    const low = refusal([...profile, "--setting", "low", "--instance-probe", "1000"]);
+    expect([low.exitCode, low.message]).toEqual([
+      1,
+      "error: --instance-probe draws on the high setting alone: the low setting makes no instance pipeline",
+    ]);
+  });
+
   it("refuses a --lit-probe that names no probe", () => {
     const error = refusal([
       "--views-check",

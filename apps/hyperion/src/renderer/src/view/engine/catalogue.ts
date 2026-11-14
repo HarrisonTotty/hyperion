@@ -111,6 +111,12 @@ import { TERRAIN_MATERIALS } from "../terrain/gpu/material";
 import { CLUSTER_COMPACT } from "../clusters/compact";
 import { CLUSTER_CULL_KERNEL, CLUSTER_CULL_OCCLUSION_KERNEL } from "../clusters/cull";
 import { DEPTH_PYRAMID_KERNEL } from "../clusters/hzb";
+import {
+  INSTANCE_COMPACT_KERNEL,
+  INSTANCE_CULL_KERNEL,
+  INSTANCE_FOLD_KERNEL,
+} from "../clusters/instanceCull";
+import { INSTANCE_TEST_PLACE_KERNEL, PARTICLE_TEST_MATERIAL } from "../clusters/instanceScene";
 import { CLUSTER_STATS_KERNEL } from "../clusters/stats";
 import {
   TERRAIN_CLUSTER_DEPTH_MATERIALS,
@@ -588,6 +594,22 @@ export const OCEAN_ENTRIES: ReadonlyArray<CatalogueEntry> = [
   { kind: "compute", spec: OCEAN_FAR_PROBE },
 ];
 
+/**
+ * Plan R14's instance path (R14.T5.d): the instance cull of the particles, the instances' cull
+ * above the cluster cull and the survivors' fold, and the test scene's placement and particles
+ * (`clusters/instanceScene.ts`). The smoke page compiles them in part 29, alone, beside their
+ * group's checks.
+ */
+export const INSTANCE_ENTRIES: ReadonlyArray<CatalogueEntry> = [
+  ...[
+    INSTANCE_CULL_KERNEL,
+    INSTANCE_COMPACT_KERNEL,
+    INSTANCE_FOLD_KERNEL,
+    INSTANCE_TEST_PLACE_KERNEL,
+  ].map((spec): CatalogueEntry => ({ kind: "compute", spec })),
+  { kind: "material", spec: PARTICLE_TEST_MATERIAL },
+];
+
 /** Every shader the engine can create; later plans add theirs here. */
 export const WGSL_CATALOGUE: ReadonlyArray<CatalogueEntry> = [
   ...TWIN_ENTRIES,
@@ -615,4 +637,5 @@ export const WGSL_CATALOGUE: ReadonlyArray<CatalogueEntry> = [
   ...MARCH_TABLE_ONLY_ENTRIES,
   ...CLOUD_ENTRIES,
   ...OCEAN_ENTRIES,
+  ...INSTANCE_ENTRIES,
 ];

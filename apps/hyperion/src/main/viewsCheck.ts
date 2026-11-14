@@ -788,6 +788,7 @@ export class ViewsCheckSession {
       marchProbe: this.#deps.launch.marchProbe ?? null,
       atmosphereLevers: this.#deps.launch.atmosphereLevers ?? null,
       litProbe: this.#deps.launch.litProbe ?? null,
+      instanceProbe: this.#deps.launch.instanceProbe ?? null,
       record,
       traces: this.#profiles,
       pageProfile,

@@ -733,7 +733,7 @@ export function litInteriorMeshData(): {
  * The clusters of a terrain page of `shape` (plan R14, R14.T1.b; T1.g), a bucket's room an
  * instance.
  *
- * @throws Error for the mesh shape, which no terrain page holds.
+ * @throws Error for the mesh and particle shapes, which no terrain page holds.
  */
 function terrainClustersOf(shape: ClusterShape): number {
   let clusters: number;
@@ -752,6 +752,8 @@ function terrainClustersOf(shape: ClusterShape): number {
       break;
     case "mesh":
       throw new Error("a terrain page holds no mesh cluster");
+    case "particle":
+      throw new Error("a terrain page holds no particle");
   }
   return clusters;
 }

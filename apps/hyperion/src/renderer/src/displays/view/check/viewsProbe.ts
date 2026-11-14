@@ -237,6 +237,8 @@ export class ViewsProbe implements EngineProbe {
   readonly #marchProbe: MarchProbe | null;
   /** The probe its engines make the lit materials and kernels under, or `null` (as drawn). */
   readonly #litProbe: LitProbe | null;
+  /** The test particles its engines draw in the primary's frame, or `null` (none; R14.T5.d). */
+  readonly #instanceProbe: number | null;
   /** The latest engine it made, which a census is asked of ({@link ViewsProbe.marchCensus}). */
   #engine: ProbedEngine | null = null;
 
@@ -251,6 +253,9 @@ export class ViewsProbe implements EngineProbe {
    * @param litProbe - The inspection profile's probe of the lit passes (`--lit-probe`; R08.T9.b's
    *   measurement), which every engine's lit materials and kernels are made under
    *   ({@link ProbedEngine}); `null`, the default, as drawn.
+   * @param instanceProbe - The inspection profile's test particles (`--instance-probe`; plan R14,
+   *   R14.T5.d), which every engine draws in the primary's frame ({@link ProbedEngine}); `null`, the
+   *   default, none.
    */
   constructor(
     inner: ViewEngineSource = DEFAULT_ENGINE_SOURCE,
@@ -258,11 +263,13 @@ export class ViewsProbe implements EngineProbe {
     compositeProbe: CompositeProbe | null = null,
     marchProbe: MarchProbe | null = null,
     litProbe: LitProbe | null = null,
+    instanceProbe: number | null = null,
   ) {
     this.#nowMs = nowMs;
     this.#compositeProbe = compositeProbe;
     this.#marchProbe = marchProbe;
     this.#litProbe = litProbe;
+    this.#instanceProbe = instanceProbe;
     this.source = {
       requestAdapter: inner.requestAdapter,
       load: async (outcome, status) => this.#attach(await inner.load(outcome, status)),
@@ -808,6 +815,7 @@ export class ViewsProbe implements EngineProbe {
       this.#compositeProbe,
       this.#marchProbe,
       this.#litProbe,
+      this.#instanceProbe,
     );
     this.#engine = probed;
     return probed;

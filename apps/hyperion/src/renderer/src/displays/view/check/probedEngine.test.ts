@@ -18,11 +18,12 @@ import { BODY_DISC_CELLS_KERNEL, BODY_DISC_MATERIALS } from "../../../view/bodie
 import type {
   ComputeBindings,
   DepthLayerPass,
+  FrameSubmission,
   RenderEngine,
   TextureHandle,
   WgslMaterialSpec,
 } from "../../../view/engine/types";
-import { type EngineProbe, ProbedEngine } from "./probedEngine";
+import { type EngineProbe, INSTANCE_PROBE_LABEL, ProbedEngine } from "./probedEngine";
 
 /** A probe whose renders and submissions a test reads. */
 interface RecordingProbe extends EngineProbe {
@@ -433,5 +434,126 @@ describe("a probed engine's renders of several targets in one submission (plan R
       ],
       2,
     ]);
+  });
+});
+
+/** A view's scene target of 64 × 36 px, with depth. */
+const SCENE_TARGET = {
+  size: { widthPx: 64, heightPx: 36 },
+  format: "rgba16float",
+  mips: 1,
+  depth: true,
+  category: "render-targets",
+} as const;
+
+/** A pass `label` of an identity view and a reversed-Z perspective, loading its target. */
+function frameOf(label: string): FrameSubmission {
+  return {
+    label,
+    viewRotation: new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]),
+    projection: new Float32Array([1, 0, 0, 0, 0, 1.78, 0, 0, 0, 0, 0, -1, 0, 0, 0.1, 0]),
+    draws: [],
+    postProcesses: [],
+    colourLoad: "load",
+  };
+}
+
+describe("a probed engine's instance probe (plan R14, R14.T5.d)", () => {
+  const scene = SCENE_TARGET;
+
+  it("draws its test field into the primary's scene target before each discs pass, placed and culled for that view", async () => {
+    const inner = await countingRenderEngine();
+    const probe = recordingProbe();
+    const engine = new ProbedEngine(inner, probe, () => 0, null, null, null, 1000);
+    const primary = engine.createRenderTarget({ ...scene, name: "view:hdr" });
+    const instrument = engine.createRenderTarget({ ...scene, name: "instrument-1:hdr" });
+    for (const target of [primary, instrument]) {
+      target.render(frameOf("sky"));
+      target.render(frameOf("discs"));
+    }
+    const instances = inner.targetFrames.find((frame) => frame.label === INSTANCE_PROBE_LABEL);
+    expect([
+      inner.targetFrames.map((frame) => frame.label),
+      inner.dispatched.map((d) => d.kernel),
+      instances?.draws.length,
+      instances?.colourLoad,
+      probe.submitted.mock.calls.map(([owner, frame]) => `${owner} ${frame.label}`),
+    ]).toEqual([
+      ["sky", INSTANCE_PROBE_LABEL, "discs", "sky", "discs"],
+      ["instance test place", "instance cull"],
+      4,
+      "load",
+      [
+        "view:hdr sky",
+        `view:hdr ${INSTANCE_PROBE_LABEL}`,
+        "view:hdr discs",
+        "instrument-1:hdr sky",
+        "instrument-1:hdr discs",
+      ],
+    ]);
+    engine.dispose();
+  });
+
+  it("makes its scene again on the restored engine after a device loss", async () => {
+    const inner = await countingRenderEngine();
+    const engine = new ProbedEngine(inner, recordingProbe(), () => 0, null, null, null, 1000);
+    const primary = engine.createRenderTarget({ ...scene, name: "view:hdr" });
+    primary.render(frameOf("discs"));
+    inner.loseDevice();
+    inner.restore();
+    primary.render(frameOf("discs"));
+    expect([
+      inner.dispatched.map((d) => d.kernel),
+      // The new scene's instances, count, lists and arguments, the lost one's ended.
+      inner.live.buffers,
+    ]).toEqual([
+      ["instance test place", "instance cull", "instance test place", "instance cull"],
+      4,
+    ]);
+  });
+
+  it("culls at the target's width as it is resized: τ in rad halves as the width doubles", async () => {
+    const inner = await countingRenderEngine();
+    const engine = new ProbedEngine(inner, recordingProbe(), () => 0, null, null, null, 1000);
+    const primary = engine.createRenderTarget({ ...scene, name: "view:hdr" });
+    // The camera pass's τ, rad, as the latest cull packed it (the path packs into one buffer).
+    const tolerance = (): number | undefined => {
+      const cull = inner.dispatched.findLast((d) => d.kernel === "instance cull");
+      return new Float32Array(
+        cull?.bindings.uniforms["passes"]?.slice().buffer ?? new ArrayBuffer(32),
+      )[4];
+    };
+    primary.render(frameOf("discs"));
+    const narrow = tolerance();
+    primary.resize({ widthPx: 128, heightPx: 72 });
+    primary.render(frameOf("discs"));
+    expect([narrow, tolerance()]).toEqual([1 / 32, 1 / 64]);
+  });
+
+  it("releases its scene and stops following restores when disposed", async () => {
+    const inner = await countingRenderEngine();
+    const before = inner.restoredListenerCount;
+    const engine = new ProbedEngine(inner, recordingProbe(), () => 0, null, null, null, 1000);
+    const primary = engine.createRenderTarget({ ...scene, name: "view:hdr" });
+    primary.render(frameOf("discs"));
+    expect(inner.restoredListenerCount).toBe(before + 1);
+    engine.dispose();
+    expect([inner.restoredListenerCount, inner.live.buffers, inner.live.materials]).toEqual([
+      before,
+      0,
+      0,
+    ]);
+  });
+
+  it("makes nothing of the instance path and draws nothing more without the probe", async () => {
+    const inner = await countingRenderEngine();
+    const engine = new ProbedEngine(inner, recordingProbe(), () => 0);
+    const primary = engine.createRenderTarget({ ...scene, name: "view:hdr" });
+    primary.render(frameOf("discs"));
+    expect([
+      inner.targetFrames.map((frame) => frame.label),
+      inner.dispatched.length,
+      inner.kernelPairs.map((pair) => pair.name),
+    ]).toEqual([["discs"], 0, []]);
   });
 });

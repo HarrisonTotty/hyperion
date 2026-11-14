@@ -81,6 +81,10 @@
 //   Nanite Virtualized Geometry").
 // - _A record of no cluster_ (R14.T4.b): a negative radius, a page's room past its clusters, which
 //   every pass refuses.
+// - _The fold_ (R14.T5.d; `clusters/fold.ts`): a workgroup's instance is its index in the dispatch's
+//   fold, row by row (`folded_group`, composed ahead of this source), so that a consumer of more
+//   instances than a dispatch's 65,535 workgroups a dimension folds them over two; an unfolded
+//   dispatch's row is its instances in order. An index past the instances finds none.
 // - _The stride_: for a cascade the coarsest s = 2^l, l up to the pass's cap, with s × the unit
 //   within the pass's tolerance, in `f32` as the twin forms it; s = 1 where none is, and for a DAG
 //   record. For a camera pass (T3.c; `clusters/strides.ts`), up to its cap, the coarsest whose
@@ -130,6 +134,11 @@ struct ClusterRecord {
   flags : u32,
 }
 
+// The pass tests, from here to their end below: the passes' struct, kinds and `f32` allowances and
+// the tests of a sphere against a pass, which `clusters/instanceCull.wgsl` composes too (plan R14,
+// R14.T5.d; `cull.ts`' CULL_PASS_TESTS_WGSL), each reading `params.viewAxis` of its own kernel's
+// parameters.
+//PASS TESTS BEGIN//
 struct CullPass {
   header : vec4u,
   scalars : vec4f,
@@ -141,25 +150,7 @@ struct CullPass {
   covered : vec4f,
 }
 
-struct CullParams {
-  rotation0 : vec4f,
-  rotation1 : vec4f,
-  rotation2 : vec4f,
-  counts : vec4u,
-  viewAxis : vec3f,
-  templates : u32,
-  listOffsets0 : vec4u,
-  listOffsets1 : vec4u,
-  listOffsets2 : vec4u,
-  listOffsets3 : vec4u,
-  capacities0 : vec4u,
-  capacities1 : vec4u,
-  capacities2 : vec4u,
-  capacities3 : vec4u,
-  shapes : vec4u,
-}
-
-// `cullPass.ts`' MAX_CULL_PASSES, a pass's kinds and the strides' levels.
+// `cullPass.ts`' MAX_CULL_PASSES and a pass's kinds.
 const MAX_CULL_PASSES : u32 = 8u;
 const PASS_CASCADE : u32 = 1u;
 const PASS_CAMERA : u32 = 2u;
@@ -167,61 +158,15 @@ const PASS_CAMERA_ORDERED : u32 = 3u;
 // The two-pass occlusion's ordered passes (`cullPass.ts`' `CameraCullPass.occlusion`; T3.d).
 const PASS_CAMERA_EARLY : u32 = 4u;
 const PASS_CAMERA_LATE : u32 = 5u;
-// A cluster an ordered pass refuses (`cull.ts`' NO_MARK).
-const NO_MARK : u32 = 0xffffffffu;
-// The cull input's bit of an instance each pass it enters keeps whole (`cull.ts`' CULL_INPUT_WHOLE).
-const INPUT_WHOLE : u32 = 0x80000000u;
-// Its bits of an edge bake's stand-in (`clusters/terrain.ts`' TERRAIN_INPUT_SURVEYED,
-// TERRAIN_INPUT_EDGE_MASK, TERRAIN_INPUT_COLUMN_RUN_SHARED and TERRAIN_INPUT_ROW_RUN_SHARED).
-const INPUT_SURVEYED : u32 = 0x40000000u;
-const INPUT_EDGE_MASK : u32 = 0x20000000u;
-const INPUT_COLUMN_RUN_SHARED : u32 = 0x10000000u;
-const INPUT_ROW_RUN_SHARED : u32 = 0x08000000u;
-// The flags' DAG-cut and may-discard bits (`record.ts`' CLUSTER_FLAG_DAG and
-// CLUSTER_FLAG_MAY_DISCARD), and a shape with no may-discard template (`cullPass.ts`').
-const CLUSTER_FLAG_DAG : u32 = 16u;
-const CLUSTER_FLAG_MAY_DISCARD : u32 = 32u;
-// `record.ts`' CLUSTER_FLAG_MEASURED: a strided record whose errors are measured (T3.b).
-const CLUSTER_FLAG_MEASURED : u32 = 64u;
-const NO_DISCARD_TEMPLATE : u32 = 0xffu;
-const STRIDE_LEVELS : u32 = 4u;
-// `strides.ts`' STRIDE_BAND_FRACTION, the quadrant word's bit by which a camera pass draws an
-// instance at stride 1 (uniforms.ts' `INSTANCE_FINEST`), and its bit by which it draws a sub-patch
-// on its own grid at its cap (`INSTANCE_SUB_GRID_STRIDES`).
-const STRIDE_BAND_FRACTION : f32 = 0.002;
-// `strides.ts`' STRIDE_MASK_BAND_FRACTION: a stand-in's mask's β, its own.
-const STRIDE_MASK_BAND_FRACTION : f32 = 0.15;
-const INSTANCE_FINEST : u32 = 0x40000u;
-const INSTANCE_SUB_GRID_STRIDES : u32 = 0x80000u;
-// The threads of a workgroup, each taking every 64th cluster of its instance's page.
-const CULL_GROUP : u32 = 64u;
+
 // The `f32` allowance: per metre of the camera-relative lengths a test forms (some sixteen ulps,
-// 2⁻²⁴ each), and a metre.
+// 2⁻²⁴ each), and an absolute part, `ROUNDING_M`, which each kernel composing these tests declares
+// for what its positions carry besides (this kernel's below).
 const ROUNDING_FRACTION : f32 = 1e-6;
-const ROUNDING_M : f32 = 1.0;
 // The receivers' tests' least allowance, m: their lengths' ulps are the fraction's.
 const RECEIVER_ROUNDING_M : f32 = 0.01;
 // The horizon test's widening of d², per |S|² (`cull.ts`' HORIZON_ROUNDING).
 const HORIZON_ROUNDING : f32 = 1e-6;
-
-@group(0) @binding(0) var<uniform> params : CullParams;
-@group(0) @binding(1) var<uniform> passes : array<CullPass, 8>;
-@group(0) @binding(2) var<storage, read> instance_words : array<u32>;
-@group(0) @binding(3) var<storage, read> cull_inputs : array<vec2u>;
-@group(0) @binding(4) var<storage, read> records : array<ClusterRecord>;
-@group(0) @binding(5) var<storage, read_write> lists : array<u32>;
-@group(0) @binding(6) var<storage, read_write> args : array<atomic<u32>>;
-@group(0) @binding(7) var<storage, read_write> marks : array<u32>;
-// Composed here: the plain kernel's (`cull.ts`' NO_OCCLUSION) one parent group's LOD sphere a
-// record (`record.ts`' `ClusterLod`, binding 8, read by a DAG record alone through `lod_of`) and the
-// occlusion's stand-ins, or the occlusion's variant's bindings and tests (`clusterOcclusion.wgsl`),
-// whose consumer has no DAG record.
-//OCCLUSION//
-
-// A record's centre in the instances' frame, turned from its page's axes.
-fn page_to_instance(v : vec3f) -> vec3f {
-  return params.rotation0.xyz * v.x + params.rotation1.xyz * v.y + params.rotation2.xyz * v.z;
-}
 
 // Whether the sphere at `centre`, camera-relative, of radius `radius` may draw into cascade box
 // `pass` (see the module's head).
@@ -330,6 +275,79 @@ fn pass_keeps(cull_pass : CullPass, centre : vec3f, radius : f32) -> bool {
 // inside it.
 fn group_distance(centre : vec3f, radius : f32) -> f32 {
   return max(length(centre) - radius, 0.0);
+}
+//PASS TESTS END//
+
+// The pass tests' absolute allowance, m: a metre, above the ulp of a terrain patch's half-size in
+// its offsets narrowed to `f32` (about 3 cm at level 4 on an Earth; plan R14's design note on
+// culling).
+const ROUNDING_M : f32 = 1.0;
+
+struct CullParams {
+  rotation0 : vec4f,
+  rotation1 : vec4f,
+  rotation2 : vec4f,
+  counts : vec4u,
+  viewAxis : vec3f,
+  templates : u32,
+  listOffsets0 : vec4u,
+  listOffsets1 : vec4u,
+  listOffsets2 : vec4u,
+  listOffsets3 : vec4u,
+  capacities0 : vec4u,
+  capacities1 : vec4u,
+  capacities2 : vec4u,
+  capacities3 : vec4u,
+  shapes : vec4u,
+}
+
+// A cluster an ordered pass refuses (`cull.ts`' NO_MARK).
+const NO_MARK : u32 = 0xffffffffu;
+// The cull input's bit of an instance each pass it enters keeps whole (`cull.ts`' CULL_INPUT_WHOLE).
+const INPUT_WHOLE : u32 = 0x80000000u;
+// Its bits of an edge bake's stand-in (`clusters/terrain.ts`' TERRAIN_INPUT_SURVEYED,
+// TERRAIN_INPUT_EDGE_MASK, TERRAIN_INPUT_COLUMN_RUN_SHARED and TERRAIN_INPUT_ROW_RUN_SHARED).
+const INPUT_SURVEYED : u32 = 0x40000000u;
+const INPUT_EDGE_MASK : u32 = 0x20000000u;
+const INPUT_COLUMN_RUN_SHARED : u32 = 0x10000000u;
+const INPUT_ROW_RUN_SHARED : u32 = 0x08000000u;
+// The flags' DAG-cut and may-discard bits (`record.ts`' CLUSTER_FLAG_DAG and
+// CLUSTER_FLAG_MAY_DISCARD), and a shape with no may-discard template (`cullPass.ts`').
+const CLUSTER_FLAG_DAG : u32 = 16u;
+const CLUSTER_FLAG_MAY_DISCARD : u32 = 32u;
+// `record.ts`' CLUSTER_FLAG_MEASURED: a strided record whose errors are measured (T3.b).
+const CLUSTER_FLAG_MEASURED : u32 = 64u;
+const NO_DISCARD_TEMPLATE : u32 = 0xffu;
+// The strides' levels.
+const STRIDE_LEVELS : u32 = 4u;
+// `strides.ts`' STRIDE_BAND_FRACTION, the quadrant word's bit by which a camera pass draws an
+// instance at stride 1 (uniforms.ts' `INSTANCE_FINEST`), and its bit by which it draws a sub-patch
+// on its own grid at its cap (`INSTANCE_SUB_GRID_STRIDES`).
+const STRIDE_BAND_FRACTION : f32 = 0.002;
+// `strides.ts`' STRIDE_MASK_BAND_FRACTION: a stand-in's mask's β, its own.
+const STRIDE_MASK_BAND_FRACTION : f32 = 0.15;
+const INSTANCE_FINEST : u32 = 0x40000u;
+const INSTANCE_SUB_GRID_STRIDES : u32 = 0x80000u;
+// The threads of a workgroup, each taking every 64th cluster of its instance's page.
+const CULL_GROUP : u32 = 64u;
+
+@group(0) @binding(0) var<uniform> params : CullParams;
+@group(0) @binding(1) var<uniform> passes : array<CullPass, 8>;
+@group(0) @binding(2) var<storage, read> instance_words : array<u32>;
+@group(0) @binding(3) var<storage, read> cull_inputs : array<vec2u>;
+@group(0) @binding(4) var<storage, read> records : array<ClusterRecord>;
+@group(0) @binding(5) var<storage, read_write> lists : array<u32>;
+@group(0) @binding(6) var<storage, read_write> args : array<atomic<u32>>;
+@group(0) @binding(7) var<storage, read_write> marks : array<u32>;
+// Composed here: the plain kernel's (`cull.ts`' NO_OCCLUSION) one parent group's LOD sphere a
+// record (`record.ts`' `ClusterLod`, binding 8, read by a DAG record alone through `lod_of`) and the
+// occlusion's stand-ins, or the occlusion's variant's bindings and tests (`clusterOcclusion.wgsl`),
+// whose consumer has no DAG record.
+//OCCLUSION//
+
+// A record's centre in the instances' frame, turned from its page's axes.
+fn page_to_instance(v : vec3f) -> vec3f {
+  return params.rotation0.xyz * v.x + params.rotation1.xyz * v.y + params.rotation2.xyz * v.z;
 }
 
 // Whether a DAG record is drawn at the pass's tolerance (see the module's head): its own error
@@ -732,8 +750,8 @@ fn template_capacity(t : u32) -> u32 {
 }
 
 @compute @workgroup_size(64)
-fn main(@builtin(workgroup_id) group : vec3u, @builtin(local_invocation_id) local : vec3u) {
-  let instance = group.x;
+fn main(@builtin(workgroup_id) group : vec3u, @builtin(num_workgroups) groups : vec3u, @builtin(local_invocation_id) local : vec3u) {
+  let instance = folded_group(group, groups);
   if (instance >= params.counts.x) {
     return;
   }

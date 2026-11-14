@@ -1621,6 +1621,7 @@ Size L–XL, tool and client, after T4; each subtask waits on its content except
   recorded), and the ring particles within the rings row; R11.T9.d's own (the slab plus the
   instances conserve transmittance to 1% over 10⁴ rays; no instances on low); on low, scatter as R11
   has it (off, or a token density).
+  - _Built_ (2026-11-14): records at the end of Risks.
 - **R14.T5.e Mesh shading.** Size M. A mesh `ResolveMaterial` through R07's `body_brdf` with the
   cascades' receiver, in the visibility path (a resolve pass of its own, Design note 9), and its
   forward twin. _Tests:_ the barycentric and BRDF twin. _Acceptance:_ a lit test mesh's pixels
@@ -2864,3 +2865,58 @@ pages are assets and presentation; collision never reads them. No domain tag is 
   `setsid` or `timeout` is missing. place-ship with `--survey` and no body takes the first planet
   whose `surface` and `figure` are `ok` (`firstPlanetToSurvey`): at v30 the sweep's served world is
   42002cb1ffc00004.0100.
+- **R14.T5.d** (`r14-t5d-instances`, 2026-11-14; no consumer yet, R11.T6.a and T9.d draw through it):
+  - Files: `clusters/{fold,particles,particlePath,instanceCull,instanceScene}.ts`; WGSL
+    `instanceCull`, `instanceCompact`, `instanceFold`, `particleInstance` (the vertex library),
+    `particleTest`, `instanceTestPlace`; all in `catalogue.ts`' `INSTANCE_ENTRIES`, test-render part 29.
+  - The fold: `foldedWorkgroups(n)` (y = ⌈n ÷ 65,535⌉ rows of ⌈n ÷ y⌉), WGSL `folded_group`; the
+    cluster cull's instance is `folded_group(group, groups)` (one row up to 65,535: as before), and
+    `ClusterConsumerPath.cull` dispatches `foldedWorkgroups(count)`.
+  - The pass tests are shared: `cull.ts`' `CULL_PASS_TESTS_WGSL`, `clusterCull.wgsl` between its
+    `//PASS TESTS` markers; a kernel composing it declares `params.viewAxis` and `ROUNDING_M`, and
+    the twins' keeps take `roundingM` (default `CULL_ROUNDING_M`).
+  - (lean, 2026-11-14) `INSTANCE_ROUNDING_M` is 1 mm, an instance's centre being the `f32` its
+    producer wrote: the cluster cull's 1 m kept 28% more of the 10⁶ field than the exact test.
+  - For T6.a and T9.d, the instance buffer: `PARTICLE_INSTANCE_BYTES` 32: centre less the camera
+    (3 `f32`, m, the passes' frame), radius (word 3; negative for none), rotation xyzw as four
+    `snorm16` (words 4–5), colour `rgba8unorm` (6), tag (7); `packParticleInstance` packs it.
+  - The producer writes up to `ParticlePath.capacity` records into `ParticlePath.instances` and the
+    count into word 0 of `ParticlePath.count` (both `STORAGE | COPY_DST`) before `cull`.
+  - The cull's inputs: `ParticlePath.cull(kernel, frame, label)`, the kernel
+    `INSTANCE_CULL_KERNEL`'s and the frame a `ParticleCull` (its passes, `CullPass`es: cameras
+    appended, cascades with receivers, at most the path's; the view axis; a pass mask); one
+    dispatch (`instance cull`), 64 instances a workgroup, folded over the capacity.
+  - (lean, 2026-11-14) A particle's instance cull is its whole cull: the bucket is a (pass,
+    template) of `ClusterBuckets`, an entry the instance's index (not (instance << 8) | cluster),
+    each template's list every instance once a pass (passes × templates × capacity within 2²⁴).
+  - Its template: the coarsest whose error fraction × r ≤ τ_rad max(|S| − k r, 0) (camera) or the
+    texel (cascade), k `ParticleTemplates.boundsScale`, the cull's bounds k r; the finest where none is.
+  - (lean, 2026-11-14) `sphereParticleTemplates()`: octahedron, icosahedron and its two divisions
+    (8 / 20 / 80 / 320), each scaled by √(4π ÷ S) to its sphere's mean projected area (Cauchy's
+    formula), for T9.d's coverage: errors 0.347 / 0.146 / 0.038 / 0.0095 r, bounds 1.347 r.
+  - The draw: `ParticlePath.drawItems(pass, mesh, base)` binds `particleInstances` and
+    `particleLists` (group 2, bindings 0 and 1, vertex); a material composes `frame.wgsl`, its
+    `Draw` with `clusterBase: u32`, then `PARTICLE_INSTANCE_WGSL`, and calls `particle_place`.
+  - (lean, 2026-11-14) Particle buckets fill in append order in colour passes too (Design note 5's
+    stable compaction not taken): differences only at exact depth ties; `CLUSTER_COMPACT` the fallback.
+  - Low: `instancePathOn(ladder)` (R11's decoration and `scatterDensity`, or `rings: "particles"`)
+    is false on low; a consumer makes no `ParticlePath`, kernel or material there. No
+    `GeometrySettings` field.
+  - For T5.c, instances above the cluster cull: `ClusterConsumerPath.cullInstances`, its kernels
+    the compaction's, the fold's and the cluster cull's, a bounding radius at the record's
+    `radiusWord` (≥ 4); survivors copied whole in an irreproducible order (appended passes only);
+    draws bind `compactedInstances`.
+  - Not built, for T5.c and T5.e: an instance's own rotation and scale in the cluster cull and a
+    mesh's vertex stage (T5.f's "T5.d's", lean 2026-11-14), T5.b's demand's visibility and motion,
+    and a cull input through the compaction for a could-touch instance's finest cut.
+  - Memory (lean; Design note 15 to take a row): 32 B + 4 B × passes × templates an instance
+    (48 MB at 10⁶, one pass), `geometry-clusters`; R11.T6.a may move its instances to `scatter`.
+  - Timed passes: a particle path one dispatch a frame; `cullInstances` three. No restore record yet:
+    the path's restore test comes with its owner (T6.a, T9.d); the probe's scene is made again.
+  - The probe: `views-check --inspection --timing --setting high --instance-probe <count>` (1 to
+    4,194,304; refused on low) draws `InstanceScene`'s field before `discs` in its own pass
+    (`instance probe`); timing file version 11, `-instances-<count>`; Mac pair `instances`, counted.
+  - Pending (the owner's RTX run), at high: `just views-check --inspection --timing --hidden`
+    with `--universe <ID> --body <ID> --setting high --hyperion-gpu-timing`, A with
+    `--instance-probe 1000000`, B without: `instance cull` + `instance probe` against 1–2 ms.
+    Windows NOT RUN.

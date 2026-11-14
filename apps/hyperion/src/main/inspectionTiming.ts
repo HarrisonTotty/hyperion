@@ -83,9 +83,10 @@ export const INSPECTION_TIMING_SCHEMA = "hyperion.views-check.inspection-timing"
  * since the run's long tasks (lane perf-page-long-tasks), 9 since the run's pacing and offscreen
  * frame clock and each window's callbacks, frame intervals and measured vsync period (R07.T19), 10
  * since the run's pipeline compiles, each window's compiles alongside it and the primary's first
- * frames (plan R08, fix-r08-decked-air-route).
+ * frames (plan R08, fix-r08-decked-air-route), 11 since the run's instance probe (plan R14,
+ * R14.T5.d).
  */
-export const INSPECTION_TIMING_VERSION = 10;
+export const INSPECTION_TIMING_VERSION = 11;
 
 /**
  * V8's CPU profiler's category, which samples every isolate's stack: the renderer's main thread,
@@ -987,6 +988,11 @@ export interface InspectionTimingResults {
      * measurement), or `null`, the surfaces lit as a player's are.
      */
     readonly litProbe: LitProbeName | null;
+    /**
+     * The test particles the profile drew in `VIEW`'s primary each frame (`--instance-probe`; plan
+     * R14, R14.T5.d), or `null`, none; a setting with no instance pipeline (low) draws none.
+     */
+    readonly instanceProbe: number | null;
   };
   readonly windows: ReadonlyArray<InspectionTimingWindowResults>;
   /** The page's long tasks over the run, or `null` where none were recorded. */
@@ -1009,6 +1015,8 @@ export interface InspectionTimingInput {
   readonly atmosphereLevers: AtmosphereLeversOverride | null;
   /** The lit passes' probe the launch drew under, or `null` (`ViewsCheckLaunch.litProbe`). */
   readonly litProbe: LitProbeName | null;
+  /** The test particles the launch drew, or `null` (`ViewsCheckLaunch.instanceProbe`). */
+  readonly instanceProbe: number | null;
   readonly record: InspectionTimingRecord;
   /** Each window's reduced trace, by name; a window without one is recorded as missing. */
   readonly traces: ReadonlyMap<InspectionTimingWindowName, Measured<ProfileTraceFigures>>;
@@ -1309,6 +1317,7 @@ export function buildInspectionTimingResults(
       marchProbe: input.marchProbe,
       atmosphereLevers: input.atmosphereLevers,
       litProbe: input.litProbe,
+      instanceProbe: input.instanceProbe,
     },
     windows: record.windows.map((window) =>
       windowResults(window, input.traces.get(window.name), record.compiles),
@@ -1734,7 +1743,7 @@ export function inspectionTimingMarkdown(results: InspectionTimingResults): stri
     `- **Body:** ${run.served === null ? "—" : `\`${run.served.body}\` of universe \`${run.served.universe}\``}`,
     `- **Machine:** ${cell(run.machine.cpu)}, ${String(run.machine.logicalCores)} threads; GPU ${cell(gpu)}`,
     `- **Versions:** app ${run.versions.app}, Electron ${run.versions.electron}, Chromium ${run.versions.chromium}`,
-    `- **Launch:** ${run.platform}, ${run.launchMode} mode, setting ${run.setting}, window ${run.shown ? "shown" : "hidden"} ${String(run.window.widthDip)} × ${String(run.window.heightDip)} DIP at a device-pixel ratio of ${String(run.devicePixelRatio)}; pacing ${run.framePacing}${run.frameRateHz === null ? "" : `, offscreen frame clock ${String(run.frameRateHz)} Hz`}; pass timer ${run.timer}${run.compositeProbe === null ? "" : `; composite probe ${run.compositeProbe}, not the picture a player sees`}${run.marchProbe === null ? "" : `; march probe ${run.marchProbe}, not the picture a player sees`}${leversText(run.atmosphereLevers)}${run.litProbe === null ? "" : `; lit probe ${run.litProbe}, not the picture a player sees`}`,
+    `- **Launch:** ${run.platform}, ${run.launchMode} mode, setting ${run.setting}, window ${run.shown ? "shown" : "hidden"} ${String(run.window.widthDip)} × ${String(run.window.heightDip)} DIP at a device-pixel ratio of ${String(run.devicePixelRatio)}; pacing ${run.framePacing}${run.frameRateHz === null ? "" : `, offscreen frame clock ${String(run.frameRateHz)} Hz`}; pass timer ${run.timer}${run.compositeProbe === null ? "" : `; composite probe ${run.compositeProbe}, not the picture a player sees`}${run.marchProbe === null ? "" : `; march probe ${run.marchProbe}, not the picture a player sees`}${leversText(run.atmosphereLevers)}${run.litProbe === null ? "" : `; lit probe ${run.litProbe}, not the picture a player sees`}${run.instanceProbe === null ? "" : `; instance probe ${String(run.instanceProbe)} test particles, not the picture a player sees`}`,
     "- **A profile, not a measurement:** nothing is judged; a hidden run's frames are never presented, and the machine may be shared.",
     "",
     ...compilesMarkdown(results),
@@ -1802,7 +1811,8 @@ const NODE_FILES: ResultsFiles = {
  * `<date>-<machine>-<setting>-inspection-timing.json` and `.md` (with `-composite-<probe>` and
  * `-march-<probe>` after it for a probed run, `-cover-<cover>`, `-limb-<rays>`, `-sources-<way>`,
  * `-lobes-<lobes>` and `-ground-<ground>` for one drawn with a lever over its setting's, and
- * `-lit-<probe>` for one drawn under the lit probe), adding
+ * `-lit-<probe>` for one drawn under the lit probe, `-instances-<count>` for one drawn with the
+ * instance probe's test particles), adding
  * `-2`, `-3` and so on where a run of the same name is there, and warns of a file over the
  * repository's limit for added files.
  *
@@ -1818,7 +1828,8 @@ export async function writeInspectionTimingResults(
   const march = results.run.marchProbe;
   const levers = results.run.atmosphereLevers;
   const lit = results.run.litProbe;
-  const stem = `${results.run.startedAt.slice(0, 10)}-${results.run.machine.name}-${results.run.setting}-inspection-timing${probe === null ? "" : `-composite-${probe}`}${march === null ? "" : `-march-${march}`}${levers?.marchCover === undefined ? "" : `-cover-${levers.marchCover}`}${levers?.limbRays === undefined ? "" : `-limb-${levers.limbRays}`}${levers?.marchSourceTransmittance === undefined ? "" : `-sources-${levers.marchSourceTransmittance}`}${levers?.surfaceLobes === undefined ? "" : `-lobes-${levers.surfaceLobes}`}${levers?.deckedAirSurface === undefined ? "" : `-ground-${levers.deckedAirSurface}`}${lit === null ? "" : `-lit-${lit}`}`;
+  const particles = results.run.instanceProbe;
+  const stem = `${results.run.startedAt.slice(0, 10)}-${results.run.machine.name}-${results.run.setting}-inspection-timing${probe === null ? "" : `-composite-${probe}`}${march === null ? "" : `-march-${march}`}${levers?.marchCover === undefined ? "" : `-cover-${levers.marchCover}`}${levers?.limbRays === undefined ? "" : `-limb-${levers.limbRays}`}${levers?.marchSourceTransmittance === undefined ? "" : `-sources-${levers.marchSourceTransmittance}`}${levers?.surfaceLobes === undefined ? "" : `-lobes-${levers.surfaceLobes}`}${levers?.deckedAirSurface === undefined ? "" : `-ground-${levers.deckedAirSurface}`}${lit === null ? "" : `-lit-${lit}`}${particles === null ? "" : `-instances-${String(particles)}`}`;
   const candidates = Array.from({ length: MAX_RUNS_A_DAY }, (_, i) =>
     i === 0 ? stem : `${stem}-${String(i + 1)}`,
   );
