@@ -1,12 +1,13 @@
 /**
- * The clouds' probe (plan R11, R11.T7.b): the field (`shaders/cloudField.wgsl`), the `f32`
- * δ-Eddington (`shaders/cloudOptics.wgsl`) and the ground's tap (`shaders/cloudShadow.wgsl`) run at
- * pinned cases on the GPU, for the smoke harness to hold against their `f64` twins
- * (`cloudDensity.ts`' `cloudFieldAt`, `cloudOptics.ts`' `deltaEddington` and `cloudShadow.ts`'
- * `cloudLightAt`).
+ * The clouds' probe (plan R11, R11.T7.b and T7.c): the field (`shaders/cloudField.wgsl`), the `f32`
+ * δ-Eddington (`shaders/cloudOptics.wgsl`), the ground's tap (`shaders/cloudShadow.wgsl`) and the
+ * volume's marches (`shaders/cloudVolume.wgsl`) run at pinned cases on the GPU, for the smoke
+ * harness to hold against their `f64` twins (`cloudDensity.ts`' `cloudFieldAt`, `cloudOptics.ts`'
+ * `deltaEddington`, `cloudShadow.ts`' `cloudLightAt`, and `cloudVolume.ts`' `marchColumn`,
+ * `octaveCorrectionAt` and `marchDeckRay`).
  *
  * @remarks
- * The three are libraries of functions, not a material, so the catalogue holds them inside a
+ * They are libraries of functions, not a material, so the catalogue holds them inside a
  * material that draws one case a row into an `r32uint` target, each pixel of the row one of the
  * case's {@link CLOUD_PROBE_OUTPUTS} values as its `f32` bits: a fragment stage, since the field
  * filters its textures through a sampler, which the engine's compute bindings do not take. The
@@ -20,15 +21,22 @@ import preciseTrigWgsl from "../shaders/preciseTrig.wgsl?raw";
 import { cloudFieldAt, sampleCoverage } from "./cloudDensity";
 import { deltaEddington } from "./cloudOptics";
 import { type CloudLightInput, cloudLightAt } from "./cloudShadow";
+import {
+  marchColumn,
+  marchDeckRay,
+  type OctaveCorrection,
+  octaveCorrectionAt,
+} from "./cloudVolume";
 import cloudFieldWgsl from "./shaders/cloudField.wgsl?raw";
 import cloudOpticsWgsl from "./shaders/cloudOptics.wgsl?raw";
 import cloudShadowWgsl from "./shaders/cloudShadow.wgsl?raw";
+import cloudVolumeWgsl from "./shaders/cloudVolume.wgsl?raw";
 
 /** The values a case writes, one a pixel of its row. */
 export const CLOUD_PROBE_OUTPUTS = 8;
 
 /** `vec4f` rows a case takes in the probe's case buffer. */
-export const CLOUD_PROBE_CASE_ROWS = 3;
+export const CLOUD_PROBE_CASE_ROWS = 4;
 
 /**
  * One case of the probe:
@@ -37,7 +45,11 @@ export const CLOUD_PROBE_CASE_ROWS = 3;
  *   z_c, N and eastward wind there;
  * - `optics`: `cloud_delta_eddington`; its outputs R, T_dir and T_diff;
  * - `ground`: `terrain_cloud_light` at a place ÷ a towards a source; its outputs the direct, sky
- *   and diffuse factors.
+ *   and diffuse factors;
+ * - `column`: `cloud_column_march`, a homogeneous column's single scattering and its octaves'
+ *   multiple scattering uncorrected, then `cloud_octave_correction_at` at its τ and μ₀;
+ * - `deck`: `cloud_volume_march` of a view ray, body-fixed m, through the deck; its outputs the
+ *   radiance and the view's transmittance.
  */
 export type CloudProbeCase =
   | {
@@ -58,6 +70,26 @@ export type CloudProbeCase =
       readonly placeOverA: Vec3;
       readonly sun: Vec3;
       readonly sourceRadiusRad: number;
+    }
+  | {
+      readonly kind: "column";
+      readonly tau: number;
+      readonly mu0: number;
+      readonly muView: number;
+      readonly cosTheta: number;
+      readonly asymmetry: number;
+      readonly coAlbedo: number;
+      readonly steps: number;
+    }
+  | {
+      readonly kind: "deck";
+      readonly originM: Vec3;
+      readonly direction: Vec3;
+      readonly sun: Vec3;
+      readonly baseM: number;
+      readonly topM: number;
+      readonly steps: number;
+      readonly footprintPerM: number;
     };
 
 /** The kernel's code of each kind. */
@@ -65,6 +97,8 @@ const KIND_CODES: Readonly<Record<CloudProbeCase["kind"], number>> = {
   field: 0,
   optics: 1,
   ground: 2,
+  column: 3,
+  deck: 4,
 };
 
 /** The cases as the probe's `array<vec4f>`, {@link CLOUD_PROBE_CASE_ROWS} rows a case. */
@@ -97,6 +131,34 @@ export function packCloudProbeCases(cases: ReadonlyArray<CloudProbeCase>): Float
           probe.sourceRadiusRad,
         ];
         break;
+      case "column":
+        values = [
+          probe.tau,
+          probe.mu0,
+          probe.muView,
+          probe.cosTheta,
+          probe.asymmetry,
+          probe.coAlbedo,
+          probe.steps,
+        ];
+        break;
+      case "deck":
+        values = [
+          probe.originM.x,
+          probe.originM.y,
+          probe.originM.z,
+          probe.direction.x,
+          probe.direction.y,
+          probe.direction.z,
+          probe.sun.x,
+          probe.sun.y,
+          probe.sun.z,
+          probe.baseM,
+          probe.topM,
+          probe.steps,
+          probe.footprintPerM,
+        ];
+        break;
     }
     out[at] = KIND_CODES[probe.kind];
     out.set(values, at + 1);
@@ -115,10 +177,12 @@ function f32Of(v: Vec3): Vec3 {
  *
  * @param clouds - The body's clouds the probe's bindings hold: its coverage texels as the texture
  *   holds them, the noise tile, its field's parameters, shell and optics, and its datum's radius.
+ * @param correction - Its condensate's octave correction, as the probe's table holds it.
  */
 export function expectedCloudProbe(
   cases: ReadonlyArray<CloudProbeCase>,
   clouds: CloudLightInput,
+  correction: OctaveCorrection,
 ): number[][] {
   return cases.map((probe) => {
     let values: number[];
@@ -170,6 +234,39 @@ export function expectedCloudProbe(
         values = [light.direct, light.sky, light.diffuse];
         break;
       }
+      case "column": {
+        const tau = Math.fround(probe.tau);
+        const mu0 = Math.fround(probe.mu0);
+        const light = marchColumn({
+          tau,
+          mu0,
+          muView: Math.fround(probe.muView),
+          cosTheta: Math.fround(probe.cosTheta),
+          optics: {
+            asymmetry: Math.fround(probe.asymmetry),
+            coAlbedo: Math.fround(probe.coAlbedo),
+          },
+          steps: probe.steps,
+        });
+        values = [light.single, light.multiple, octaveCorrectionAt(correction, tau, mu0)];
+        break;
+      }
+      case "deck": {
+        const march = marchDeckRay(
+          clouds,
+          { baseM: Math.fround(probe.baseM), topM: Math.fround(probe.topM) },
+          correction,
+          {
+            originM: f32Of(probe.originM),
+            direction: f32Of(probe.direction),
+            sun: f32Of(probe.sun),
+            steps: probe.steps,
+            footprintPerM: Math.fround(probe.footprintPerM),
+          },
+        );
+        values = [march.radiance, march.transmittance];
+        break;
+      }
     }
     return [...values, ...Array.from({ length: CLOUD_PROBE_OUTPUTS - values.length }, () => 0)];
   });
@@ -190,6 +287,7 @@ export const CLOUD_PROBE_BINDINGS = {
   sampler: 2,
   layer: 3,
   cases: 4,
+  correction: 5,
 } as const;
 
 /** The probe's names for the buffer of its cases and its textures, as a draw binds them. */
@@ -199,6 +297,7 @@ export const CLOUD_PROBE_NAMES = {
   sampler: "cloudSampler",
   layer: "cloudLayer",
   cases: "cloudProbeCases",
+  correction: "cloudOctaveCorrection",
 } as const;
 
 /** The probe's own source, after the libraries it runs. */
@@ -212,6 +311,7 @@ struct Draw {
 @group(2) @binding(2) var cloud_sampler : sampler;
 @group(2) @binding(3) var<storage, read> cloud_layer : array<vec4f>;
 @group(2) @binding(4) var<storage, read> cloud_probe_cases : array<vec4f>;
+@group(2) @binding(5) var cloud_octave_correction : texture_2d<f32>;
 
 @vertex fn vertexMain(@location(0) position : vec3f) -> @builtin(position) vec4f {
   return frame.clipProjection * frame.viewRotation * vec4f(position + draw.offsetFromCameraM, 1.0);
@@ -221,11 +321,13 @@ struct Draw {
 @fragment fn fragmentMain(@builtin(position) at : vec4f) -> @location(0) u32 {
   let row = u32(at.y);
   let column = min(u32(at.x), 7u);
-  if (row >= arrayLength(&cloud_probe_cases) / 3u) {
+  if (row >= arrayLength(&cloud_probe_cases) / 4u) {
     return 0u;
   }
-  let head = cloud_probe_cases[3u * row];
-  let a = cloud_probe_cases[3u * row + 1u];
+  let head = cloud_probe_cases[4u * row];
+  let a = cloud_probe_cases[4u * row + 1u];
+  let b = cloud_probe_cases[4u * row + 2u];
+  let e = cloud_probe_cases[4u * row + 3u];
   var values = array<f32, 8>(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
   let kind = u32(head.x);
   if (kind == 0u) {
@@ -240,18 +342,30 @@ struct Draw {
     values[0] = slab.reflectance;
     values[1] = slab.direct;
     values[2] = slab.diffuse;
-  } else {
+  } else if (kind == 2u) {
     let light = terrain_cloud_light(head.yzw, a.xyz, a.w);
     values[0] = light.x;
     values[1] = light.y;
     values[2] = light.z;
+  } else if (kind == 3u) {
+    let light = cloud_column_march(head.y, head.z, head.w, a.x, a.y, a.z, u32(a.w));
+    values[0] = light.x;
+    values[1] = light.y;
+    values[2] = cloud_octave_correction_at(head.y, head.z);
+  } else {
+    let march = cloud_volume_march(head.yzw, a.xyz, vec3f(a.w, b.xy), b.z, b.w, u32(e.x), e.y);
+    values[0] = march.x;
+    values[1] = march.y;
   }
   return bitcast<u32>(values[column]);
 }
 `;
 
-/** The probe's WGSL: the frame, `preciseTrig.wgsl`, the field, the optics, the tap and the probe. */
-export const CLOUD_PROBE_WGSL = `${frameWgsl}\n${preciseTrigWgsl}\n${cloudFieldWgsl}\n${cloudOpticsWgsl}\n${cloudShadowWgsl}\n${PROBE_WGSL}`;
+/**
+ * The probe's WGSL: the frame, `preciseTrig.wgsl`, the field, the optics, the tap, the volume and the
+ * probe.
+ */
+export const CLOUD_PROBE_WGSL = `${frameWgsl}\n${preciseTrigWgsl}\n${cloudFieldWgsl}\n${cloudOpticsWgsl}\n${cloudShadowWgsl}\n${cloudVolumeWgsl}\n${PROBE_WGSL}`;
 
 /** The probe's material, drawn into an `r32uint` target of {@link CLOUD_PROBE_OUTPUTS} columns. */
 export const CLOUD_PROBE_MATERIAL: WgslMaterialSpec = {
@@ -271,6 +385,11 @@ export const CLOUD_PROBE_MATERIAL: WgslMaterialSpec = {
   textures: [
     { name: CLOUD_PROBE_NAMES.coverage, binding: CLOUD_PROBE_BINDINGS.coverage },
     { name: CLOUD_PROBE_NAMES.noise, binding: CLOUD_PROBE_BINDINGS.noise, viewDimension: "3d" },
+    {
+      name: CLOUD_PROBE_NAMES.correction,
+      binding: CLOUD_PROBE_BINDINGS.correction,
+      sampleType: "unfilterable-float",
+    },
   ],
   storageBuffers: [
     { name: CLOUD_PROBE_NAMES.layer, binding: CLOUD_PROBE_BINDINGS.layer, stages: ["fragment"] },

@@ -1,8 +1,8 @@
 /**
- * The smoke page's clouds checks (plan R11, R11.T7.b), in part 26: the field, the `f32`
- * δ-Eddington and the ground's tap on the run's adapter against their `f64` twins, through the
- * clouds' probe (`view/clouds/cloudProbe.ts`), and the two-dimensional layer drawn over a frame with
- * every texel finite.
+ * The smoke page's clouds checks (plan R11, R11.T7.b and T7.c), in part 26: the field, the `f32`
+ * δ-Eddington, the ground's tap and the volume's marches on the run's adapter against their `f64`
+ * twins, through the clouds' probe (`view/clouds/cloudProbe.ts`), and the two-dimensional layer
+ * drawn over a frame with every texel finite.
  *
  * @remarks
  * One Earth-like body's clouds are made by the layer's own `CloudLayers` (its noise tile, coverage
@@ -20,15 +20,20 @@
  * - δ-Eddington's R and T_diff to {@link SLAB_TOLERANCE}, T_dir to {@link DIRECT_RELATIVE_TOLERANCE}
  *   of itself (`cloudOptics.wgsl`'s header: 8.0 × 10⁻⁵ in R emulated, before WGSL's `exp`);
  * - the ground's three factors to {@link GROUND_TOLERANCE}, the share's end-to-end error at the
- *   sun's footprint, and exactly (1, 1, 0) above the shell.
+ *   sun's footprint, and exactly (1, 1, 0) above the shell;
+ * - a homogeneous column's octave march, its single and its multiple scattering, to
+ *   {@link COLUMN_TOLERANCE} and its correction's lookup to
+ *   {@link CORRECTION_TOLERANCE}, relative; a view ray's march through the deck, whose every
+ *   sample reads the field, to {@link DECK_TOLERANCE} of its radiance at footprints of a twentieth
+ *   of the distance, and its transmittance to {@link DECK_TRANSMITTANCE_TOLERANCE}.
  */
 
 import type { Vec3 } from "../geometry/vec3";
 import { createAirlessTables } from "../view/atmosphere/surfaceLighting";
 import { lookAlong } from "../view/camera/quaternion";
 import { CLOUD_ENTRIES } from "../view/engine/catalogue";
-import { BUFFER_USAGE } from "../view/engine/gpuFlags";
-import type { RenderEngine } from "../view/engine/types";
+import { BUFFER_USAGE, TEXTURE_USAGE } from "../view/engine/gpuFlags";
+import type { BufferHandle, RenderEngine, RenderTarget, TextureHandle } from "../view/engine/types";
 import {
   cloudFieldParams,
   cloudSeedOf,
@@ -58,6 +63,7 @@ import {
   packCloudProbeCases,
 } from "../view/clouds/cloudProbe";
 import type { CloudLightInput } from "../view/clouds/cloudShadow";
+import { CORRECTION_MUS, CORRECTION_TAUS, octaveCorrectionOf } from "../view/clouds/cloudVolume";
 import { type CloudCondensate, STAND_IN_CONDENSATES } from "../view/clouds/condensates";
 import type { GraphicsStatusStore } from "../view/engine/status";
 import { checkCatalogue } from "./catalogue";
@@ -241,7 +247,64 @@ function probeCases(twin: CloudLightInput): CloudProbeCase[] {
     sun: directionAt(20, 40),
     sourceRadiusRad: sunRadius,
   });
-  return [...field, ...optics, ...ground];
+  return [...field, ...optics, ...ground, ...volumeCases()];
+}
+
+/** The volume's deck, from 1 km to 3 km (T7.c), as {@link CONDENSATE}'s. */
+const DECK = { baseM: CONDENSATE.baseAltitudeM, topM: CONDENSATE.topAltitudeM };
+
+/** The volume's cases (R11.T7.c): homogeneous columns, then view rays through the deck. */
+function volumeCases(): CloudProbeCase[] {
+  const columns: CloudProbeCase[] = [];
+  for (const tau of [0.5, 1, 10, 50]) {
+    for (const [mu0, muView, cosTheta] of [
+      [1, 1, -1],
+      [0.5, 0.8, -0.2],
+      [0.75, 0.3, 0.4],
+    ] as const) {
+      columns.push({
+        kind: "column",
+        tau,
+        mu0,
+        muView,
+        cosTheta,
+        asymmetry: CONDENSATE.asymmetry,
+        coAlbedo: CONDENSATE.coAlbedo,
+        steps: 32,
+      });
+    }
+  }
+  const decks = PLACES.flatMap(([lat, lon]): CloudProbeCase[] => {
+    const u = directionAt(lat, lon);
+    const east = unit({ x: -u.y, y: u.x, z: 0 });
+    const ground = onSpheroid(u, FIGURE.equatorialRadiusM, FIGURE.polarRadiusM);
+    const above = onSpheroid(u, FIGURE.equatorialRadiusM + 8_000, FIGURE.polarRadiusM + 8_000);
+    const sun = unit({ x: u.x + 0.5 * east.x, y: u.y + 0.5 * east.y, z: u.z + 0.5 * east.z });
+    const slant = unit({ x: -u.x + 0.4 * east.x, y: -u.y + 0.4 * east.y, z: -u.z + 0.4 * east.z });
+    return [
+      // From above, straight down and slanting; from the ground, straight up.
+      {
+        kind: "deck",
+        originM: above,
+        direction: { x: -u.x, y: -u.y, z: -u.z },
+        sun,
+        ...DECK,
+        steps: 48,
+        footprintPerM: 0.05,
+      },
+      {
+        kind: "deck",
+        originM: above,
+        direction: slant,
+        sun,
+        ...DECK,
+        steps: 48,
+        footprintPerM: 0.05,
+      },
+      { kind: "deck", originM: ground, direction: u, sun, ...DECK, steps: 48, footprintPerM: 0.05 },
+    ];
+  });
+  return [...columns, ...decks];
 }
 
 /** The largest of `values`, 0 for none. */
@@ -256,7 +319,10 @@ interface Compared {
   readonly probe: CloudProbeCase;
 }
 
-/** R11.T7.b's field, optics and ground's tap against their twins (the module's remarks). */
+/**
+ * R11.T7.b's field, optics and ground's tap, and R11.T7.c's volume's marches, against their twins
+ * (the module's remarks).
+ */
 export async function checkCloudTwins(engine: RenderEngine, checks: Checks): Promise<void> {
   const layers = new CloudLayers(engine, "smoke");
   layers.step(() => performance.now(), Number.POSITIVE_INFINITY);
@@ -266,25 +332,46 @@ export async function checkCloudTwins(engine: RenderEngine, checks: Checks): Pro
     throw new Error("the clouds' noise tile was not made in one unbounded step");
   }
   const twin = twinOf(cloudNoiseTexels());
+  const correction = octaveCorrectionOf(CONDENSATE);
   const cases = probeCases(twin);
   const packed = packCloudProbeCases(cases);
-  const caseBuffer = engine.createBuffer({
-    name: "cloud probe cases",
-    bytes: packed.byteLength,
-    usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST,
-    category: "other",
-  });
-  engine.writeBuffer(caseBuffer, 0, packed);
-  const target = engine.createRenderTarget({
-    name: "cloud probe",
-    size: { widthPx: CLOUD_PROBE_OUTPUTS, heightPx: cases.length },
-    format: "r32uint",
-    mips: 1,
-    depth: false,
-    category: "render-targets",
-  });
+  // Made one by one, each released however a later one fails.
+  const made: { texture?: TextureHandle; buffer?: BufferHandle; target?: RenderTarget } = {};
   let results: number[][];
   try {
+    const correctionTexture = engine.createTexture({
+      name: "cloud octave correction",
+      size: { width: CORRECTION_TAUS, height: CORRECTION_MUS },
+      dimension: "2d",
+      format: "r32float",
+      mips: 1,
+      usage: TEXTURE_USAGE.TEXTURE_BINDING | TEXTURE_USAGE.COPY_DST,
+      category: "clouds",
+    });
+    made.texture = correctionTexture;
+    engine.writeTexture(
+      correctionTexture,
+      { x: 0, y: 0 },
+      { width: CORRECTION_TAUS, height: CORRECTION_MUS },
+      correction.factors,
+    );
+    const caseBuffer = engine.createBuffer({
+      name: "cloud probe cases",
+      bytes: packed.byteLength,
+      usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST,
+      category: "other",
+    });
+    made.buffer = caseBuffer;
+    engine.writeBuffer(caseBuffer, 0, packed);
+    const target = engine.createRenderTarget({
+      name: "cloud probe",
+      size: { widthPx: CLOUD_PROBE_OUTPUTS, heightPx: cases.length },
+      format: "r32uint",
+      mips: 1,
+      depth: false,
+      category: "render-targets",
+    });
+    made.target = target;
     const material = engine.createMaterial(CLOUD_PROBE_MATERIAL);
     target.render(
       frameOf(
@@ -295,6 +382,7 @@ export async function checkCloudTwins(engine: RenderEngine, checks: Checks): Pro
             textures: {
               [CLOUD_PROBE_NAMES.coverage]: gpu.coverage,
               [CLOUD_PROBE_NAMES.noise]: gpu.noise,
+              [CLOUD_PROBE_NAMES.correction]: correctionTexture,
             },
             storageBuffers: {
               [CLOUD_PROBE_NAMES.layer]: gpu.layer,
@@ -310,11 +398,16 @@ export async function checkCloudTwins(engine: RenderEngine, checks: Checks): Pro
       cases.length,
     );
   } finally {
-    target.dispose();
-    engine.releaseBuffer(caseBuffer);
+    made.target?.dispose();
+    if (made.buffer !== undefined) {
+      engine.releaseBuffer(made.buffer);
+    }
+    if (made.texture !== undefined) {
+      engine.releaseTexture(made.texture);
+    }
     layers.dispose();
   }
-  const expected = expectedCloudProbe(cases, twin);
+  const expected = expectedCloudProbe(cases, twin, correction);
   const compared: Compared[] = cases.map((probe, i) => ({
     gpu: results[i] ?? [],
     cpu: expected[i] ?? [],
@@ -332,6 +425,54 @@ export async function checkCloudTwins(engine: RenderEngine, checks: Checks): Pro
   checkGround(
     checks,
     compared.filter(({ probe }) => probe.kind === "ground"),
+  );
+  checkVolume(
+    checks,
+    compared.filter(({ probe }) => probe.kind === "column"),
+    compared.filter(({ probe }) => probe.kind === "deck"),
+  );
+}
+
+/** A column's march, relative. */
+const COLUMN_TOLERANCE = 2e-4;
+/** The correction's interpolation, relative. */
+const CORRECTION_TOLERANCE = 1e-5;
+/** A deck's march, relative to its radiance, beside 10⁻⁶ sr⁻¹ absolute. */
+const DECK_TOLERANCE = 0.02;
+/** A deck's view transmittance, absolute. */
+const DECK_TRANSMITTANCE_TOLERANCE = 0.01;
+
+/** A GPU value's difference from its twin's, relative to the twin's beside `floor`. */
+function relative(gpu: number | undefined, cpu: number | undefined, floor: number): number {
+  return Math.abs((gpu ?? Number.NaN) - (cpu ?? Number.NaN)) / (Math.abs(cpu ?? 0) + floor);
+}
+
+function checkVolume(
+  checks: Checks,
+  columns: ReadonlyArray<Compared>,
+  decks: ReadonlyArray<Compared>,
+): void {
+  const marched = columns.map(({ gpu, cpu }) =>
+    Math.max(relative(gpu[0], cpu[0], 1e-9), relative(gpu[1], cpu[1], 1e-9)),
+  );
+  const corrected = columns.map(({ gpu, cpu }) => relative(gpu[2], cpu[2], 1e-6));
+  checks.check(
+    "R11.T7.c the volume's column march and its correction equal their twins",
+    allFinite(columns) &&
+      largest(marched) <= COLUMN_TOLERANCE &&
+      largest(corrected) <= CORRECTION_TOLERANCE,
+    `largest relative difference ${largest(marched).toExponential(2)} (≤ ${COLUMN_TOLERANCE}) and ${largest(corrected).toExponential(2)} (≤ ${CORRECTION_TOLERANCE}) over ${columns.length} columns`,
+  );
+  const radiance = decks.map(({ gpu, cpu }) => relative(gpu[0], cpu[0], 1e-6 / DECK_TOLERANCE));
+  const transmittance = decks.map(({ gpu, cpu }) => off(gpu, cpu, 1));
+  const lit = decks.filter(({ cpu }) => (cpu[0] ?? 0) > 0).length;
+  checks.check(
+    "R11.T7.c the volume's march through a deck equals its twin",
+    allFinite(decks) &&
+      lit >= decks.length / 2 &&
+      largest(radiance) <= DECK_TOLERANCE &&
+      largest(transmittance) <= DECK_TRANSMITTANCE_TOLERANCE,
+    `largest relative difference ${largest(radiance).toExponential(2)} (≤ ${DECK_TOLERANCE}), |ΔT| ${largest(transmittance).toExponential(2)} (≤ ${DECK_TRANSMITTANCE_TOLERANCE}), ${lit} of ${decks.length} rays lit`,
   );
 }
 

@@ -786,8 +786,10 @@ async function run(
   await group(26, "T9.b catalogue: the clouds' kernels", () =>
     checkCloudCatalogue(engine, status, checks),
   );
-  await group(26, "R11.T7.b the clouds' field, optics and ground light against their twins", () =>
-    checkCloudTwins(engine, checks),
+  await group(
+    26,
+    "R11.T7.b–c the clouds' field, optics, ground light and volume against their twins",
+    () => checkCloudTwins(engine, checks),
   );
   await group(26, "R11.T7.b the cloud layer drawn", () => checkCloudLayerDraw(engine, checks));
   await group(17, "R08.T8.d the far limb's node rays packed in the general forms", () =>
