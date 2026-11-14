@@ -16,15 +16,16 @@
 //! - **A(age)** ([`age_factor`]) is a + (1 − a) e^(−t ÷ τ) of the body's surface age t: rocks
 //!   break down to the equilibrium share a that impacts keep making, faster and further on an
 //!   airless or tenuous body (a = 0.6, τ = 0.3 Gyr: micrometeorite gardening and thermal fatigue
-//!   unshielded, Ghent et al. 2014's breakdown of lunar ejecta within about 1 Gyr) than under an
-//!   atmosphere (a = 0.85, τ = 2 Gyr). The airless floor puts mature mare regolith at 0.039,
+//!   unshielded, as lunar ejecta's blocks break down, their rockiness falling as the age^−0.46
+//!   over nine craters, Ghent et al. 2014, Geology 42, 1059) than under an atmosphere (a = 0.85,
+//!   τ = 2 Gyr). The airless floor puts mature mare regolith at 0.039,
 //!   Design note 4's 0.03–0.05 for the authoritative sizes; the atmosphere's puts the landers'
 //!   sites where they were measured, Viking 1's soil at 0.070, Viking 2's volcanic plain at 0.18
 //!   and Pathfinder's flood-scoured rock at 0.18 (the tests' conditions).
 //! - **`k_ejecta`** ([`ejecta_abundance`]) is 0.3 e^(−(r − R) ÷ R) outside the rim, at a distance r
 //!   from the centre of a coarse crater of rim radius R, aged by A's decaying part e^(−t ÷ τ) of
-//!   the crater's own age t, so that old ejecta keep no blocks (Ghent et al. 2014), and only for a
-//!   crater no older than the surface. It ends at the crater's reach, (1 + a) R at most 2.54 R,
+//!   the crater's own age t, so that old ejecta keep no blocks (after Ghent et al. 2014), and only
+//!   for a crater no older than the surface. It ends at the crater's reach, (1 + a) R at most 2.54 R,
 //!   since the field indexes a coarse crater only in the cells its reach touches, not at Design
 //!   note 4's 3R; where several reach the site, the largest term is taken.
 //!
@@ -32,8 +33,8 @@
 //! generated worlds, and on an airless world the one-parameter law cannot fit the flatter lunar
 //! size distribution, so k is set there for the authoritative sizes and small rocks are knowingly
 //! wrong. Every figure here but the law's is that ruling's choice; the sources named above were
-//! read from memory and could not be re-checked when the module was written (plan R11, the
-//! records of R11.T3).
+//! re-checked on 2026-11-13 against Golombek and Rapp 1997's, Golombek et al. 2003's and Ghent et
+//! al. 2014's abstracts, not their full texts (plan R11, the records of R11.T3).
 //!
 //! # Inputs both sides hold
 //!
@@ -176,11 +177,13 @@ pub const fn bears_rocks(class: MaterialClass) -> bool {
 /// documentation](self).
 #[must_use]
 pub const fn base_abundance(class: MaterialClass, mechanics: Option<MechanicsFamily>) -> f64 {
-    let icy = matches!(
-        mechanics,
-        Some(MechanicsFamily::WaterIce | MechanicsFamily::VolatileIce)
-    );
-    let organic = matches!(mechanics, Some(MechanicsFamily::Organic));
+    let (icy, organic) = match mechanics {
+        None | Some(MechanicsFamily::Silicate | MechanicsFamily::Metal | MechanicsFamily::Salt) => {
+            (false, false)
+        }
+        Some(MechanicsFamily::WaterIce | MechanicsFamily::VolatileIce) => (true, false),
+        Some(MechanicsFamily::Organic) => (false, true),
+    };
     match class {
         MaterialClass::Seabed
         | MaterialClass::SeaIce
@@ -220,29 +223,29 @@ pub const fn base_abundance(class: MaterialClass, mechanics: Option<MechanicsFam
     }
 }
 
-/// The equilibrium share a and the breakdown time τ, Gyr, of `atmosphere`'s A(age).
+/// The equilibrium share a and the breakdown time τ of `atmosphere`'s A(age).
 #[must_use]
-const fn breakdown(atmosphere: AtmosphereClass) -> (f64, f64) {
+const fn breakdown(atmosphere: AtmosphereClass) -> (f64, Gigayears) {
     if atmosphere.breaks_down_as_airless() {
-        (AIRLESS_FLOOR, AIRLESS_BREAKDOWN_GYR)
+        (AIRLESS_FLOOR, Gigayears::new(AIRLESS_BREAKDOWN_GYR))
     } else {
-        (ATMOSPHERE_FLOOR, ATMOSPHERE_BREAKDOWN_GYR)
+        (ATMOSPHERE_FLOOR, Gigayears::new(ATMOSPHERE_BREAKDOWN_GYR))
     }
 }
 
-/// e^(−t ÷ τ) of the age `age` and the breakdown time `tau_gyr`, Gyr.
+/// e^(−t ÷ τ) of the age `age` and the breakdown time `tau`.
 ///
 /// # Panics
 ///
 /// If `age` is not finite and non-negative.
 #[must_use]
-fn decay(age: Gigayears, tau_gyr: f64) -> f64 {
+fn decay(age: Gigayears, tau: Gigayears) -> f64 {
     let t = age.value();
     assert!(
         t.is_finite() && t >= 0.0,
         "an age must be finite and non-negative, got {t}"
     );
-    math::exp(-t / tau_gyr)
+    math::exp(-t / tau.value())
 }
 
 /// A(age) = a + (1 − a) e^(−t ÷ τ), the share of a young surface's rocks a surface `age` old keeps
@@ -424,11 +427,12 @@ pub fn rock_abundance(site: &RockSite) -> RockAbundance {
     RockAbundance::new(base + ejecta)
 }
 
-/// The site at the body-fixed point `at`, metres from the body's centre: R10's [`material_at`] at
-/// the point's foot on the datum, the palette entry's family, the header's surface age and
-/// atmosphere class, and the coarse crater of the foot's coarse cell whose ejecta add the most
-/// there (see the [module documentation](self)). `cache` is the caller's, and the site does not
-/// depend on what it holds.
+/// The site at the body-fixed point `at`, metres from the body's centre.
+///
+/// It is R10's [`material_at`] at the point's foot on the datum, the palette entry's family, the
+/// header's surface age and atmosphere class, and the coarse crater of the foot's coarse cell whose
+/// ejecta add the most there (see the [module documentation](self)). `cache` is the caller's, and
+/// the site does not depend on what it holds.
 ///
 /// # Errors
 ///
@@ -470,6 +474,10 @@ pub(crate) fn site_at<F: FieldView>(
     let atmosphere = atmosphere_class(header.surface_pressure());
     let coarse = PatchKey::containing(header.level().get(), dir)
         .expect("a coarse level is below the cube's deepest");
+    // The crater index is the cell's: a view without the cell would list none.
+    if field.cell(coarse).is_none() {
+        return Err(QueryHeightError::NotSurveyed(coarse));
+    }
     let p = figure.point(dir);
     let mut best: Option<(f64, CraterEjecta)> = None;
     for crater in field.craters_reaching(coarse) {
@@ -525,8 +533,10 @@ mod tests {
     /// The landers' sites, as the tests build them: Viking 1's rocky plain in Chryse Planitia as
     /// soil, Viking 2's in Utopia Planitia as volcanic rock and Pathfinder's flood-scoured plain in
     /// Ares Vallis as bedrock, each on a Hesperian surface under Mars's air. Their k: Viking 1
-    /// 0.06–0.09, Viking 2 0.15–0.20 and Pathfinder 0.16–0.20 (Golombek et al. 2012 give Viking 2
-    /// and Pathfinder about 20% lander-measured and 18% by IRTM; Viking 1's from memory).
+    /// 0.06–0.09, Viking 2 0.15–0.20 and Pathfinder 0.16–0.20: Viking 1 8% without its outcrops and
+    /// Viking 2 about 20% (Golombek and Rapp 1997, JGR 102(E2), 4117, the abstract), Viking 2's
+    /// rocks over 3.5 cm about 16% (Moore and Keller's count, as Herkenhoff et al. 2008 quote it),
+    /// and Pathfinder 19% in all (Golombek et al. 2003, JGR 108(E12), 8086, the abstract).
     #[test]
     fn the_landers_sites_have_their_measured_abundance() {
         let mars = atmosphere_class(MARS_PRESSURE);
@@ -690,6 +700,65 @@ mod tests {
         assert!((at(2_000.0, 0.0) - 0.3 * math::exp(-1.0)).abs() < 1e-15);
         assert_eq!(at(999.0, 0.0), 0.0);
         assert!(at(1_500.0, 1.0) < 0.05 * at(1_500.0, 0.0));
+    }
+
+    /// A site within a coarse crater's reach, outside its rim, takes the largest ejecta of the
+    /// craters reaching it, and old ejecta keep next to none.
+    #[test]
+    fn a_site_takes_the_largest_craters_ejecta_about_it() {
+        let field = world(SyntheticWorld::MoonLike);
+        let header = field.header();
+        let figure = header.figure();
+        let synth = Synthesiser::new(field, SEED);
+        let mut cache = SynthCache::new();
+        let mut seen = 0;
+        for crater in field.craters().iter().take(8) {
+            // A point 1.5 rim radii from the centre, along a tangent of its own components.
+            let centre = crater.centre;
+            let tangent = crate::cube::unit_dir([-centre[1], centre[0], 0.3]);
+            let along = [0, 1, 2].map(|k| {
+                tangent[k] - centre[k] * tangent.iter().zip(centre).map(|(t, c)| t * c).sum::<f64>()
+            });
+            let along = crate::cube::unit_dir(along);
+            let radius = header.figure().equatorial_radius_m;
+            let angle = 0.75 * crater.diameter.value() / radius;
+            let dir = crate::cube::unit_dir([0, 1, 2].map(|k| centre[k] + angle * along[k]));
+            let site = rock_site(&synth, &mut cache, &figure.point(dir)).expect("a whole field");
+            let Some(ejecta) = site.ejecta() else {
+                continue;
+            };
+            seen += 1;
+            let added = ejecta_abundance(&ejecta, site.atmosphere());
+            assert!(added > 0.0);
+            // No crater reaching the site adds more.
+            let coarse = PatchKey::containing(header.level().get(), dir).unwrap();
+            for other in field.craters_reaching(coarse) {
+                if other.age > header.surface_age() {
+                    continue;
+                }
+                let centre_m = figure.point(other.centre);
+                let at_m = figure.point(dir);
+                let d = (0..3)
+                    .map(|i| (at_m[i] - centre_m[i]) * (at_m[i] - centre_m[i]))
+                    .sum::<f64>()
+                    .sqrt();
+                let reach = crater_shape(header.craters(), other.diameter)
+                    .reach()
+                    .value();
+                if d < reach {
+                    let e = CraterEjecta::new(other.diameter * 0.5, Metres::new(d), other.age);
+                    let other_k = ejecta_abundance(&e, site.atmosphere());
+                    // The site's distance is from its foot, a rounding away.
+                    assert!(
+                        other_k <= added * (1.0 + 1e-12),
+                        "{other_k} > {added}: {e:?}"
+                    );
+                }
+            }
+        }
+        assert!(seen > 0, "no site lay in a crater's ejecta");
+        let old = CraterEjecta::new(Metres::new(1e3), Metres::new(1.5e3), Gigayears::new(9.0));
+        assert!(ejecta_abundance(&old, AtmosphereClass::Airless) < 1e-12);
     }
 
     /// A site read from a world: its class is the classifier's, its age and atmosphere the

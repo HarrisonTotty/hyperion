@@ -33,8 +33,8 @@ use hyperion_base::units::Metres;
 
 use crate::num;
 
-/// The largest rock abundance the law is used at: 0.40, the top of the range Golombek and Rapp
-/// 1997's model family spans (Design note 4).
+/// The largest rock abundance the law is used at: 0.40, Design note 4's clamp, within the range
+/// Golombek and Rapp 1997's model curves are drawn over.
 pub const MAX_ROCK_ABUNDANCE: f64 = 0.40;
 
 /// q(k)'s constant term, per metre (Golombek and Rapp 1997, eq. 2).
@@ -54,6 +54,15 @@ const CF_STEPS: u32 = 1_000;
 /// The step below which the continued fraction stops: a few ulps of 1.
 const CF_TOLERANCE: f64 = 4.0 * f64::EPSILON;
 
+/// The smallest rock abundance taken as some rocks: 10⁻⁹, below which [`RockAbundance::new`]
+/// gives none. q(k) is then 1.5 × 10⁸ per metre, so N(>0.4 m) carries e^(−6 × 10⁷), nothing, and q
+/// would overflow only below about 10⁻³⁰⁹.
+pub const MIN_ROCK_ABUNDANCE: f64 = 1e-9;
+
+/// The argument above which E₁ underflows: 745, where e^(−x) ÷ x is below `f64`'s smallest
+/// subnormal.
+const E1_UNDERFLOW: f64 = 745.0;
+
 /// The most steps [`RockAbundance::diameter_at`] takes: Newton's method from the bracket's mean
 /// meets its tolerance in a handful, and the bisection that guards it halves the bracket each
 /// time it is taken.
@@ -64,8 +73,9 @@ const INVERSION_STEPS: u32 = 64;
 /// Below 1 it is the series −γ − ln x − Σ (−x)ⁿ ÷ (n n!), from n = 1; from 1 up, e^(−x) times the
 /// continued fraction 1 ÷ (x + 1 − 1² ÷ (x + 3 − 2² ÷ (x + 5 − …))) by the modified Lentz method
 /// (Press et al., _Numerical Recipes_, 3rd ed., §6.3, `expint` for n = 1). Both are held to
-/// tabulated values (Abramowitz and Stegun 1964, Table 5.1) to 10⁻¹² relative over x from 0.5 to
-/// 700, past every argument the law takes. It underflows to 0 above about 745.
+/// mpmath's 50-digit values to 10⁻¹² relative over x from 0.5 to 700, past every argument the law
+/// takes. It is 0 from 745 up, infinity included, where it
+/// underflows.
 ///
 /// # Panics
 ///
@@ -73,7 +83,9 @@ const INVERSION_STEPS: u32 = 64;
 #[must_use]
 pub fn exponential_integral_e1(x: f64) -> f64 {
     assert!(x > 0.0, "E1 needs a positive argument, got {x}");
-    if x < 1.0 {
+    if x >= E1_UNDERFLOW {
+        0.0
+    } else if x < 1.0 {
         e1_series(x)
     } else {
         math::exp(-x) * scaled_e1(x)
@@ -84,7 +96,7 @@ pub fn exponential_integral_e1(x: f64) -> f64 {
 #[must_use]
 fn e1_series(x: f64) -> f64 {
     let mut sum = 0.0;
-    // Term n is (−1)^(n+1) xⁿ ÷ (n n!); `power` holds (−1)^(n+1) xⁿ ÷ n!.
+    // Term n is (−1)^(n+1) xⁿ ÷ (n n!); `power` holds (−x)ⁿ ÷ n!.
     let mut power = 1.0;
     for n in 1..=SERIES_TERMS {
         let n = f64::from(n);
@@ -148,8 +160,10 @@ impl RockAbundance {
     /// No rocks: k = 0.
     pub const NONE: Self = Self { k: 0.0 };
 
-    /// The abundance `k`, clamped to [0, [`MAX_ROCK_ABUNDANCE`]]; a −0 is taken as +0, so that no
-    /// abundance carries a sign bit.
+    /// The abundance `k`, clamped to [0, [`MAX_ROCK_ABUNDANCE`]].
+    ///
+    /// Below [`MIN_ROCK_ABUNDANCE`] it is none, and a −0 is taken as +0, so that no abundance
+    /// carries a sign bit.
     ///
     /// # Panics
     ///
@@ -157,8 +171,12 @@ impl RockAbundance {
     #[must_use]
     pub fn new(k: f64) -> Self {
         assert!(!k.is_nan(), "a rock abundance must not be a NaN");
-        let k = num::min(num::max(k, 0.0), MAX_ROCK_ABUNDANCE);
-        Self { k }
+        if k < MIN_ROCK_ABUNDANCE {
+            return Self::NONE;
+        }
+        Self {
+            k: num::min(k, MAX_ROCK_ABUNDANCE),
+        }
     }
 
     /// k, the fraction of the ground covered by rocks, 0 to [`MAX_ROCK_ABUNDANCE`].
@@ -174,15 +192,16 @@ impl RockAbundance {
     }
 
     /// q(k) = 1.79 + 0.152 ÷ k, per metre: the rate at which the area covered falls with diameter.
-    /// Infinite at k = 0.
+    ///
+    /// It is infinite at k = 0.
     #[must_use]
-    pub fn q(&self) -> f64 {
+    pub fn q_per_m(&self) -> f64 {
         Q_CONSTANT_PER_M + Q_INVERSE_PER_M / self.k
     }
 
     /// k q, per metre, as 1.79 k + 0.152, which stays finite at k = 0.
     #[must_use]
-    fn kq(self) -> f64 {
+    fn kq_per_m(self) -> f64 {
         Q_CONSTANT_PER_M * self.k + Q_INVERSE_PER_M
     }
 
@@ -197,7 +216,7 @@ impl RockAbundance {
         if self.is_none() {
             return 0.0;
         }
-        self.k * math::exp(-self.q() * d)
+        self.k * math::exp(-self.q_per_m() * d)
     }
 
     /// N(>D), the number of rocks of `diameter` or larger per square metre, in closed form (see
@@ -212,28 +231,29 @@ impl RockAbundance {
         if self.is_none() {
             return 0.0;
         }
-        let q = self.q();
+        let q = self.q_per_m();
         let x = q * d;
         let bracket = 1.0 / d - q * scaled_e1_any(x);
         num::max(
-            4.0 * self.kq() / core::f64::consts::PI * math::exp(-x) * bracket,
+            4.0 * self.kq_per_m() / core::f64::consts::PI * math::exp(-x) * bracket,
             0.0,
         )
     }
 
-    /// n(D), the number of rocks per square metre per metre of diameter at `diameter`:
-    /// (4 k q ÷ π) e^(−qD) ÷ D², the slope of N(>D) with its sign turned.
+    /// n(D), the number of rocks per square metre per metre of diameter at `diameter`.
+    ///
+    /// It is (4 k q ÷ π) e^(−qD) ÷ D², the slope of N(>D) with its sign turned.
     ///
     /// # Panics
     ///
     /// If `diameter` is not positive and finite.
     #[must_use]
-    pub fn number_density(&self, diameter: Metres) -> f64 {
+    pub fn number_per_m2_per_m(&self, diameter: Metres) -> f64 {
         let d = assert_diameter(diameter);
         if self.is_none() {
             return 0.0;
         }
-        4.0 * self.kq() / core::f64::consts::PI * math::exp(-self.q() * d) / (d * d)
+        4.0 * self.kq_per_m() / core::f64::consts::PI * math::exp(-self.q_per_m() * d) / (d * d)
     }
 
     /// The number of rocks per square metre with diameters from `low` up to `high`:
@@ -254,9 +274,10 @@ impl RockAbundance {
         )
     }
 
-    /// The diameter in [`low`, `high`] below which the share `u` of the rocks between them lies:
-    /// the law inverted within the range, the D with N(>`low`) − N(>D) = `u` (N(>`low`) −
-    /// N(>`high`)). Newton's method on N, from the range's mean, guarded by bisection of the
+    /// The diameter in [`low`, `high`] below which the share `u` of the rocks between them lies.
+    ///
+    /// It is the law inverted within the range, the D with N(>`low`) − N(>D) = `u` (N(>`low`) −
+    /// N(>`high`)): Newton's method on N, from the range's mean, guarded by bisection of the
     /// bracket, to a step of 10⁻¹⁴ of the diameter, a few nanometres. `low` itself at k = 0, where
     /// the range holds no rocks.
     ///
@@ -285,7 +306,7 @@ impl RockAbundance {
             } else {
                 hi = d;
             }
-            let slope = self.number_density(Metres::new(d));
+            let slope = self.number_per_m2_per_m(Metres::new(d));
             let newton = d + excess / slope;
             let next = if newton > lo && newton < hi && newton.is_finite() {
                 newton
@@ -320,9 +341,9 @@ mod tests {
     #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
     use wasm_bindgen_test::wasm_bindgen_test as test;
 
-    /// E₁ at tabulated points: Abramowitz and Stegun 1964, Table 5.1 (x = 0.5, 1, 2, 5 and 10, to
-    /// their 15 figures), the rest computed with mpmath's `e1` at 50 digits (2026-11-02) and
-    /// rounded to `f64`. The range covers both branches, the switch at 1 and the law's
+    /// E₁ at tabulated points: mpmath's `e1` at 50 digits (2026-11-02), rounded to `f64`, which at
+    /// x = 0.5, 1, 2, 5 and 10 agree with Abramowitz and Stegun 1964's Table 5.1 to its figures (from
+    /// memory). The range covers both branches, the switch at 1 and the law's
     /// arguments, qD from 0.87 (k = 0.40, D = 0.4 m) to several hundred.
     const E1_TABLE: [(f64, f64); 17] = [
         (0.5, 0.559_773_594_776_160_8),
@@ -354,6 +375,23 @@ mod tests {
                 "E1({x}) = {got:e}, tabulated {expected:e}: {relative:e} relative"
             );
         }
+    }
+
+    /// E₁ underflows to 0 at and above 745, infinity included, and a subnormal abundance is none,
+    /// so that no positive k takes the law to a NaN.
+    #[test]
+    fn the_law_underflows_to_nothing() {
+        assert_eq!(exponential_integral_e1(f64::INFINITY), 0.0);
+        assert_eq!(exponential_integral_e1(800.0), 0.0);
+        for k in [1e-320, 1e-12, 0.0] {
+            let law = RockAbundance::new(k);
+            assert!(law.is_none(), "{k}");
+            assert_eq!(law.cumulative_number_per_m2(Metres::new(0.4)), 0.0);
+        }
+        let thin = RockAbundance::new(MIN_ROCK_ABUNDANCE);
+        assert_eq!(thin.cumulative_number_per_m2(Metres::new(0.4)), 0.0);
+        let range = (Metres::new(0.4), Metres::new(0.8));
+        assert_eq!(thin.diameter_at(range.0, range.1, 0.5), range.0);
     }
 
     /// The two branches agree at the switch, 1, so that the law has no step there.
@@ -411,9 +449,9 @@ mod tests {
             let difference = law.number_between_per_m2(Metres::new(a), Metres::new(b));
             let mid = f64::midpoint(a, b);
             let simpson = (b - a) / 6.0
-                * (law.number_density(Metres::new(a))
-                    + 4.0 * law.number_density(Metres::new(mid))
-                    + law.number_density(Metres::new(b)));
+                * (law.number_per_m2_per_m(Metres::new(a))
+                    + 4.0 * law.number_per_m2_per_m(Metres::new(mid))
+                    + law.number_per_m2_per_m(Metres::new(b)));
             assert!(
                 (difference - simpson).abs() <= 1e-9 * simpson,
                 "at {d} m: {difference} against {simpson}"

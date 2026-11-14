@@ -6,7 +6,7 @@
 //! A rock drawn in a cell of its octave's level reaches no point outside the cell's 3 × 3
 //! neighbourhood ([`rock_octave_levels`]), so a point's own rocks are those of the 3 × 3 about its
 //! cell at each octave's level, across face edges by the cube's rule, where a cube corner has
-//! seven cells: a rock whose cell lies across a face edge, or at a cube corner, is found from the
+//! seven neighbours: a rock whose cell lies across a face edge, or at a cube corner, is found from the
 //! neighbouring face. A wider search ([`rocks_near`] at a radius) walks outwards from the point's
 //! cell through each cell's neighbours, keeping every cell whose spheroid points could lie within
 //! the radius and the octave's reach of it, so no cell that could hold a rock reaching that far is
@@ -30,17 +30,17 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use hyperion_base::rng::DetailSeed;
-use hyperion_base::units::Metres;
+use hyperion_base::units::{Gigayears, Metres, Pascals};
 
 use super::hold::RockRules;
 use super::law::RockAbundance;
 use super::place::{
-    REACH_MARGIN, ROCK_OCTAVE_COUNT, ROCK_OCTAVES, RockError, rock_octave_levels, rocks_of,
+    FindRocksError, REACH_MARGIN, ROCK_OCTAVE_COUNT, ROCK_OCTAVES, rock_octave_levels, rocks_of,
     site_abundance, site_cell,
 };
 use super::shape::{MAX_REACH_SHARE, Rock};
 use crate::cube::PatchKey;
-use crate::field::{BodyRef, FieldView};
+use crate::field::{BodyRef, CoarseLevel, FieldHeader, FieldView};
 use crate::ground::{datum_foot, ground_at};
 use crate::num;
 use crate::spheroid::Spheroid;
@@ -60,9 +60,37 @@ const CELL_SPAN_MARGIN: f64 = 1.1;
 /// documentation](self)): empty or full, it changes no answer.
 #[derive(Debug, Clone, Default)]
 pub struct RockCache {
-    owner: Option<(DetailSeed, BodyRef)>,
+    owner: Option<Owner>,
     sites: BTreeMap<u64, RockAbundance>,
     cells: BTreeMap<u64, Vec<Rock>>,
+}
+
+/// What a [`RockCache`]'s values are made from besides the cells: the body's detail seed and the
+/// header's parts the rocks read, so that a cache asked for another body's, or another field's, starts
+/// afresh, as R09's crater cache does.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Owner {
+    seed: DetailSeed,
+    body: BodyRef,
+    figure: Spheroid,
+    level: CoarseLevel,
+    surface_age: Gigayears,
+    surface_pressure: Pascals,
+}
+
+impl Owner {
+    /// The owner of the rocks of the body of `header` drawn from `seed`.
+    #[must_use]
+    fn of(seed: DetailSeed, header: &FieldHeader) -> Self {
+        Self {
+            seed,
+            body: header.body(),
+            figure: header.figure(),
+            level: header.level(),
+            surface_age: header.surface_age(),
+            surface_pressure: header.surface_pressure(),
+        }
+    }
 }
 
 impl RockCache {
@@ -88,12 +116,12 @@ impl RockCache {
         self.cells.is_empty()
     }
 
-    /// Takes the cache for the body of `seed` and `body`, emptying it if it held another's.
-    fn own(&mut self, seed: DetailSeed, body: BodyRef) {
-        if self.owner != Some((seed, body)) {
+    /// Takes the cache for `owner`'s rocks, emptying it if it held another's.
+    fn own(&mut self, owner: Owner) {
+        if self.owner != Some(owner) {
             self.sites.clear();
             self.cells.clear();
-            self.owner = Some((seed, body));
+            self.owner = Some(owner);
         }
     }
 
@@ -108,38 +136,44 @@ impl RockCache {
         cell: PatchKey,
     ) -> Result<&[Rock], QueryHeightError> {
         let key = cell.to_u64();
-        if !self.cells.contains_key(&key) {
-            let site = site_cell(cell, levels[ROCK_OCTAVE_COUNT - 1]);
-            let k = if let Some(&k) = self.sites.get(&site.to_u64()) {
-                k
-            } else {
-                let k = site_abundance(synth, synth_cache, site)?;
-                if self.sites.len() >= CACHE_CELLS {
+        if self.cells.len() >= CACHE_CELLS && !self.cells.contains_key(&key) {
+            self.cells.clear();
+        }
+        match self.cells.entry(key) {
+            std::collections::btree_map::Entry::Occupied(kept) => Ok(kept.into_mut()),
+            std::collections::btree_map::Entry::Vacant(slot) => {
+                let site = site_cell(cell, levels[ROCK_OCTAVE_COUNT - 1]).to_u64();
+                if self.sites.len() >= CACHE_CELLS && !self.sites.contains_key(&site) {
                     self.sites.clear();
                 }
-                self.sites.insert(site.to_u64(), k);
-                k
-            };
-            let mut rocks = Vec::new();
-            rocks_of(synth, synth_cache, cell, octave, k, &mut rocks)?;
-            if self.cells.len() >= CACHE_CELLS {
-                self.cells.clear();
+                let k = match self.sites.entry(site) {
+                    std::collections::btree_map::Entry::Occupied(kept) => *kept.get(),
+                    std::collections::btree_map::Entry::Vacant(empty) => {
+                        *empty.insert(site_abundance(
+                            synth,
+                            synth_cache,
+                            PatchKey::from_u64(site).expect("a site cell's own key"),
+                        )?)
+                    }
+                };
+                let mut rocks = Vec::new();
+                rocks_of(synth, synth_cache, cell, octave, k, &mut rocks)?;
+                Ok(slot.insert(rocks))
             }
-            self.cells.insert(key, rocks);
         }
-        Ok(&self.cells[&key])
     }
 }
 
-/// The rocks within `radius` of the body-fixed point `at`, appended to `out`: every rock whose
-/// outline may come within `radius` of the point's foot on the datum, its reach taken
-/// [`REACH_MARGIN`] wider, octave by octave (see the [module documentation](self)); none below
-/// [`ROCKS_VERSION`](super::ROCKS_VERSION). Both caches are the caller's, and the rocks do not
-/// depend on what they hold.
+/// The rocks within `radius` of the body-fixed point `at`, appended to `out`.
+///
+/// They are every rock whose outline may come within `radius` of the point's foot on the datum,
+/// its reach taken [`REACH_MARGIN`] wider, octave by octave (see the [module
+/// documentation](self)); none below [`ROCKS_VERSION`](super::ROCKS_VERSION). Both caches are the
+/// caller's, and the rocks do not depend on what they hold.
 ///
 /// # Errors
 ///
-/// [`RockError::Query`] where a cell searched, its site or a rock's ground reads a cell the view
+/// [`FindRocksError::Query`] where a cell searched, its site or a rock's ground reads a cell the view
 /// does not hold: never "no rocks there". `out` may then hold some of the rocks.
 ///
 /// # Panics
@@ -153,7 +187,7 @@ pub fn rocks_near<F: FieldView>(
     at: &[f64; 3],
     radius: Metres,
     out: &mut Vec<Rock>,
-) -> Result<(), RockError> {
+) -> Result<(), FindRocksError> {
     let radius_m = radius.value();
     assert!(
         radius_m.is_finite() && radius_m >= 0.0,
@@ -174,15 +208,16 @@ pub fn rocks_near<F: FieldView>(
     }
 }
 
-/// The authoritative ground with its rocks at the body-fixed point `at`: the larger of R10's
-/// [`ground_at`] there and every rock's top along the datum's normal through the point's foot,
-/// metres above the datum (see the [module documentation](self)); the ground's height below
+/// The authoritative ground with its rocks at the body-fixed point `at`, metres above the datum.
+///
+/// It is the larger of R10's [`ground_at`] there and every rock's top along the datum's normal
+/// through the point's foot (see the [module documentation](self)); the ground's height below
 /// [`ROCKS_VERSION`](super::ROCKS_VERSION). Both caches are the caller's, and the height does not
 /// depend on what they hold.
 ///
 /// # Errors
 ///
-/// [`RockError::Query`] where the ground, a cell searched, its site or a rock's ground reads a cell
+/// [`FindRocksError::Query`] where the ground, a cell searched, its site or a rock's ground reads a cell
 /// the view does not hold: never a height without its rocks.
 ///
 /// # Panics
@@ -193,7 +228,7 @@ pub fn surface_height_with_rocks<F: FieldView>(
     synth_cache: &mut SynthCache,
     cache: &mut RockCache,
     at: &[f64; 3],
-) -> Result<Metres, RockError> {
+) -> Result<Metres, FindRocksError> {
     let ground = ground_at(synth, synth_cache, at)?;
     match RockRules::in_force() {
         RockRules::Held => Ok(ground.height()),
@@ -202,7 +237,7 @@ pub fn surface_height_with_rocks<F: FieldView>(
             let foot = ground.dir();
             let mut height = ground.height().value();
             each_near(synth, synth_cache, cache, foot, 0.0, |rock| {
-                if let Some(top) = rock.top_at(&figure, foot) {
+                if let Some(top) = rock.top_at_m(&figure, foot) {
                     height = num::max(height, top);
                 }
             })?;
@@ -222,20 +257,22 @@ fn each_near<F: FieldView>(
     mut found: impl FnMut(&Rock),
 ) -> Result<(), QueryHeightError> {
     let header = synth.field().header();
-    cache.own(synth.seed(), header.body());
+    cache.own(Owner::of(synth.seed(), header));
     let figure = header.figure();
     let levels = rock_octave_levels(&figure);
     let p = figure.point(foot);
     for (octave, &level) in levels.iter().enumerate() {
         let home = PatchKey::containing(level, foot).expect("a rock octave's level is a level");
-        let cells = if radius_m > 0.0 {
+        let (around, count) = neighbourhood(home);
+        let wide;
+        let cells: &[PatchKey] = if radius_m > 0.0 {
             let reach = REACH_MARGIN * MAX_REACH_SHARE * ROCK_OCTAVES[octave].1.value();
-            cells_within(home, p, radius_m + reach, &figure)
+            wide = cells_within(home, p, radius_m + reach, &figure);
+            &wide
         } else {
-            let (cells, count) = neighbourhood(home);
-            cells[..count].to_vec()
+            &around[..count]
         };
-        for cell in cells {
+        for &cell in cells {
             for rock in cache.rocks(synth, synth_cache, levels, octave, cell)? {
                 let q = figure.point(rock.dir());
                 let d = [0, 1, 2].map(|k| p[k] - q[k]);
@@ -294,6 +331,7 @@ fn cell_span_m(cell: PatchKey, figure: &Spheroid) -> f64 {
 #[cfg(test)]
 mod tests {
     use std::cell::RefCell;
+    use std::collections::BTreeSet;
 
     use super::*;
     #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
@@ -456,9 +494,11 @@ mod tests {
             let figure = field.header().figure();
             let synth = Synthesiser::new(field, SEED);
             let (mut synth_cache, mut cache) = (SynthCache::new(), RockCache::new());
+            let mut searched = 0;
             for dir in DIRS {
                 let all = rocks_about(w, dir);
                 let Some(first) = all.first() else { continue };
+                searched += 1;
                 let at = first.base_centre();
                 let mut wide = Vec::new();
                 rocks_near(
@@ -496,6 +536,7 @@ mod tests {
                     assert!(wide.contains(rock));
                 }
             }
+            assert!(searched > 0, "no site held a rock to search about");
         });
     }
 
@@ -520,16 +561,17 @@ mod tests {
                     sites.push(PatchKey::new(Face::PosX, site_level, i, j).unwrap());
                 }
             }
-            let mut at_corners = 0;
+            let mut corners = 0;
             for face in Face::ALL {
                 for (i, j) in [(0, 0), (0, side - 1), (side - 1, 0), (side - 1, side - 1)] {
                     let corner = PatchKey::new(face, site_level, i, j).unwrap();
                     let (around, count) = neighbourhood(corner);
+                    assert_eq!(count, 8, "a cube corner's cell has seven neighbours");
                     sites.extend_from_slice(&around[..count]);
-                    at_corners += 1;
+                    corners += 1;
                 }
             }
-            assert_eq!(at_corners, 24);
+            assert_eq!(corners, 24);
             let mut crossings = 0;
             for site in sites {
                 for (_, cell) in cells_under(site, levels) {
@@ -540,7 +582,7 @@ mod tests {
                         let own_face = cell.face();
                         for p in grid_about(&rock, &figure, 2.0 * rock.reach().value(), 9) {
                             let (foot, _) = datum_foot(&figure, &p);
-                            let Some(top) = rock.top_at(&figure, foot) else {
+                            let Some(top) = rock.top_at_m(&figure, foot) else {
                                 continue;
                             };
                             if PatchKey::containing(cell.level(), foot).unwrap().face() == own_face
@@ -571,6 +613,183 @@ mod tests {
         });
     }
 
+    /// A rock in the cube corner's cell of one face, its outline over the corner, is found from
+    /// points on the corner's two other faces, through the corner's seven neighbours: a rock
+    /// planted in the cache, since the drawn ones seldom stand there.
+    #[test]
+    fn a_rock_at_a_cube_corner_is_found_from_the_other_faces() {
+        use super::super::shape::RockShape;
+        use crate::patch::collision::finest_surface_height;
+        use hyperion_base::units::Radians;
+        with_rocks_placed(|| {
+            let field = world(SyntheticWorld::MoonLike);
+            let header = field.header();
+            let figure = header.figure();
+            let synth = Synthesiser::new(field, SEED);
+            let (mut synth_cache, mut cache) = (SynthCache::new(), RockCache::new());
+            let level = rock_octave_levels(&figure)[0];
+            let dir = unit_dir([1.0, 1.0 - 2e-7, 1.0 - 2e-7]);
+            let home = PatchKey::containing(level, dir).unwrap();
+            assert_eq!(home.face(), Face::PosX);
+            let ground = finest_surface_height(&synth, dir, &mut synth_cache).unwrap();
+            let shape = RockShape::new(0.4, 0.9, Radians::ZERO, 2.0);
+            let rock = Rock::new(&figure, dir, ground, Metres::new(0.8), shape);
+            cache.own(Owner::of(SEED, header));
+            cache.cells.insert(home.to_u64(), vec![rock.clone()]);
+            for other in [[1.0 - 2e-7, 1.0, 1.0 - 2e-7], [1.0 - 2e-7, 1.0 - 2e-7, 1.0]] {
+                let foot = unit_dir(other);
+                let on = PatchKey::containing(level, foot).unwrap();
+                assert_ne!(on.face(), home.face());
+                let top = rock
+                    .top_at_m(&figure, foot)
+                    .expect("the outline covers the point");
+                let p = figure.surface_point(foot, 1.0);
+                let mut near = Vec::new();
+                rocks_near(
+                    &synth,
+                    &mut synth_cache,
+                    &mut cache,
+                    &p,
+                    Metres::ZERO,
+                    &mut near,
+                )
+                .unwrap();
+                assert!(
+                    near.contains(&rock),
+                    "the corner's rock is missed from {:?}",
+                    on.face()
+                );
+                let with =
+                    surface_height_with_rocks(&synth, &mut synth_cache, &mut cache, &p).unwrap();
+                assert!(with.value() >= top);
+            }
+        });
+    }
+
+    /// The list a search returns, contents and order, does not depend on what the caches hold or on
+    /// the order the points are asked in.
+    #[test]
+    fn the_rocks_near_a_point_are_order_and_cache_independent() {
+        with_rocks_placed(|| {
+            let w = SyntheticWorld::MoonLike;
+            let field = world(w);
+            let figure = field.header().figure();
+            let synth = Synthesiser::new(field, SEED);
+            let mut points = Vec::new();
+            for dir in DIRS {
+                for rock in rocks_about(w, dir).iter().take(2) {
+                    points.extend(grid_about(rock, &figure, 3.0 * rock.reach().value(), 3));
+                }
+            }
+            assert_ne!(points.len(), 0);
+            let near = |p: &[f64; 3], radius: f64, caches: &mut (SynthCache, RockCache)| {
+                let mut out = Vec::new();
+                let (synth_cache, cache) = caches;
+                rocks_near(&synth, synth_cache, cache, p, Metres::new(radius), &mut out).unwrap();
+                format!("{out:?}")
+            };
+            for radius in [0.0, 6.0] {
+                let shared = RefCell::new((SynthCache::new(), RockCache::new()));
+                let warm = |p: &[f64; 3]| near(p, radius, &mut shared.borrow_mut());
+                assert_order_independent(&points, warm);
+                for p in &points {
+                    let cold = near(p, radius, &mut (SynthCache::new(), RockCache::new()));
+                    assert_eq!(cold, warm(p));
+                }
+            }
+        });
+    }
+
+    /// The payload's blocks of `cells` of `field`, at 50 m, with their margin, into a client's field.
+    fn client_of(field: &crate::field::CoarseField, cells: &BTreeSet<PatchKey>) -> PartialField {
+        use crate::field::{Cover, CoverRange, ResolutionCode, cell_index};
+        use crate::wire::{decode_payload, encode_payload};
+        let code = ResolutionCode::from_resolution(Metres::new(50.0)).unwrap();
+        let mut indices: Vec<u32> = cells.iter().map(|&c| cell_index(c)).collect();
+        indices.sort_unstable();
+        let cover = Cover::from_ranges(
+            indices
+                .iter()
+                .map(|&i| CoverRange::new(i, i + 1, code).unwrap()),
+        )
+        .unwrap();
+        let blocks = decode_payload(&encode_payload(field, &cover, None)).unwrap();
+        let mut client = PartialField::new(blocks[0].header().unwrap().clone());
+        for block in &blocks {
+            client.insert(block).unwrap();
+        }
+        client
+    }
+
+    /// On a client's field of one surveyed cell and its margin, along a line out of the survey,
+    /// every query either answers with the rocks, never below the ground, or is `NotSurveyed`; and
+    /// at the survey's edge, found by bisection, there are points whose ground the client knows but
+    /// whose rocks' sites it does not, where the query is `NotSurveyed` too, never a height without
+    /// the rocks.
+    #[test]
+    fn a_client_without_a_rocks_cells_is_not_surveyed_there() {
+        let field = world(SyntheticWorld::MoonLike);
+        let figure = field.header().figure();
+        let level = field.header().level().get();
+        let home = PatchKey::containing(level, unit_dir([0.3, 0.2, 0.9])).unwrap();
+        let client = client_of(field, &BTreeSet::from([home]));
+        let synth = Synthesiser::new(&client, SEED);
+        let start = home.vertex_dir(32, 32);
+        let out = unit_dir([start[1], -start[0], 0.0]);
+        let at = |angle: f64| {
+            let dir = unit_dir([0, 1, 2].map(|k| start[k] + angle * out[k]));
+            figure.surface_point(dir, 0.0)
+        };
+        with_rocks_placed(|| {
+            let (mut synth_cache, mut cache) = (SynthCache::new(), RockCache::new());
+            let mut query = |p: &[f64; 3]| {
+                let ground = ground_at(&synth, &mut synth_cache, p).map(|g| g.height());
+                let with = surface_height_with_rocks(&synth, &mut synth_cache, &mut cache, p);
+                match (ground, with) {
+                    (Ok(g), Ok(h)) => {
+                        assert!(h >= g);
+                        (true, true)
+                    }
+                    (ground, Err(FindRocksError::Query(QueryHeightError::NotSurveyed(_)))) => {
+                        (ground.is_ok(), false)
+                    }
+                    (ground, with) => panic!("{ground:?} and {with:?}"),
+                }
+            };
+            // The first step out of the survey, then the edge of the ground's knowledge between it
+            // and the last step in, to a millimetre.
+            let step = 1.5e-3;
+            let first_out = (0..400_u32)
+                .map(|n| f64::from(n) * step)
+                .find(|&angle| !query(&at(angle)).0)
+                .expect("the line leaves the survey");
+            assert!(first_out > 0.0);
+            let (mut inside, mut outside) = (first_out - step, first_out);
+            while (outside - inside) * figure.equatorial_radius_m > 1e-3 {
+                let mid = f64::midpoint(inside, outside);
+                if query(&at(mid)).0 {
+                    inside = mid;
+                } else {
+                    outside = mid;
+                }
+            }
+            // Back into the survey from its edge, half a metre a step over 40 m.
+            let mut ground_alone = 0;
+            for n in 0..80_u32 {
+                let back = f64::from(n) * 0.5 / figure.equatorial_radius_m;
+                let (ground, rocks) = query(&at(inside - back));
+                assert!(ground, "the ground is known inside its edge");
+                if !rocks {
+                    ground_alone += 1;
+                }
+            }
+            assert!(
+                ground_alone > 0,
+                "no point knows its ground but not its rocks"
+            );
+        });
+    }
+
     /// On a client's field that holds no cell, a query returns `NotSurveyed`, never a height or a
     /// search without its rocks.
     #[test]
@@ -586,7 +805,7 @@ mod tests {
             assert!(
                 matches!(
                     height,
-                    Err(RockError::Query(QueryHeightError::NotSurveyed(_)))
+                    Err(FindRocksError::Query(QueryHeightError::NotSurveyed(_)))
                 ),
                 "{height:?}"
             );
@@ -602,7 +821,7 @@ mod tests {
             assert!(
                 matches!(
                     near,
-                    Err(RockError::Query(QueryHeightError::NotSurveyed(_)))
+                    Err(FindRocksError::Query(QueryHeightError::NotSurveyed(_)))
                 ),
                 "{near:?}"
             );
@@ -617,6 +836,7 @@ mod tests {
         let synth = Synthesiser::new(field, SEED);
         let (mut synth_cache, mut cache) = (SynthCache::new(), RockCache::new());
         let placed = with_rocks_placed(|| rocks_about(w, DIRS[0]));
+        assert_ne!(placed.len(), 0, "the site holds rocks to test");
         for rock in &placed {
             let p = rock.base_centre();
             let ground = ground_at(&synth, &mut synth_cache, &p).unwrap();

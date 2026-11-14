@@ -991,13 +991,16 @@ ripples and scars read as ground, and turn off with the setting.
 
 ### R11.T3 Authoritative rocks in `hyperion-surface`
 
+Records: [11-surface-detail-clouds-oceans-rings-stills/records/R11.T3.md](11-surface-detail-clouds-oceans-rings-stills/records/R11.T3.md).
+
 _The names T3 calls, re-validated against the code (2026-11-02): `QueryHeightError`,
 `Synthesiser`, `SynthCache` and `BakeHook` are as written; where the rest differ, these hold:_
 
 - `ground::ground_at(synth, cache, p: &[f64; 3]) -> Result<GroundPoint, QueryHeightError>`, the
   height in `GroundPoint::height` and the point's foot in `dir`.
 - `material::material_at(synth, cache, at: FaceUv) -> Result<GroundMaterial, QueryHeightError>`:
-  `RockSite`'s material is a `GroundMaterial` (class and `Option<u8>` entry), not a `Material`.
+  `RockSite` holds its `MaterialClass` and its entry's `Option<MechanicsFamily>`, read from the
+  palette, not a `Material`.
 - `ObjectKey::surface_cell(face, level, i, j, instance: u16)`: `RockCellKey::object_key` takes a
   `u16`.
 - `hyperion_surface::tags` (`domain_tags!` with its key-form table): `surface.scatter` is reserved,
@@ -1016,8 +1019,8 @@ _The names T3 calls, re-validated against the code (2026-11-02): `QueryHeightErr
 - The goldens over the synthetic worlds live in the library (`scatter/golden.rs`, as
   `ground/golden.rs`), since `ci`'s wasip1 run does not enable `testing` for `tests/`; the slow
   test is a library `#[ignore = "slow: …"]` test.
-- No `GENERATOR_VERSION` bump: every rock is held at `ROCKS_VERSION` = 27 (rule B), and tests reach
-  the 27 rules through `scatter::with_rock_rules`.
+- No `GENERATOR_VERSION` bump: every rock is held at `ROCKS_VERSION` = 33 (rule B), and tests reach
+  the 33 rules through `scatter::with_rock_rules`.
 - The sketches' `BodyFixed` and `Gyr` are `[f64; 3]` and `Gigayears`.
 
 - **R11.T3.a The law and the site.** `RockAbundance`, `exponential_integral_e1`, `RockSite`,
@@ -1061,6 +1064,8 @@ _The names T3 calls, re-validated against the code (2026-11-02): `QueryHeightErr
   that moves accounted for by `golden_diff.py`. Criterion bench `rocks_per_finest_patch` under
   `just bench`: the rocks of one 32 m finest patch at k = 0.18 and their base heights, against the
   budget's 40 ms patch bake; more than 4 ms (a tenth of it) is a finding.
+  _Built 2026-11-13._
+  Records: [11-surface-detail-clouds-oceans-rings-stills/records/R11.T3.d.md](11-surface-detail-clouds-oceans-rings-stills/records/R11.T3.d.md).
 
 Files: `crates/hyperion-surface/src/scatter/{mod,law,site,place,shape,contact}.rs`,
 `hyperion_surface::tags`, `crates/hyperion-surface/tests/{scatter_golden,scatter_slow}.rs` (every

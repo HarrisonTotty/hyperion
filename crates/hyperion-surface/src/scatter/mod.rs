@@ -19,7 +19,7 @@
 //! - [`shape`]: each rock's superquadric, half buried on the ground, and its top along a normal.
 //! - [`contact`]: the rocks near a point, and the ground with its rocks there, which collision
 //!   reads.
-//! - [`hold`]: the rocks are placed from generator version 27 ([`ROCKS_VERSION`]); below it the
+//! - [`hold`]: the rocks are placed from generator version 33 ([`ROCKS_VERSION`]); below it the
 //!   crate places none.
 //!
 //! # The layers
@@ -41,11 +41,13 @@ use hyperion_base::units::Metres;
 
 pub use contact::{RockCache, rocks_near, surface_height_with_rocks};
 pub use hold::{ROCKS_VERSION, RockRules};
-#[cfg(any(test, feature = "testing"))]
+#[cfg(test)]
 pub use hold::{with_rock_rules, with_rocks_placed};
 pub use law::{MAX_ROCK_ABUNDANCE, RockAbundance, exponential_integral_e1};
+#[cfg(any(test, feature = "testing"))]
+pub use place::rocks_in_cell_at;
 pub use place::{
-    REACH_MARGIN, ROCK_OCTAVE_COUNT, ROCK_OCTAVES, RockCellKey, RockError, rock_octave_levels,
+    FindRocksError, REACH_MARGIN, ROCK_OCTAVE_COUNT, ROCK_OCTAVES, RockCellKey, rock_octave_levels,
     rocks_in_cell,
 };
 pub use shape::{MAX_REACH_SHARE, ROCK_ASPECT, ROCK_EXPONENT, Rock, RockShape};
@@ -54,8 +56,9 @@ pub use site::{
     rock_site,
 };
 
-/// The height at and above which a rigid instance must be authoritative: 0.2 m, the rendering
-/// brainstorm's ruling on its open question 11, below the 0.3 m hazard that landing-hazard
+/// The height at and above which a rigid instance must be authoritative: 0.2 m.
+///
+/// It is the rendering brainstorm's ruling on its open question 11, below the 0.3 m hazard that landing-hazard
 /// detection is specified against (Epp and Smith 2007, for NASA's ALHAT), since a rock is a hazard
 /// well below a gear's relief tolerance (Apollo's lunar module's engine skirt cleared about
 /// 0.34 m, NASA TN D-6850). A generator constant.

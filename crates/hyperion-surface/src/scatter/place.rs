@@ -15,7 +15,7 @@
 //!
 //! # The abundance
 //!
-//! A cell's rock abundance is its site's ([`rock_abundance`](super::rock_abundance)), read at the
+//! A cell's rock abundance is its site's ([`rock_abundance`]), read at the
 //! centre of its ancestor at the largest octave's level, its **site cell**, about 5 m across on an
 //! Earth: every octave's cells within it share one k, and a 32 m patch reads some forty sites, not
 //! the thousands of cells its finest octave holds (lean, 2026-11-02). k is so piecewise constant
@@ -25,7 +25,7 @@
 //!
 //! A cell's count is a Poisson draw whose mean is the law's number between the octave's diameters,
 //! N(>`D_low`) − N(>`D_high`), times the cell's true area on the spheroid
-//! ([`cell_area`](crate::synth::craters::cell_area)), on `surface.scatter` keyed by the cell
+//! ([`cell_area`]), on `surface.scatter` keyed by the cell
 //! (instance 0). Its rocks follow in the same stream, each its place, uniform in area over the cell
 //! by rejection as R09's craters' are, and a word for its diameter, the law inverted within the
 //! octave ([`RockAbundance::diameter_at`]). Each rock's shape is drawn on `surface.scatter.shape`
@@ -64,9 +64,9 @@ pub const ROCK_OCTAVES: [(Metres, Metres); ROCK_OCTAVE_COUNT] = [
 ];
 
 /// The factor on an octave's reach for its level: 1.1, so that a rock's reach, measured at the
-/// ground, holds in the datum's directions down to a depth of a tenth of the body's smallest
-/// radius below it, deeper than any basin (Vesta's Rheasilvia, some 20 km on a 262 km body, is
-/// 8%).
+/// ground, holds in the datum's directions down to a depth of an eleventh (9.1%) of the body's
+/// smallest radius below it, deeper than any basin (Vesta's Rheasilvia, some 20 km on a 262 km
+/// body, is 7.6%; from memory).
 pub const REACH_MARGIN: f64 = 1.1;
 
 /// The quadtree level of each rock octave on `figure`'s body (see the [module
@@ -99,21 +99,30 @@ pub(crate) fn octave_of(levels: [u8; ROCK_OCTAVE_COUNT], level: u8) -> Option<us
 pub struct RockCellKey(PatchKey);
 
 impl RockCellKey {
-    /// The cell `cell`, at whatever level: [`rocks_in_cell`] checks the level against the body's.
+    /// The cell `cell`, at whatever level.
+    ///
+    /// [`rocks_in_cell`] checks the level against the body's octave levels, and panics on another.
     #[must_use]
     pub const fn new(cell: PatchKey) -> Self {
         Self(cell)
     }
 
-    /// The cell of octave `octave`'s level that holds the unit direction `dir`, on a body of rock
-    /// octave levels `levels`.
+    /// The cell of octave `octave`'s level on `figure`'s body that holds the unit direction `dir`.
     ///
     /// # Panics
     ///
-    /// If `octave` is not below [`ROCK_OCTAVE_COUNT`], or `dir` is zero or not finite.
+    /// If `octave` is not below [`ROCK_OCTAVE_COUNT`], or `dir` is zero or not finite; or as
+    /// [`rock_octave_levels`].
     #[must_use]
-    pub fn containing(levels: [u8; ROCK_OCTAVE_COUNT], octave: usize, dir: [f64; 3]) -> Self {
-        Self(PatchKey::containing(levels[octave], dir).expect("a rock octave's level is a level"))
+    pub fn containing(figure: &Spheroid, octave: usize, dir: [f64; 3]) -> Self {
+        assert!(
+            octave < ROCK_OCTAVE_COUNT,
+            "there are {ROCK_OCTAVE_COUNT} rock octaves, not {octave}"
+        );
+        let level = rock_octave_levels(figure)[octave];
+        Self(
+            PatchKey::containing(level, dir).expect("a rock octave's level is at most the deepest"),
+        )
     }
 
     /// The cell as a patch key.
@@ -161,13 +170,13 @@ impl RockCellKey {
 
 /// Why the rocks could not be found.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum RockError {
+pub enum FindRocksError {
     /// A rock's site or ground reads a cell the view does not hold, so this side does not know the
     /// rocks there: on a client, no rock is drawn there and nothing reaches it.
     Query(QueryHeightError),
 }
 
-impl std::fmt::Display for RockError {
+impl std::fmt::Display for FindRocksError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Query(e) => write!(f, "the rocks are not known here: {e}"),
@@ -175,7 +184,7 @@ impl std::fmt::Display for RockError {
     }
 }
 
-impl std::error::Error for RockError {
+impl std::error::Error for FindRocksError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Query(e) => Some(e),
@@ -183,7 +192,7 @@ impl std::error::Error for RockError {
     }
 }
 
-impl From<QueryHeightError> for RockError {
+impl From<QueryHeightError> for FindRocksError {
     fn from(e: QueryHeightError) -> Self {
         Self::Query(e)
     }
@@ -297,13 +306,14 @@ pub(crate) fn rocks_of<F: FieldView>(
     Ok(())
 }
 
-/// The authoritative rocks drawn in `cell`, appended to `out` in draw order (see the [module
-/// documentation](self)); none below [`ROCKS_VERSION`](super::ROCKS_VERSION), whose hold places
-/// none. `synth_cache` is the caller's, and the rocks do not depend on what it holds.
+/// The authoritative rocks drawn in `cell`, appended to `out` in draw order.
+///
+/// See the [module documentation](self). Below [`ROCKS_VERSION`](super::ROCKS_VERSION) the hold
+/// places none. `synth_cache` is the caller's, and the rocks do not depend on what it holds.
 ///
 /// # Errors
 ///
-/// [`RockError::Query`] where the cell's site or a rock's ground reads a cell the view does not
+/// [`FindRocksError::Query`] where the cell's site or a rock's ground reads a cell the view does not
 /// hold: never "no rocks there". `out` may then hold some of the cell's rocks.
 ///
 /// # Panics
@@ -315,7 +325,7 @@ pub fn rocks_in_cell<F: FieldView>(
     synth_cache: &mut SynthCache,
     cell: RockCellKey,
     out: &mut Vec<Rock>,
-) -> Result<(), RockError> {
+) -> Result<(), FindRocksError> {
     match RockRules::in_force() {
         RockRules::Held => Ok(()),
         RockRules::Placed => {
@@ -331,6 +341,37 @@ pub fn rocks_in_cell<F: FieldView>(
             Ok(rocks_of(synth, synth_cache, cell.cell(), octave, k, out)?)
         }
     }
+}
+
+/// The rocks of `cell` at the abundance `k`, whatever its site's and whatever the hold's rules,
+/// appended to `out` in draw order.
+///
+/// It is [`rocks_in_cell`]'s draw at a stated k, for the benches and other crates' tests (feature
+/// `testing`), never the generator's.
+///
+/// # Errors
+///
+/// [`FindRocksError::Query`] where a rock's ground reads a cell the view does not hold.
+///
+/// # Panics
+///
+/// As [`rocks_in_cell`].
+#[cfg(any(test, feature = "testing"))]
+pub fn rocks_in_cell_at<F: FieldView>(
+    synth: &Synthesiser<'_, F>,
+    synth_cache: &mut SynthCache,
+    cell: RockCellKey,
+    k: RockAbundance,
+    out: &mut Vec<Rock>,
+) -> Result<(), FindRocksError> {
+    let levels = rock_octave_levels(&synth.field().header().figure());
+    let octave = octave_of(levels, cell.level()).unwrap_or_else(|| {
+        panic!(
+            "level {} is not a rock octave's level, {levels:?}",
+            cell.level()
+        )
+    });
+    Ok(rocks_of(synth, synth_cache, cell.cell(), octave, k, out)?)
 }
 
 #[cfg(test)]
@@ -351,14 +392,18 @@ mod tests {
 
     /// The rocks under the site cell of `dir` on `w`, octave by octave.
     fn rocks_about(w: SyntheticWorld, dir: [f64; 3]) -> Vec<Rock> {
+        rocks_about_with(w, dir, &mut SynthCache::new())
+    }
+
+    /// [`rocks_about`] through `cache`.
+    fn rocks_about_with(w: SyntheticWorld, dir: [f64; 3], cache: &mut SynthCache) -> Vec<Rock> {
         let field = world(w);
         let synth = Synthesiser::new(field, SEED);
-        let mut cache = SynthCache::new();
         let levels = rock_octave_levels(&field.header().figure());
         let site = PatchKey::containing(levels[3], dir).unwrap();
         let mut rocks = Vec::new();
         for (_, cell) in cells_under(site, levels) {
-            rocks_in_cell(&synth, &mut cache, RockCellKey::new(cell), &mut rocks).unwrap();
+            rocks_in_cell(&synth, cache, RockCellKey::new(cell), &mut rocks).unwrap();
         }
         rocks
     }
@@ -446,10 +491,85 @@ mod tests {
     #[test]
     fn the_same_seed_gives_the_same_rocks_twice() {
         with_rocks_placed(|| {
-            for w in [SyntheticWorld::MoonLike, SyntheticWorld::MarsLike] {
+            for w in [SyntheticWorld::MoonLike, SyntheticWorld::EarthLike] {
+                let mut warm = SynthCache::new();
                 for dir in DIRS {
                     let first = rocks_about(w, dir);
                     assert_eq!(first, rocks_about(w, dir));
+                    assert_eq!(first, rocks_about_with(w, dir, &mut warm));
+                }
+            }
+        });
+    }
+
+    /// The rocks of a cell do not depend on what the synthesis cache holds or on the order the
+    /// cells are asked in, to the bit.
+    #[test]
+    fn the_rocks_of_a_cell_are_order_and_cache_independent() {
+        with_rocks_placed(|| {
+            let w = SyntheticWorld::MoonLike;
+            let field = world(w);
+            let synth = Synthesiser::new(field, SEED);
+            let levels = rock_octave_levels(&field.header().figure());
+            let mut cells = Vec::new();
+            for dir in DIRS {
+                let site = PatchKey::containing(levels[3], dir).unwrap();
+                cells.extend(
+                    cells_under(site, levels)
+                        .into_iter()
+                        .map(|(_, c)| c)
+                        .step_by(5),
+                );
+            }
+            let print = |rocks: Vec<Rock>| format!("{rocks:?}");
+            let shared = core::cell::RefCell::new(SynthCache::new());
+            let warm = |cell: &PatchKey| {
+                let mut rocks = Vec::new();
+                let cache = &mut *shared.borrow_mut();
+                rocks_in_cell(&synth, cache, RockCellKey::new(*cell), &mut rocks).unwrap();
+                print(rocks)
+            };
+            hyperion_testkit::order::assert_order_independent(&cells, warm);
+            for cell in &cells {
+                let mut rocks = Vec::new();
+                rocks_in_cell(
+                    &synth,
+                    &mut SynthCache::new(),
+                    RockCellKey::new(*cell),
+                    &mut rocks,
+                )
+                .unwrap();
+                assert_eq!(print(rocks), warm(cell));
+            }
+        });
+    }
+
+    /// At the site's own k, the draw at a stated k is the cell's own draw; and a cell containing a
+    /// direction is the patch key's at the octave's level.
+    #[test]
+    fn the_draw_at_a_stated_k_and_the_containing_cell_agree() {
+        with_rocks_placed(|| {
+            let w = SyntheticWorld::MoonLike;
+            let field = world(w);
+            let figure = field.header().figure();
+            let synth = Synthesiser::new(field, SEED);
+            let mut cache = SynthCache::new();
+            let levels = rock_octave_levels(&figure);
+            for dir in DIRS {
+                let site = PatchKey::containing(levels[3], dir).unwrap();
+                let k = site_abundance(&synth, &mut cache, site).unwrap();
+                for (octave, cell) in cells_under(site, levels) {
+                    let key = RockCellKey::new(cell);
+                    let (mut own, mut stated) = (Vec::new(), Vec::new());
+                    rocks_in_cell(&synth, &mut cache, key, &mut own).unwrap();
+                    rocks_in_cell_at(&synth, &mut cache, key, k, &mut stated).unwrap();
+                    assert_eq!(own, stated);
+                    let at = cell.vertex_dir(17, 40);
+                    let containing = RockCellKey::containing(&figure, octave, at);
+                    assert_eq!(
+                        containing.cell(),
+                        PatchKey::containing(levels[octave], at).unwrap()
+                    );
                 }
             }
         });
@@ -526,6 +646,8 @@ mod tests {
         use hyperion_testkit::stats::{
             ALPHA, assert_p_value, assert_poisson_count, chi_square_gof,
         };
+        #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+        use wasm_bindgen_test::wasm_bindgen_test as test;
 
         /// The cells the slow test draws at `level`: a block of 317 × 317, about 10⁵, by the middle
         /// of face 1.
@@ -543,8 +665,9 @@ mod tests {
         const BINS: usize = 8;
 
         /// The counts over 10⁵ cells at three k match the law's expectation in each octave: each
-        /// octave's total against its Poisson mean, and its rocks over eight diameter bins of equal
-        /// share by chi-square, at α = 10⁻³, wherever the octave expects 40 rocks or more.
+        /// octave's total against its Poisson mean, all twelve, and its rocks over eight diameter
+        /// bins of equal share by chi-square, at α = 10⁻³, wherever the octave expects 40 rocks or
+        /// more, which nine of the twelve do.
         #[test]
         #[ignore = "slow: 1.2 x 10^6 cells' rocks at three abundances, four octaves"]
         fn the_counts_follow_the_law_in_each_octave() {
@@ -573,12 +696,13 @@ mod tests {
                         }
                     }
                     let total: u64 = bins.iter().sum();
+                    let name = format!("k = {k}, octave {octave}");
+                    assert_poisson_count(&name, total, mean, ALPHA);
+                    // The bins' chi-square only where each bin expects five rocks or more.
                     if mean < 40.0 {
                         continue;
                     }
                     tested += 1;
-                    let name = format!("k = {k}, octave {octave}");
-                    assert_poisson_count(&name, total, mean, ALPHA);
                     let expected = [count_as_f64(total) / 8.0; BINS];
                     let fit = chi_square_gof(&bins, &expected);
                     assert_p_value(&name, fit.p_value, ALPHA);

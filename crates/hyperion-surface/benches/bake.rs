@@ -37,6 +37,14 @@
 //! every vertex height it reads. The client's field holds every coarse cell within the far field's
 //! reach of the patch, so that the far field reads real ground throughout. `just bench --
 //! bake/horizon`.
+//!
+//! `scatter/rocks_per_finest_patch/<world>` is R11.T3.d's: the authoritative rocks of one finest
+//! patch at k = 0.18, Viking 2's and Pathfinder's abundance, with their base heights on R10's
+//! ground (`hyperion_surface::scatter::rocks_in_cell_at` over every octave's cells under the patch,
+//! or over the one above it where an octave's cells are larger), from a synthesis cache a first
+//! pass filled, as a worker's bake of the patch would have; the Earth-like world's finest patch and
+//! the Moon-like world's at the direction (0.3, 1, 0.2), against the budget's 40 ms patch bake, of
+//! which more than a tenth, 4 ms, is a finding (plan R11, T3.d). `just bench -- scatter/rocks`.
 
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 mod bench {
@@ -437,10 +445,93 @@ mod bench {
         }
         group.finish();
     }
+
+    /// The cells of every rock octave over `patch`: the octave's cells under it where they are
+    /// smaller, else the one cell above it.
+    fn rock_cells_over(patch: PatchKey, levels: [u8; 4]) -> Vec<PatchKey> {
+        let mut cells = Vec::new();
+        for level in levels {
+            if level >= patch.level() {
+                let down = level - patch.level();
+                let span = 1_u32 << down;
+                for di in 0..span {
+                    for dj in 0..span {
+                        let (i, j) = ((patch.i() << down) + di, (patch.j() << down) + dj);
+                        let cell = PatchKey::new(patch.face(), level, i, j)
+                            .expect("a descendant of a patch is a patch key");
+                        cells.push(cell);
+                    }
+                }
+            } else {
+                let up = patch.level() - level;
+                let (i, j) = (patch.i() >> up, patch.j() >> up);
+                let cell = PatchKey::new(patch.face(), level, i, j)
+                    .expect("an ancestor of a patch is a patch key");
+                cells.push(cell);
+            }
+        }
+        cells
+    }
+
+    /// The rocks of one finest patch at k = 0.18 with their base heights (see the module
+    /// documentation).
+    pub fn rocks_per_finest_patch(c: &mut Criterion) {
+        use hyperion_surface::geometry::finest_level;
+        use hyperion_surface::scatter::{
+            RockAbundance, RockCellKey, rock_octave_levels, rocks_in_cell_at,
+        };
+        let mut group = c.benchmark_group("scatter/rocks_per_finest_patch");
+        group.measurement_time(Duration::from_secs(10));
+        let k = RockAbundance::new(0.18);
+        for (name, world, dir) in [
+            ("earth", SyntheticWorld::EarthLike, [0.3, 1.0, 0.2]),
+            ("moon", SyntheticWorld::MoonLike, [0.3, 1.0, 0.2]),
+        ] {
+            let field = synthetic_field(world);
+            let figure = field.header().figure();
+            let synth = Synthesiser::new(&field, SEED);
+            let patch =
+                PatchKey::containing(finest_level(figure.equatorial_radius_m), unit_dir(dir))
+                    .expect("the finest level is a level");
+            let levels = rock_octave_levels(&figure);
+            let cells = rock_cells_over(patch, levels);
+            let run = |cache: &mut SynthCache| {
+                let mut rocks = Vec::new();
+                for &cell in &cells {
+                    rocks_in_cell_at(&synth, cache, RockCellKey::new(cell), k, &mut rocks)
+                        .expect("a whole field holds every cell");
+                }
+                rocks
+            };
+            let mut warm = SynthCache::new();
+            let first = run(&mut warm);
+            let corner = |x, y| figure.point(patch.vertex_dir(x, y));
+            let (a, b) = (corner(0, 0), corner(64, 0));
+            let side = (0..3)
+                .map(|k| (a[k] - b[k]) * (a[k] - b[k]))
+                .sum::<f64>()
+                .sqrt();
+            eprintln!(
+                "{name}: level {} patch, {side:.1} m a side, {} cells, {} rocks",
+                patch.level(),
+                cells.len(),
+                first.len()
+            );
+            group.bench_function(name, |bench| {
+                bench.iter(|| black_box(run(&mut warm)));
+            });
+        }
+        group.finish();
+    }
 }
 
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
-criterion::criterion_group!(benches, bench::patch_65, bench::horizon);
+criterion::criterion_group!(
+    benches,
+    bench::patch_65,
+    bench::horizon,
+    bench::rocks_per_finest_patch
+);
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 criterion::criterion_main!(benches);
 
