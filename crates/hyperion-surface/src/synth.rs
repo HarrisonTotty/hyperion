@@ -1406,7 +1406,7 @@ pub(crate) fn omitted_variance_in(
 /// its partial ice share lies on, kept as the channels' part is, which starts afresh at 16,384
 /// cells; and, for R10's horizon maps ([`crate::bake::horizon`]), the far field's vertex heights by
 /// face, level and lattice vertex, kept as the channels' part is, which starts afresh at 131,072
-/// heights; and, for the classifier's class edges from generator version 32 (lane
+/// heights; and, for the classifier's class edges from generator version 33 (lane
 /// fix-jagged-biome-edges; `material::edges`), the warp's lattice corners a bake covers, apart from
 /// the structural octaves'. No height, and no material, depends on what it holds, only the time a
 /// query takes, so

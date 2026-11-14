@@ -27,7 +27,7 @@
 //!   is a function of its seed alone;
 //! - the class edges' warp, [`NoiseKey::ClassEdges`]: the body's detail seed's stream on
 //!   `surface.class_edges`, `DetailSeed::stream(SURFACE_CLASS_EDGES, ObjectKey::surface_item(object))`,
-//!   its points on the unit sphere (`material::edges`, from generator version 32).
+//!   its points on the unit sphere (`material::edges`, from generator version 33).
 //!
 //! All three key the corner alike:
 //!

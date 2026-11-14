@@ -294,7 +294,7 @@ pub(crate) fn cover_patch<F: FieldView>(
 }
 
 /// Covers the class edges' warp's lattice (lane fix-jagged-biome-edges; from generator version
-/// 32) and the structural octaves' in `cache` for every query of a bake of `key` at `level`,
+/// 33) and the structural octaves' in `cache` for every query of a bake of `key` at `level`,
 /// whose set is the parent's and more: each octave's corners within a ball about the patch's
 /// centre out to its farthest corner (the patch's edges being great circles of the cube, its
 /// corners bound it), with a tenth's margin, for the spheroid's; the warp's on the unit sphere,

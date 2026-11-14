@@ -38,7 +38,7 @@
 //!
 //! Held at [`CLASS_EDGES_VERSION`]: before it ([`ClassEdgeRule::Cells`]) every point reads its own
 //! cell, as before, bit for bit, and no word of the warp's stream is drawn.
-//! `the_warped_class_edges_wait_for_their_version` is the tripwire, which the bump to 32 fails.
+//! `the_warped_class_edges_wait_for_their_version` is the tripwire, which the bump to 33 fails.
 //!
 //! # Streams
 //!
@@ -54,8 +54,8 @@ use crate::noise::{self, LatticeCache, NoiseKey, Octave, gradient_noise};
 use crate::synth::{BandLevel, QueryHeightError, SynthCache, Synthesiser};
 
 /// The generator version from which the classifier reads a point's site through the warp (lane
-/// fix-jagged-biome-edges): 32, the next after 31's.
-pub(crate) const CLASS_EDGES_VERSION: u32 = 32;
+/// fix-jagged-biome-edges): 33, train 32's list having frozen before it.
+pub(crate) const CLASS_EDGES_VERSION: u32 = 33;
 
 /// The warp's octaves: from [`BASE_SPACING_CELLS`] cells to 2⁻⁵ of that, a sixteenth of a cell,
 /// 2.4 km at a level-8 field on an Earth-sized body. Below it a boundary is the warp's smooth

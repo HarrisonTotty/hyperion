@@ -1228,7 +1228,7 @@ fn coast_patch(extra: u8) -> (PatchKey, BTreeSet<PatchKey>) {
 
 #[test]
 fn bake_under_the_class_edges_warp_moves_only_the_weights() {
-    // Lane fix-jagged-biome-edges: from generator version 32 a bake's weights read the warped
+    // Lane fix-jagged-biome-edges: from generator version 33 a bake's weights read the warped
     // point's cell's record; its heights, normals and survey do not move.
     for extra in [2, 4] {
         let (key, cells) = coast_patch(extra);

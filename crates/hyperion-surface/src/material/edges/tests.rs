@@ -50,8 +50,8 @@ fn band(level: u8) -> BandLevel {
 
 #[test]
 fn the_warped_class_edges_wait_for_their_version() {
-    // The tripwire of the hold at 32: the bump to 32 fails it. Then re-bless the class map's, the
-    // bakes' and the materials' goldens at 32, the warp's own tests becoming the version's, and
+    // The tripwire of the hold at 33: the bump to 33 fails it. Then re-bless the class map's, the
+    // bakes' and the materials' goldens at 33, the warp's own tests becoming the version's, and
     // retire `ClassEdgeRule::Cells` with this test.
     assert_eq!(
         ClassEdgeRule::of_version(crate::generator_version()),
@@ -65,7 +65,8 @@ fn the_warped_class_edges_wait_for_their_version() {
 #[test]
 fn the_rule_turns_at_its_version() {
     assert_eq!(ClassEdgeRule::of_version(31), ClassEdgeRule::Cells);
-    assert_eq!(ClassEdgeRule::of_version(32), ClassEdgeRule::Warped);
+    assert_eq!(ClassEdgeRule::of_version(32), ClassEdgeRule::Cells);
+    assert_eq!(ClassEdgeRule::of_version(33), ClassEdgeRule::Warped);
     assert_eq!(ClassEdgeRule::of_version(40), ClassEdgeRule::Warped);
 }
 
@@ -285,7 +286,7 @@ fn the_warped_material_is_the_finest_weights_largest() {
 /// warped directions at band levels L − 6, 9 and 14 (`w <face> <u> <v> <level> <x> <y> <z>`, each
 /// float its IEEE 754 bits), then [`material_at`] at 21 points along each of 12 coasts' lines from
 /// a sea's cell's centre to its land's (`m <face> <u> <v> <code> <class> <entry>`), so that the
-/// targets agree on the warp bit for bit and the bump to 32 sees what it changes.
+/// targets agree on the warp bit for bit and the bump to 33 sees what it changes.
 fn class_edges_text() -> String {
     use std::fmt::Write as _;
 
