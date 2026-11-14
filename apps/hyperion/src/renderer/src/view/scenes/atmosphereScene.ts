@@ -313,14 +313,16 @@ const GIANT_GROUND_ALBEDO = 0;
  * (the test holds the two equal): some 22 km under Jupiter's 1-bar 71,492 km (Archinal et al.
  * 2018), restated with the NH₃ haze and chromophore of 30's rules (`test/giantFixtures.ts`'s
  * `coldGiantHazes`), which lift it from 185 km under, at 2.12 bar, and restated at 31 (2.8 m
- * higher, the fixture's record its decks' base moving with the chromophore's fold). `TEST JUPITER`'s
+ * higher, the fixture's record its decks' base moving with the chromophore's fold) and at 32
+ * (10.3 m higher, the golden profile it reads moving with the envelope's column read whole,
+ * P14.T24.h.b). `TEST JUPITER`'s
  * figure; its disc
  * stands on it until its medium lands, and then on the cache's ground, this floor again while its
  * route is closed.
  */
 const JUPITER_FLOOR: AtmosphereFixtureFigure = {
-  equatorialRadiusM: 71_470_441.805_110_32,
-  polarRadiusM: 66_835_321.618_901_22,
+  equatorialRadiusM: 71_470_452.055_253_74,
+  polarRadiusM: 66_835_330.624_209_11,
 };
 
 /** An envelope's floor, the hand Jupiter's ground: black, as its tables take it. */
