@@ -168,6 +168,7 @@ describe("the spike report's check", () => {
         discCells: "per-cell",
         figureShading: "forward",
         terrainPlanetshine: "record",
+        decorationSets: "generated",
       },
       segments: [
         {
@@ -206,6 +207,7 @@ describe("the spike report's check", () => {
       discCells: _discCells,
       figureShading: _figureShading,
       terrainPlanetshine: _terrainPlanetshine,
+      decorationSets: _decorationSets,
       ...beforeT4
     } = geometry.settings;
     expect([

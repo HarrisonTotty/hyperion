@@ -93,6 +93,9 @@ import type {
 import { type HorizonLayerSetting, PALETTE_NONE, type TerrainLayers } from "./workers/messages";
 import { MAX_CONSECUTIVE_WORKER_FAILURES } from "./workers/pool";
 import { type GeometrySettings, SETTINGS, type TerrainSettings } from "../quality/qualitySetting";
+import { decorationLevel, decorationSeed } from "../surface/decoration/decorationLattice";
+import { finestLevel } from "./cube";
+import { DETAIL_KERNELS } from "../surface/decoration/detailTextureBake";
 import type { DrawItem } from "../engine/types";
 import { terrainSlotLayout } from "./slotLayout";
 
@@ -681,6 +684,87 @@ describe("the terrain session's passes (R10.T16.b; decision-r10-live-path, D3 an
     // The session's own materials, compiled at its making (R10.T14.d), go with it.
     expect(h.engine.live).toEqual({ ...before, materials: 0 });
     expect(h.session.passBodies.size).toBe(0);
+  });
+});
+
+/** The names of the detail sets' kernels `engine` was asked to compile (plan R11, R11.T2.c). */
+function detailKernels(engine: CountingRenderEngine): string[] {
+  return engine.kernelPairs
+    .map((pair) => pair.name)
+    .filter((name) => name.startsWith("R11 detail"));
+}
+
+describe("the terrain session's detail sets (plan R11, R11.T2.c; Design note 21)", () => {
+  /** A basalt and a regolith of the moon's palette, as its patches' layers name them. */
+  const MATERIALS = [
+    { classCode: 5, entry: 0, albedoBvr: [0.08, 0.1, 0.12], weathering: null },
+    { classCode: 1, entry: 1, albedoBvr: [0.1, 0.12, 0.14], weathering: null },
+  ] as const;
+
+  it("compiles the generator's four kernels when made on the high setting, and none on the low", async () => {
+    const high = await harness("high");
+    expect(detailKernels(high.engine)).toEqual(DETAIL_KERNELS.map((pair) => pair.name));
+    // A hand-over compiles none (R10.T14.d).
+    await handedOver(high);
+    expect(detailKernels(high.engine)).toHaveLength(DETAIL_KERNELS.length);
+    high.session.dispose();
+    const low = await harness("low");
+    await handedOver(low);
+    expect(detailKernels(low.engine)).toEqual([]);
+    expect(low.session.passBodies.size).toBe(1);
+    expect(low.session.pass(MOON)?.detailSets ?? null).toBeNull();
+  });
+
+  it("gives a lit pass its body's sets on high, keyed by its detail seed", async () => {
+    const h = await harness("high");
+    await handedOver(h);
+    const sets = h.session.pass(MOON)?.detailSets ?? null;
+    expect(sets?.body.seed).toBe(decorationSeed(SEED));
+    const radiusM = moonLikeHeader(MOON).equatorial_radius_m;
+    expect(sets?.body.level).toBe(decorationLevel(radiusM, 2));
+    expect(sets?.body.startLevel).toBe(finestLevel(radiusM));
+  });
+
+  it("generates a layer a step, and none while a view's frame-rate floor has stepped it down", async () => {
+    const h = await harness("high");
+    await handedOver(h);
+    const sets = h.session.pass(MOON)?.detailSets ?? null;
+    if (sets === null) {
+      throw new Error("the lit pass has no detail sets on high");
+    }
+    sets.noteMaterials(MATERIALS, sets.body.startLevel);
+    expect(sets.waiting).toBe(2);
+    h.session.noteView(PRIMARY, handing(5e6, { floorStepped: true }));
+    h.session.step();
+    expect(sets.waiting).toBe(2);
+    h.session.noteView(PRIMARY, handing(5e6));
+    h.session.step();
+    expect([sets.waiting, sets.layers.length]).toEqual([1, 1]);
+    h.session.step();
+    h.session.step();
+    expect([sets.waiting, sets.layers.length]).toEqual([0, 2]);
+    expect(h.tally.liveBytes("decoration")).toBe(sets.memoryBytes);
+  });
+
+  it("frees a body's sets with its pass, and the kernels with the session", async () => {
+    const h = await harness("high");
+    await handedOver(h);
+    const sets = h.session.pass(MOON)?.detailSets ?? null;
+    sets?.noteMaterials(MATERIALS, sets.body.startLevel);
+    h.session.step();
+    expect(h.tally.liveBytes("decoration")).toBeGreaterThan(0);
+    // Beyond twice the range: the field and the pass go, and the sets with them.
+    h.session.noteView(PRIMARY, notHanding(7e7));
+    h.session.step();
+    expect(h.tally.liveBytes("decoration")).toBe(0);
+    expect(sets?.texture ?? null).toBeNull();
+    const released = vi.spyOn(h.engine, "releaseCompute");
+    h.session.dispose();
+    expect(
+      released.mock.calls
+        .map(([kernel]) => kernel.name)
+        .filter((name) => name.startsWith("R11 detail")),
+    ).toHaveLength(DETAIL_KERNELS.length);
   });
 });
 

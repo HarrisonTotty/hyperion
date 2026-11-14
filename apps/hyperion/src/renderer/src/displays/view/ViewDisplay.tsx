@@ -1674,8 +1674,13 @@ function ViewStage({
               );
         if (session !== null && report !== null) {
           // Its FRAME body, whose terrain readout it states, is wanted wherever the camera is
-          // (R10.T12).
-          session.noteView(VIEW_ID, { ...report, readoutBody: readoutBodyOf(run) });
+          // (R10.T12); while its frame-rate floor has stepped it down, no body's detail sets are
+          // generated (R11.T2.c).
+          session.noteView(VIEW_ID, {
+            ...report,
+            readoutBody: readoutBodyOf(run),
+            floorStepped: primaryScale.airStepped,
+          });
         }
       }
       // Guarded: no throw of the step stops this loop or the instruments' (S5), and one that lasts

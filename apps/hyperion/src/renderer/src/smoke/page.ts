@@ -69,6 +69,7 @@ import {
   MARCH_TABLE_ONLY_ENTRIES,
   PACKED_CELL_ENTRIES,
   CLOUD_ENTRIES,
+  DECORATION_ENTRIES,
   WGSL_CATALOGUE,
 } from "../view/engine/catalogue";
 import { loadRenderEngine } from "../view/engine/loadEngine";
@@ -189,6 +190,7 @@ import { checkTonemap } from "./tonemap";
 import { TwinPool, twinWorkerCount } from "./twinPool";
 import { checkTwins } from "./twins";
 import { checkDecorationTwin } from "./decoration";
+import { checkDetailSets } from "./detailSets";
 import { checkSpatialStrokeContrast } from "./spatial";
 import { checkStrokeContrast } from "./strokeContrast";
 import { checkWireframe } from "./wireframe";
@@ -328,10 +330,11 @@ const VARIANTS: Readonly<Record<string, CapabilityOverrides | undefined>> = {
  * part 22 composes its frames as the renderer does (2026-11-06; parts 20 and 21 on their lane).
  * Plan R07's packed `disc cells` kernels, every form with its table-only twin (some 63 s on a pod),
  * took parts 9, 16 and 17 past their watchdogs under a pod's load (2026-11-05), so they took part
- * 24, alone (their lane's part 20). Plan R11's decoration library against its reference (R11.T2.a)
- * took part 25, alone, so that no part near its watchdog grows (2026-11-13). Plan R11's clouds
- * (R11.T7.b), their kernels' catalogue, their field, optics and ground's tap against their twins
- * and their layer's draw, took part 26, alone (2026-11-13).
+ * 24, alone (their lane's part 20). Plan R11's decoration library against its reference (R11.T2.a),
+ * its kernels' catalogue and the generated detail sets (R11.T2.c) took part 25, alone, so that no
+ * part near its watchdog grows (2026-11-13). Plan R11's clouds (R11.T7.b), their kernels'
+ * catalogue, their field, optics and ground's tap against their twins and their layer's draw, took
+ * part 26, alone (2026-11-13).
  */
 type PagePart =
   | 1
@@ -559,6 +562,7 @@ async function run(
       !MARCH_TABLE_ONLY_ENTRIES.includes(entry) &&
       !PACKED_CELL_ENTRIES.includes(entry) &&
       !CLOUD_ENTRIES.includes(entry) &&
+      !DECORATION_ENTRIES.includes(entry) &&
       !ATMOSPHERE_THICK_LEVER_ENTRIES.includes(entry),
   );
   const entries = fixture === "broken-wgsl" ? [...thin, BROKEN_ENTRY] : thin;
@@ -933,6 +937,14 @@ async function run(
   // the terrain's, stands near its watchdog, and part 12 holds the atmosphere's twins).
   await group(25, "R11.T2.a the decoration library against its reference", () =>
     checkDecorationTwin(engine, checks),
+  );
+  // Plan R11's decoration kernels (R11.T2.a's twin, R11.T2.c's generator), in part 25 beside their
+  // checks, and the world's generated detail sets on the device (R11.T2.c).
+  await group(25, "T9.b catalogue: the decoration's kernels", () =>
+    checkCatalogue(engine, status, DECORATION_ENTRIES, checks),
+  );
+  await group(25, "R11.T2.c the world's generated detail sets", () =>
+    checkDetailSets(engine, checks),
   );
   // In part 13, last: in part 6 it took the part to its watchdog (180 s), and beside the thin one
   // in part 12 to 166 to 172 s under load.

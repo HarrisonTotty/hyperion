@@ -298,6 +298,7 @@ import type {
 import { draftVertexBits, mergeRefinedNormals } from "./workers/draftNormals";
 import type { RefinedDraft, RefineRequest } from "./workers/pool";
 import { needsRebake, type RebakeLayers } from "./workers/rebake";
+import { DetailSetBake, type DetailSetSource } from "../surface/decoration/detailTextureBake";
 
 export { DEFAULT_TERRAIN_VIEW } from "./gpu/resources";
 
@@ -905,6 +906,12 @@ export interface TerrainPassOptions {
    * Design note 16).
    */
   readonly clusterCullKernel?: KernelPair;
+  /**
+   * What the body's generated detail sets are made from (plan R11, R11.T2.c; Design note 21): the
+   * session's kernels and the body's conditions, on a lit pass whose setting draws decoration.
+   * Absent, the pass generates none; the other shadings take none.
+   */
+  readonly detailSets?: DetailSetSource;
 }
 
 /**
@@ -2093,6 +2100,10 @@ export class TerrainPass {
   #measuring = false;
   /** The cluster cull's kernel ({@link TerrainPassOptions.clusterCullKernel}). */
   readonly #cullKernel: KernelPair;
+  /** What the body's detail sets are made from ({@link TerrainPassOptions.detailSets}), or `null`. */
+  readonly #detailSource: DetailSetSource | null;
+  /** The body's detail sets on the current device (plan R11, R11.T2.c), or `null` for none. */
+  #detailSets: DetailSetBake | null = null;
   /** Whether it is the occlusion's variant, which binds the pyramid and the visibility (R14.T3.d). */
   readonly #cullOccludes: boolean;
   /** Why the cluster path was refused on the current device, `null` while it stands. */
@@ -2178,6 +2189,7 @@ export class TerrainPass {
       options.clusterCullKernel ??
       (this.#shading === "lit" ? CLUSTER_CULL_OCCLUSION_KERNEL : CLUSTER_CULL_KERNEL);
     this.#cullOccludes = this.#cullKernel === CLUSTER_CULL_OCCLUSION_KERNEL;
+    this.#detailSource = this.#shading === "lit" ? (options.detailSets ?? null) : null;
     if (this.#shading === "lit") {
       this.#ownShadows = options.shadows === undefined;
       this.#shadows =
@@ -2198,9 +2210,50 @@ export class TerrainPass {
         this.#shadows?.dispose();
       }
     }
+    this.#detailSets = this.#makeDetailSets();
     this.#offRestored = this.#device.resources.onRebuilt(() => {
       this.#rebuild();
     });
+  }
+
+  /** A bake of the body's detail sets from {@link TerrainPassOptions.detailSets}, or `null`. */
+  #makeDetailSets(): DetailSetBake | null {
+    const source = this.#detailSource;
+    if (source === null || this.#source.kind !== "body") {
+      return null;
+    }
+    return new DetailSetBake(this.#engine, source.kernels, source.body, this.#source.body);
+  }
+
+  /**
+   * The body's generated detail sets (plan R11, R11.T2.c), which its lit draw samples once a
+   * material's layer is made (R11.T2.b); `null` where the pass generates none.
+   */
+  get detailSets(): DetailSetBake | null {
+    return this.#detailSets;
+  }
+
+  /**
+   * Generates the next layer of the body's detail sets that waits, where one does: the terrain
+   * session calls it once a frame for one body at most (`DETAIL_LAYERS_PER_FRAME`), and not
+   * while its view's frame-rate floor has stepped it down. None under the geometry's
+   * `decorationSets` `off`, the Mac pair's B side.
+   *
+   * @returns Whether a layer was generated.
+   */
+  stepDetailSets(): boolean {
+    if (this.#disposed || this.#faulted || this.#geometry.decorationSets === "off") {
+      return false;
+    }
+    try {
+      return this.#detailSets?.step() ?? false;
+    } catch (error: unknown) {
+      // A layer asked during a loss: the restore's rebuild makes the sets again.
+      if (error instanceof EngineUnavailable) {
+        return false;
+      }
+      throw error;
+    }
   }
 
   /**
@@ -3524,6 +3577,8 @@ export class TerrainPass {
       this.#nearestGround.clear();
       this.#margins.clear();
       this.#heights.clear();
+      this.#detailSets?.dispose();
+      this.#detailSets = null;
       try {
         device.resources.dispose();
       } finally {
@@ -3718,6 +3773,9 @@ export class TerrainPass {
     // The lost device's handles went with it: `ResilientEngine` drops their release.
     this.#releaseDevice(old);
     this.#heights.clear();
+    // The lost device's sets went with it; the patches that land again name their materials again.
+    this.#detailSets?.dispose();
+    this.#detailSets = this.#makeDetailSets();
     this.#device = this.#makeDevice(old.resources);
     // The new device's cluster path is made again, and refused again only if its compiler says so.
     this.#clusterRefusal = null;
@@ -3818,6 +3876,10 @@ export class TerrainPass {
     // A rebake replaces its old bake in its slot (`PatchCache.insert` of a resident key).
     this.#heights.take(bake);
     const layers = bake.layers;
+    if (layers !== null) {
+      // The materials its layers name wait for their detail sets (plan R11, R11.T2.c).
+      this.#detailSets?.note(layers, bake.key.level);
+    }
     device.givenUp.delete(keyString);
     device.residents.set(keyString, {
       layers:

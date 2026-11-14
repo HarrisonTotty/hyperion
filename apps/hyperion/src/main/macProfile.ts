@@ -198,6 +198,15 @@ export const MAC_PROFILE_LEVERS: ReadonlyArray<MacProfileLever> = [
     countSides: true,
   },
   {
+    name: "decoration-sets",
+    decides:
+      "R11.T2.c, the world's detail sets: generated a layer a frame as an arrival's materials land (A) against none (B)",
+    a: [],
+    b: ["--geometry", "decorationSets=off"],
+    ratios: [1],
+    countSides: false,
+  },
+  {
     name: "pacing-120",
     decides:
       "R07.T19, the frame pacing on a 120 Hz clock: frames counted, up to 120 Hz (A), against each view at its own rate (B)",

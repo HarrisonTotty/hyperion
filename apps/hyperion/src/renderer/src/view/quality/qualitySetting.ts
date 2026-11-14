@@ -290,6 +290,13 @@ export interface GeometrySettings {
    * SwiftShader high's low window drew `bodies` some 10% faster with one source.
    */
   readonly terrainPlanetshine: "record" | "brightest";
+  /**
+   * Whether a body's detail sets are generated where its setting draws decoration (plan R11,
+   * R11.T2.c; Design note 21): `generated`, a layer a frame as its materials land, or `off`, none,
+   * the Mac pair `decoration-sets`' B side, which measures what the generation costs an arrival.
+   * `generated` on both settings; the low setting draws no decoration, and so generates none.
+   */
+  readonly decorationSets: "generated" | "off";
 }
 
 /**
@@ -324,6 +331,7 @@ export const GEOMETRY_BEFORE_R14: GeometrySettings = {
   discCells: "per-cell",
   figureShading: "forward",
   terrainPlanetshine: "record",
+  decorationSets: "generated",
 };
 
 /**
@@ -510,6 +518,7 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       discCells: "packed",
       figureShading: "forward",
       terrainPlanetshine: "record",
+      decorationSets: "generated",
     },
     decoration: true,
     scatterDensity: 1,
@@ -566,6 +575,7 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       discCells: "packed",
       figureShading: "forward",
       terrainPlanetshine: "record",
+      decorationSets: "generated",
     },
     decoration: false,
     scatterDensity: 0,

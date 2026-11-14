@@ -97,6 +97,7 @@ import type { KernelPair } from "./kernels";
 import { BLOOM_DOWN_MATERIAL, BLOOM_UP_MATERIAL } from "../post/bloomChain";
 import { HISTOGRAM_KERNEL } from "../post/histogram";
 import { DECORATION_TWIN_KERNEL } from "../surface/decoration/decorationTwin";
+import { DETAIL_KERNELS } from "../surface/decoration/detailTextureBake";
 import { OVERLAY_SCENE_DEPTH_MATERIAL } from "../photoreal/overlayDepth";
 import { TONEMAP_MATERIAL } from "../post/tonemap";
 import { BAKE_KERNELS, BAKE_SPLAT } from "../sky/bake";
@@ -372,8 +373,6 @@ const TERRAIN_ENTRIES: ReadonlyArray<CatalogueEntry> = [
   })),
   // Its resolve and the resolve's emissive form (plan R14, R14.T2.d), into the scene target.
   ...TERRAIN_RESOLVE_MATERIALS.map((spec): CatalogueEntry => ({ kind: "material", spec })),
-  // Plan R11's decoration library and the detail textures' projection, in their twin (R11.T2.a).
-  { kind: "compute", spec: DECORATION_TWIN_KERNEL },
   // Plan R14's cluster path (R14.T1.b): its cull, the copy of its counters and its stable
   // compaction (R14.T2.a); the cull with the two-pass occlusion and the depth pyramid (R14.T3.d).
   { kind: "compute", spec: CLUSTER_CULL_KERNEL },
@@ -523,6 +522,16 @@ export const PACKED_CELL_ENTRIES: ReadonlyArray<CatalogueEntry> = [
 });
 
 /**
+ * Plan R11's decoration (R11.T2): its library and the detail textures' projection in their twin
+ * (R11.T2.a), and the detail sets' four generator kernels (R11.T2.c). The smoke page compiles them
+ * in part 25, beside their checks, so that no part near its watchdog grows.
+ */
+export const DECORATION_ENTRIES: ReadonlyArray<CatalogueEntry> = [
+  { kind: "compute", spec: DECORATION_TWIN_KERNEL },
+  ...DETAIL_KERNELS.map((spec): CatalogueEntry => ({ kind: "compute", spec })),
+];
+
+/**
  * The engine's ID target's own forms (plan R14, R14.T2.b; `idTarget.ts`): the writer into
  * `r32uint`, and the reader of a `texture_2d<u32>` into the scene's `rgba16float`.
  */
@@ -581,6 +590,7 @@ export const WGSL_CATALOGUE: ReadonlyArray<CatalogueEntry> = [
   ...ATMOSPHERE_THERMAL_ENTRIES,
   ...ATMOSPHERE_DECK_ENTRIES,
   ...TERRAIN_ENTRIES,
+  ...DECORATION_ENTRIES,
   ...SPLAT_ENTRIES,
   ...LIT_BODY_ENTRIES,
   ...THERMAL_ENTRIES,

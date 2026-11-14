@@ -25,6 +25,8 @@
  *   (R14.T1.b).
  * - `geometry-pages`: plan R14's mesh page pool, its pages and their records and LOD spheres,
  *   `GeometrySettings.pageBytes` in all (R14.T5.b).
+ * - `decoration`: plan R11's generated detail sets, each body's `texture_2d_array` of a layer a
+ *   material and its generator's scratch, at most 16 MB a body (R11.T2.c, Design note 21).
  * - `coarse-field-gpu`: the brainstorm's "coarse field, GPU copy", each body's coverage mask, a
  *   byte a coarse cell a face (R10.T7, R10 Design note 12), and the disc's class map once R10.T10.d
  *   files it here; the fields themselves stay in the height workers.
@@ -41,6 +43,7 @@ export type MemoryCategory =
   | "atmosphere-view"
   | "clouds"
   | "coarse-field-gpu"
+  | "decoration"
   | "geometry-clusters"
   | "geometry-pages"
   | "height-cache"

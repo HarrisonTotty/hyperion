@@ -129,6 +129,7 @@ const CATEGORIES: ReadonlyArray<MemoryCategory> = [
   "atmosphere-tables",
   "atmosphere-view",
   "coarse-field-gpu",
+  "decoration",
   "geometry-clusters",
   "geometry-pages",
   "height-cache",

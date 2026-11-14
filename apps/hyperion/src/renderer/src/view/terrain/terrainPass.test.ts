@@ -96,6 +96,11 @@ import {
 } from "./terrainPass";
 import { distanceToBoxFromM } from "./viewGeometry";
 import {
+  type DetailBody,
+  DetailKernelSet,
+  type DetailKernelSource,
+} from "../surface/decoration/detailTextureBake";
+import {
   type BakedPatch,
   type BakeSettings,
   NORMALS_BETWEEN,
@@ -284,6 +289,7 @@ async function passOn(
       | "source"
       | "lookaheadClockMs"
       | "budgetHoldMargin"
+      | "detailSets"
     >
   > = {},
 ): Promise<{ pass: TerrainPass; pool: () => FakePool; engine: CountingRenderEngine }> {
@@ -1579,6 +1585,124 @@ describe("the lit terrain of a body (R10.T10.b)", () => {
     // R05's layout keeps its slots: the lit fields are the lit layout's alone.
     expect(planet.pass.layout.slots).toEqual(terrainSlotLayout(TERRAIN_SETTINGS.high));
     expect(lit.pass.layout.slots).toEqual(terrainSlotLayout(TERRAIN_SETTINGS.high, "lit"));
+  });
+
+  it("hands its body's detail sets the materials each landed bake names, a layer a step once their kernels are compiled (R11.T2.c)", async () => {
+    let set: DetailKernelSet | null = null;
+    const kernels: DetailKernelSource = {
+      get kernels() {
+        return set?.kernels ?? null;
+      },
+    };
+    const body: DetailBody = {
+      seed: 1,
+      radiusM: PLANET.figure.equatorialRadiusM,
+      level: 3,
+      startLevel: 3,
+      surfacePressurePa: 0,
+      surfaceAgeGyr: 4,
+      maturity: null,
+      feoByEntry: [],
+    };
+    const { pass, pool, engine } = await passOn("low", {
+      source: BODY,
+      detailSets: { kernels, body },
+    });
+    pool().layers = edgeLayers();
+    pool().deliver(pass, { face: 2, level: 3, i: 1, j: 1 });
+    pool().deliver(pass, { face: 2, level: 3, i: 1, j: 2 });
+    // One material, its slot's class 1 and entry 0, whichever patch names it.
+    expect(pass.detailSets?.waiting).toBe(1);
+    expect(pass.stepDetailSets()).toBe(false);
+    set = DetailKernelSet.forSetting(SETTINGS.high, engine);
+    expect(await set?.ready).toBe(true);
+    let decorationBytes = 0;
+    engine.onAllocation((event) => {
+      if (event.kind !== "uploaded" && event.category === "decoration") {
+        decorationBytes += event.kind === "created" ? event.bytes : -event.bytes;
+      }
+    });
+    expect([pass.stepDetailSets(), pass.stepDetailSets()]).toEqual([true, false]);
+    expect(pass.detailSets?.layerOf(1, 0)?.layer).toBe(0);
+    expect(decorationBytes).toBe(pass.detailSets?.memoryBytes);
+    // Freed with the body's pass.
+    pass.dispose();
+    expect(decorationBytes).toBe(0);
+    expect(pass.detailSets).toBeNull();
+    set?.dispose();
+  });
+
+  /** A pass of `BODY` given detail sets of compiled kernels, its bakes naming one material. */
+  async function passWithSets(): Promise<{
+    readonly pass: TerrainPass;
+    readonly engine: CountingRenderEngine;
+    readonly set: DetailKernelSet;
+  }> {
+    const engine = await countingRenderEngine();
+    const set = DetailKernelSet.forSetting(SETTINGS.high, engine);
+    if (set === null || !(await set.ready)) {
+      throw new Error("no detail kernels");
+    }
+    const body: DetailBody = {
+      seed: 1,
+      radiusM: PLANET.figure.equatorialRadiusM,
+      level: 3,
+      startLevel: 3,
+      surfacePressurePa: 0,
+      surfaceAgeGyr: 4,
+      maturity: null,
+      feoByEntry: [],
+    };
+    // The pass's own engine: the kernels' handles are the set's, of another fake engine.
+    const made = await passOn("low", { source: BODY, detailSets: { kernels: set, body } });
+    made.pool().layers = edgeLayers();
+    made.pool().deliver(made.pass, { face: 2, level: 3, i: 1, j: 1 });
+    return { pass: made.pass, engine: made.engine, set };
+  }
+
+  it("generates none of its detail sets under the geometry's decorationSets off, the Mac pair's B side (R11.T2.c)", async () => {
+    const { pass, set } = await passWithSets();
+    pass.setGeometry({ ...pass.geometry, decorationSets: "off" });
+    expect([pass.stepDetailSets(), pass.detailSets?.waiting]).toEqual([false, 1]);
+    pass.setGeometry({ ...pass.geometry, decorationSets: "generated" });
+    expect([pass.stepDetailSets(), pass.detailSets?.waiting]).toEqual([true, 0]);
+    pass.dispose();
+    set.dispose();
+  });
+
+  it("makes its detail sets again after a device loss, the lost ones dropped (R11.T2.c)", async () => {
+    const { pass, engine, set } = await passWithSets();
+    const before = pass.detailSets;
+    expect(pass.stepDetailSets()).toBe(true);
+    engine.loseDevice();
+    engine.restore();
+    expect(pass.detailSets).not.toBe(before);
+    expect([pass.detailSets?.waiting, pass.detailSets?.texture ?? null]).toEqual([0, null]);
+    pass.dispose();
+    set.dispose();
+  });
+
+  it("generates no detail sets on a pass not given them, nor on the wireframe's (R11.T2.c)", async () => {
+    const plain = await passOn("high", { source: BODY });
+    expect(plain.pass.detailSets).toBeNull();
+    expect(plain.pass.stepDetailSets()).toBe(false);
+    const wire = await passOn("high", {
+      source: { ...BODY, weights: "skipped", normals: "skipped" },
+      detailSets: {
+        kernels: { kernels: null },
+        body: {
+          seed: 1,
+          radiusM: 1,
+          level: 3,
+          startLevel: 3,
+          surfacePressurePa: 0,
+          surfaceAgeGyr: 4,
+          maturity: null,
+          feoByEntry: [],
+        },
+      },
+    });
+    expect(wire.pass.detailSets).toBeNull();
   });
 
   it("binds the disc's normal map its lighting gives, for the fade near the hand-over, and the draw anew when it changes (R10.T15.b.2)", async () => {

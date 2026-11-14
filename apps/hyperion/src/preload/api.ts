@@ -298,6 +298,8 @@ export interface GeometryOverride {
   readonly figureShading?: "forward" | "screen";
   /** The mesh-regime terrain's planetshine: every source its record carries, or the brightest. */
   readonly terrainPlanetshine?: "record" | "brightest";
+  /** Plan R11's detail sets (R11.T2.c): generated where decoration is drawn, or none. */
+  readonly decorationSets?: "generated" | "off";
 }
 
 /** A mesh's DAG-cut tolerance (plan R14, R14.T5.f), px: in its camera pass, and as an occluder. */

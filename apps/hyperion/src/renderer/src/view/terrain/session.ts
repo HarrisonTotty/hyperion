@@ -131,7 +131,19 @@ import { type MemoryCategory, textureBytes, type TextureSpec } from "../engine/m
 import { EngineUnavailable } from "../engine/resilientEngine";
 import type { DrawItem, RenderEngine, TextureHandle } from "../engine/types";
 import { isLitBody } from "../lighting/retarded";
-import type { GeometrySettings, QualitySetting, TerrainSettings } from "../quality/qualitySetting";
+import {
+  type GeometrySettings,
+  type QualitySetting,
+  SETTINGS,
+  type TerrainSettings,
+} from "../quality/qualitySetting";
+import { decorationLevel } from "../surface/decoration/decorationLattice";
+import {
+  DETAIL_LAYERS_PER_FRAME,
+  detailBodyOf,
+  DetailKernelSet,
+  type DetailSetSource,
+} from "../surface/decoration/detailTextureBake";
 import {
   cameraSceneOf,
   sceneOrigins,
@@ -175,7 +187,7 @@ import {
 import { SELECTION_RULE } from "./levelBounds";
 import { TerrainMaterialSet } from "./materialSet";
 import { unreachable } from "./patchKey";
-import { type BodyFigure, type BodyFixedVec3, planetGeometry } from "./planet";
+import { bandLimitM, type BodyFigure, type BodyFixedVec3, planetGeometry } from "./planet";
 import { PRIMARY_VIEW_WEIGHT, SECONDARY_VIEW_WEIGHT } from "./priority";
 import { MAX_SELECTION_VIEWS } from "./select";
 import { type ShadowCasters, TerrainShadows } from "./shadows/terrainShadows";
@@ -351,6 +363,12 @@ export interface TerrainViewReport {
    * modelled ({@link TerrainSession.terrainFaults}; decision-r10-t12-commit3 §6).
    */
   readonly readoutBody?: BodyIdHex | null;
+  /**
+   * Whether its frame-rate floor has stepped it down (`BudgetedScale.airStepped`; the owner's
+   * report, 2026-11-01): while any view's has, no body's detail sets are generated (plan R11,
+   * R11.T2.c). Absent, `false`.
+   */
+  readonly floorStepped?: boolean;
 }
 
 /**
@@ -997,6 +1015,11 @@ export class TerrainSession {
   readonly #engine: RenderEngine;
   /** The materials every pass draws with, compiled at its making on its setting (R10.T14.d). */
   readonly #materials: TerrainMaterialSet;
+  /**
+   * The detail sets' kernels (plan R11, R11.T2.c), compiled when the session is made on a setting
+   * that draws decoration, so that a hand-over compiles none; `null` on the others.
+   */
+  readonly #detailKernels: DetailKernelSet | null;
   /** The shadow cascades every lit pass draws with, on the high setting (R10.T9.b). */
   readonly #shadows: TerrainShadows;
   readonly #bodies = new Map<BodyIdHex, SessionBody>();
@@ -1101,6 +1124,8 @@ export class TerrainSession {
     // Last, so that nothing before it can throw and leave it compiling, and before any pass, so that
     // its restore listener runs before any pass's resources' (`materialSet.ts`).
     this.#materials = new TerrainMaterialSet(options.engine, options.setting);
+    // Cannot throw: its compile is asynchronous, and none is made on the low setting (R11.T2.c).
+    this.#detailKernels = DetailKernelSet.forSetting(SETTINGS[options.setting], options.engine);
   }
 
   /**
@@ -1413,6 +1438,53 @@ export class TerrainSession {
       return;
     }
     this.#stepPasses();
+    this.#stepDetailSets();
+  }
+
+  /**
+   * Generates the bodies' detail sets a layer a step (plan R11, R11.T2.c; `DETAIL_LAYERS_PER_FRAME`),
+   * of the first pass in order whose body has one waiting, unless a view's frame-rate floor has
+   * stepped it down ({@link TerrainViewReport.floorStepped}), when the frame's time is the floor's.
+   */
+  #stepDetailSets(): void {
+    if (this.#detailKernels === null) {
+      return;
+    }
+    for (const report of this.#reports.values()) {
+      if (report.floorStepped === true) {
+        return;
+      }
+    }
+    let made = 0;
+    for (const pass of this.#passes.values()) {
+      if (made >= DETAIL_LAYERS_PER_FRAME) {
+        return;
+      }
+      if (pass.stepDetailSets()) {
+        made += 1;
+      }
+    }
+  }
+
+  /**
+   * What `header`'s body's detail sets are made from on a lit pass (plan R11, R11.T2.c), or `null`
+   * where the session draws no decoration or the body's lattice would pass its last level.
+   */
+  #detailSetsOf(header: SurfaceHeaderDto, detailSeed: DetailSeedHex): DetailSetSource | null {
+    const kernels = this.#detailKernels;
+    if (kernels === null) {
+      return null;
+    }
+    let level: number;
+    try {
+      level = decorationLevel(header.equatorial_radius_m, bandLimitM());
+    } catch (error: unknown) {
+      if (error instanceof RangeError) {
+        return null;
+      }
+      throw error;
+    }
+    return { kernels, body: detailBodyOf(header, detailSeed, level) };
   }
 
   /**
@@ -1679,6 +1751,7 @@ export class TerrainSession {
     this.#passes.clear();
     this.#wirePasses.clear();
     this.#materials.dispose();
+    this.#detailKernels?.dispose();
     this.#shadows.dispose();
     this.#wireHanded.clear();
     this.#faultListeners.clear();
@@ -2024,6 +2097,7 @@ export class TerrainSession {
     // The workers' latest level bounds: the table, σ by level (R10.T4.b) and the level charge
     // (R09.T8.d (b3)).
     const bounds = this.#pool.fieldBounds(body);
+    const detailSets = shading === "lit" ? this.#detailSetsOf(header, detailSeed) : null;
     let pass: TerrainPass;
     try {
       pass = new TerrainPass({
@@ -2068,6 +2142,8 @@ export class TerrainSession {
         ...(shading === "lit" && this.#handoverAtCells
           ? { surveyedFloorLevel: cellPatchLevel(header.level) }
           : {}),
+        // Its body's generated detail sets, on a setting that draws decoration (R11.T2.c).
+        ...(detailSets === null ? {} : { detailSets }),
       });
     } catch (error: unknown) {
       if (error instanceof EngineUnavailable) {

@@ -186,6 +186,22 @@ describe("the geometry override's hand-off (plan R14, Design note 17)", () => {
     }
   });
 
+  it("reads and writes the detail sets' lever, last in the fields' order (plan R11, R11.T2.c)", () => {
+    const override = parseGeometryOverride("decorationSets=off,terrainPlanetshine=brightest");
+    expect([
+      override,
+      geometryText(override),
+      parseGeometryOverride("decorationSets=generated"),
+    ]).toEqual([
+      { decorationSets: "off", terrainPlanetshine: "brightest" },
+      "terrainPlanetshine=brightest,decorationSets=off",
+      { decorationSets: "generated" },
+    ]);
+    for (const text of ["decorationSets=on", "decorationSets=false", "decorationSets="]) {
+      expect(() => parseGeometryOverride(text)).toThrow("decorationSets is generated or off");
+    }
+  });
+
   it("refuses a figure's shading other than forward or screen (plan R07)", () => {
     for (const text of ["figureShading=visibility", "figureShading=deferred", "figureShading="]) {
       expect(() => parseGeometryOverride(text)).toThrow("figureShading is forward or screen");

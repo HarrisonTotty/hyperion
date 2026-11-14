@@ -27,8 +27,9 @@
 # limb's kernels and their general forms' check, part 18 R14.T2's frame by the visibility buffer,
 # part 19 its frame under the high setting's cascades, part 22 part 15's ridge by the visibility
 # buffer with the two-pass occlusion, part 23 R14.T2's frames by the visibility buffer through the
-# renderer, part 24 plan R07's packed disc cells' kernels, part 25 R11.T2.a's decoration library
-# against its reference, part 26 plan R11's clouds (R11.T7.b), and part 1 every other group.
+# renderer, part 24 plan R07's packed disc cells' kernels, part 25 plan R11's decoration library
+# against its reference, its kernels' catalogue and the generated detail sets, part 26 plan R11's
+# clouds (R11.T7.b), and part 1 every other group.
 # SwiftShader's GPU process and the twins together took some 940 CPU-seconds for the two variants
 # (measured 2026-10-13), so on a machine busy with other work, with about 4 cores left to the
 # smoke, a run of the whole page outlasted the 180 s watchdog however its work overlapped. Three
