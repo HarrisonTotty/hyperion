@@ -1118,10 +1118,13 @@ the wireframe, and the frame time is recorded with them.
 
 ### R11.T5 Craters between 1 and 2 m (open question 18)
 
+Records: [11-surface-detail-clouds-oceans-rings-stills/records/R11.T5.md](11-surface-detail-clouds-oceans-rings-stills/records/R11.T5.md).
+
 Record Design note 20's ruling with its sources and revisit triggers, and propose to the owner the
 brainstorm's open question 18 status ("ruled decoration") and its corrected depths; the brainstorm
 itself is not edited here. No dip is built, no tag reserved and no version bumped. Files: this plan
 and the notes. Acceptance: the ruling is recorded and `pnpm format:check` passes.
+_Built 2026-11-13._
 
 ### R11.T6 Decorative scatter
 
