@@ -839,6 +839,7 @@ battery. Acceptance: `pnpm test`, `just ci`.
   has a `MEMORY_ITEMS` entry (a type-level test over the union); R01's `GpuTimer` and the record's
   `timer` agree (a type-level test); a creation without a category fails the Vitest over the tally's
   call sites. Acceptance: `pnpm test`.
+  Records: [12-measurements-and-settings-ladder/records/R12.T3.a.md](12-measurements-and-settings-ladder/records/R12.T3.a.md).
 - **R12.T3.b The kernel's figures.** `sampleGpuMemory(pid)` over R05's `fdinfo.ts`, adding
   `drm-shared-system0` and `drm-total-stolen-system0` to what it parses, summing per unique
   `drm-client-id`, and returning resident, total, shared, the lower bound of Design note 6 and the

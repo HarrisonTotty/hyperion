@@ -105,3 +105,33 @@ export type MemoryItem = (typeof MEMORY_ITEMS_ORDER)[number];
 export function isMemoryItem(value: string): value is MemoryItem {
   return MEMORY_ITEMS_ORDER.some((item) => item === value);
 }
+
+/**
+ * Every R01 `MemoryCategory` (`apps/hyperion`'s `view/engine/memory.ts`), by its owning plan's
+ * name, to the memory row it is reported in (Design note 6; R12.T3.a).
+ *
+ * @remarks
+ * Its keys are the renderer's union exactly: `view/perf/ledger.test.ts`'s type-level test fails on
+ * a category without an entry, or an entry of no category. The five names this plan asked for map
+ * to their own rows (`height-cache`, `atmosphere-tables`, `atmosphere-view`, `coarse-field-gpu`
+ * and `shadows`), as do R01's, R06's cube and R11's that have rows. R06's bake transients
+ * (`sky-scratch`), R11's detail sets (`decoration`) and R14's cluster records and mesh pages
+ * (`geometry-clusters`, `geometry-pages`) have no row in the brainstorm's table, and are counted
+ * in `other` (R12.T0's lean, kept by T3.a, 2026-11-17).
+ */
+export const MEMORY_ITEMS = {
+  "render-targets": "render-targets",
+  other: "other",
+  "atmosphere-tables": "atmosphere-tables",
+  "atmosphere-view": "atmosphere-view",
+  clouds: "clouds",
+  "coarse-field-gpu": "coarse-field-gpu",
+  decoration: "other",
+  "geometry-clusters": "other",
+  "geometry-pages": "other",
+  "height-cache": "height-cache",
+  ocean: "ocean",
+  shadows: "shadows",
+  "sky-cube": "star-cubemap",
+  "sky-scratch": "other",
+} as const satisfies Readonly<Record<string, MemoryItem>>;
