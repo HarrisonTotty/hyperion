@@ -31,11 +31,13 @@ install:
 # `cp --reflink=always`, which btrfs and XFS support; on macOS with clonefile(2), which APFS
 # supports, called through Python's ctypes (the Command Line Tools ship Python 3), since macOS's
 # `cp -c` makes a full copy where it cannot clone. Dependencies from the registry are then fresh;
-# the workspace's own crates are rebuilt, since their paths differ. It refuses when `target/`
+# the workspace's own crates are rebuilt, since this worktree's checkout of their sources is newer
+# than the source's build of them (cargo's hashes do not depend on the worktree's path, so their
+# build steps' directories are the source's; cargo 1.99 and 1.100 alike). It refuses when `target/`
 # exists, and when the filesystem cannot clone it says so and copies nothing, since a plain copy
-# would be tens of gigabytes. It holds each of the source's cargo build-directory locks while
-# copying, so that no build of the source is caught half-written; a build there waits for the copy,
-# and the copy for a build. On Linux, when the source's `target/` is the root of a btrfs subvolume
+# would be tens of gigabytes. It holds every one of the source's cargo locks while copying, so that
+# no build of the source is caught half-written; a build there waits for the copy, and the copy for
+# a build. On Linux, when the source's `target/` is the root of a btrfs subvolume
 # (`just target-subvolume`), it takes a snapshot of it instead, still under those locks: seconds
 # rather than minutes, so the source's builds barely wait (a 33 GB, 115k-file tree that took 31.6 s
 # to clone took 1.5 s to snapshot; perf-build.md Q3), and the snapshot shares the source's metadata
@@ -81,20 +83,41 @@ seed-target source:
         echo "a plain copy would take as much space again: build from scratch with \`just ci\` instead" >&2
         exit 1
     fi
+    # Cargo's locks, in each profile's directory at any depth (`target/debug`, and
+    # `target/cross/<triple>/debug` four levels down): `.cargo-build-lock` and, where the build
+    # made final artefacts, `.cargo-artifact-lock`, which a build holds exclusively, and
+    # `.cargo-lock`, which it holds shared, so that holding it exclusively keeps a build out too
+    # (cargo 1.99 and 1.100 alike, 2026-11-17). The build steps' directories and rustdoc's output
+    # hold none, and are not searched.
     locks=()
     while IFS= read -r -d '' lock; do
         locks+=("$lock")
-    done < <(find "$src" -maxdepth 3 -name .cargo-lock -print0)
-    # Each lock on a descriptor of its own, numbered from 20, since bash 3.2 cannot allocate one
-    # (`exec {fd}<`).
-    fd=20
-    for lock in ${locks[@]+"${locks[@]}"}; do
-        eval "exec $fd<\"\$lock\""
-        if ! flock -n "$fd"; then
-            echo "waiting for a build in the source to finish ($lock)..." >&2
-            flock "$fd"
-        fi
-        fd=$((fd + 1))
+    done < <(find "$src" \( -name build -o -name deps -o -name .fingerprint -o -name incremental \
+        -o -name doc \) -prune -o \( -name .cargo-build-lock -o -name .cargo-lock \
+        -o -name .cargo-artifact-lock \) -print0)
+    # All of them or none: where a build holds one, those taken are let go and the copy waits for
+    # that one alone, then starts again, so that it never holds a lock while it waits for another,
+    # and cannot deadlock against a build that holds some and waits for the rest, whatever order
+    # cargo takes them in. Each on a descriptor of its own, numbered from 20, since bash 3.2 cannot
+    # allocate one (`exec {fd}<`).
+    while true; do
+        fd=20
+        busy=""
+        for lock in ${locks[@]+"${locks[@]}"}; do
+            eval "exec $fd<\"\$lock\""
+            if ! flock -n "$fd"; then
+                busy="$lock"
+                break
+            fi
+            fd=$((fd + 1))
+        done
+        if [[ -z "$busy" ]]; then break; fi
+        while [[ "$fd" -ge 20 ]]; do
+            eval "exec $fd<&-"
+            fd=$((fd - 1))
+        done
+        echo "waiting for a build in the source to finish ($busy)..." >&2
+        (eval "exec 9<\"\$busy\"" && flock 9)
     done
     start=$SECONDS
     # `stat -f -c` and `stat -c` are GNU's, so on Linux alone.
@@ -116,10 +139,10 @@ seed-target source:
 # A worktree's `target/` becomes the root of a btrfs subvolume of its own, so that `just
 # seed-target` from this worktree takes a snapshot instead of cloning the tree file by file (Linux,
 # on btrfs; nothing to do elsewhere). It clones the tree into a new subvolume, as a seed does, then
-# swaps the two and deletes the old tree, holding the cargo build-directory locks of `target/`
-# throughout. A build that starts meanwhile waits on the old tree's lock, and builds into the new
-# tree, unlocked, once it ends: run it when this worktree is idle. Once per worktree; a seed taken
-# from a converted one is a subvolume already.
+# swaps the two and deletes the old tree, holding every cargo lock of `target/` throughout. A
+# build that starts meanwhile waits on the old tree's lock, and builds into the new tree, unlocked,
+# once it ends: run it when this worktree is idle. Once per worktree; a seed taken from a converted
+# one is a subvolume already.
 # Make this worktree's `target/` a btrfs subvolume, the source of instant seeds (Linux, btrfs).
 target-subvolume:
     #!/usr/bin/env bash
@@ -149,19 +172,31 @@ target-subvolume:
         echo "$target is a subvolume already" >&2
         exit 0
     fi
+    # As in seed-target: every cargo lock of `target/`, all of them or none.
     locks=()
     while IFS= read -r -d '' lock; do
         locks+=("$lock")
-    done < <(find "$target" -maxdepth 3 -name .cargo-lock -print0)
-    # As in seed-target: each lock on a descriptor of its own, numbered from 20.
-    fd=20
-    for lock in ${locks[@]+"${locks[@]}"}; do
-        eval "exec $fd<\"\$lock\""
-        if ! flock -n "$fd"; then
-            echo "waiting for a build in this worktree to finish ($lock)..." >&2
-            flock "$fd"
-        fi
-        fd=$((fd + 1))
+    done < <(find "$target" \( -name build -o -name deps -o -name .fingerprint -o -name incremental \
+        -o -name doc \) -prune -o \( -name .cargo-build-lock -o -name .cargo-lock \
+        -o -name .cargo-artifact-lock \) -print0)
+    while true; do
+        fd=20
+        busy=""
+        for lock in ${locks[@]+"${locks[@]}"}; do
+            eval "exec $fd<\"\$lock\""
+            if ! flock -n "$fd"; then
+                busy="$lock"
+                break
+            fi
+            fd=$((fd + 1))
+        done
+        if [[ -z "$busy" ]]; then break; fi
+        while [[ "$fd" -ge 20 ]]; do
+            eval "exec $fd<&-"
+            fd=$((fd - 1))
+        done
+        echo "waiting for a build in this worktree to finish ($busy)..." >&2
+        (eval "exec 9<\"\$busy\"" && flock 9)
     done
     # Until the swap, a failure leaves `target/` as it was; after it, only the old tree is left.
     trap '[[ -e "$target" ]] || mv "$old" "$target"; rm -rf "$new"' EXIT
