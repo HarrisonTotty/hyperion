@@ -70,7 +70,9 @@
 //      it carries its texels' maturity (`class_map_maturity`, R10.T1.c), 0 otherwise;
 //   26 + k, class k (law k + 1): its A per channel, scaled; w, its L(0);
 //   42 to 45  the classes' rows of `phase_factor_table`, four a row;
-//   46  the planetshine sources (x);
+//   46  the planetshine sources (x); y and z, the first rows of its emission and air blocks, 0 for
+//      none; w, the share of its class map's edges' shaping held out near the hand-over (lane
+//      fix-jagged-biome-edges, part 2; `classEdgeWeight`), 0 for none;
 //   47 + 2j, source j: the neighbour's unit direction from the body's centre, w its distance ÷ a;
 //      its illuminance face-on at the body's centre per channel (lx), w its radius ÷ a;
 //   51  where the `disc cells` pass left the pixels' sums (T8.d): for a disc whose every pixel
@@ -485,8 +487,8 @@ fn edge_key_of(k : u32) -> u32 {
 // unit body-fixed direction `p`, each one's share of their sum sharpened about the others' by its
 // own noise, under the gate of the lattice points' mean purity `mean_purity` against the purity of
 // the classes' mix here, at the footprint `footprint_rad` against the lattice's spacing
-// `lattice_rad`, both on the unit sphere; law 0 and a class of no key keep their shares, and the
-// keyed classes' sum is kept.
+// `lattice_rad`, both on the unit sphere, the gate scaled by `weight` (the hand-over's hold, part
+// 2); law 0 and a class of no key keep their shares, and the keyed classes' sum is kept.
 fn edge_shape_disc(
   surface : ptr<function, SurfaceAt>,
   count : u32,
@@ -494,6 +496,7 @@ fn edge_shape_disc(
   footprint_rad : f32,
   lattice_rad : f32,
   mean_purity : f32,
+  weight : f32,
 ) {
   var keyed = 0u;
   var kept = 0.0;
@@ -511,7 +514,7 @@ fn edge_shape_disc(
   if (keyed < 2u || !(classes > 0.0)) {
     return;
   }
-  let gate = edge_gate(mean_purity, squares / (classes * classes));
+  let gate = edge_gate(mean_purity, squares / (classes * classes)) * weight;
   if (!(gate > 0.0)) {
     return;
   }
@@ -653,9 +656,11 @@ fn surface_at(body : Body, q : vec3f, classes : u32, footprint : f32) -> Surface
   for (var m = 0u; m <= count; m = m + 1u) {
     out.shares[m] = sums.sum[m] / sums.norm;
   }
-  if (sums.purity_norm > 0.0) {
-    // A cell coordinate's step is about π ÷ 2 rad on the unit sphere: a face spans a quarter turn.
-    edge_shape_disc(&out, count, p, footprint, edge_lattice_rad(lattice_st), sums.purity / sums.purity_norm);
+  // The share of the edges' shaping held out near the hand-over (row 46's w; lane
+  // fix-jagged-biome-edges, part 2), so that there the disc draws what the terrain does.
+  let edge_weight = 1.0 - disc_row(SECONDARY_COUNT_ROW).w;
+  if (sums.purity_norm > 0.0 && edge_weight > 0.0) {
+    edge_shape_disc(&out, count, p, footprint, edge_lattice_rad(lattice_st), sums.purity / sums.purity_norm, edge_weight);
   }
   if (!body.maturity) {
     return out;

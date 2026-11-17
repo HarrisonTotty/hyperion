@@ -29,6 +29,7 @@ import type { DrawItem, TextureHandle } from "../engine/types";
 import type { PlacedLight } from "../lighting/hostLights";
 import { PLANETSHINE_SOURCES_HIGH } from "../lighting/planetshine";
 import { SETTINGS } from "../quality/qualitySetting";
+import { handoverTauPx, limbDistanceM, pixelAngleRad } from "../terrain/handover";
 import { AU_M } from "../scenes/kept";
 import type { ScreenRect } from "../wireframe/submit";
 import { WIREFRAME_MATERIALS } from "../wireframe/submit";
@@ -1590,5 +1591,41 @@ describe("the lit bodies' renderer's classes' edges (lane fix-jagged-biome-edges
 
   it("packs no class's edge key where the geometry turns the classes' edges off", async () => {
     expect(await packedKey("off")).toBe(0);
+  });
+
+  /** A keyed class map's disc 13 px across, its relief putting it at `ratio` of its hand-over range. */
+  function mappedAt(ratio: number): DiscRecord | undefined {
+    const { bodies, hosts } = bodiesOf([13]);
+    const [body] = bodies;
+    if (body === undefined) {
+      throw new Error("no body");
+    }
+    const limbM = limbDistanceM(norm(body.centreM), body.figure.equatorialRadiusM);
+    const reliefM =
+      (limbM * handoverTauPx("photorealistic", "high") * pixelAngleRad(CAMERA, VIEWPORT)) / ratio;
+    const drawn: LitBodyInput = {
+      ...body,
+      surface: { ...classMapOf(`${body.id} class map`), edgeKeys: [0x51f00d] },
+      rotation: IDENTITY_ROTATION,
+      handoverReliefM: reliefM,
+    };
+    return planLitBodies([drawn], hosts, OPTIONS, new Map([[drawn.id, "disc"]])).discs[0];
+  }
+
+  it("holds a class map's edges out just past its hand-back (part 2)", () => {
+    expect(mappedAt(1.15)?.edgeWeight).toBe(0);
+  });
+
+  it("draws a class map's edges shaped whole far from its hand-over (part 2)", () => {
+    expect(mappedAt(3)?.edgeWeight).toBe(1);
+  });
+
+  it("packs the share of its edges' shaping held out in row 46's w (part 2)", () => {
+    const record = mappedAt(1.15);
+    if (record === undefined) {
+      throw new Error("no disc");
+    }
+    const packed = packDiscRecords([record, { ...record, edgeWeight: 0.25 }], null);
+    expect([packed[46 * 4 + 3], packed[(DISC_ROWS + 46) * 4 + 3]]).toEqual([1, 0.75]);
   });
 });

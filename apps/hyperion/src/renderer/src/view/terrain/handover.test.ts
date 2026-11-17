@@ -46,7 +46,10 @@ import {
   CLASS_FADE_FAR,
   CLASS_FADE_NEAR,
   classCellFade,
+  classEdgeWeight,
   drawsCells,
+  EDGE_FADE_FAR,
+  EDGE_FADE_NEAR,
   handoverDetailShare,
   HANDOVER_FADE_SPAN,
   handoverRangeM,
@@ -882,6 +885,32 @@ describe("the hand-over at the field's cells (lane fix-coast-class-map; HANDOVER
       drawsCells(drawSet, 2, second),
       drawsCells(drawSet, 2),
     ]).toEqual([true, false, false]);
+  });
+});
+
+describe("a disc's class edges near the hand-over (lane fix-jagged-biome-edges, part 2)", () => {
+  it("holds them out at both switches", () => {
+    expect([
+      classEdgeWeight(1 / 1.1),
+      classEdgeWeight(1 / 0.9),
+      classEdgeWeight(EDGE_FADE_NEAR),
+    ]).toEqual([0, 0, 0]);
+  });
+
+  it("draws them shaped whole from half as far again and for a body never handed over", () => {
+    expect([
+      classEdgeWeight(EDGE_FADE_FAR),
+      classEdgeWeight(10),
+      classEdgeWeight(Number.POSITIVE_INFINITY),
+    ]).toEqual([1, 1, 1]);
+  });
+
+  it("fades them in linearly between", () => {
+    expect(classEdgeWeight((EDGE_FADE_NEAR + EDGE_FADE_FAR) / 2)).toBeCloseTo(0.5, 12);
+  });
+
+  it("holds them out at a ratio that is not a number", () => {
+    expect(classEdgeWeight(Number.NaN)).toBe(0);
   });
 });
 

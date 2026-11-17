@@ -23,6 +23,7 @@ import {
   edgeShapedShares,
 } from "../bodies/classEdge";
 import { faceUvToXyz, stToUv } from "./cube";
+import { classEdgeWeight } from "./handover";
 import { oblateAlbedoScale } from "../bodies/oblate";
 import { TERRAIN_DEPTH_FRACTION } from "../depth/groundPull";
 import { WGSL_CATALOGUE } from "../engine/catalogue";
@@ -2177,6 +2178,29 @@ describe("a coast's shaped edge at the hand-over (lane fix-jagged-biome-edges, p
         ),
       );
     }
+  });
+
+  it("draws a coast at the switch as the disc does, both unshaped within the switch's fade", () => {
+    // The disc's edges are held out at the hand-over's range ratio, 1 here; the terrain's cells'
+    // set, the one it draws within the fade, is never shaped.
+    const [disc] = sitesAt(0.86, 0.52);
+    if (disc === undefined) {
+      throw new Error("no site");
+    }
+    const weight = classEdgeWeight(1);
+    for (const fx of [0.2, 0.45, 0.5, 0.55, 0.8]) {
+      const fromDisc = edgeShapedShares([0, 1 - fx, fx], KEYS, { ...disc, meanPurity: 1, weight });
+      const bilinear = terrainShares(
+        [0, 1]
+          .map((k) => (1 - fx) * (SEA[k] ?? 0) + fx * (LAND[k] ?? 0))
+          .concat([0, 0, 0, 0, 0, 0]),
+        NAMED,
+      );
+      expect(fromDisc).toEqual(bilinear.slice(0, 3).map((v) => expect.closeTo(v, 12)));
+    }
+    expect(wgslFunction(terrainLitWgsl.replaceAll(/\/\/[^\n]*/gu, ""), "class_sets")).toContain(
+      "sets.uv[sets.count] = ancestor_uv; sets.lattice[sets.count] = 0.0;",
+    );
   });
 
   it("draws a coast's shaped shares as the disc does from the same cell's corners", () => {

@@ -1170,6 +1170,12 @@ export interface DiscRecord {
    * read none. Absent, its terrain draws by the plain forms.
    */
   readonly clouds?: CloudBodyGpu;
+  /**
+   * The weight, 0 to 1, of its class map's edges' shaping (lane fix-jagged-biome-edges, part 2;
+   * `handover.ts`' `classEdgeWeight`): 0 near the hand-over, where the terrain draws its cells
+   * unshaped; absent, 1.
+   */
+  readonly edgeWeight?: number;
 }
 
 /** The pole's stretch M x = x + (a ÷ c − 1)(x · p) p. */
@@ -1382,12 +1388,13 @@ export function packDiscRecords(
     }
     const secondaries = record.secondaries.slice(0, MAX_DISC_SECONDARIES);
     // y: the first row of its emission block, 0 for none (R08.T18.a); z: of its air block, 0 for
-    // none (R08.T16.b).
+    // none (R08.T16.b); w: the share of its classes' edges' shaping held out near the hand-over,
+    // 0 for none (lane fix-jagged-biome-edges).
     put(SECONDARY_COUNT_ROW, [
       secondaries.length,
       blockRows.get(index) ?? 0,
       airRows.get(index) ?? 0,
-      0,
+      1 - (record.edgeWeight ?? 1),
     ]);
     const blockRow = blockRows.get(index);
     if (record.emission !== undefined && blockRow !== undefined) {
@@ -1441,6 +1448,8 @@ interface ViewClassMap {
   readonly axes: readonly [Vec3, Vec3, Vec3];
   /** Each class's edge key, 0 for none (lane fix-jagged-biome-edges). */
   readonly edgeKeys: ReadonlyArray<number>;
+  /** The weight of its classes' edges' shaping (`DiscRecord.edgeWeight`), 1 where none is given. */
+  readonly edgeWeight: number;
 }
 
 /** The record seen from one camera: everything in the view's axes. */
@@ -1494,6 +1503,7 @@ function viewBodyOf(
       normals: record.surface.normals?.texels ?? null,
       axes: [x, y, cross(x, y)],
       edgeKeys: record.surface.edgeKeys ?? [],
+      edgeWeight: record.edgeWeight ?? 1,
     };
   }
   // The shader's P₁₁ is the projection's y scale, s × aspect (`rayThrough`).
@@ -1623,6 +1633,7 @@ function sharesAt(body: ViewBody, q: Vec3, muDatum: number): number[] {
     footprintRad: edgeFootprintRad(distanceOverRadius, body.pixelRad, muDatum),
     latticeRad: edgeLatticeRad(reconstruction.latticeSt),
     meanPurity: reconstruction.meanPurity,
+    weight: body.classMap.edgeWeight,
   });
 }
 

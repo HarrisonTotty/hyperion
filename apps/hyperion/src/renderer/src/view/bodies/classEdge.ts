@@ -272,6 +272,11 @@ export interface EdgeSite {
    * `terrainEdgeShapedShares`); absent, the shares' own ({@link classPurity}).
    */
   readonly mixPurity?: number;
+  /**
+   * The weight, 0 to 1, of the shaping, which scales its gate: the disc's near the hand-over
+   * (`handover.ts`' `classEdgeWeight`); absent, 1.
+   */
+  readonly weight?: number;
 }
 
 /**
@@ -298,7 +303,8 @@ export function edgeShapedShares(
   if (keyed < 2) {
     return out;
   }
-  const gate = edgeGate(site.meanPurity, site.mixPurity ?? classPurity(shares));
+  const gate =
+    edgeGate(site.meanPurity, site.mixPurity ?? classPurity(shares)) * (site.weight ?? 1);
   if (!(gate > 0)) {
     return out;
   }

@@ -262,6 +262,21 @@ describe("the shaped shares (lane fix-jagged-biome-edges)", () => {
     }
   });
 
+  it("leaves the shares as they are under a weight of 0", () => {
+    const shares = [0, 0.4, 0.6, 0];
+    expect(
+      edgeShapedShares(shares, KEYS, { ...boundarySite(unit(1, 2, 3), 50), weight: 0 }),
+    ).toEqual(shares);
+  });
+
+  it("shapes under a weight of 1 as with none given", () => {
+    const shares = [0, 0.4, 0.6, 0];
+    const site = boundarySite(unit(1, 2, 3), 50);
+    expect(edgeShapedShares(shares, KEYS, { ...site, weight: 1 })).toEqual(
+      edgeShapedShares(shares, KEYS, site),
+    );
+  });
+
   it("is the bilinear blend itself where the pixel spans the lattice", () => {
     const shares = [0, 0.3, 0.7, 0];
     const site = {

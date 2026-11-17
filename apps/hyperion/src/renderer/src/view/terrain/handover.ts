@@ -207,6 +207,31 @@ export const CLASS_FADE_FAR = 0.75 / (1 + REGIME_HYSTERESIS);
 export const CLASS_FADE_NEAR = CLASS_FADE_FAR / 2;
 
 /**
+ * The range ratio out to which R07's disc draws its classes' edges as its reconstruction leaves
+ * them (lane fix-jagged-biome-edges, part 2): a tenth past the hand-back's 1 ÷ (1 − h), so that at
+ * both switches the disc draws what the terrain does, its cells' set unshaped
+ * (`terrainLit.wgsl`'s `class_sets`), as BASE drew both.
+ */
+export const EDGE_FADE_NEAR = 1.1 / (1 - REGIME_HYSTERESIS);
+
+/** The range ratio from which the disc draws its classes' edges shaped whole: 1.5 {@link EDGE_FADE_NEAR}. */
+export const EDGE_FADE_FAR = 1.5 * EDGE_FADE_NEAR;
+
+/**
+ * The weight, 0 to 1, of a disc's shaped class edges at the range ratio `rangeRatio`
+ * ({@link handoverRangeRatio}; lane fix-jagged-biome-edges, part 2): 0 to {@link EDGE_FADE_NEAR},
+ * rising linearly to 1 at {@link EDGE_FADE_FAR}, so that its shaped edges fade in as the camera
+ * draws back from the hand-over with no pop; 1 at an infinite ratio (a body never handed over),
+ * 0 at a ratio that is not a number.
+ */
+export function classEdgeWeight(rangeRatio: number): number {
+  if (!(rangeRatio > EDGE_FADE_NEAR)) {
+    return 0;
+  }
+  return Math.min((rangeRatio - EDGE_FADE_NEAR) / (EDGE_FADE_FAR - EDGE_FADE_NEAR), 1);
+}
+
+/**
  * The fade of a lit terrain's class weights to those of its patches' ancestors of the field's
  * cells' level, L − 6 (lane fix-coast-class-map; `TerrainFrameInput.classSets`), at the range ratio
  * `rangeRatio` ({@link handoverRangeRatio}): 1 from {@link CLASS_FADE_FAR} out, so that on either

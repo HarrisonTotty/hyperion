@@ -672,10 +672,10 @@ struct ClassSets {
 
 // The class sets of the texel `in`, with `reference` law 0 alone (`shade_terrain`'s): their slots,
 // places and weights, then each set's shares and A (`terrain_shares`, `terrain_albedos`), the own
-// set's at its morph factor and rebake, another's at its own field. Each set's classes' edges are
-// shaped on its patch's lattice (lane fix-jagged-biome-edges; `edge_shape_terrain`), the own
-// patch's quad `quad_st` in cell coordinates, its parent's twice it and the ancestor's 2ᵈ times it;
-// none where `quad_st` is 0.
+// set's at its morph factor and rebake, another's at its own field. The own and the parent set's
+// classes' edges are shaped on their patch's lattice (lane fix-jagged-biome-edges;
+// `edge_shape_terrain`), the own patch's quad `quad_st` in cell coordinates and its parent's twice
+// it; none where `quad_st` is 0, and never the ancestor's, the cells' set of the switch's fade.
 fn class_sets(in : LitVertexOut, reference : bool, quad_st : f32) -> ClassSets {
   var sets : ClassSets;
   // The texel's body-fixed unit direction on R05's cube sphere, from its cell coordinates on its
@@ -721,7 +721,9 @@ fn class_sets(in : LitVertexOut, reference : bool, quad_st : f32) -> ClassSets {
     sets.weight[sets.count] = c;
     sets.slot[sets.count] = in.cells.x;
     sets.uv[sets.count] = ancestor_uv;
-    sets.lattice[sets.count] = quad_st * f32(1u << (in.cells.y & 31u));
+    // Unshaped: within the switch's fade the terrain draws the field's cells as R07's disc draws
+    // them there, its edges held out (lane fix-jagged-biome-edges, part 2; `classEdgeWeight`).
+    sets.lattice[sets.count] = 0.0;
     sets.count = sets.count + 1u;
   }
   for (var s = 0u; s < sets.count; s = s + 1u) {

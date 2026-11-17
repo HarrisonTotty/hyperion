@@ -90,7 +90,9 @@ import { frustumOf } from "../terrain/cull";
 import { patchMeshData } from "../terrain/gpu/resources";
 import { INSTANCE_RECORD_BYTES } from "../terrain/gpu/uniforms";
 import {
+  classEdgeWeight,
   handoverDetailShare,
+  handoverRangeRatio,
   type HandoverSphere,
   handoverSubtense,
   handOverRegimes,
@@ -1230,10 +1232,26 @@ export function planLitBodies(
       stars: lightsOf(body, hosts),
       planetshine: planetshineSources(body, neighbours, options.planetshine),
     };
-    const record = discRecordOf(shown, drawn, lit, occluders, rows, options, air);
-    if (record === null) {
+    const made = discRecordOf(shown, drawn, lit, occluders, rows, options, air);
+    if (made === null) {
       continue;
     }
+    // A class map's edges are held out near the hand-over, where its terrain draws its cells
+    // unshaped (lane fix-jagged-biome-edges, part 2).
+    const record: DiscRecord =
+      made.surface.kind === "class-map" && body.handoverReliefM !== undefined
+        ? {
+            ...made,
+            edgeWeight: classEdgeWeight(
+              handoverRangeRatio(
+                limbDistanceM(norm(body.centreM), body.figure.equatorialRadiusM),
+                body.handoverReliefM,
+                tauPx,
+                radPerPx,
+              ),
+            ),
+          }
+        : made;
     if (air !== undefined) {
       tabled.add(body.id);
     }
