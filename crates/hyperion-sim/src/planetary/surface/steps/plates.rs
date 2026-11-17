@@ -1227,8 +1227,10 @@ pub(super) struct Reach {
     pub(super) source: u32,
 }
 
-/// A distance transform's heap entry, ordered by (distance, cell, source).
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// A distance transform's heap entry, ordered by (distance, cell, source), and equal where it is
+/// ordered equal, as `relief::sea`'s `Entry` is: a derived `==` would read the distance's ±0 as
+/// equal and a NaN as unequal to itself, where `total_cmp` orders them.
+#[derive(Debug, Clone, Copy)]
 struct Entry {
     /// The path's length, metres, finite.
     distance_m: f64,
@@ -1236,6 +1238,12 @@ struct Entry {
     cell: u32,
     /// The source it comes from.
     source: u32,
+}
+
+impl PartialEq for Entry {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other).is_eq()
+    }
 }
 
 impl Eq for Entry {}
