@@ -28,8 +28,14 @@ import init, {
 } from "../../../generated/surface/hyperion_surface";
 import wasmUrl from "../../../generated/surface/hyperion_surface_bg.wasm?url";
 import { describeLoadFailure } from "../../../wasm/handleRequest";
-import { answerRequest, type HeightModule, staleModuleMessage, WorkerFields } from "./heightBake";
-import type { HeightWorkerMessage, HeightWorkerRequest } from "./messages";
+import {
+  answerRequest,
+  type HeightModule,
+  postedMessageOf,
+  staleModuleMessage,
+  WorkerFields,
+} from "./heightBake";
+import type { HeightWorkerRequest } from "./messages";
 
 const module: HeightModule = {
   bakePatch,
@@ -72,9 +78,7 @@ async function answer(request: HeightWorkerRequest): Promise<void> {
   }
   fields ??= new WorkerFields(module);
   const { reply, transfer } = answerRequest(module, request, fields);
-  const message: HeightWorkerMessage =
-    memory === null ? reply : { ...reply, wasmBytes: memory.buffer.byteLength };
-  postMessage(message, transfer);
+  postMessage(postedMessageOf(reply, memory), transfer);
 }
 
 // The message is a structured clone of a `HeightWorkerRequest` that our own render thread posted,

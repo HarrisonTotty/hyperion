@@ -40,6 +40,7 @@ import type {
   FieldForm,
   GroundReadoutQuery,
   HeightSourceSetting,
+  HeightWorkerMessage,
   HeightWorkerReply,
   HeightWorkerRequest,
   HorizonLayerSetting,
@@ -1254,6 +1255,22 @@ function materialOf(ground: WasmGround): SurfaceMaterial {
       mechanics,
     },
   };
+}
+
+/** A WebAssembly memory as {@link postedMessageOf} reads it: its buffer's byte length. */
+export interface MemoryLike {
+  readonly buffer: { readonly byteLength: number };
+}
+
+/**
+ * `reply` as the worker posts it: with its module's memory's byte length beside it once the module
+ * has loaded (plan R12, R12.T3.b), as it is without one.
+ */
+export function postedMessageOf(
+  reply: HeightWorkerReply,
+  memory: MemoryLike | null,
+): HeightWorkerMessage {
+  return memory === null ? reply : { ...reply, wasmBytes: memory.buffer.byteLength };
 }
 
 /** A worker's answer and the buffers it transfers with it. */

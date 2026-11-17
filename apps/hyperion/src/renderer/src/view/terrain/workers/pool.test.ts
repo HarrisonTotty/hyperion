@@ -333,8 +333,23 @@ describe("the height-worker pool", () => {
       { fieldBytes: 100, wasmBytes: 0 },
       { fieldBytes: 100, wasmBytes: 3 * 65_536 * 32 },
     ]);
+  });
+
+  it("starts a replaced worker's memory afresh", () => {
+    const { pool, created } = poolOf(1);
+    pool.fieldInit(MOON, blockOf(100, 0));
+    const worker = workerAt(created, 0);
+    const [init] = worker.fieldMessages;
+    worker.reply({
+      kind: "field-held",
+      id: init?.id ?? -1,
+      body: MOON,
+      heldBytes: 100,
+      block: null,
+      wasmBytes: 65_536 * 32,
+    });
     worker.fail();
-    expect(pool.workerMemory[1]).toEqual({ fieldBytes: 0, wasmBytes: 0 });
+    expect(pool.workerMemory).toEqual([{ fieldBytes: 0, wasmBytes: 0 }]);
   });
 
   it("posts a bake after the field's blocks, so that the worker makes it with them", () => {

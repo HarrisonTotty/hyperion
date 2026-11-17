@@ -6,14 +6,18 @@
  * @remarks
  * Every reading is what an unprivileged process can read, and a missing file is `null` with the
  * path in its reason, never a guess. Under Linux the readings are the kernel's sysfs files, as its
- * ABI documents them (`Documentation/ABI/testing/sysfs-devices-system-cpu`, `sysfs-class-power`,
- * `Documentation/driver-api/thermal/sysfs-api.rst`, `Documentation/hwmon/k10temp.rst`,
- * `Documentation/power/powercap/powercap.rst` and i915's `gt_*_freq_mhz`):
+ * documentation and drivers give them: `Documentation/ABI/testing/sysfs-class-thermal` and
+ * `sysfs-class-hwmon` (millidegrees Celsius), `drivers/hwmon/k10temp.c` (`Tctl`'s label),
+ * `Documentation/admin-guide/pm/cpufreq.rst` (`scaling_cur_freq` in kHz),
+ * `drivers/thermal/intel/therm_throt.c` (the throttle counters, ms),
+ * `Documentation/power/powercap/powercap.rst` (µJ, µW, µs) and i915's `gt_*_freq_mhz`:
  *
  * - the package temperature: the `temp` (millidegrees Celsius) of the thermal zone whose `type` is
  *   `x86_pkg_temp`, else `k10temp`'s `Tctl` on an AMD machine such as the development desktop
  *   (hardware item 2, decided 2026-09-30), with every zone's temperature beside it;
- * - throttling: each CPU's `thermal_throttle/{package,core}_throttle_total_time_ms`;
+ * - throttling: each CPU's `thermal_throttle/{package,core}_throttle_total_time_ms`, Intel's
+ *   alone (the AMD desktop has none), which the kernel adds an episode's time to when the episode
+ *   ends, so a span's rise misses one still running at its end and counts whole one begun before;
  * - the CPUs' clocks: each CPU's `cpufreq/scaling_cur_freq` (kHz);
  * - the GPU's clock: i915's `gt_act_freq_mhz` against `gt_RP0_freq_mhz` (`gpuClocks.ts`), or on
  *   NVIDIA a long-lived `nvidia-smi` child ({@link NvidiaClockStream}), whose clock event reasons
@@ -451,7 +455,11 @@ export const NVIDIA_SLOWDOWN_REASONS = [
  * The fields the long-lived `nvidia-smi` child queries, in the order of its CSV columns: the GPU's
  * index, its graphics clock and maximum graphics clock (MHz), the slowdown reasons ("Active" or
  * "Not Active", as driver 615.71.09's `-q -x` writes them in `clocks_event_reasons`) and its
- * temperature (°C).
+ * temperature (°C), by the names of `nvidia-smi --help-query-gpu` on driver 615.71.09.
+ *
+ * @remarks
+ * The `clocks_event_reasons.*` names are driver 535's and later's; an older driver knows only
+ * `clocks_throttle_reasons.*` and refuses the query, which the child's end then reports.
  */
 export const NVIDIA_CLOCK_FIELDS = [
   "index",
@@ -646,7 +654,7 @@ export class NvidiaClockStream {
 export interface GpuClockNow {
   readonly source: "i915-sysfs" | "amdgpu-sysfs" | "nvidia-smi";
   readonly mhz: Measured<number>;
-  /** RP0 on i915, the highest level on amdgpu, the maximum graphics clock on NVIDIA. */
+  /** RP0 on i915 and the highest level on amdgpu; missing on NVIDIA ({@link NVIDIA_MAX_REASON}). */
   readonly maxMHz: Measured<number>;
   /** NVIDIA's slowdown reasons; missing elsewhere. */
   readonly slowdown: Measured<boolean>;
@@ -654,6 +662,14 @@ export interface GpuClockNow {
 
 /** The GPU's clock at one sample, or why the run's GPU has none. */
 export type GpuClockReading = GpuClockNow | { readonly source: "none"; readonly reason: string };
+
+/**
+ * Why NVIDIA's clock has no maximum to share time at: GPU Boost holds an unthrottled GPU below
+ * `clocks.max.gr` (the RTX 3080's 1,890–1,965 MHz under load against 2,100 MHz), so a share at it
+ * would read as throttling; the slowdown reasons stand in (`gpuThrottleShare`).
+ */
+export const NVIDIA_MAX_REASON =
+  "NVIDIA's GPU Boost runs below clocks.max.gr unthrottled: its slowdown reasons stand in";
 
 /** No `nvidia-smi -q -x` reading, for `GpuClockReader`, which reads NVIDIA from the stream here. */
 const NO_NVIDIA_XML: NvidiaReading = {
@@ -702,15 +718,12 @@ export class GpuClockSampler {
       if (line.value === null) {
         return { source: "none", reason: line.reason };
       }
-      const { graphicsMHz, maxGraphicsMHz, slowdown } = line.value;
+      const { graphicsMHz, slowdown } = line.value;
       return {
         source: "nvidia-smi",
         mhz:
           graphicsMHz === null ? missing("nvidia-smi gives no clocks.gr") : measured(graphicsMHz),
-        maxMHz:
-          maxGraphicsMHz === null
-            ? missing("nvidia-smi gives no clocks.max.gr")
-            : measured(maxGraphicsMHz),
+        maxMHz: missing(NVIDIA_MAX_REASON),
         slowdown:
           slowdown === null
             ? missing("nvidia-smi gives no clock event reason")
@@ -722,7 +735,7 @@ export class GpuClockSampler {
       return { source: "none", reason: sample.reason };
     }
     return {
-      source: sample.source === "amdgpu-sysfs" ? "amdgpu-sysfs" : "i915-sysfs",
+      source: sample.source,
       mhz: sample.graphicsMHz,
       maxMHz: sample.maxGraphicsMHz,
       slowdown: missing(`${sample.source} reports no slowdown reason`),
@@ -879,7 +892,7 @@ export class PerfSampler {
         return;
       }
       this.#reading = true;
-      this.sampleOnce()
+      void this.sampleOnce()
         .catch((error: unknown) => {
           this.#failure = failureOf(error);
         })
@@ -1224,8 +1237,9 @@ export const RELEASE_SETTLE_MS = 2000;
 
 /**
  * The smallest release that opens a settle window, bytes (lean, 2026-11-17): a 16 MiB texture's
- * pages lingering a tick are a few percent of the UHD 620's 150–300 MB budget, and the patch
- * cache's steady churn of smaller buffers never closes every window.
+ * pages lingering a tick are under 2% of the low setting's 1 GB GPU-resident ceiling (the
+ * brainstorm's Performance budget), and the patch cache's steady churn of smaller buffers never
+ * closes every window.
  */
 export const LARGE_RELEASE_BYTES = 16 * 1024 ** 2;
 
@@ -1420,7 +1434,8 @@ export interface AppMemorySample {
   readonly gpuPid: number | null;
 }
 
-function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+/** Whether `value` is a plain object, for narrowing what Electron returns. */
+export function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 

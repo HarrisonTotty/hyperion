@@ -31,7 +31,7 @@ import type {
 
 import type { SysfsFiles } from "../gpuClocks";
 import { activeGpu } from "../results";
-import { listDir, NODE_FILES, readText } from "./samplers";
+import { isRecord, listDir, NODE_FILES, readText } from "./samplers";
 
 /** Electron's `Display`, as much of it as the record reads. */
 export interface DisplayLike {
@@ -108,10 +108,6 @@ export function nodeMachineSources(electron: ElectronMachineParts): MachineSourc
     files: NODE_FILES,
     procRoot: "/proc",
   };
-}
-
-function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /**

@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 
-import { QUIET_RULE_UNCHECKED } from "../machineLoad";
 import {
   commandFixture,
   DESKTOP_SYS,
@@ -11,6 +10,7 @@ import {
 } from "./fixtures/sysfs";
 import {
   checkQuiet,
+  LOAD_UNCHECKED,
   parsePmsetBatt,
   parsePmsetLowPower,
   parseTlpMode,
@@ -100,7 +100,9 @@ describe("checkQuiet on the UHD 620 laptop", () => {
     const report = await checkQuiet(machine({ load: 1 }));
     expect(report.quiet).toBe(false);
     expect(report.refusals).toHaveLength(1);
-    expect(report.refusals[0]).toMatch(/^load average 1\.00 at the start/u);
+    expect(report.refusals).toEqual([
+      "load average 1.00 at the start (Design note 7 asks below 1.0)",
+    ]);
   });
 
   it("refuses above 60 °C after waiting five minutes for the package to cool, and names it", async () => {
@@ -207,14 +209,35 @@ describe("checkQuiet off Linux", () => {
     expect(report.state.supply).toBe("battery");
     expect(report.refusals).toEqual([
       "on battery (pmset: Battery Power); Design note 7 asks for AC",
-      expect.stringMatching(/^thermal pressure \(pmset -g therm: .*CPU_Speed_Limit = 71\)$/u),
+      expect.stringMatching(
+        /^thermal pressure after 300 s \(pmset -g therm: .*CPU_Speed_Limit = 71\)$/u,
+      ),
     ]);
+  });
+
+  it("starts macOS once its thermal pressure has cleared", async () => {
+    let reads = 0;
+    const sources = machine({ platform: "darwin" });
+    const report = await checkQuiet({
+      ...sources,
+      run: (file, args) => {
+        if (args.join(" ") !== "-g therm") {
+          return sources.run(file, args);
+        }
+        reads += 1;
+        return Promise.resolve(
+          commandFixture(reads < 3 ? "pmset-therm-pressure.txt" : "pmset-therm-nominal.txt"),
+        );
+      },
+    });
+    expect(report.quiet).toBe(true);
+    expect(report.cooledMs).toBe(2 * QUIET_LIMITS.coolPollMs);
   });
 
   it("never reads Windows as quiet on os.loadavg()'s zeros", async () => {
     const report = await checkQuiet(machine({ platform: "win32", load: 0 }));
     expect(report.quiet).toBe(false);
-    expect(report.refusals).toContain(QUIET_RULE_UNCHECKED);
+    expect(report.refusals).toContain(LOAD_UNCHECKED);
     expect(report.state.loadAverage1m).toBeNull();
     expect(report.state.profile.governor).toBeNull();
   });

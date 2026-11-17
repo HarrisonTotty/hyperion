@@ -4,6 +4,7 @@ import { keptBody } from "../../scenes/kept";
 import {
   answerRequest,
   type HeightModule,
+  postedMessageOf,
   StandInFields,
   type WasmBakedTerrain,
   type WasmClassMap,
@@ -1068,5 +1069,20 @@ describe("a height worker's fields", () => {
       expect(Object.hasOwn(answer.reply.bake.layers ?? {}, "maturity")).toBe(false);
       expect(asked).toEqual([]);
     });
+  });
+});
+
+describe("a worker's message", () => {
+  const reply = { kind: "bake-failed", id: 7, message: "out of range" } as const;
+
+  it("carries the module's memory's byte length once it has loaded (R12.T3.b)", () => {
+    expect(postedMessageOf(reply, { buffer: { byteLength: 17 * 65_536 } })).toEqual({
+      ...reply,
+      wasmBytes: 17 * 65_536,
+    });
+  });
+
+  it("is the reply as it is before the module has loaded", () => {
+    expect(postedMessageOf(reply, null)).toBe(reply);
   });
 });

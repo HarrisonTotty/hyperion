@@ -6,20 +6,25 @@
  *
  * @remarks
  * Under Linux, AC is the `online` file of the power supply whose `type` is `Mains`
- * (`Documentation/ABI/testing/sysfs-class-power`); a USB-C source's `online` is ignored, and a
- * supply whose `scope` is `Device`, such as a mouse's battery, is ignored too, so that a machine
- * with no `Mains` supply and no system battery reads as `desktop`, which is always on AC (hardware
- * item 2, decided 2026-09-30; this settles R12.T9's open point: a desktop passes). The profile is
+ * (`Documentation/ABI/testing/sysfs-class-power`: `type`, `online` and a battery's `status`); a
+ * USB-C source's `online` is ignored, and a supply whose `scope` is `Device`
+ * (`drivers/power/supply/power_supply_sysfs.c`, `POWER_SUPPLY_SCOPE_TEXT`), such as a mouse's
+ * battery, is ignored too, so that a machine with no `Mains` supply and no system battery reads as
+ * `desktop`, which is always on AC (hardware item 2, decided 2026-09-30; this settles R12.T9's open
+ * point: a desktop passes). Without a `Mains` supply, a system battery that is not discharging
+ * reads as on AC, and a kernel with no power-supply class at all as a desktop. The profile is
  * TLP's (`tlp-stat -s`, which runs unprivileged), the governor and energy preference of `cpu0`,
  * `intel_pstate/no_turbo`, and RAPL's PL1, PL2 and τ from `intel-rapl-mmio:0`, else
- * `intel-rapl:0` (`Documentation/power/powercap/powercap.rst`: `constraint_<n>_name`
- * `long_term` and `short_term`, each with `power_limit_uw` and `time_window_us`).
+ * `intel-rapl:0` (`Documentation/power/powercap/powercap.rst`: `constraint_<n>_name`, with
+ * `power_limit_uw` and `time_window_us`; `drivers/powercap/intel_rapl_common.c`'s `pl_names`:
+ * `long_term` is PL1 and `short_term` PL2).
  *
  * The load average takes R05's rule (`machineLoad.ts`'s `quietOf`), so that Windows, which keeps
  * none, is never quiet on `os.loadavg()`'s zeros: its record is forced, its quiet rule unchecked.
  * On macOS AC and the thermal state come from `pmset -g batt` and `pmset -g therm`, and Low Power
- * Mode from `pmset -g`, all unprivileged (the M5 Mac's lean, pending the owner): the thermal
- * pressure stands in for the package temperature, which macOS gives no unprivileged reading of.
+ * Mode from `pmset -g`, all unprivileged (Apple's `pmset.m` prints them; the M5 Mac's lean,
+ * pending the owner): the thermal pressure stands in for the package temperature, which macOS
+ * gives no unprivileged reading of, and the start waits for it to clear as for the package to cool.
  * The platform is one switch, in {@link checkQuiet}.
  */
 
@@ -40,6 +45,7 @@ import {
   readThermalZones,
   samplerPlatformOf,
   type SamplerSources,
+  type ThermalPressure,
 } from "./samplers";
 
 /** Design note 7's limits. */
@@ -121,7 +127,8 @@ export function supplyOf(supplies: ReadonlyArray<PowerSupply>): SupplyReading {
   const system = supplies.filter((supply) => supply.scope !== "Device");
   const mains = system.filter((supply) => supply.type === "Mains");
   if (mains.length > 0) {
-    const online = mains.filter((supply) => supply.online === 1);
+    // `online` is 1, or 2 for a programmable source (`sysfs-class-power`).
+    const online = mains.filter((supply) => supply.online !== null && supply.online > 0);
     return online.length > 0
       ? { supply: "mains", why: `${online.map((s) => s.name).join(", ")} online` }
       : { supply: "battery", why: `${mains.map((s) => s.name).join(", ")} offline` };
@@ -284,7 +291,7 @@ export interface PreconditionReport {
   readonly refusals: ReadonlyArray<string>;
   /** The record's `state`. */
   readonly state: PowerThermalRecord;
-  /** How long the start waited for the package to cool, ms. */
+  /** How long the start waited for the package to cool, or macOS's pressure to clear, ms. */
   readonly cooledMs: number;
 }
 
@@ -298,9 +305,18 @@ function supplyRefusal(reading: Measured<SupplyReading>): string | null {
     : null;
 }
 
-/** The load average's refusal by R05's rule, or `null` where it passes. */
+/** Why a platform that keeps no load average is never quiet. */
+export const LOAD_UNCHECKED =
+  "no load average on this platform: Design note 7's quiet machine is unchecked";
+
+/** The load average's refusal by R05's rule (`quietOf`), in this plan's words, or `null`. */
 function loadRefusal(platform: NodeJS.Platform, load: Measured<LoadAverage>): string | null {
-  return quietOf(platform, load.value ?? [0, 0, 0]).note;
+  if (!quietOf(platform, load.value ?? [0, 0, 0]).provisional) {
+    return null;
+  }
+  return load.value === null
+    ? LOAD_UNCHECKED
+    : `load average ${load.value[0].toFixed(2)} at the start (Design note 7 asks below 1.0)`;
 }
 
 /**
@@ -387,17 +403,34 @@ async function linuxQuiet(
   );
 }
 
+/**
+ * macOS's thermal state at the start, waiting for any pressure to clear for at most
+ * {@link QUIET_LIMITS.coolWaitMs}, one reading every {@link QUIET_LIMITS.coolPollMs}.
+ */
+async function clearedPressure(
+  sources: PreconditionSources,
+  waitedMs: number,
+): Promise<{ readonly pressure: Measured<ThermalPressure>; readonly waitedMs: number }> {
+  const pressure = await readThermalPressure(sources.run);
+  if (pressure.value === null || pressure.value.nominal || waitedMs >= QUIET_LIMITS.coolWaitMs) {
+    return { pressure, waitedMs };
+  }
+  await sources.sleep(QUIET_LIMITS.coolPollMs);
+  return clearedPressure(sources, waitedMs + QUIET_LIMITS.coolPollMs);
+}
+
 /** macOS's preconditions: `pmset`'s supply, Low Power Mode and thermal pressure, and the load. */
 async function darwinQuiet(
   sources: PreconditionSources,
   { load, loadAverage1m }: LoadReading,
 ): Promise<PreconditionReport> {
   const { platform } = sources;
-  const [batt, settings, pressure] = await Promise.all([
+  const [batt, settings, cleared] = await Promise.all([
     outputOf(sources.run, "pmset", ["-g", "batt"]),
     outputOf(sources.run, "pmset", ["-g"]),
-    readThermalPressure(sources.run),
+    clearedPressure(sources, 0),
   ]);
+  const { pressure } = cleared;
   const parsed = batt === null ? null : parsePmsetBatt(batt);
   const supply = parsed === null ? missing("pmset -g batt gave no power source") : measured(parsed);
   const pressureRefusal =
@@ -405,7 +438,7 @@ async function darwinQuiet(
       ? `the thermal state is unread (${pressure.reason}): a nominal state is unchecked`
       : pressure.value.nominal
         ? null
-        : `thermal pressure (pmset -g therm: ${pressure.value.detail})`;
+        : `thermal pressure after ${Math.round(cleared.waitedMs / 1000)} s (pmset -g therm: ${pressure.value.detail})`;
   return reportOf(
     [supplyRefusal(supply), loadRefusal(platform, load), pressureRefusal],
     {
@@ -418,7 +451,7 @@ async function darwinQuiet(
       startPackageDegC: null,
       temperatureSource: pressure.value === null ? null : "pmset -g therm",
     },
-    0,
+    cleared.waitedMs,
   );
 }
 

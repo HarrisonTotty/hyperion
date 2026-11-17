@@ -40,8 +40,10 @@ import {
   type PerfSample,
   PerfSampler,
   readNumber,
+  NVIDIA_MAX_REASON,
   type SamplerSources,
   sampleThermal,
+  SPAWN_LINES,
   sampleThrottle,
   type SpawnLines,
   summariseSamples,
@@ -228,6 +230,19 @@ describe("the throttle sampler", () => {
   });
 });
 
+/** A stream over `fake`, its clock `clock.nowMs`. */
+function streamOf(
+  fake: ReturnType<typeof fakeSpawn>,
+  clock: { nowMs: number } = { nowMs: 0 },
+): NvidiaClockStream {
+  return new NvidiaClockStream({
+    spawn: fake.spawn,
+    intervalMs: 100,
+    gpuIndex: 0,
+    now: () => clock.nowMs,
+  });
+}
+
 describe("the long-lived nvidia-smi child", () => {
   it("asks for its fields as CSV every interval", () => {
     expect(nvidiaClockArgs(100)).toEqual([
@@ -255,19 +270,19 @@ describe("the long-lived nvidia-smi child", () => {
     expect(parseNvidiaClockLine(error ?? "")).toBeNull();
   });
 
-  it("starts one child and gives its latest line to the GPU sampler", async () => {
+  it("starts one child however often it is started", () => {
     const fake = fakeSpawn();
-    let nowMs = 0;
-    const stream = new NvidiaClockStream({
-      spawn: fake.spawn,
-      intervalMs: 100,
-      gpuIndex: 0,
-      now: () => nowMs,
-    });
+    const stream = streamOf(fake);
     stream.start();
     stream.start();
     expect(fake.started).toEqual([{ file: "nvidia-smi", args: nvidiaClockArgs(100) }]);
     expect(stream.latest()).toEqual(missing("no line from nvidia-smi yet"));
+  });
+
+  it("gives its GPU's latest line to the GPU sampler, with no maximum to share time at", async () => {
+    const fake = fakeSpawn();
+    const stream = streamOf(fake);
+    stream.start();
     fake.line("1, 300, 2100, Not Active, Not Active, Not Active, Not Active, Not Active, 40");
     fake.line(commandFixture("nvidia-smi-clocks.csv").split("\n")[1] ?? "");
     const gpu = new GpuClockSampler({
@@ -278,11 +293,25 @@ describe("the long-lived nvidia-smi child", () => {
     expect(await gpu.read()).toEqual({
       source: "nvidia-smi",
       mhz: measured(1890),
-      maxMHz: measured(2100),
+      maxMHz: missing(NVIDIA_MAX_REASON),
       slowdown: measured(true),
     });
-    nowMs = 1001;
+  });
+
+  it("reads a line older than ten intervals as stale", () => {
+    const fake = fakeSpawn();
+    const clock = { nowMs: 0 };
+    const stream = streamOf(fake, clock);
+    stream.start();
+    fake.line(commandFixture("nvidia-smi-clocks.csv").split("\n")[0] ?? "");
+    clock.nowMs = 1001;
     expect(stream.latest().reason).toBe("nvidia-smi's latest line is 1001 ms old");
+  });
+
+  it("ends its child when stopped", () => {
+    const fake = fakeSpawn();
+    const stream = streamOf(fake);
+    stream.start();
     stream.stop();
     expect(fake.stopped()).toBe(1);
     expect(stream.latest()).toEqual(missing("stopped"));
@@ -299,6 +328,63 @@ describe("the long-lived nvidia-smi child", () => {
     stream.start();
     fake.end("no nvidia-smi on this machine");
     expect(stream.latest()).toEqual(missing("no nvidia-smi on this machine"));
+  });
+});
+
+/** Runs `SPAWN_LINES` on Node itself with `script`, resolving its lines and its end. */
+function run(
+  script: string,
+  stopAfter: number | null = null,
+): Promise<{ readonly lines: string[]; readonly end: string | null }> {
+  return new Promise((resolve) => {
+    const lines: string[] = [];
+    const child = SPAWN_LINES(
+      process.execPath,
+      ["-e", script],
+      (line) => {
+        lines.push(line);
+        if (lines.length === stopAfter) {
+          child.stop();
+          // A stopped child reports no end; give its exit a moment to prove it.
+          setTimeout(() => {
+            resolve({ lines, end: null });
+          }, 200);
+        }
+      },
+      (end) => {
+        resolve({ lines, end });
+      },
+    );
+  });
+}
+
+describe("a child read a line at a time", () => {
+  it("gives each line of the child's output", async () => {
+    const { lines } = await run('console.log("0, 1965"); console.log("0, 1890");');
+    expect(lines).toEqual(["0, 1965", "0, 1890"]);
+  });
+
+  it("ends with the child's exit code and the tail of its standard error", async () => {
+    const { end } = await run(
+      'console.error("Field is not a valid field to query."); process.exit(2);',
+    );
+    expect(end).toMatch(/exited \(2\): Field is not a valid field to query\.$/u);
+  });
+
+  it("ends with no such program where the file is missing", async () => {
+    const result = await new Promise<string>((resolve) => {
+      SPAWN_LINES("hyperion-no-such-program", [], () => undefined, resolve);
+    });
+    expect(result).toBe("no hyperion-no-such-program on this machine");
+  });
+
+  it("reports neither a line nor an end once stopped", async () => {
+    const { lines, end } = await run(
+      'console.log("a"); setTimeout(() => console.log("b"), 100); setTimeout(() => {}, 2000);',
+      1,
+    );
+    expect(lines).toEqual(["a"]);
+    expect(end).toBeNull();
   });
 });
 
@@ -434,46 +520,82 @@ describe("a repetition's summary", () => {
   });
 });
 
+function tickOf(ticks: ReadonlyArray<() => void>): () => void {
+  const tick = ticks[0];
+  if (tick === undefined) {
+    throw new Error("the sampler set no interval");
+  }
+  return tick;
+}
+
 describe("the 10 Hz sampler", () => {
-  it("samples every interval, skips a tick while one reads, and summarises a span", async () => {
+  /** A sampler over the laptop's tree whose ticks the test fires, and its clock. */
+  function laptopSampler(): {
+    readonly sampler: PerfSampler;
+    readonly ticks: (() => void)[];
+    readonly clock: { nowMs: number };
+    readonly cancelled: () => number;
+  } {
     const ticks: (() => void)[] = [];
-    let cancelled = 0;
+    let cancels = 0;
     const every: Every = (callback, ms) => {
       expect(ms).toBe(100);
       ticks.push(callback);
       return () => {
-        cancelled += 1;
+        cancels += 1;
       };
     };
-    let nowMs = 0;
+    const clock = { nowMs: 0 };
     const laptop = sources(X1_YOGA_SYS);
     const sampler = new PerfSampler({
       sources: laptop,
       gpu: new GpuClockSampler({ sources: laptop, gpu: UHD_620, nvidia: null }),
       intervalMs: 100,
-      now: () => nowMs,
+      now: () => clock.nowMs,
       every,
     });
+    return { sampler, ticks, clock, cancelled: () => cancels };
+  }
+
+  it("sets one interval however often it is started, and clears it when stopped", () => {
+    const { sampler, ticks, cancelled } = laptopSampler();
     sampler.start();
     sampler.start();
     expect(ticks).toHaveLength(1);
-    const tick = ticks[0] ?? ((): void => undefined);
+    sampler.stop();
+    expect(cancelled()).toBe(1);
+  });
+
+  it("skips a tick while the one before it is still reading", async () => {
+    const { sampler, ticks } = laptopSampler();
+    sampler.start();
+    const tick = tickOf(ticks);
     tick();
-    // The first tick is still reading: this one is skipped.
     tick();
     await expect.poll(() => sampler.samples.length).toBe(1);
-    nowMs = 100;
-    tick();
-    await expect.poll(() => sampler.samples.length).toBe(2);
-    sampler.stop();
-    expect(cancelled).toBe(1);
     expect(sampler.failure).toBeNull();
+  });
+
+  it("summarises the samples of a span", async () => {
+    const { sampler, clock } = laptopSampler();
+    await sampler.sampleOnce();
+    clock.nowMs = 100;
+    await sampler.sampleOnce();
     const figures = sampler.summarise(0, 100);
-    expect(figures.packageThrottleMs).toBe(0);
-    expect(figures.throttleFraction).toBe(0);
-    expect(figures.rp0Share).toBe(1);
-    expect(figures.maxPackageDegC).toBe(52);
+    expect(figures).toMatchObject({
+      packageThrottleMs: 0,
+      throttleFraction: 0,
+      rp0Share: 1,
+      maxPackageDegC: 52,
+    });
     expect(sampler.summarise(200, 300).gpuMedianMHz).toBeNull();
+  });
+
+  it("drops the samples before a time", async () => {
+    const { sampler, clock } = laptopSampler();
+    await sampler.sampleOnce();
+    clock.nowMs = 100;
+    await sampler.sampleOnce();
     sampler.discardBefore(100);
     expect(sampler.samples.map((s) => s.thermal.atMs)).toEqual([100]);
   });

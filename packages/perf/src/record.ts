@@ -217,8 +217,9 @@ export interface PowerProfileRecord {
 /** The machine's power and thermal state at the start (Design note 7). */
 export interface PowerThermalRecord {
   /**
-   * `mains`: the `Mains` supply is online; `battery`: it is not; `desktop`: no `Mains` supply and
-   * no system battery (hardware item 2); `null` where unread.
+   * `mains`: the `Mains` supply is online, or, with none, a system battery is not discharging;
+   * `battery`: neither; `desktop`: no `Mains` supply and no system battery (hardware item 2), or no
+   * power-supply class at all; `null` where unread (R12.T2).
    */
   readonly supply: "mains" | "battery" | "desktop" | null;
   readonly profile: PowerProfileRecord;
@@ -321,10 +322,13 @@ export interface PassFigures {
 /** The GPU memory's headline and its bounds (Design note 6). */
 export interface GpuMemoryFigures {
   readonly source: "drm-fdinfo" | "nvidia-smi" | "adapter-tally";
-  /** Σ `drm-resident-system0`, or `nvidia-smi`'s figure, or the tally's, at its peak. */
+  /**
+   * Σ `drm-resident-<region>` over every region (`system0` and `stolen-system0` on i915), or
+   * `nvidia-smi`'s figure, or the tally's, at its peak.
+   */
   readonly residentPeakBytes: number;
   readonly totalPeakBytes: number | null;
-  /** Σ resident − ½ Σ `drm-shared-system0`. */
+  /** Σ resident − ½ Σ `drm-shared-<region>`, at its peak: a lower bound on the peak resident. */
   readonly residentLowerBoundBytes: number | null;
 }
 
@@ -373,7 +377,10 @@ export interface ThrottleFigures {
   readonly coreThrottleMs: number | null;
   /** The share of the span the package was throttled. */
   readonly throttleFraction: number | null;
-  /** The GPU's share of the span at `gt_RP0_freq_mhz`, or at NVIDIA's maximum graphics clock. */
+  /**
+   * The GPU's share of the span at `gt_RP0_freq_mhz` (amdgpu's highest level); `null` on NVIDIA,
+   * whose GPU Boost runs below its maximum unthrottled, where `gpuThrottleShare` stands in.
+   */
   readonly rp0Share: number | null;
   readonly gpuMinMHz: number | null;
   readonly gpuMedianMHz: number | null;
