@@ -200,21 +200,18 @@ pub(crate) fn run_with_solves(
     pass: &Pass<'_>,
     working: &mut Working,
 ) -> Vec<Option<OrographicSolve>> {
-    run_diagnosed(pass, working)
-        .water
-        .map(|water| {
-            water
-                .months
-                .iter()
-                .map(|month| {
-                    month.orographic.as_ref().map(|solve| OrographicSolve {
-                        restarts: solve.restarts,
-                        converged: solve.converged,
-                    })
+    run_diagnosed(pass, working).water.map_or_default(|water| {
+        water
+            .months
+            .iter()
+            .map(|month| {
+                month.orographic.as_ref().map(|solve| OrographicSolve {
+                    restarts: solve.restarts,
+                    converged: solve.converged,
                 })
-                .collect()
-        })
-        .unwrap_or_default()
+            })
+            .collect()
+    })
 }
 
 /// What a run did that is no output, for its tests: the guard's counts, the corrections and the

@@ -452,9 +452,9 @@ fn no_cell_without_uplift_rises() {
     times.extend([1.0e2, 1.0e3, 1.0e4, 1.0e5, 1.0e6].map(Time::Years));
     for time in times {
         let solution = inputs.solve(&tree, time);
-        for c in 0..7 {
+        for (c, &z0) in inputs.z0_m.iter().enumerate() {
             let z = solution.elevation_m(cell_of(c), 1.0);
-            assert!(z <= inputs.z0_m[c], "{time:?}: cell {c} rose to {z} m");
+            assert!(z <= z0, "{time:?}: cell {c} rose to {z} m");
         }
         if time == Time::Years(1.0e2) {
             assert_same_bits(solution.elevation_m(2, 1.0), 50.0);

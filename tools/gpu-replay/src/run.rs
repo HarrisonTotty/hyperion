@@ -133,7 +133,7 @@ pub(crate) fn rows_of(capture: &Capture) -> BTreeMap<String, PassRow> {
         .meta()
         .get("passRows")
         .and_then(Value::as_object)
-        .map(|map| {
+        .map_or_default(|map| {
             map.iter()
                 .map(|(label, row)| {
                     let row = match row.as_str() {
@@ -145,7 +145,6 @@ pub(crate) fn rows_of(capture: &Capture) -> BTreeMap<String, PassRow> {
                 })
                 .collect()
         })
-        .unwrap_or_default()
 }
 
 /// The bytes the span's writes upload.

@@ -852,9 +852,9 @@ mod capped {
             for record in records.iter_mut() {
                 let cut = &cuts[record.cut];
                 let rays = &record.rays;
-                for k in 0..DEPTHS {
+                for (k, beyond) in record.beyond.iter_mut().enumerate() {
                     if same_v(depth_v(k, cut.v), f) {
-                        record.beyond[k] = count.stars_beyond(rays);
+                        *beyond = count.stars_beyond(rays);
                     }
                 }
                 if same_v(cut.v, f) {

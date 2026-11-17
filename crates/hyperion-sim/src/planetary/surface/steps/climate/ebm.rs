@@ -1578,15 +1578,18 @@ fn shares(moisture: &Moisture, water: &WaterVapour) -> bool {
     sharing() && moisture.condensable == water.water
 }
 
-/// Whether the direct reads share what they read at one temperature (R09.T16.a, B3 and B9):
-/// always, but in a test that switches it off for the per-read path, the oracle (the tests'
-/// `with_saturation_reads`).
+/// Whether the direct reads share what they read at one temperature (R09.T16.a, B3 and B9): unless
+/// a test switches it off for the per-read path, the oracle (the tests' `with_saturation_reads`).
+#[cfg(test)]
 #[must_use]
 fn sharing() -> bool {
-    #[cfg(test)]
-    if SATURATION_READS.with(core::cell::Cell::get) == SaturationReads::PerRead {
-        return false;
-    }
+    SATURATION_READS.with(core::cell::Cell::get) != SaturationReads::PerRead
+}
+
+/// Whether the direct reads share what they read at one temperature: always outside a test build.
+#[cfg(not(test))]
+#[must_use]
+const fn sharing() -> bool {
     true
 }
 

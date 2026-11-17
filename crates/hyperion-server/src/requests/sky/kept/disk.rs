@@ -965,13 +965,12 @@ mod tests {
 
     /// The files in the store's directory.
     fn listed(dir: &TempDir) -> Vec<String> {
-        let mut names: Vec<String> = fs::read_dir(dir.path().join(SKY_FILES_DIR))
-            .map(|entries| {
+        let mut names: Vec<String> =
+            fs::read_dir(dir.path().join(SKY_FILES_DIR)).map_or_default(|entries| {
                 entries
                     .map(|entry| entry.unwrap().file_name().into_string().unwrap())
                     .collect()
-            })
-            .unwrap_or_default();
+            });
         names.sort();
         names
     }

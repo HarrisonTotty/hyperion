@@ -2325,9 +2325,9 @@ mod tests {
                     .find(|walk| walk.layer == shell.layer())
                     .expect("the shell's walk");
                 let (outer, inner) = walk.shell_spheres(usize::from(shell.index()));
-                let held: BTreeSet<CellKey> = inner
-                    .map(|inner| crate::galaxy::query::cells_in_sphere(walk.layer, inner).collect())
-                    .unwrap_or_default();
+                let held: BTreeSet<CellKey> = inner.map_or_default(|inner| {
+                    crate::galaxy::query::cells_in_sphere(walk.layer, inner).collect()
+                });
                 expected.extend(
                     crate::galaxy::query::cells_in_sphere(walk.layer, outer).filter(|&key| {
                         !held.contains(&key)

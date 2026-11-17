@@ -243,8 +243,7 @@ pub fn select_body_frame(
     let depth = |id: BodyId| depths.get(&id).copied().unwrap_or(0);
     let chain = current
         .filter(|id| by_id.get(id).is_some_and(|c| c.ratio() <= 1.0))
-        .map(ancestors)
-        .unwrap_or_default();
+        .map_or_default(ancestors);
     let eligible = |c: &&BodyFrameCandidate| {
         c.ratio() <= BODY_FRAME_ENTRY || (chain.contains(&c.id) && c.ratio() <= 1.0)
     };

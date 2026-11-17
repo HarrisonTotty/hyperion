@@ -772,11 +772,7 @@ impl PassTiming {
 /// and says why.
 #[must_use]
 fn machine(sources: &MachineSources, adapter: &wgpu::AdapterInfo) -> Value {
-    let name = sources
-        .host_name
-        .as_deref()
-        .map(normalised)
-        .unwrap_or_default();
+    let name = sources.host_name.as_deref().map_or_default(normalised);
     json!({
         "name": if name.is_empty() { "machine".to_owned() } else { name },
         "cpu": sources.cpu_brand.as_deref().unwrap_or("unknown"),
@@ -1667,12 +1663,11 @@ mod tests {
     fn row_ids(results: &Value) -> Vec<String> {
         results["criteria"]["whole"]
             .as_array()
-            .map(|rows| {
+            .map_or_default(|rows| {
                 rows.iter()
                     .filter_map(|row| row["id"].as_str().map(str::to_owned))
                     .collect()
             })
-            .unwrap_or_default()
     }
 
     /// Readings from `nvidia-smi` of a 2,115 MHz GPU at `graphics_mhz` in P2.

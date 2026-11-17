@@ -141,7 +141,7 @@ fn bake_bits(bake: &TerrainBake) -> Vec<u64> {
     out.extend(p.origin.map(bits));
     out.push(bits(p.origin_height_m));
     out.extend(f32s(&p.heights));
-    out.extend(p.offsets.as_deref().map(f32s).unwrap_or_default());
+    out.extend(p.offsets.as_deref().map_or_default(f32s));
     out.extend(f32s(&p.normals));
     out.extend([p.height_range_m.0, p.height_range_m.1].map(|h| u64::from(bits_f32(h))));
     out.extend([bits(p.bounding_radius_m), bits(p.skirt_depth_m)]);

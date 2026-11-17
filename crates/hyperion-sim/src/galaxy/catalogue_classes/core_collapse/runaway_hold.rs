@@ -258,13 +258,13 @@ fn the_terms_are_the_young_field_s_runaway_and_walkaway_classes() {
             ages.max_pdf_between(floor, RECENT_DEATH_AGES) * (1.0 + RATE_MARGIN) * interval;
         let expected = intervals.rates(ages, interval, &term.shares);
         assert_eq!(term.rates, expected);
-        for i in 0..INTERVALS {
+        for (i, &rate) in term.rates.rates.iter().enumerate() {
             let oldest = oldest_death_age(table, i, interval);
             assert_same_bits(
-                term.rates.rates[i],
+                rate,
                 ages.max_pdf_between(floor, Years::new(oldest)) * (1.0 + RATE_MARGIN) * interval,
             );
-            assert!(term.rates.rates[i] <= densest);
+            assert!(rate <= densest);
         }
         assert_same_bits(term.weight, term.rates.total());
         order.push((

@@ -1314,14 +1314,19 @@ impl CriticalColumn {
 
 /// Whether a solve of the partition's weights ([`AirborneWeights::solve`]) and a step of T13.c's
 /// partitioned greenhouse stop at their bit-exact fixed points (lever (p), decision-p14-t54a-passes,
-/// "Cost escalation (after Batch B)"): always in the generator, and in the tests unless they switch
-/// the exits off (`with_exits`).
+/// "Cost escalation (after Batch B)"): in the tests unless they switch the exits off
+/// (`with_exits`).
+#[cfg(test)]
 #[must_use]
 pub(crate) fn exits_taken() -> bool {
-    #[cfg(test)]
-    if EXITS.with(core::cell::Cell::get) == Exits::Unlevered {
-        return false;
-    }
+    EXITS.with(core::cell::Cell::get) != Exits::Unlevered
+}
+
+/// Whether the partition's solves and T13.c's partitioned greenhouses stop at their bit-exact fixed
+/// points: always outside a test build.
+#[cfg(not(test))]
+#[must_use]
+pub(crate) const fn exits_taken() -> bool {
     true
 }
 

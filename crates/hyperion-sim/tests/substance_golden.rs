@@ -1438,7 +1438,7 @@ fn substance_fixture_grain_density_holds_the_registry() {
         assert_eq!(read.variant, variant, "{key}'s variant");
         for phase in [CondensedPhase::Solid, CondensedPhase::Liquid] {
             let pieces = read.member(phase);
-            let mut samples = pieces.map(piece_samples).unwrap_or_default();
+            let mut samples = pieces.map_or_default(piece_samples);
             samples.extend(row_samples(row, phase));
             compare_samples(row, phase, pieces, &samples);
             if let Some(pieces) = pieces {

@@ -2112,14 +2112,19 @@ pub(crate) struct LidWeathering {
 }
 
 /// Whether a lid younger than [`REGOLITH_FORMATION_TIME`] keeps the cap
-/// ([`StandIn::UnweatheredLava`]): always, but in a test that reads P14.T54.b.e's area mix as
-/// built before decision-p14-t54b-e-findings' must-fix ([`with_young_lava_weathered`]).
+/// ([`StandIn::UnweatheredLava`]): unless a test reads P14.T54.b.e's area mix as built before
+/// decision-p14-t54b-e-findings' must-fix ([`with_young_lava_weathered`]).
+#[cfg(test)]
 #[must_use]
 fn young_lava_capped() -> bool {
-    #[cfg(test)]
-    if YOUNG_LAVA_WEATHERED.with(core::cell::Cell::get) {
-        return false;
-    }
+    !YOUNG_LAVA_WEATHERED.with(core::cell::Cell::get)
+}
+
+/// Whether a lid younger than [`REGOLITH_FORMATION_TIME`] keeps the cap: always outside a test
+/// build.
+#[cfg(not(test))]
+#[must_use]
+const fn young_lava_capped() -> bool {
     true
 }
 

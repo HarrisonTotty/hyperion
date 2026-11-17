@@ -8644,8 +8644,8 @@ fn a_pinned_primary_s_merged_dwarf_disrupts() {
         let age = 1.0e6;
         assert!(age < pin, "the pin is still to come");
         let mut engine = engine_with_its_pin(&input, age, 10.0);
-        for i in 0..2 {
-            engine.members[i] = Member::Remnant {
+        for member in &mut engine.members {
+            *member = Member::Remnant {
                 phase: Phase::CarbonOxygenWhiteDwarf,
                 birth: 0.5 * age,
                 origin: crate::units::Megayears::ZERO,

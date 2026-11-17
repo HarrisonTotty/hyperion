@@ -15,9 +15,10 @@
 //! A copy lives at
 //! `<profile directory>/sky-fixtures/<run>-<binary>-<fingerprint>/<name>`:
 //!
-//! - `<profile directory>` is the parent of the `deps/` directory holding the test binary, such as
-//!   `target/debug` or `target/wasm32-wasip1/debug`. Each target and each cargo profile gets its
-//!   own directory, so wasip1 always builds and reads its own copy and never the native one.
+//! - `<profile directory>` is the profile's directory in the build directory that holds the test
+//!   binary, such as `target/debug` or `target/wasm32-wasip1/debug` ([`profile_of`]). Each target
+//!   and each cargo profile gets its own directory, so wasip1 always builds and reads its own copy
+//!   and never the native one.
 //! - `<run>` is `NEXTEST_RUN_ID`, a fresh UUID that nextest makes for every run, so a process
 //!   never looks at another run's copy. Each run builds its own, and a copy from another build,
 //!   commit or profile, which another run made, is never opened.
@@ -64,7 +65,10 @@
 //! shares only when its runner passes the run's id (`--env NEXTEST_RUN_ID`). Without it, the guest
 //! builds in its process. The guest's `argv[0]` is its module's bare file name, so [`this_binary`]
 //! looks for that name among the workspace target's wasip1 profiles. Those lie under the
-//! repository, which the runner opens to the guest (`--dir`).
+//! repository, which the runner opens to the guest (`--dir`). Cargo does not promise where its
+//! build directory keeps a test binary ("The build-dir layout is considered internal to Cargo, and
+//! is subject to change", the Cargo Book's "Build cache", 1.100), so a test fails if under nextest
+//! the binary finds no run directory, rather than every process building its own unseen.
 //!
 //! # I/O
 //!
@@ -318,7 +322,7 @@ fn run_dir() -> Option<&'static Path> {
 
 /// The run directory of the run `run` of the binary at `binary` whose bytes have `fingerprint`,
 /// or `None` if `run` is not a nextest run id (a UUID: letters, digits and hyphens) or the binary
-/// does not lie in a profile's `deps/` directory or similar.
+/// does not lie in a profile's directory of the build directory ([`profile_of`]).
 #[must_use]
 fn run_dir_for(run: &str, binary: &Path, fingerprint: u64) -> Option<PathBuf> {
     // Anything but a run id must not reach a path.
@@ -329,12 +333,30 @@ fn run_dir_for(run: &str, binary: &Path, fingerprint: u64) -> Option<PathBuf> {
         return None;
     }
     let name = binary.file_name()?.to_str()?;
-    let profile = binary.parent()?.parent()?;
+    let profile = profile_of(binary)?;
     Some(
         profile
             .join(ROOT)
             .join(format!("{run}-{name}-{fingerprint:016x}")),
     )
+}
+
+/// The profile's directory of the build directory that holds the test binary at `binary`, or
+/// `None` if it lies in none. Cargo 1.100 keeps each build step's output in a directory of its own,
+/// `<profile>/build/<package>/<hash>/out/<binary>` (cargo#15010, its "Overview"); cargo before it
+/// kept test binaries in `<profile>/deps/`, which [`this_binary`] still searches.
+#[must_use]
+fn profile_of(binary: &Path) -> Option<&Path> {
+    let dir = binary.parent()?;
+    if dir.file_name()? == "deps" {
+        return dir.parent();
+    }
+    let build = dir.parent()?.parent()?.parent()?;
+    if dir.file_name()? == "out" && build.file_name()? == "build" {
+        build.parent()
+    } else {
+        None
+    }
 }
 
 /// The file of this test binary: the running executable natively.
@@ -346,22 +368,35 @@ fn this_binary() -> Option<PathBuf> {
 
 /// The file of this test binary: under wasmtime, whose guest sees its module's bare file name as
 /// `argv[0]` and has no `current_exe`, the one module of that name among the workspace target's
-/// wasip1 profiles, `target/wasm32-wasip1/<profile>/deps/<name>`. The name holds cargo's
-/// metadata hash, which differs between profiles, so at most one profile holds it. A target
-/// directory elsewhere (`CARGO_TARGET_DIR`) is not searched, and the guest then builds in its
-/// process.
+/// wasip1 profiles, in a build step's directory of this package,
+/// `target/wasm32-wasip1/<profile>/build/hyperion-sim/<hash>/out/<name>` ([`profile_of`]), or in
+/// `<profile>/deps/<name>`, where cargo before 1.100 put it. The name holds cargo's metadata hash,
+/// which differs between profiles and between build steps, so at most one directory holds it. A
+/// target directory elsewhere (`CARGO_TARGET_DIR`) is not searched, and the guest then builds in
+/// its process.
 #[cfg(target_family = "wasm")]
 fn this_binary() -> Option<PathBuf> {
     let argv0 = std::env::args_os().next()?;
     let name = Path::new(&argv0).file_name()?.to_owned();
     // `crates/<crate>/../../target`: the workspace's target directory.
     let wasip1 = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/wasm32-wasip1");
-    // A profile directory that cannot be listed is passed over: if it held the module, the module
-    // is not found, and the guest builds in its process.
+    // A directory that cannot be listed is passed over: if it held the module, the module is not
+    // found, and the guest builds in its process.
     let mut found = fs::read_dir(wasip1)
         .ok()?
         .filter_map(Result::ok)
-        .map(|profile| profile.path().join("deps").join(&name))
+        .flat_map(|profile| {
+            let profile = profile.path();
+            let steps = fs::read_dir(profile.join("build").join(env!("CARGO_PKG_NAME")));
+            let mut places: Vec<PathBuf> = steps
+                .into_iter()
+                .flatten()
+                .filter_map(Result::ok)
+                .map(|step| step.path().join("out").join(&name))
+                .collect();
+            places.push(profile.join("deps").join(&name));
+            places
+        })
         .filter(|path| path.is_file());
     let binary = found.next()?;
     found.next().is_none().then_some(binary)
@@ -738,21 +773,68 @@ mod tests {
     }
 
     /// A run directory is a nextest run id's, the binary's name and its fingerprint, in the
-    /// binary's profile directory; anything but a run id is refused before it reaches a path.
+    /// binary's profile directory, under cargo 1.100's build-directory layout and the one before;
+    /// anything but a run id, or a binary in no profile's directory, is refused before it reaches
+    /// a path.
     #[test]
     fn a_run_directory_takes_only_a_run_id() {
-        let binary = Path::new("target/debug/deps/hyperion_sim-0123");
+        let binary = Path::new("target/debug/build/hyperion-sim/0123/out/hyperion_sim-0123");
         let run = "db70d0c7-e81a-432e-944c-e3bc8afdd282";
+        let expected = Some(PathBuf::from(format!(
+            "target/debug/{ROOT}/{run}-hyperion_sim-0123-00000000000000ab"
+        )));
+        assert_eq!(run_dir_for(run, binary, 0xab), expected);
+        let before = Path::new("target/debug/deps/hyperion_sim-0123");
         assert_eq!(
-            run_dir_for(run, binary, 0xab),
-            Some(PathBuf::from(format!(
-                "target/debug/{ROOT}/{run}-hyperion_sim-0123-00000000000000ab"
-            )))
+            run_dir_for(run, before, 0xab),
+            expected,
+            "cargo before 1.100"
         );
         for refused in ["", "../x", "a/b", "a\\b", "a.b", &"a".repeat(65)] {
             assert_eq!(run_dir_for(refused, binary, 0xab), None, "{refused:?}");
         }
-        assert_eq!(run_dir_for(run, Path::new("hyperion_sim"), 0xab), None);
+        for elsewhere in [
+            "hyperion_sim",
+            "target/debug/hyperion_sim-0123",
+            "target/debug/build/hyperion-sim/0123/hyperion_sim-0123",
+            "target/debug/steps/hyperion-sim/0123/out/hyperion_sim-0123",
+        ] {
+            assert_eq!(
+                run_dir_for(run, Path::new(elsewhere), 0xab),
+                None,
+                "{elsewhere}"
+            );
+        }
+    }
+
+    /// Under nextest (natively, and on wasip1, whose runner passes the run's id), this binary finds
+    /// itself and its run directory, in its profile directory of the workspace's target directory:
+    /// a cargo that moved its test binaries would otherwise leave every process building its own
+    /// fixtures, unseen. Outside nextest there is no run directory to find, and with a target
+    /// directory of its own (`CARGO_TARGET_DIR`) wasip1 does not search for it.
+    #[test]
+    fn under_nextest_the_binary_finds_its_run_directory() {
+        if std::env::var_os("NEXTEST_RUN_ID").is_none() || option_env!("CARGO_TARGET_DIR").is_some()
+        {
+            return;
+        }
+        let dir = run_dir().expect("a run directory, under nextest");
+        assert_eq!(dir.parent().and_then(Path::file_name), Some(ROOT.as_ref()));
+        let profiles = dir
+            .parent()
+            .and_then(Path::parent)
+            .and_then(Path::parent)
+            .expect("its profile directory's parent");
+        let target = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target");
+        if cfg!(target_family = "wasm") {
+            // The search's own path, built from the same directory: std has no `canonicalize`
+            // on wasip1.
+            assert_eq!(profiles, target.join("wasm32-wasip1"), "{}", dir.display());
+        } else {
+            // The running executable's path, its symbolic links resolved.
+            let canonical = |path: &Path| fs::canonicalize(path).expect("an existing directory");
+            assert_eq!(canonical(profiles), canonical(&target), "{}", dir.display());
+        }
     }
 
     /// Pruning keeps the newest runs, by their times, whatever order they are listed in, and none

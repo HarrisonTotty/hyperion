@@ -1591,17 +1591,13 @@ fn near_critical_body(record: &BodyRecord) -> Option<String> {
     for deck in inventory.decks() {
         let condensate = deck.condensate();
         let (t, p) = (deck.base_temperature().value(), deck.base().value());
-        let critical = condensate
-            .substance()
-            .phase_diagram()
-            .map(|d| {
-                format!(
-                    " ({:.2} T_c, {:.2} p_c)",
-                    t / d.critical_temperature().value(),
-                    p / d.critical_pressure().value()
-                )
-            })
-            .unwrap_or_default();
+        let critical = condensate.substance().phase_diagram().map_or_default(|d| {
+            format!(
+                " ({:.2} T_c, {:.2} p_c)",
+                t / d.critical_temperature().value(),
+                p / d.critical_pressure().value()
+            )
+        });
         write!(
             out,
             "; {} based at {:.2} bar, {t:.2} K{critical}",

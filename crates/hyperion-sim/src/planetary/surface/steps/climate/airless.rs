@@ -3055,16 +3055,15 @@ mod tests {
             let mine: Vec<&(usize, usize, f64, f64)> =
                 orbit(last).iter().filter(|s| s.0 == site).collect();
             let weight: f64 = mine.iter().map(|s| s.2).sum();
-            for k in 0..4 {
+            for (k, &about) in moments.about_reference.iter().enumerate() {
                 let direct = mine.iter().fold(0.0, |sum, s| {
                     sum + s.2 * math::powi(s.3 - reference_k[site], i32::try_from(k + 1).unwrap())
                 }) / weight;
                 let scale = math::powi(100.0, i32::try_from(k + 1).unwrap());
                 assert!(
-                    (moments.about_reference[k] - direct).abs() < 1e-9 * scale,
-                    "site {site}, k {}: {} against {direct}",
+                    (about - direct).abs() < 1e-9 * scale,
+                    "site {site}, k {}: {about} against {direct}",
                     k + 1,
-                    moments.about_reference[k]
                 );
             }
             let fourth = mine
