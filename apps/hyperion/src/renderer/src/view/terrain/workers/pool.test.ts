@@ -299,6 +299,44 @@ describe("the height-worker pool", () => {
     expect(pool.fieldResidentBytes).toBe(3 * 10);
   });
 
+  it("reports each running worker's field copy and the largest WebAssembly memory it gave", () => {
+    const { pool, created } = poolOf(2);
+    pool.fieldInit(MOON, blockOf(100, 0));
+    expect(pool.workerMemory).toEqual([
+      { fieldBytes: 0, wasmBytes: 0 },
+      { fieldBytes: 0, wasmBytes: 0 },
+    ]);
+    workerAt(created, 0).answerFields();
+    pool.reprioritise([req(1, 9), req(2, 8)]);
+    const worker = workerAt(created, 1);
+    const [bake] = worker.pendingBakes;
+    if (bake === undefined) {
+      throw new Error("no bake was posted to the second worker");
+    }
+    // The memory only grows: the later, smaller figure lowers nothing.
+    worker.reply({
+      kind: "baked",
+      id: bake.id,
+      bake: bakeOf(bake.key, bake.generation),
+      wasmBytes: 3 * 65_536 * 32,
+    });
+    const [init] = worker.fieldMessages;
+    worker.reply({
+      kind: "field-held",
+      id: init?.id ?? -1,
+      body: MOON,
+      heldBytes: 100,
+      block: null,
+      wasmBytes: 2 * 65_536 * 32,
+    });
+    expect(pool.workerMemory).toEqual([
+      { fieldBytes: 100, wasmBytes: 0 },
+      { fieldBytes: 100, wasmBytes: 3 * 65_536 * 32 },
+    ]);
+    worker.fail();
+    expect(pool.workerMemory[1]).toEqual({ fieldBytes: 0, wasmBytes: 0 });
+  });
+
   it("posts a bake after the field's blocks, so that the worker makes it with them", () => {
     const { pool, created } = poolOf(2);
     pool.fieldInit(MOON, blockOf(4, 0));

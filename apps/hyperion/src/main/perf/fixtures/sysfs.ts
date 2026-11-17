@@ -23,7 +23,11 @@ import type { SysfsFiles } from "../../gpuClocks";
  *   zone, `k10temp`'s `Tctl`; `acpi-cpufreq` with `schedutil` and no `thermal_throttle`;
  *   `intel-rapl:0` with no constraint files.
  * - `commands/`: `tlp-stat -s` (TLP 1.10's form and 1.6's), `pmset -g batt`, `-g therm` and `-g`,
- *   and the long-lived `nvidia-smi` child's CSV.
+ *   the long-lived `nvidia-smi` child's CSV, and `nvidia-smi -q -x` on the RTX 3080 idle and with
+ *   the GPU process listed as `G`, as `C+G`, and under Windows's WDDM (`N/A`) (R12.T3.b).
+ * - `fdinfo/`: the UHD 620's GPU process's two i915 clients (ANGLE's and Skia's, and Dawn's, the
+ *   probe's 293.6 MB total and 28.9 MB resident), sharing 6 MiB of swapchain images each, and
+ *   Xorg's client (R12.T3.b; Design note 6).
  *
  * A path's `:` is stored as `%3A`, since Windows refuses it in a file name (`intel-rapl-mmio:0`).
  */
@@ -93,5 +97,55 @@ export function fixtureCommands(outputs: Readonly<Record<string, string>>): RunC
   return (file, args) => {
     const output = outputs[[file, ...args].join(" ")];
     return output === undefined ? Promise.reject(failure("ENOENT", file)) : Promise.resolve(output);
+  };
+}
+
+/** An fdinfo fixture's text. */
+export function fdinfoFixture(name: string): string {
+  return readFileSync(join(PERF_FIXTURES, "fdinfo", name), "utf8");
+}
+
+/**
+ * `/proc` with each process's open descriptors as fdinfo fixtures (`fds`, by process ID, then by
+ * descriptor, its file under `fixtures/fdinfo` or R05's `../fixtures/fdinfo`) and its `comm`;
+ * a process in `unreadable` refuses its fdinfo with `EACCES`, as a root process's does.
+ */
+export function procFixture(
+  fds: Readonly<Record<string, Readonly<Record<string, string>>>>,
+  comm: Readonly<Record<string, string>> = {},
+  unreadable: ReadonlyArray<string> = [],
+): SysfsFiles {
+  const text = (name: string): string =>
+    name.startsWith("r05:")
+      ? readFileSync(join(PERF_FIXTURES, "../../fixtures/fdinfo", name.slice(4)), "utf8")
+      : fdinfoFixture(name);
+  return {
+    readdir: (path) => {
+      if (path === "/proc") {
+        return Promise.resolve([...new Set(["self", ...Object.keys(fds), ...Object.keys(comm)])]);
+      }
+      const pid = /^\/proc\/(\d+)\/fdinfo$/.exec(path)?.[1];
+      if (pid !== undefined && unreadable.includes(pid)) {
+        return Promise.reject(failure("EACCES", path));
+      }
+      const open = pid === undefined ? undefined : fds[pid];
+      return open === undefined
+        ? Promise.reject(failure("ENOENT", path))
+        : Promise.resolve(Object.keys(open));
+    },
+    readFile: (path) => {
+      const name = /^\/proc\/(\d+)\/comm$/.exec(path)?.[1];
+      if (name !== undefined) {
+        const process = comm[name];
+        return process === undefined
+          ? Promise.reject(failure("ENOENT", path))
+          : Promise.resolve(`${process}\n`);
+      }
+      const [, pid = "", fd = ""] = /^\/proc\/(\d+)\/fdinfo\/(\d+)$/.exec(path) ?? [];
+      const file = fds[pid]?.[fd];
+      return file === undefined
+        ? Promise.reject(failure("ENOENT", path))
+        : Promise.resolve(text(file));
+    },
   };
 }

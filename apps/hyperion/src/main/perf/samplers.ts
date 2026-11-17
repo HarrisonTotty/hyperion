@@ -29,15 +29,38 @@
  * The platform is one switch in {@link sampleThermal} and one in {@link sampleThrottle} (the M5
  * Mac's lean, pending the owner). Nothing here runs outside a perf run: the runner (R12.T4.a)
  * starts the sampler.
+ *
+ * The memory samplers (R12.T3.b; Design note 6), read at 1 Hz by the runner: the GPU process's
+ * DRM fdinfo ({@link sampleGpuMemory}, over R05's `fdinfo.ts`), summed per distinct client with
+ * the lower bound Σresident − ½·Σshared beside it; the display server's ({@link
+ * sampleDisplayServer}, Xorg's fdinfo where it is readable); `nvidia-smi -q -x`'s `process_info`
+ * of the GPU process and the device's `memory.used` less a baseline taken before launch
+ * ({@link sampleNvidia}), the headline on NVIDIA, whose driver writes no DRM keys, where the
+ * fdinfo readings are `null` with their reason (hardware item 2); and `app.getAppMetrics()`'s
+ * memory per process ({@link appMemoryOf}). The kernel's peak leaves out the samples within
+ * {@link RELEASE_SETTLE_MS} of a large release in the tally ({@link summariseDrm}), since Dawn
+ * frees a destroyed resource on a later device tick.
  */
 
 import { execFile, spawn } from "node:child_process";
 import { readdir, readFile } from "node:fs/promises";
 import { createInterface } from "node:readline";
 
-import { median, type ThrottleFigures } from "@hyperion/perf";
+import {
+  type DisplayServerFigures,
+  type GpuMemoryFigures,
+  median,
+  type ThrottleFigures,
+} from "@hyperion/perf";
 
-import type { NvidiaReading, RunCommand } from "../fdinfo";
+import {
+  type DrmClient,
+  type FdinfoFiles,
+  type NvidiaReading,
+  readDrmClients,
+  readNvidiaSmi,
+  type RunCommand,
+} from "../fdinfo";
 import { GpuClockReader, type GpuIdentity, type SysfsFiles } from "../gpuClocks";
 import { type Measured, measured, missing } from "../measured";
 
@@ -1018,4 +1041,410 @@ export function summariseSamples(samples: ReadonlyArray<PerfSample>): ThrottleFi
     zoneMaxDegC,
     packageWatts: packageWattsOf(samples.map(({ thermal }) => thermal)),
   };
+}
+
+// --- GPU memory, the kernel's and NVIDIA's (R12.T3.b) ---
+
+/** The DRM drivers whose clients count for a GPU vendor, or `null` to count every driver's. */
+export function drmDriversOf(vendorId: number): ReadonlyArray<string> | null {
+  switch (vendorId) {
+    case 0x80_86:
+      return ["i915", "xe"];
+    case 0x10_02:
+      return ["amdgpu"];
+    default:
+      return null;
+  }
+}
+
+/** One sample of a process's GPU memory from its DRM fdinfo (Design note 6). */
+export interface DrmMemorySample {
+  /** The sample's time, ms on the sampler's clock. */
+  readonly atMs: number;
+  /**
+   * Σ `drm-resident-<region>` over the distinct clients, bytes: the headline against the ceiling,
+   * an upper bound since a buffer the clients share is counted in each.
+   */
+  readonly residentBytes: number;
+  /** Σ `drm-total-<region>`, `stolen-system0` among them; `null` unless every client gives one. */
+  readonly totalBytes: number | null;
+  /** Σ `drm-shared-<region>`; `null` where no client gives one. */
+  readonly sharedBytes: number | null;
+  /** Σresident − ½·Σshared: Design note 6's lower bound, the resident figure where none is shared. */
+  readonly residentLowerBoundBytes: number;
+  /**
+   * Σ of each client's render engine time, ns, cumulative (`drm-engine-render`, amdgpu's
+   * `drm-engine-gfx`); `null` where no client gives one.
+   */
+  readonly busyNs: number | null;
+  readonly clients: number;
+  readonly drivers: ReadonlyArray<string>;
+}
+
+function sumOf(record: Readonly<Record<string, number>>): number {
+  let sum = 0;
+  for (const value of Object.values(record)) {
+    sum += value;
+  }
+  return sum;
+}
+
+/**
+ * The memory of `clients` at `atMs`: those of `drivers` (every driver's where `null`; an fdinfo of
+ * another driver, such as a second GPU's, is skipped), each distinct client (device and
+ * `drm-client-id`) counted once, as the kernel's `drm-usage-stats.rst` says duplicated descriptors
+ * share an ID.
+ */
+export function drmSampleOf(
+  clients: ReadonlyArray<DrmClient>,
+  drivers: ReadonlyArray<string> | null,
+  atMs: number,
+): Measured<DrmMemorySample> {
+  const distinct = new Map<string, DrmClient>();
+  for (const client of clients) {
+    if (drivers === null || (client.driver !== null && drivers.includes(client.driver))) {
+      distinct.set(`${client.pdev ?? ""}/${client.clientId}`, client);
+    }
+  }
+  const withMemory = [...distinct.values()].filter(
+    (client) =>
+      Object.keys(client.totalBytes).length > 0 || Object.keys(client.residentBytes).length > 0,
+  );
+  if (withMemory.length === 0) {
+    return missing(
+      clients.length === 0
+        ? "no DRM client in the process's fdinfo (NVIDIA's driver writes none)"
+        : `no DRM client of ${drivers?.join(" or ") ?? "any driver"} reports drm-* memory keys`,
+    );
+  }
+  const residentBytes = withMemory.reduce((sum, client) => sum + sumOf(client.residentBytes), 0);
+  const totalBytes = withMemory.every((client) => Object.keys(client.totalBytes).length > 0)
+    ? withMemory.reduce((sum, client) => sum + sumOf(client.totalBytes), 0)
+    : null;
+  const sharing = withMemory.filter((client) => Object.keys(client.sharedBytes).length > 0);
+  const sharedBytes =
+    sharing.length === 0
+      ? null
+      : sharing.reduce((sum, client) => sum + sumOf(client.sharedBytes), 0);
+  const busy = withMemory
+    .map((client) => client.engineNs["render"] ?? client.engineNs["gfx"])
+    .filter((ns): ns is number => ns !== undefined);
+  return measured({
+    atMs,
+    residentBytes,
+    totalBytes,
+    sharedBytes,
+    residentLowerBoundBytes: residentBytes - (sharedBytes ?? 0) / 2,
+    busyNs: busy.length === 0 ? null : busy.reduce((sum, ns) => sum + ns, 0),
+    clients: withMemory.length,
+    drivers: [...new Set(withMemory.map(({ driver }) => driver ?? "unknown"))].toSorted(),
+  });
+}
+
+/** What the memory samplers read. */
+export interface MemorySamplerSources {
+  readonly platform: NodeJS.Platform;
+  readonly files: FdinfoFiles;
+  /** Where procfs is mounted, for {@link findDisplayServerPid}: `/proc`, or a test's. */
+  readonly procRoot: string;
+  /** Runs `nvidia-smi`. */
+  readonly run: RunCommand;
+}
+
+/** This process's memory sources. */
+export function nodeMemorySources(): MemorySamplerSources {
+  return { platform: process.platform, files: NODE_FILES, procRoot: "/proc", run: RUN_COMMAND };
+}
+
+/**
+ * The GPU process's memory from its DRM fdinfo, the clients of `drivers` alone (the GPU's,
+ * {@link drmDriversOf}).
+ *
+ * @returns The sample, or why there is none: off Linux, an unreadable fdinfo, or no client with
+ * memory keys, as on NVIDIA.
+ */
+export async function sampleGpuMemory(
+  pid: number,
+  drivers: ReadonlyArray<string> | null,
+  sources: MemorySamplerSources,
+  atMs: number,
+): Promise<Measured<DrmMemorySample>> {
+  const read = await readDrmClients(pid, sources.platform, sources.files);
+  return read.kind === "unavailable"
+    ? missing(read.reason)
+    : drmSampleOf(read.clients, drivers, atMs);
+}
+
+/** The X server's process ID: the first process whose `comm` is `Xorg`, or `null` with none. */
+export async function findDisplayServerPid(sources: MemorySamplerSources): Promise<number | null> {
+  if (sources.platform !== "linux") {
+    return null;
+  }
+  const entries = await listDir(sources.files, sources.procRoot);
+  const pids = numbered(
+    (entries.value ?? []).filter((name) => /^\d+$/.test(name)),
+    /^\d+$/,
+  );
+  const names = await Promise.all(
+    pids.map((pid) => readText(sources.files, `${sources.procRoot}/${pid}/comm`)),
+  );
+  const found = pids.find((_, i) => names[i]?.value === "Xorg");
+  return found === undefined ? null : Number(found);
+}
+
+/**
+ * The display server's memory and render time from Xorg's fdinfo, readable under X11 where Xorg
+ * runs as the user (Design note 6's "display server" line); `null` where there is no X server or
+ * its fdinfo cannot be read, as when it runs as root.
+ */
+export async function sampleDisplayServer(
+  pid: number | null,
+  drivers: ReadonlyArray<string> | null,
+  sources: MemorySamplerSources,
+  atMs: number,
+): Promise<DrmMemorySample | null> {
+  if (pid === null) {
+    return null;
+  }
+  return (await sampleGpuMemory(pid, drivers, sources, atMs)).value;
+}
+
+/** A release the tally saw, which the kernel's figure follows a device tick later. */
+export interface TallyRelease {
+  /** When the renderer's tally saw it, ms on the sampler's clock. */
+  readonly atMs: number;
+  readonly bytes: number;
+}
+
+/**
+ * How long after a large release the kernel's peak ignores its samples, ms: Dawn frees a destroyed
+ * resource on a later device tick (Design note 6).
+ */
+export const RELEASE_SETTLE_MS = 2000;
+
+/**
+ * The smallest release that opens a settle window, bytes (lean, 2026-11-17): a 16 MiB texture's
+ * pages lingering a tick are a few percent of the UHD 620's 150–300 MB budget, and the patch
+ * cache's steady churn of smaller buffers never closes every window.
+ */
+export const LARGE_RELEASE_BYTES = 16 * 1024 ** 2;
+
+/** Whether a sample at `atMs` falls within the settle window of a large release. */
+export function settling(atMs: number, releases: ReadonlyArray<TallyRelease>): boolean {
+  return releases.some(
+    (release) =>
+      release.bytes >= LARGE_RELEASE_BYTES &&
+      atMs >= release.atMs &&
+      atMs < release.atMs + RELEASE_SETTLE_MS,
+  );
+}
+
+/** A span's DRM samples summarised (Design note 6). */
+export interface DrmSpanSummary {
+  /** The settled samples' peak resident bytes. */
+  readonly residentPeakBytes: number;
+  /** The settled samples' peak total, a finding above the ceiling; `null` where none gave one. */
+  readonly totalPeakBytes: number | null;
+  /** The settled samples' peak lower bound, which the peak resident is at least. */
+  readonly residentLowerBoundPeakBytes: number;
+  /** The render engine's time over the span, ns: the last sample's less the first's. */
+  readonly busyNs: number | null;
+  /** The samples within a settle window, which the peaks leave out. */
+  readonly settlingSamples: number;
+}
+
+/**
+ * The span's DRM samples as its peaks, the samples within {@link RELEASE_SETTLE_MS} of a large
+ * release left out of them; `null` with no settled sample.
+ */
+export function summariseDrm(
+  samples: ReadonlyArray<DrmMemorySample>,
+  releases: ReadonlyArray<TallyRelease>,
+): DrmSpanSummary | null {
+  const settled = samples.filter((sample) => !settling(sample.atMs, releases));
+  if (settled.length === 0) {
+    return null;
+  }
+  const totals = settled
+    .map((sample) => sample.totalBytes)
+    .filter((bytes): bytes is number => bytes !== null);
+  const first = samples[0]?.busyNs ?? null;
+  const last = samples.at(-1)?.busyNs ?? null;
+  return {
+    residentPeakBytes: Math.max(...settled.map((sample) => sample.residentBytes)),
+    totalPeakBytes: totals.length === 0 ? null : Math.max(...totals),
+    residentLowerBoundPeakBytes: Math.max(...settled.map((s) => s.residentLowerBoundBytes)),
+    busyNs: first === null || last === null || last < first ? null : last - first,
+    settlingSamples: samples.length - settled.length,
+  };
+}
+
+/** The display server's line of the record from its span's summary. */
+export function displayServerFiguresOf(summary: DrmSpanSummary): DisplayServerFigures {
+  return {
+    residentPeakBytes: summary.residentPeakBytes,
+    renderBusyMs: summary.busyNs === null ? null : summary.busyNs / 1e6,
+  };
+}
+
+/** One sample of NVIDIA's memory for the GPU process (Design note 6). */
+export interface NvidiaMemorySample {
+  readonly atMs: number;
+  /**
+   * The GPU process's `used_memory`, Σ over its `process_info` entries of the first GPU, whatever
+   * their type (`G` or `C+G`); `null` where none lists it or the driver writes `N/A`, as WDDM does.
+   */
+  readonly processUsedBytes: number | null;
+  /** The types its entries gave. */
+  readonly processTypes: ReadonlyArray<string>;
+  /** The device's `fb_memory_usage/used`. */
+  readonly deviceUsedBytes: number | null;
+  /** The device's use less the baseline taken before launch; `null` without a baseline. */
+  readonly deviceLessBaselineBytes: number | null;
+}
+
+/** NVIDIA's memory for process `gpuPid` from one `nvidia-smi -q -x` reading. */
+export function nvidiaMemoryOf(
+  reading: NvidiaReading,
+  gpuPid: number | null,
+  baselineBytes: number | null,
+  atMs: number,
+): Measured<NvidiaMemorySample> {
+  if (reading.kind === "unavailable") {
+    return missing(reading.reason);
+  }
+  const gpu = reading.gpus[0];
+  if (gpu === undefined) {
+    return missing("nvidia-smi lists no GPU");
+  }
+  const entries = gpu.processes.filter((process) => process.pid === gpuPid);
+  const used = entries
+    .map((process) => process.usedBytes)
+    .filter((bytes): bytes is number => bytes !== null);
+  return measured({
+    atMs,
+    processUsedBytes: used.length === 0 ? null : used.reduce((sum, bytes) => sum + bytes, 0),
+    processTypes: entries.map((process) => process.type),
+    deviceUsedBytes: gpu.usedBytes,
+    deviceLessBaselineBytes:
+      gpu.usedBytes === null || baselineBytes === null ? null : gpu.usedBytes - baselineBytes,
+  });
+}
+
+/** One sample of NVIDIA's memory for process `gpuPid`, or why there is none. */
+export async function sampleNvidia(
+  gpuPid: number | null,
+  baselineBytes: number | null,
+  sources: MemorySamplerSources,
+  atMs: number,
+): Promise<Measured<NvidiaMemorySample>> {
+  return nvidiaMemoryOf(await readNvidiaSmi(sources.run), gpuPid, baselineBytes, atMs);
+}
+
+/** The first GPU's `memory.used` before launch: the baseline its later readings are less. */
+export async function nvidiaBaseline(sources: MemorySamplerSources): Promise<Measured<number>> {
+  const reading = await readNvidiaSmi(sources.run);
+  if (reading.kind === "unavailable") {
+    return missing(reading.reason);
+  }
+  const used = reading.gpus[0]?.usedBytes ?? null;
+  return used === null ? missing("nvidia-smi gives no fb_memory_usage/used") : measured(used);
+}
+
+/** A span's NVIDIA samples as their peaks. */
+export interface NvidiaSpanSummary {
+  readonly processPeakBytes: number | null;
+  readonly deviceLessBaselinePeakBytes: number | null;
+}
+
+/** The largest of `values` that are known, or `null` with none. */
+function peak(values: ReadonlyArray<number | null>): number | null {
+  const known = values.filter((value): value is number => value !== null);
+  return known.length === 0 ? null : Math.max(...known);
+}
+
+/** The span's NVIDIA samples as their peaks, each `null` where no sample gave it. */
+export function summariseNvidia(samples: ReadonlyArray<NvidiaMemorySample>): NvidiaSpanSummary {
+  return {
+    processPeakBytes: peak(samples.map((sample) => sample.processUsedBytes)),
+    deviceLessBaselinePeakBytes: peak(samples.map((sample) => sample.deviceLessBaselineBytes)),
+  };
+}
+
+/**
+ * The record's GPU-memory headline (Design note 6; R12.T3.b's platform audit): the kernel's DRM
+ * figures where there are any; else `nvidia-smi`'s for the GPU process; else its device use less
+ * the baseline, as under Windows's WDDM, whose per-process figure is `N/A`; else the tally's, a
+ * lower bound; `null` with none of them.
+ */
+export function gpuMemoryHeadline(
+  drm: DrmSpanSummary | null,
+  nvidia: NvidiaSpanSummary | null,
+  tallyPeakBytes: number | null,
+): GpuMemoryFigures | null {
+  if (drm !== null) {
+    return {
+      source: "drm-fdinfo",
+      residentPeakBytes: drm.residentPeakBytes,
+      totalPeakBytes: drm.totalPeakBytes,
+      residentLowerBoundBytes: drm.residentLowerBoundPeakBytes,
+    };
+  }
+  const nvidiaBytes = nvidia?.processPeakBytes ?? nvidia?.deviceLessBaselinePeakBytes ?? null;
+  if (nvidiaBytes !== null) {
+    return {
+      source: "nvidia-smi",
+      residentPeakBytes: nvidiaBytes,
+      totalPeakBytes: null,
+      residentLowerBoundBytes: null,
+    };
+  }
+  return tallyPeakBytes === null
+    ? null
+    : {
+        source: "adapter-tally",
+        residentPeakBytes: tallyPeakBytes,
+        totalPeakBytes: null,
+        residentLowerBoundBytes: null,
+      };
+}
+
+/** One sample of every process's memory from `app.getAppMetrics()`. */
+export interface AppMemorySample {
+  readonly atMs: number;
+  /** Σ of every process's `workingSetSize`, bytes. */
+  readonly totalBytes: number;
+  /** The same by Chromium's process type (`Browser`, `GPU`, `Tab`, `Utility`, …). */
+  readonly byTypeBytes: Readonly<Record<string, number>>;
+  /** The GPU process's ID, for the fdinfo and `nvidia-smi` readings; `null` with none. */
+  readonly gpuPid: number | null;
+}
+
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Every process's memory from `app.getAppMetrics()`, narrowed from what Electron returns: each
+ * `ProcessMetric`'s `memory.workingSetSize`, which Electron gives in KiB. It holds no GEM pages
+ * (Design note 6: 163 MB before and 166 MB after 256 MiB became resident), so it is reported
+ * beside the GPU's figure, never summed with it.
+ */
+export function appMemoryOf(metrics: unknown, atMs: number): AppMemorySample {
+  const byTypeBytes: Record<string, number> = {};
+  let totalBytes = 0;
+  let gpuPid: number | null = null;
+  for (const metric of Array.isArray(metrics) ? metrics.filter(isRecord) : []) {
+    const memory = metric["memory"];
+    const kib = isRecord(memory) ? memory["workingSetSize"] : undefined;
+    const type = typeof metric["type"] === "string" ? metric["type"] : "Unknown";
+    if (type === "GPU" && typeof metric["pid"] === "number") {
+      gpuPid = metric["pid"];
+    }
+    if (typeof kib === "number" && Number.isFinite(kib)) {
+      byTypeBytes[type] = (byTypeBytes[type] ?? 0) + kib * 1024;
+      totalBytes += kib * 1024;
+    }
+  }
+  return { atMs, totalBytes, byTypeBytes, gpuPid };
 }

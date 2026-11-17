@@ -29,7 +29,7 @@ import init, {
 import wasmUrl from "../../../generated/surface/hyperion_surface_bg.wasm?url";
 import { describeLoadFailure } from "../../../wasm/handleRequest";
 import { answerRequest, type HeightModule, staleModuleMessage, WorkerFields } from "./heightBake";
-import type { HeightWorkerRequest } from "./messages";
+import type { HeightWorkerMessage, HeightWorkerRequest } from "./messages";
 
 const module: HeightModule = {
   bakePatch,
@@ -37,10 +37,13 @@ const module: HeightModule = {
   createFields: () => new SurfaceFields(),
 };
 
+/** The module's memory once it has loaded, whose byte length each message carries (R12.T3.b). */
+let memory: WebAssembly.Memory | null = null;
+
 /** Loads the module, once; `null` once it can serve, or the error saying why it cannot. */
 async function load(): Promise<Error | null> {
   try {
-    await init({ module_or_path: wasmUrl });
+    ({ memory } = await init({ module_or_path: wasmUrl }));
   } catch (error: unknown) {
     const cause = describeLoadFailure(error);
     return new Error(`the surface module did not load (${cause.kind}): ${cause.message}`, {
@@ -69,7 +72,9 @@ async function answer(request: HeightWorkerRequest): Promise<void> {
   }
   fields ??= new WorkerFields(module);
   const { reply, transfer } = answerRequest(module, request, fields);
-  postMessage(reply, transfer);
+  const message: HeightWorkerMessage =
+    memory === null ? reply : { ...reply, wasmBytes: memory.buffer.byteLength };
+  postMessage(message, transfer);
 }
 
 // The message is a structured clone of a `HeightWorkerRequest` that our own render thread posted,

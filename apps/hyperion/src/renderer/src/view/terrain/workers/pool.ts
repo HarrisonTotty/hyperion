@@ -59,6 +59,7 @@ import type {
   FieldBlockAnswer,
   FieldForm,
   GroundReadoutQuery,
+  HeightWorkerMessage,
   HeightWorkerReply,
   HeightWorkerRequest,
   OceanMapAnswer,
@@ -83,6 +84,14 @@ export interface WorkerLike {
   removeEventListener(type: "error", listener: (event: Event) => void): void;
   postMessage(message: HeightWorkerRequest, transfer: Transferable[]): void;
   terminate(): void;
+}
+
+/** One height worker's memory as it reports it (plan R12, R12.T3.b). */
+export interface WorkerMemory {
+  /** Its copy of every body's coarse field, bytes. */
+  readonly fieldBytes: number;
+  /** Its WebAssembly memory's `buffer.byteLength`, at its largest. */
+  readonly wasmBytes: number;
 }
 
 /** The most requests a worker has in flight at once. */
@@ -350,7 +359,7 @@ interface Slot {
    */
   readonly bakes: boolean;
   worker: WorkerLike;
-  readonly onMessage: (event: MessageEvent<HeightWorkerReply>) => void;
+  readonly onMessage: (event: MessageEvent<HeightWorkerMessage>) => void;
   readonly onError: () => void;
   readonly inFlight: Map<number, InFlight>;
   /** The class-map and readout queries posted to this worker and not yet answered, by message ID. */
@@ -359,6 +368,8 @@ interface Slot {
   readonly posted: Map<number, PostedBlock>;
   /** What the worker last said it holds of every body's field, bytes. */
   fieldBytes: number;
+  /** The largest byte length of its WebAssembly memory the worker has reported (R12.T3.b). */
+  wasmBytes: number;
   /** Failures in a row with no answer between. */
   failures: number;
   /** Given up after {@link MAX_CONSECUTIVE_WORKER_FAILURES}: no worker runs in this place. */
@@ -595,6 +606,7 @@ export class HeightWorkerPool {
         queries: new Map(),
         posted: new Map(),
         fieldBytes: 0,
+        wasmBytes: 0,
         failures: 0,
         lost: false,
       };
@@ -657,6 +669,17 @@ export class HeightWorkerPool {
       bytes += slot.lost ? 0 : slot.fieldBytes;
     }
     return bytes;
+  }
+
+  /**
+   * Each running worker's memory as it last reported it, in the pool's order, a lost worker's
+   * place left out (R12 Design note 6's line for each height worker): its coarse-field copy and
+   * the byte length of its WebAssembly memory, 0 until its module has answered.
+   */
+  get workerMemory(): ReadonlyArray<WorkerMemory> {
+    return this.slots
+      .filter((slot) => !slot.lost)
+      .map((slot) => ({ fieldBytes: slot.fieldBytes, wasmBytes: slot.wasmBytes }));
   }
 
   /** The bodies whose fields the pool keeps, in the order they were started. */
@@ -1379,8 +1402,11 @@ export class HeightWorkerPool {
     }
   }
 
-  private receive(slot: Slot, reply: HeightWorkerReply): void {
+  private receive(slot: Slot, reply: HeightWorkerMessage): void {
     slot.failures = 0;
+    if (reply.wasmBytes !== undefined) {
+      slot.wasmBytes = Math.max(slot.wasmBytes, reply.wasmBytes);
+    }
     this.take(slot, reply);
     this.pump();
   }
@@ -1595,6 +1621,7 @@ export class HeightWorkerPool {
     const queries = [...slot.queries.values()];
     slot.queries.clear();
     slot.fieldBytes = 0;
+    slot.wasmBytes = 0;
     slot.failures += 1;
     if (slot.failures >= MAX_CONSECUTIVE_WORKER_FAILURES) {
       slot.lost = true;

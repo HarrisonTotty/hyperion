@@ -207,6 +207,7 @@ import {
   type HeightWorkerLane,
   HeightWorkerPool,
   type WorkerLike,
+  type WorkerMemory,
 } from "./workers/pool";
 import type {
   HorizonLayerSetting,
@@ -1717,6 +1718,15 @@ export class TerrainSession {
   readoutSeasonRad(body: BodyIdHex, time: UniverseTime): number | undefined {
     const held = this.#bodies.get(body);
     return held?.season.kind === "held" ? meanAnomalyAt(held.season.orbit, time) : undefined;
+  }
+
+  /**
+   * Each running height worker's own report, its coarse-field copy and its WebAssembly memory's
+   * byte length (the pool's `workerMemory`; plan R12, R12.T3.b), which a perf record lists worker
+   * by worker beside {@link TerrainSession.memory}'s sums.
+   */
+  get workerMemory(): ReadonlyArray<WorkerMemory> {
+    return this.#pool.workerMemory;
   }
 
   /** The session's memory report: the fields' copies and its GPU bytes. */

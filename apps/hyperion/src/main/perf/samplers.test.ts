@@ -1,16 +1,35 @@
 import { describe, expect, it } from "vitest";
 
+import { parseFdinfo, parseNvidiaSmi } from "../fdinfo";
 import type { GpuIdentity } from "../gpuClocks";
 import { type Measured, measured, missing } from "../measured";
 import {
   commandFixture,
   DESKTOP_SYS,
+  fdinfoFixture,
   fixtureCommands,
   fixtureFiles,
+  procFixture,
   X1_YOGA_SYS,
 } from "./fixtures/sysfs";
 import {
+  appMemoryOf,
+  displayServerFiguresOf,
+  type DrmMemorySample,
+  drmDriversOf,
   type Every,
+  findDisplayServerPid,
+  gpuMemoryHeadline,
+  LARGE_RELEASE_BYTES,
+  type MemorySamplerSources,
+  nvidiaBaseline,
+  nvidiaMemoryOf,
+  RELEASE_SETTLE_MS,
+  sampleDisplayServer,
+  sampleGpuMemory,
+  sampleNvidia,
+  summariseDrm,
+  summariseNvidia,
   type GpuClockReading,
   GpuClockSampler,
   NVIDIA_CLOCK_FIELDS,
@@ -457,5 +476,272 @@ describe("the 10 Hz sampler", () => {
     expect(sampler.summarise(200, 300).gpuMedianMHz).toBeNull();
     sampler.discardBefore(100);
     expect(sampler.samples.map((s) => s.thermal.atMs)).toEqual([100]);
+  });
+});
+
+// --- The memory samplers (R12.T3.b) ---
+
+const KIB = 1024;
+const MIB = 1024 ** 2;
+const GPU_PID = 52_144;
+const XORG_PID = 1351;
+const I915 = drmDriversOf(0x80_86);
+
+function memorySources(
+  files = procFixture({}),
+  platform: NodeJS.Platform = "linux",
+  commands: Readonly<Record<string, string>> = {},
+): MemorySamplerSources {
+  return { platform, files, procRoot: "/proc", run: fixtureCommands(commands) };
+}
+
+/** The UHD 620's GPU process: Dawn's client behind two descriptors, and ANGLE's and Skia's. */
+const UHD_620_GPU = {
+  [String(GPU_PID)]: {
+    "10": "uhd620-gpu-client41.txt",
+    "11": "uhd620-gpu-client41.txt",
+    "12": "uhd620-gpu-client40.txt",
+  },
+};
+
+describe("the GPU process's kernel memory", () => {
+  it("parses the UHD 620's i915 text: system0's total, shared and resident, and stolen-system0", () => {
+    expect(parseFdinfo(fdinfoFixture("uhd620-gpu-client41.txt"))).toMatchObject({
+      driver: "i915",
+      clientId: "41",
+      totalBytes: { system0: 286_720 * KIB, "stolen-system0": 0 },
+      sharedBytes: { system0: 6144 * KIB, "stolen-system0": 0 },
+      residentBytes: { system0: 28_224 * KIB, "stolen-system0": 0 },
+      engineNs: { render: 81_234_567_890 },
+    });
+  });
+
+  it("counts two descriptors of one client once, and states the lower bound beside the sum", async () => {
+    const sample = await sampleGpuMemory(GPU_PID, I915, memorySources(procFixture(UHD_620_GPU)), 7);
+    expect(sample).toEqual(
+      measured({
+        atMs: 7,
+        residentBytes: (28_224 + 24_576) * KIB,
+        totalBytes: (286_720 + 32_768) * KIB,
+        sharedBytes: 12_288 * KIB,
+        // Σresident − ½·Σshared: the 6 MiB of swapchain images counted in both clients, once.
+        residentLowerBoundBytes: (28_224 + 24_576 - 6144) * KIB,
+        busyNs: 81_234_567_890 + 1_234_567_890,
+        clients: 2,
+        drivers: ["i915"],
+      }),
+    );
+  });
+
+  it("skips an fdinfo of another driver", async () => {
+    const files = procFixture({
+      [String(GPU_PID)]: { ...UHD_620_GPU[String(GPU_PID)], "13": "r05:amdgpu-client35.txt" },
+    });
+    const sample = await sampleGpuMemory(GPU_PID, I915, memorySources(files), 0);
+    expect(sample.value).toMatchObject({ clients: 2, drivers: ["i915"] });
+    const every = await sampleGpuMemory(GPU_PID, null, memorySources(files), 0);
+    expect(every.value).toMatchObject({ clients: 3, drivers: ["amdgpu", "i915"] });
+  });
+
+  it("is null with its reason on NVIDIA, whose driver writes no DRM keys", async () => {
+    const files = procFixture({ [String(GPU_PID)]: { "10": "r05:nvidia-renderD128.txt" } });
+    expect(await sampleGpuMemory(GPU_PID, null, memorySources(files), 0)).toEqual(
+      missing("no DRM client in the process's fdinfo (NVIDIA's driver writes none)"),
+    );
+  });
+
+  it("is null for an unreadable fdinfo, and off Linux", async () => {
+    const files = procFixture(UHD_620_GPU, {}, [String(GPU_PID)]);
+    const unreadable = await sampleGpuMemory(GPU_PID, I915, memorySources(files), 0);
+    expect(unreadable.reason).toMatch(/\/proc\/52144\/fdinfo could not be read: EACCES/u);
+    const mac = await sampleGpuMemory(
+      GPU_PID,
+      I915,
+      memorySources(procFixture(UHD_620_GPU), "darwin"),
+      0,
+    );
+    expect(mac).toEqual(missing("DRM fdinfo is Linux's; this is darwin"));
+  });
+});
+
+describe("the display server", () => {
+  const xorg = { [String(XORG_PID)]: { "4": "uhd620-xorg-client2.txt" } };
+  const comm = { [String(XORG_PID)]: "Xorg", "901": "i3", [String(GPU_PID)]: "hyperion" };
+
+  it("is Xorg's fdinfo where it is readable", async () => {
+    const x11 = memorySources(procFixture(xorg, comm));
+    const pid = await findDisplayServerPid(x11);
+    expect(pid).toBe(XORG_PID);
+    const sample = await sampleDisplayServer(pid, I915, x11, 0);
+    expect(sample).toMatchObject({ residentBytes: 49_152 * KIB, busyNs: 412_345_678_901 });
+  });
+
+  it("is null where Xorg runs as root, or there is none", async () => {
+    const root = memorySources(procFixture(xorg, comm, [String(XORG_PID)]));
+    expect(await sampleDisplayServer(XORG_PID, I915, root, 0)).toBeNull();
+    const wayland = memorySources(procFixture({}, { "901": "sway" }));
+    expect(await findDisplayServerPid(wayland)).toBeNull();
+    expect(await sampleDisplayServer(null, I915, wayland, 0)).toBeNull();
+  });
+});
+
+function drm(atMs: number, residentMiB: number, busyNs: number | null = null): DrmMemorySample {
+  return {
+    atMs,
+    residentBytes: residentMiB * MIB,
+    totalBytes: residentMiB * 2 * MIB,
+    sharedBytes: 4 * MIB,
+    residentLowerBoundBytes: (residentMiB - 2) * MIB,
+    busyNs,
+    clients: 2,
+    drivers: ["i915"],
+  };
+}
+
+describe("the kernel's peak", () => {
+  it("ignores the samples within 2 s of a large release in the tally", () => {
+    // A 64 MiB cube released and remade at 1 s: the kernel shows both until Dawn's next tick.
+    const samples = [drm(0, 100), drm(1500, 164), drm(1000 + RELEASE_SETTLE_MS, 100)];
+    const summary = summariseDrm(samples, [{ atMs: 1000, bytes: 64 * MIB }]);
+    expect(summary).toMatchObject({
+      residentPeakBytes: 100 * MIB,
+      totalPeakBytes: 200 * MIB,
+      residentLowerBoundPeakBytes: 98 * MIB,
+      settlingSamples: 1,
+    });
+  });
+
+  it("keeps the samples after a small release", () => {
+    const samples = [drm(0, 100), drm(1500, 164)];
+    const summary = summariseDrm(samples, [{ atMs: 1000, bytes: LARGE_RELEASE_BYTES - 1 }]);
+    expect(summary?.residentPeakBytes).toBe(164 * MIB);
+  });
+
+  it("states the render engine's time over the span, and the display server's line", () => {
+    const summary = summariseDrm([drm(0, 30, 5_000_000), drm(1000, 31, 17_500_000)], []);
+    expect(summary?.busyNs).toBe(12_500_000);
+    expect(summary === null ? null : displayServerFiguresOf(summary)).toEqual({
+      residentPeakBytes: 31 * MIB,
+      renderBusyMs: 12.5,
+    });
+    expect(summariseDrm([], [])).toBeNull();
+  });
+});
+
+describe("NVIDIA's memory", () => {
+  it("reads the GPU process's process_info of type G", () => {
+    const reading = parseNvidiaSmi(commandFixture("nvidia-smi-gpu-process-g.xml"));
+    expect(nvidiaMemoryOf(reading, GPU_PID, 728 * MIB, 0)).toEqual(
+      measured({
+        atMs: 0,
+        processUsedBytes: 612 * MIB,
+        processTypes: ["G"],
+        deviceUsedBytes: 1460 * MIB,
+        deviceLessBaselineBytes: (1460 - 728) * MIB,
+      }),
+    );
+  });
+
+  it("reads the GPU process's process_info of type C+G, and the device less its baseline", async () => {
+    const running = memorySources(procFixture({}), "linux", {
+      "nvidia-smi -q -x": commandFixture("nvidia-smi-gpu-process-cg.xml"),
+    });
+    const idle = memorySources(procFixture({}), "linux", {
+      "nvidia-smi -q -x": commandFixture("nvidia-smi-idle.xml"),
+    });
+    const baseline = await nvidiaBaseline(idle);
+    expect(baseline).toEqual(measured(728 * MIB));
+    const sample = await sampleNvidia(GPU_PID, baseline.value, running, 0);
+    expect(sample.value).toMatchObject({
+      processUsedBytes: 640 * MIB,
+      processTypes: ["C+G"],
+      deviceLessBaselineBytes: (1488 - 728) * MIB,
+    });
+  });
+
+  it("gives the process's figure as null under WDDM, and where the process is not listed", () => {
+    const wddm = nvidiaMemoryOf(
+      parseNvidiaSmi(commandFixture("nvidia-smi-wddm.xml")),
+      GPU_PID,
+      null,
+      0,
+    );
+    expect(wddm.value).toMatchObject({ processUsedBytes: null, processTypes: ["C+G"] });
+    const other = nvidiaMemoryOf(
+      parseNvidiaSmi(commandFixture("nvidia-smi-idle.xml")),
+      GPU_PID,
+      null,
+      0,
+    );
+    expect(other.value).toMatchObject({ processUsedBytes: null, processTypes: [] });
+  });
+
+  it("is missing with nvidia-smi's reason on a machine without it", async () => {
+    expect(await sampleNvidia(GPU_PID, null, memorySources(), 0)).toEqual(
+      missing("no nvidia-smi on this machine"),
+    );
+  });
+});
+
+describe("the GPU-memory headline", () => {
+  const kernel = summariseDrm([drm(0, 120)], []);
+  const nvidia = summariseNvidia([
+    {
+      atMs: 0,
+      processUsedBytes: 600 * MIB,
+      processTypes: ["G"],
+      deviceUsedBytes: null,
+      deviceLessBaselineBytes: 700 * MIB,
+    },
+  ]);
+  const wddm = summariseNvidia([
+    {
+      atMs: 0,
+      processUsedBytes: null,
+      processTypes: ["C+G"],
+      deviceUsedBytes: null,
+      deviceLessBaselineBytes: 700 * MIB,
+    },
+  ]);
+
+  it("is the kernel's where fdinfo reads, with its bounds", () => {
+    expect(gpuMemoryHeadline(kernel, nvidia, 90 * MIB)).toEqual({
+      source: "drm-fdinfo",
+      residentPeakBytes: 120 * MIB,
+      totalPeakBytes: 240 * MIB,
+      residentLowerBoundBytes: 118 * MIB,
+    });
+  });
+
+  it("is nvidia-smi's on NVIDIA: the process's, else the device's less its baseline", () => {
+    expect(gpuMemoryHeadline(null, nvidia, 90 * MIB)).toMatchObject({
+      source: "nvidia-smi",
+      residentPeakBytes: 600 * MIB,
+      residentLowerBoundBytes: null,
+    });
+    expect(gpuMemoryHeadline(null, wddm, 90 * MIB)?.residentPeakBytes).toBe(700 * MIB);
+  });
+
+  it("falls to the tally, else nothing", () => {
+    expect(gpuMemoryHeadline(null, null, 90 * MIB)?.source).toBe("adapter-tally");
+    expect(gpuMemoryHeadline(null, null, null)).toBeNull();
+  });
+});
+
+describe("app.getAppMetrics()", () => {
+  it("sums every process's working set, KiB to bytes, by type, and finds the GPU process", () => {
+    const metrics = [
+      { pid: 1, type: "Browser", memory: { workingSetSize: 120_000 } },
+      { pid: GPU_PID, type: "GPU", memory: { workingSetSize: 163_000 } },
+      { pid: 3, type: "Tab", memory: { workingSetSize: 250_000 } },
+      { pid: 4, type: "Tab", memory: { workingSetSize: 10_000 } },
+    ];
+    expect(appMemoryOf(metrics, 3)).toEqual({
+      atMs: 3,
+      totalBytes: 543_000 * KIB,
+      byTypeBytes: { Browser: 120_000 * KIB, GPU: 163_000 * KIB, Tab: 260_000 * KIB },
+      gpuPid: GPU_PID,
+    });
+    expect(appMemoryOf(null, 0)).toEqual({ atMs: 0, totalBytes: 0, byTypeBytes: {}, gpuPid: null });
   });
 });

@@ -29,6 +29,17 @@ export interface DrmClient {
   readonly totalBytes: Readonly<Record<string, number>>;
   /** `drm-resident-<region>`, or `drm-memory-<region>` without it, bytes, by region. */
   readonly residentBytes: Readonly<Record<string, number>>;
+  /**
+   * `drm-shared-<region>`, bytes, by region: what the client shares with others, such as the
+   * swapchain images the GPU process's clients share (plan R12, R12.T3.b; Design note 6).
+   */
+  readonly sharedBytes: Readonly<Record<string, number>>;
+  /**
+   * `drm-engine-<engine>`, the nanoseconds the engine spent busy on the client's work, by engine
+   * (`render` on i915, `gfx` on amdgpu); `drm-engine-capacity-<engine>` is not a time and is left
+   * out.
+   */
+  readonly engineNs: Readonly<Record<string, number>>;
 }
 
 /** A process's GPU memory from its DRM fdinfo, or why there is none. */
@@ -82,15 +93,30 @@ export function parseFdinfo(text: string): DrmClient | null {
   }
   const totalBytes: Record<string, number> = {};
   const residentBytes: Record<string, number> = {};
+  const sharedBytes: Record<string, number> = {};
   const legacy: Record<string, number> = {};
+  const engineNs: Record<string, number> = {};
   for (const [key, value] of keys) {
-    const memory = /^drm-(total|resident|memory)-(.+)$/.exec(key);
+    const engine = /^drm-engine-(.+)$/.exec(key)?.[1];
+    const ns = /^(\d+)\s*ns$/.exec(value)?.[1];
+    if (engine !== undefined && !engine.startsWith("capacity-") && ns !== undefined) {
+      engineNs[engine] = Number(ns);
+      continue;
+    }
+    const memory = /^drm-(total|resident|memory|shared)-(.+)$/.exec(key);
     const bytes = memory === null ? undefined : parseBytes(value);
     if (memory === null || bytes === undefined) {
       continue;
     }
     const [, kind, region = ""] = memory;
-    const target = kind === "total" ? totalBytes : kind === "resident" ? residentBytes : legacy;
+    const target =
+      kind === "total"
+        ? totalBytes
+        : kind === "resident"
+          ? residentBytes
+          : kind === "shared"
+            ? sharedBytes
+            : legacy;
     target[region] = bytes;
   }
   for (const [region, bytes] of Object.entries(legacy)) {
@@ -102,6 +128,8 @@ export function parseFdinfo(text: string): DrmClient | null {
     clientId,
     totalBytes,
     residentBytes,
+    sharedBytes,
+    engineNs,
   };
 }
 
@@ -162,17 +190,22 @@ const NODE_FILES: FdinfoFiles = {
   readFile: (path) => readFile(path, "utf8"),
 };
 
+/** A process's DRM clients from its fdinfo, or why there are none to read. */
+export type DrmClientsReading =
+  | { readonly kind: "clients"; readonly clients: ReadonlyArray<DrmClient> }
+  | { readonly kind: "unavailable"; readonly reason: string };
+
 /**
- * The GPU memory a process holds, from `/proc/<pid>/fdinfo`.
+ * Every DRM client in `/proc/<pid>/fdinfo`, a duplicated descriptor's as often as it appears.
  *
- * @returns The reading, or the reason there is none: not Linux, an unreadable directory, or no
- * DRM client with memory keys, as on NVIDIA.
+ * @returns The clients, possibly none, or the reason there is no reading: not Linux, or an
+ * unreadable directory.
  */
-export async function readDrmMemory(
+export async function readDrmClients(
   pid: number,
   platform: NodeJS.Platform,
   files: FdinfoFiles = NODE_FILES,
-): Promise<DrmMemoryReading> {
+): Promise<DrmClientsReading> {
   if (platform !== "linux") {
     return { kind: "unavailable", reason: `DRM fdinfo is Linux's; this is ${platform}` };
   }
@@ -194,7 +227,28 @@ export async function readDrmMemory(
       ),
     ),
   );
-  const clients = read.filter((client): client is DrmClient => client !== null);
+  return {
+    kind: "clients",
+    clients: read.filter((client): client is DrmClient => client !== null),
+  };
+}
+
+/**
+ * The GPU memory a process holds, from `/proc/<pid>/fdinfo`.
+ *
+ * @returns The reading, or the reason there is none: not Linux, an unreadable directory, or no
+ * DRM client with memory keys, as on NVIDIA.
+ */
+export async function readDrmMemory(
+  pid: number,
+  platform: NodeJS.Platform,
+  files: FdinfoFiles = NODE_FILES,
+): Promise<DrmMemoryReading> {
+  const read = await readDrmClients(pid, platform, files);
+  if (read.kind === "unavailable") {
+    return read;
+  }
+  const { clients } = read;
   return sumDrmClients(
     clients,
     clients.length === 0

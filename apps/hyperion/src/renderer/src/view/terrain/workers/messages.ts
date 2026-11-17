@@ -775,6 +775,14 @@ export type HeightWorkerReply =
       readonly message: string;
     };
 
+/**
+ * A height worker's message as it posts it: a reply with the byte length of its WebAssembly
+ * module's memory beside it once the module has loaded (plan R12, R12.T3.b; R12 Design note 6's
+ * line for each worker's memory), absent from a fake worker's. The memory only grows, so the
+ * latest is the worker's peak.
+ */
+export type HeightWorkerMessage = HeightWorkerReply & { readonly wasmBytes?: number };
+
 /** The buffers a worker transfers with a bake, so that none is copied twice. */
 export function bakeTransferables(bake: BakedPatch): Transferable[] {
   const buffers: Transferable[] = [bake.heights.buffer, bake.normals.buffer];

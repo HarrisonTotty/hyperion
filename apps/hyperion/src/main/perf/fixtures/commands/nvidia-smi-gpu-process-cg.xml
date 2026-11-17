@@ -1,0 +1,44 @@
+<?xml version="1.0" ?>
+<!DOCTYPE nvidia_smi_log SYSTEM "nvsmi_device_v13.dtd">
+<nvidia_smi_log>
+	<driver_version>615.71.09</driver_version>
+	<kmd_version>615.71.09</kmd_version>
+	<attached_gpus>1</attached_gpus>
+	<gpu id="00000000:08:00.0">
+		<product_name>NVIDIA GeForce RTX 3080</product_name>
+		<performance_state>P2</performance_state>
+		<fb_memory_usage>
+			<total>10240 MiB</total>
+			<reserved>320 MiB</reserved>
+			<used>1488 MiB</used>
+			<free>8460 MiB</free>
+		</fb_memory_usage>
+		<clocks>
+			<graphics_clock>1905 MHz</graphics_clock>
+			<mem_clock>9251 MHz</mem_clock>
+		</clocks>
+		<max_clocks>
+			<graphics_clock>2100 MHz</graphics_clock>
+			<mem_clock>9501 MHz</mem_clock>
+		</max_clocks>
+		<processes>
+			<process_info>
+				<gpu_instance_id>N/A</gpu_instance_id>
+				<compute_instance_id>N/A</compute_instance_id>
+				<pid>1351</pid>
+				<type>G</type>
+				<process_name>/usr/lib/Xorg</process_name>
+				<used_memory>84 MiB</used_memory>
+			</process_info>
+			<process_info>
+				<gpu_instance_id>N/A</gpu_instance_id>
+				<compute_instance_id>N/A</compute_instance_id>
+				<pid>52144</pid>
+				<type>C+G</type>
+				<process_name>/opt/hyperion/hyperion --type=gpu-process</process_name>
+				<used_memory>640 MiB</used_memory>
+			</process_info>
+		</processes>
+	</gpu>
+
+</nvidia_smi_log>

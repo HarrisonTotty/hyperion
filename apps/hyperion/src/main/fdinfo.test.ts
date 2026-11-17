@@ -54,6 +54,8 @@ describe("an fdinfo file", () => {
       clientId: "7",
       totalBytes: { system0: 231_424 * KIB, "stolen-system0": 0 },
       residentBytes: { system0: 198_656 * KIB, "stolen-system0": 0 },
+      sharedBytes: { system0: 0, "stolen-system0": 0 },
+      engineNs: { render: 25_662_044_495, copy: 0, video: 0, "video-enhance": 0 },
     });
   });
 
@@ -64,6 +66,8 @@ describe("an fdinfo file", () => {
       clientId: "34",
       totalBytes: {},
       residentBytes: { vram: 30_348 * KIB, gtt: 2048 * KIB, cpu: 0 },
+      sharedBytes: {},
+      engineNs: { gfx: 1_251_766_891, compute: 0, dec: 0, enc: 0 },
     });
   });
 
@@ -143,7 +147,15 @@ describe("the GPU process's DRM memory", () => {
   });
 
   it("is null when the clients carry no memory keys", () => {
-    const bare = { driver: "x", pdev: null, clientId: "1", totalBytes: {}, residentBytes: {} };
+    const bare = {
+      driver: "x",
+      pdev: null,
+      clientId: "1",
+      totalBytes: {},
+      residentBytes: {},
+      sharedBytes: {},
+      engineNs: {},
+    };
     expect(sumDrmClients([bare], "the driver reports no drm-* memory keys")).toEqual({
       kind: "unavailable",
       reason: "the driver reports no drm-* memory keys",

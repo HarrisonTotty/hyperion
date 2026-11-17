@@ -3,6 +3,7 @@ import type { PatchKey } from "../view/terrain/patchKey";
 import { StandInFields } from "../view/terrain/workers/heightBake";
 import type {
   BakedPatch,
+  HeightWorkerMessage,
   HeightWorkerReply,
   HeightWorkerRequest,
 } from "../view/terrain/workers/messages";
@@ -129,7 +130,8 @@ export class ScriptedHeightWorker implements WorkerLike {
     );
   }
 
-  reply(message: HeightWorkerReply): void {
+  /** Posts `message` to the pool, its WebAssembly memory's byte length beside it where given. */
+  reply(message: HeightWorkerMessage): void {
     this.answered.push(message.id);
     this.events.dispatchEvent(new MessageEvent("message", { data: message }));
   }
