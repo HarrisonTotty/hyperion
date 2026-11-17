@@ -1,3 +1,5 @@
+import type { PerfSceneId } from "@hyperion/perf";
+
 /**
  * How this launch runs the GPU: Chromium's own path off Linux (no switches, never relaunched), the
  * forced Vulkan path on Linux, the declared safe mode, which has no WebGPU, or the check-only
@@ -122,6 +124,33 @@ export interface SpikeLaunch {
    * file are as before.
    */
   readonly served?: ServedWorldNames;
+}
+
+/**
+ * A perf run's options as the command line gave them (plan R12, R12.T4.a): the scene of
+ * `@hyperion/perf`'s catalogue it runs, the quality setting it runs at, where its record goes, how
+ * many repetitions it makes, whether it is the scene's control run, and whether a failed
+ * precondition is overridden.
+ */
+export interface PerfLaunch {
+  readonly scene: PerfSceneId;
+  /** `--setting`: the scene's views at that quality (Design note 9's columns). */
+  readonly setting: QualitySettingName;
+  /**
+   * The file the record is appended to as a JSON line (`--perf-out`), or `null` for
+   * `target/perf-run/runs.v1.jsonl` under the working directory; `just perf-record` adds it to the
+   * store.
+   */
+  readonly out: string | null;
+  /** `--perf-reps`: the repetitions after the warm-up, five by default (Design note 7). */
+  readonly repetitions: number;
+  /**
+   * `--perf-control`: the control run, which omits R01's timing switch, so that its timestamps
+   * stay quantized (Design note 4).
+   */
+  readonly control: boolean;
+  /** `--force`: run though a precondition fails, the record marked `forced` with its reasons. */
+  readonly force: boolean;
 }
 
 /**

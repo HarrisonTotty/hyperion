@@ -20,6 +20,7 @@ import {
 import type {
   FramePacingName,
   GeometryOverride,
+  PerfLaunch,
   QualitySettingName,
   SpikeLaunch,
   ViewsCheckLaunch,
@@ -88,6 +89,7 @@ import { softwareModeRefusal } from "./graphics/softwareMode";
 import { x11RelaunchArgs } from "./graphics/x11Relaunch";
 import { isSafeExternalUrl, isSameDocument } from "./navigation";
 import { machinePerformanceThreads } from "./performanceThreads";
+import { perfGpuTiming, perfSwitches } from "./perf/launch";
 import { denyPermissionRequests } from "./permissions";
 
 function reportLoadFailure(error: unknown): void {
@@ -659,6 +661,7 @@ function startViewsCheckSession(
 function prepareGraphics(
   spike: SpikeLaunch | undefined,
   viewsCheck: boolean,
+  perf: PerfLaunch | undefined,
 ):
   | { readonly graphics: GraphicsLaunch; readonly switches: ReadonlyArray<ChromiumSwitch> }
   | undefined {
@@ -679,6 +682,14 @@ function prepareGraphics(
     safe: app.commandLine.hasSwitch(SAFE_MODE_SWITCH),
     software,
   });
+  if (perf !== undefined) {
+    // Perf mode's are R01's with the timing toggle, the control run's without it, and no other
+    // switch (plan R12, R12.T4.a; Design note 4).
+    const control = { mode, control: perf.control };
+    const switches = perfSwitches({ platform: process.platform, ...control });
+    applyGraphicsSwitches(app.commandLine, switches);
+    return { graphics: { launchMode: mode, gpuTiming: perfGpuTiming(control) }, switches };
+  }
   // The timing toggle lifts the quantization in every mode that draws with WebGPU, safe mode's
   // none. A spike run always asks for it (T14.b's `launchSwitches`), and so does a views check
   // (R07.T20).
@@ -722,7 +733,7 @@ async function main(): Promise<void> {
   }
   const serverUrl = serverUrlOf(args);
   // Also before `ready`: Chromium reads its switches when the GPU process starts.
-  const prepared = prepareGraphics(args.spike, args.viewsCheck !== undefined);
+  const prepared = prepareGraphics(args.spike, args.viewsCheck !== undefined, args.perf);
   if (prepared === undefined) {
     return;
   }
@@ -744,6 +755,12 @@ async function main(): Promise<void> {
   await app.whenReady();
   denyPermissionRequests(session.defaultSession);
   registerStills();
+  if (args.perf !== undefined) {
+    // The runner, the main process's half of a run, is R12.T4.b's.
+    process.stderr.write("perf run: the runner is not built yet (plan R12, R12.T4.b)\n");
+    app.exit(2);
+    return;
+  }
   const spike = args.spike;
   if (spike !== undefined) {
     const hidden = spike.smoke || process.env[SPIKE_HIDDEN_ENV] === "1";

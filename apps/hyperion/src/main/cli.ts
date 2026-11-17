@@ -4,10 +4,29 @@
  * @remarks
  * Every option can instead be set by an environment variable; one given on the command line wins.
  *
- * | Option      | Variable               | Default     |
- * | ----------- | ---------------------- | ----------- |
- * | `--address` | `HYPERION_SERVER_ADDR` | `127.0.0.1` |
- * | `--port`    | `HYPERION_SERVER_PORT` | `7878`      |
+ * | Option           | Variable                | Default                         |
+ * | ---------------- | ----------------------- | ------------------------------- |
+ * | `--address`      | `HYPERION_SERVER_ADDR`  | `127.0.0.1`                     |
+ * | `--port`         | `HYPERION_SERVER_PORT`  | `7878`                          |
+ * | `--perf-run`     | `HYPERION_PERF_RUN`     | none                            |
+ * | `--perf-out`     | `HYPERION_PERF_OUT`     | `target/perf-run/runs.v1.jsonl` |
+ * | `--perf-reps`    | `HYPERION_PERF_REPS`    | `5`                             |
+ * | `--perf-control` | `HYPERION_PERF_CONTROL` | off                             |
+ * | `--force`        | `HYPERION_PERF_FORCE`   | off                             |
+ *
+ * A switch's variable turns it on when set to any value, as commander reads a flag's variable.
+ *
+ * `--perf-run <SCENE>` runs one scene of `@hyperion/perf`'s catalogue (`PERF_SCENE_IDS`) in perf
+ * mode in place of the consoles (plan R12, R12.T4; Design notes 7, 13 and 14), at its `--setting`:
+ * the warm-up, then `--perf-reps` repetitions, each from the same state, and the run's record
+ * appended to `--perf-out` as one JSON line, which `just perf-record` adds to the store. A scene
+ * outside the catalogue is refused. Perf mode launches with R01's graphics switches and their
+ * timing toggle (`--hyperion-gpu-timing`), and adds no other switch; `--perf-control` is the
+ * scene's control run, launched without the toggle (Design note 4), and is refused beside
+ * `--hyperion-gpu-timing`. `--force` runs though a precondition fails (Design note 7), the record
+ * marked `forced` with its reasons. Each of the four is refused without `--perf-run`, and
+ * `--perf-run` beside `--descent-spike` or `--views-check`; the spike's own options are refused
+ * with it, as on the consoles.
  *
  * `--setting high|low` is the quality setting `VIEW` draws at (plan R07, T17; R05 Design note 26),
  * `high` unless given: the operator chooses it at launch, it holds for the run, and launching again
@@ -155,6 +174,7 @@
  * not the same thing.
  */
 
+import { isPerfSceneId, PERF_SCENE_IDS } from "@hyperion/perf";
 import { Command, InvalidArgumentError, Option } from "commander";
 
 import type {
@@ -165,6 +185,7 @@ import type {
   MarchProbeName,
   HandoverLookName,
   LitProbeName,
+  PerfLaunch,
   QualitySettingName,
   ServedWorldNames,
 } from "../preload/api";
@@ -192,6 +213,32 @@ export const ENV_SERVER_ADDR = "HYPERION_SERVER_ADDR";
 /** The variable giving the port of the server to link to, for `--port`. */
 export const ENV_SERVER_PORT = "HYPERION_SERVER_PORT";
 
+/** The variable naming the perf run's scene, for `--perf-run`. */
+export const ENV_PERF_RUN = "HYPERION_PERF_RUN";
+/** The variable naming the file the perf run's record is appended to, for `--perf-out`. */
+export const ENV_PERF_OUT = "HYPERION_PERF_OUT";
+/** The variable giving the perf run's repetitions, for `--perf-reps`. */
+export const ENV_PERF_REPS = "HYPERION_PERF_REPS";
+/** The variable that makes the perf run the scene's control run, for `--perf-control`. */
+export const ENV_PERF_CONTROL = "HYPERION_PERF_CONTROL";
+/** The variable that runs the perf run though a precondition fails, for `--force`. */
+export const ENV_PERF_FORCE = "HYPERION_PERF_FORCE";
+
+/** Every variable of perf mode, for a caller that must clear them (a test). */
+export const PERF_ENV = [
+  ENV_PERF_RUN,
+  ENV_PERF_OUT,
+  ENV_PERF_REPS,
+  ENV_PERF_CONTROL,
+  ENV_PERF_FORCE,
+] as const;
+
+/** A perf run's repetitions without `--perf-reps`: Design note 7's five. */
+export const DEFAULT_PERF_REPETITIONS = 5;
+
+/** The most repetitions `--perf-reps` takes: T8.d's ten, and room above it. */
+export const MAX_PERF_REPETITIONS = 50;
+
 /** The address linked to when `--address` is not given: a server on this machine. */
 export const DEFAULT_ADDRESS = "127.0.0.1";
 /** The port linked to when `--port` is not given, the server's own default. */
@@ -217,6 +264,8 @@ export interface ClientArgs {
   readonly spike?: SpikeLaunch;
   /** The several-views check's options when `--views-check` is given, else `undefined`. */
   readonly viewsCheck?: ViewsCheckLaunch;
+  /** The perf run's options when `--perf-run` is given (plan R12, R12.T4.a), else `undefined`. */
+  readonly perf?: PerfLaunch;
   /**
    * The spike's or the check's geometry override (`--geometry`, plan R14, Design note 17), applied
    * over its setting's, when given, else `undefined`.
@@ -296,6 +345,27 @@ export function parseWorkers(value: string): number {
     throw new InvalidArgumentError("expected a worker count from 1 to 64");
   }
   return workers;
+}
+
+/** Reads a `--perf-run` value: a scene of `@hyperion/perf`'s `PERF_SCENE_IDS`. */
+export function parsePerfScene(value: string): string {
+  if (!isPerfSceneId(value)) {
+    throw new InvalidArgumentError(
+      `expected a scene of the catalogue: ${PERF_SCENE_IDS.join(", ")}`,
+    );
+  }
+  return value;
+}
+
+/** Reads a `--perf-reps` value: 1 to {@link MAX_PERF_REPETITIONS} repetitions. */
+export function parsePerfRepetitions(value: string): number {
+  const reps = /^\d{1,2}$/.test(value) ? Number(value) : Number.NaN;
+  if (!Number.isInteger(reps) || reps < 1 || reps > MAX_PERF_REPETITIONS) {
+    throw new InvalidArgumentError(
+      `expected a repetition count from 1 to ${String(MAX_PERF_REPETITIONS)}`,
+    );
+  }
+  return reps;
 }
 
 /** Reads a `--randomize` count: the `RANDOMIZE` draws a planet viewer run captures, 1 to 32. */
@@ -673,6 +743,42 @@ export function buildCommand(version: string): Command {
         "bake the horizon map with a generated world's lit patches (default on)",
       ).choices(["on", "off"]),
     )
+    .addOption(
+      new Option(
+        "--perf-run <SCENE>",
+        `run a scene of the perf catalogue (plan R12) in place of the consoles: ${PERF_SCENE_IDS.join(", ")}`,
+      )
+        .env(ENV_PERF_RUN)
+        .argParser(parsePerfScene),
+    )
+    .addOption(
+      new Option(
+        "--perf-out <PATH>",
+        "the file the perf run's record is appended to (default target/perf-run/runs.v1.jsonl)",
+      )
+        .env(ENV_PERF_OUT)
+        .argParser(parseFile),
+    )
+    .addOption(
+      new Option(
+        "--perf-reps <N>",
+        `the perf run's repetitions, 1 to ${String(MAX_PERF_REPETITIONS)} (default ${String(DEFAULT_PERF_REPETITIONS)})`,
+      )
+        .env(ENV_PERF_REPS)
+        .argParser(parsePerfRepetitions),
+    )
+    .addOption(
+      new Option(
+        "--perf-control",
+        "the perf run's control run, without the timing switch (timestamps stay quantized)",
+      ).env(ENV_PERF_CONTROL),
+    )
+    .addOption(
+      new Option(
+        "--force",
+        "run the perf run though a precondition fails, its record marked forced",
+      ).env(ENV_PERF_FORCE),
+    )
     .exitOverride();
 }
 
@@ -788,6 +894,10 @@ export function parseClientArgs(args: readonly string[], version: string): Clien
       "error: --look handover-halo centres a crater of TERRAIN TEST's moon, not a served world's",
     );
   }
+  const perfRefusal = perfRefusalOf(options);
+  if (perfRefusal !== null) {
+    command.error(`error: ${perfRefusal}`);
+  }
   if (options["viewsCheck"] === true) {
     // Throws a CommanderError, as the parser's own refusals do (`exitOverride`).
     if (options["descentSpike"] === true) {
@@ -828,11 +938,13 @@ export function parseClientArgs(args: readonly string[], version: string): Clien
         : "--descent-spike, which was not";
       command.error(`error: --${kebab(stray)} is an option of ${owners} given`);
     }
+    const perf = perfLaunchOf(options);
     return {
       address,
       port,
       setting: settingOf(options),
       framePacing,
+      ...(perf === null ? {} : { perf }),
       ...(options["planetViewer"] === true ? { planetViewer: true } : {}),
     };
   }
@@ -876,6 +988,48 @@ function geometryOf(
 function framePacingOf(options: Readonly<Record<string, unknown>>): FramePacingName {
   const pacing = options["framePacing"];
   return pacing === "rate" || pacing === "display" ? pacing : DEFAULT_FRAME_PACING;
+}
+
+/** Perf mode's options that `--perf-run` takes, by their commander attribute names. */
+const PERF_OPTIONS = ["perfOut", "perfReps", "perfControl", "force"] as const;
+
+/**
+ * Why perf mode's options cannot run together (plan R12, R12.T4.a), or `null` where they can: one
+ * of them without `--perf-run`; `--perf-run` beside the spike or the check; or `--perf-control`, the
+ * run without the timing switch, beside that switch.
+ */
+function perfRefusalOf(options: Readonly<Record<string, unknown>>): string | null {
+  if (options["perfRun"] === undefined) {
+    const stray = PERF_OPTIONS.find((name) => options[name] !== undefined);
+    return stray === undefined
+      ? null
+      : `--${kebab(stray)} is an option of --perf-run, which was not given`;
+  }
+  if (options["descentSpike"] === true || options["viewsCheck"] === true) {
+    return "--perf-run, --descent-spike and --views-check are separate runs; give one";
+  }
+  if (options["perfControl"] === true && options["hyperionGpuTiming"] === true) {
+    return `--perf-control is the run without --${GPU_TIMING_SWITCH}; give one`;
+  }
+  return null;
+}
+
+/** The perf run's options where `--perf-run` names a scene, else `null` (commander has parsed them). */
+function perfLaunchOf(options: Readonly<Record<string, unknown>>): PerfLaunch | null {
+  const scene = options["perfRun"];
+  if (typeof scene !== "string" || !isPerfSceneId(scene)) {
+    return null;
+  }
+  const out = options["perfOut"];
+  const repetitions = options["perfReps"];
+  return {
+    scene,
+    setting: settingOf(options),
+    out: typeof out === "string" ? out : null,
+    repetitions: typeof repetitions === "number" ? repetitions : DEFAULT_PERF_REPETITIONS,
+    control: options["perfControl"] === true,
+    force: options["force"] === true,
+  };
 }
 
 /** The `--setting` given, `high` without one (commander has checked its choices). */

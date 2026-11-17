@@ -1,12 +1,21 @@
 import { CommanderError } from "commander";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { PERF_SCENE_IDS } from "@hyperion/perf";
+
 import {
   type ClientArgs,
   DEFAULT_ADDRESS,
+  DEFAULT_PERF_REPETITIONS,
   DEFAULT_PORT,
+  ENV_PERF_CONTROL,
+  ENV_PERF_FORCE,
+  ENV_PERF_OUT,
+  ENV_PERF_REPS,
+  ENV_PERF_RUN,
   ENV_SERVER_ADDR,
   ENV_SERVER_PORT,
+  PERF_ENV,
   parseClientArgs,
   serverUrlOf,
   userArgs,
@@ -55,6 +64,9 @@ describe("the client's command line", () => {
     // A variable set where the tests run must not change their outcome.
     vi.stubEnv(ENV_SERVER_ADDR, undefined);
     vi.stubEnv(ENV_SERVER_PORT, undefined);
+    for (const name of PERF_ENV) {
+      vi.stubEnv(name, undefined);
+    }
   });
 
   afterEach(() => {
@@ -1357,5 +1369,131 @@ describe("the geometry override (plan R14, Design note 17)", () => {
       "commander.invalidArgument",
       true,
     ]);
+  });
+});
+
+describe("perf mode (plan R12, R12.T4.a)", () => {
+  beforeEach(() => {
+    for (const stream of [process.stdout, process.stderr]) {
+      vi.spyOn(stream, "write").mockImplementation(() => true);
+    }
+    for (const name of [ENV_SERVER_ADDR, ENV_SERVER_PORT, ...PERF_ENV]) {
+      vi.stubEnv(name, undefined);
+    }
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("runs a scene of the catalogue at its setting, five repetitions by default", () => {
+    expect(parse(["--perf-run", "cockpit-descent", "--setting", "low"])).toEqual({
+      address: DEFAULT_ADDRESS,
+      port: DEFAULT_PORT,
+      setting: "low",
+      framePacing: "display",
+      perf: {
+        scene: "cockpit-descent",
+        setting: "low",
+        out: null,
+        repetitions: DEFAULT_PERF_REPETITIONS,
+        control: false,
+        force: false,
+      },
+    });
+    expect(DEFAULT_PERF_REPETITIONS).toBe(5);
+  });
+
+  it.each(PERF_SCENE_IDS)("takes the catalogue's scene %s", (scene) => {
+    expect(parse([`--perf-run=${scene}`]).perf?.scene).toBe(scene);
+  });
+
+  it("takes its record's file, its repetitions, the control run and --force", () => {
+    expect(
+      parse([
+        "--perf-run",
+        "nuclear-disc-sky",
+        "--perf-out",
+        "target/perf-run/sky.jsonl",
+        "--perf-reps",
+        "10",
+        "--perf-control",
+        "--force",
+      ]).perf,
+    ).toEqual({
+      scene: "nuclear-disc-sky",
+      setting: "high",
+      out: "target/perf-run/sky.jsonl",
+      repetitions: 10,
+      control: true,
+      force: true,
+    });
+  });
+
+  it("reads every option from its variable, the command line winning", () => {
+    vi.stubEnv(ENV_PERF_RUN, "arrival-memory");
+    vi.stubEnv(ENV_PERF_OUT, "elsewhere.jsonl");
+    vi.stubEnv(ENV_PERF_REPS, "3");
+    vi.stubEnv(ENV_PERF_CONTROL, "1");
+    vi.stubEnv(ENV_PERF_FORCE, "1");
+    expect(parse([]).perf).toEqual({
+      scene: "arrival-memory",
+      setting: "high",
+      out: "elsewhere.jsonl",
+      repetitions: 3,
+      control: true,
+      force: true,
+    });
+    expect(parse(["--perf-run", "ringed-giant-approach", "--perf-reps", "2"]).perf).toMatchObject({
+      scene: "ringed-giant-approach",
+      repetitions: 2,
+    });
+  });
+
+  it("is absent from an ordinary launch", () => {
+    expect(parse([])).not.toHaveProperty("perf");
+  });
+
+  it.each([["cockpit"], ["main-screen-4k"], [""]])(
+    "refuses a scene %j not in the catalogue",
+    (scene) => {
+      const error = refusal(["--perf-run", scene]);
+      expect([error.exitCode, error.code]).toEqual([1, "commander.invalidArgument"]);
+      expect(error.message).toContain(PERF_SCENE_IDS.join(", "));
+    },
+  );
+
+  it.each([["0"], ["51"], ["five"], ["2.5"]])("refuses %j repetitions", (reps) => {
+    const error = refusal(["--perf-run", "cockpit-descent", "--perf-reps", reps]);
+    expect([error.exitCode, error.code]).toEqual([1, "commander.invalidArgument"]);
+  });
+
+  it.each([
+    [["--perf-out", "x.jsonl"], "--perf-out"],
+    [["--perf-reps", "5"], "--perf-reps"],
+    [["--perf-control"], "--perf-control"],
+    [["--force"], "--force"],
+  ])("refuses %j without --perf-run", (args, flag) => {
+    expect(refusal(args).message).toBe(
+      `error: ${flag} is an option of --perf-run, which was not given`,
+    );
+  });
+
+  it.each([[["--descent-spike"]], [["--views-check"]]])("refuses --perf-run beside %j", (args) => {
+    expect(refusal(["--perf-run", "cockpit-descent", ...args]).message).toBe(
+      "error: --perf-run, --descent-spike and --views-check are separate runs; give one",
+    );
+  });
+
+  it("refuses the control run beside the timing switch it omits", () => {
+    expect(
+      refusal(["--perf-run", "cockpit-descent", "--perf-control", "--hyperion-gpu-timing"]).message,
+    ).toBe("error: --perf-control is the run without --hyperion-gpu-timing; give one");
+  });
+
+  it("refuses the spike's own options with --perf-run, as on the consoles", () => {
+    expect(refusal(["--perf-run", "cockpit-descent", "--seed", "7"]).message).toBe(
+      "error: --seed is an option of --descent-spike, which was not given",
+    );
   });
 });
