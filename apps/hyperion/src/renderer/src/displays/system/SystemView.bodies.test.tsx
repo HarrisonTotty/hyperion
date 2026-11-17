@@ -2395,6 +2395,50 @@ describe("SystemView with moons, rings, belts and the cometary halo", () => {
       ]);
     });
 
+    it("keeps the focus when a moon of a destroyed planet is chosen", async () => {
+      const { user, socket } = renderView();
+      const moon = `${FIXTURE_SYSTEM}.0101`;
+      const engulfed = `${FIXTURE_SYSTEM}.0200`;
+      const planet = populatedBodies().bodies.find((body) => body.id === engulfed);
+      if (planet?.state.type !== "destroyed") {
+        throw new Error("the populated answer's /512 is destroyed");
+      }
+      const gone = planet.state;
+      // The moon /257 moved to the engulfed planet /512, and gone with it.
+      await answer(
+        socket,
+        populatedBodiesWith((body) => {
+          switch (body.id) {
+            case PLANET_ID:
+              return { ...body, moons: { state: "ok", value: [] } };
+            case engulfed:
+              return { ...body, moons: { state: "ok", value: [moon] } };
+            case moon:
+              return {
+                ...body,
+                parent: { type: "body", id: engulfed },
+                state: gone,
+                position_m: null,
+                orbit: { state: "not_applicable" },
+              };
+            default:
+              return body;
+          }
+        }),
+      );
+      await focusRow(user, /\/256,/);
+
+      await selectRow(user, /\/257,/);
+
+      expect([
+        frame(),
+        focusBody().getAttribute("aria-pressed"),
+        within(screen.getByRole("tree", { name: "Bodies" }))
+          .getByRole("treeitem", { name: /\/257,/ })
+          .getAttribute("aria-selected"),
+      ]).toEqual(["BODY H7K 4C0RFZ D-7 /256", "true", "true"]);
+    });
+
     it("opens the newly focused planet's moon with VIEW BODY and OPEN IN PLANET VIEWER", async () => {
       const viewed = vi.fn<(inspection: BodyInspection) => void>();
       const opened = vi.fn<(inspection: BodyInspection) => void>();
