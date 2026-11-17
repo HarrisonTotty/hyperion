@@ -6,7 +6,7 @@ import { SOFTWARE_WAIT_FACTOR, softwareModeRefusal, type SoftwareModeRun } from 
 const WHERE = { cwd: "/repo/apps/hyperion", repoRoot: "/repo" } as const;
 
 /** The runs that may take the switch. */
-const RUNS: ReadonlyArray<SoftwareModeRun> = ["views check", "descent spike"];
+const RUNS: ReadonlyArray<SoftwareModeRun> = ["views check", "descent spike", "perf run"];
 
 describe("the software mode's refusal", () => {
   it("lets a views check or a descent spike of an unpackaged build take the switch", () => {
@@ -21,7 +21,7 @@ describe("the software mode's refusal", () => {
     expect(
       softwareModeRefusal({ software: true, packaged: false, run: null, out: null, ...WHERE }),
     ).toBe(
-      "error: --hyperion-graphics-software is an option of --views-check and --descent-spike, neither of which was given",
+      "error: --hyperion-graphics-software is an option of --views-check, --descent-spike and --perf-run, none of which was given",
     );
   });
 
@@ -30,7 +30,7 @@ describe("the software mode's refusal", () => {
       expect(
         softwareModeRefusal({ software: true, packaged: true, run, out: null, ...WHERE }),
       ).toBe(
-        "error: --hyperion-graphics-software is a test switch of the views check and the descent spike, refused in a packaged build",
+        "error: --hyperion-graphics-software is a test switch of the views check, the descent spike and the perf run, refused in a packaged build",
       );
     }
   });
@@ -79,6 +79,15 @@ describe("the software mode's refusal", () => {
         "error: --out is refused with --hyperion-graphics-software, whose records go under target/ alone",
       );
     }
+  });
+
+  it("lets a perf run's --perf-out under the repository's target/ take the switch, and no other", () => {
+    const of = (out: string): string | null =>
+      softwareModeRefusal({ software: true, packaged: false, run: "perf run", out, ...WHERE });
+    expect(of("/repo/target/perf-run/runs.v1.jsonl")).toBeNull();
+    expect(of("/repo/docs/measurements/rendering/runs.v1.jsonl")).toBe(
+      "error: --perf-out is refused with --hyperion-graphics-software, whose records go under target/ alone",
+    );
   });
 
   it("refuses nothing without the switch", () => {

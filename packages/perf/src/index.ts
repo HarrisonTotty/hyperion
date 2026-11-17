@@ -12,3 +12,5 @@ export * from "./scenes.ts";
 export * from "./stats.ts";
 export * from "./store.ts";
 export * from "./table.ts";
+/** The record's schema helpers, for a caller that validates a part of a record it is handed. */
+export * as perfSchema from "./schema.ts";

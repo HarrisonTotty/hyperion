@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { GraphicsLaunchMode } from "../../preload/api";
 import { graphicsSwitches } from "../graphics/switches";
-import { perfGpuTiming, perfSwitches } from "./launch";
+import { machineSlugOf, perfGpuTiming, perfSwitches } from "./launch";
 
 const PLATFORMS: ReadonlyArray<NodeJS.Platform> = ["linux", "darwin", "win32"];
 const MODES: ReadonlyArray<GraphicsLaunchMode> = ["default", "vulkan", "safe", "software"];
@@ -55,5 +55,27 @@ describe("perf mode's switches", () => {
         expect(perfGpuTiming({ mode, control: true })).toBe(false);
       }
     }
+  });
+});
+
+describe("the machine's slug", () => {
+  it("names the README's machines by their GPU or, for the Mac, its CPU", () => {
+    expect(
+      machineSlugOf({ vendorId: 0x10de, deviceId: 0x2206 }, "linux", "AMD Ryzen 7 3700X"),
+    ).toBe("rtx3080");
+    expect(machineSlugOf({ vendorId: 0x8086, deviceId: 0x3ea0 }, "linux", "i7-8665U")).toBe(
+      "uhd620",
+    );
+    expect(machineSlugOf({ vendorId: 0x106b, deviceId: 0 }, "darwin", "Apple M5")).toBe("m5");
+  });
+
+  it("names SwiftShader, and any other GPU by its IDs, never by the host", () => {
+    expect(machineSlugOf({ vendorId: 0x1ae0, deviceId: 0xc0de }, "linux", "AMD EPYC 7571")).toBe(
+      "swiftshader",
+    );
+    expect(machineSlugOf({ vendorId: 0x1002, deviceId: 0x73bf }, "linux", "x")).toBe(
+      "gpu-1002-73bf",
+    );
+    expect(machineSlugOf(null, "win32", "x")).toBe("unknown-win32");
   });
 });

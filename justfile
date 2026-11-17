@@ -313,6 +313,22 @@ child-window-check *args: gen-surface
     pnpm --filter hyperion build
     bash apps/hyperion/scripts/childWindowCheck.sh "$@"
 
+# R12's perf mode (R12.T4.b; Design notes 7, 13 and 14): builds the client and the release server,
+# then runs one scene of `@hyperion/perf`'s catalogue `<reps>` times on this machine after its
+# warm-up, the preconditions checked first, the local server restarted with a fresh data directory
+# before each repetition, and appends the run's record to `target/perf-run/runs.v1.jsonl`, which
+# `just perf-record` adds to the store. The commit, the tree's state and hyperion-base's
+# `GENERATOR_VERSION` go to the client in the environment (`apps/hyperion/scripts/perfRun.sh`).
+# Options: `--setting high|low`, `--perf-control`, `--force`, `--perf-out <file>`, `--hidden`,
+# `--software` (SwiftShader in a pod: its figures are never a GPU's). By hand, on a quiet machine;
+# not part of `ci`.
+# Run a perf scene, e.g. `just perf-run cockpit-descent 5 --setting low`.
+[positional-arguments]
+perf-run scene reps *args: gen-surface
+    pnpm --filter hyperion build
+    cargo build --release --quiet -p hyperion-server
+    bash apps/hyperion/scripts/perfRun.sh "$@"
+
 # R12's consolidated record (R12.T1.b): validates a perf run's record (one record as JSON, or JSON
 # lines as `--perf-out` appends them), or folds one of R05's descent-spike results files, appends
 # it to `docs/measurements/rendering/runs.v1.jsonl` under the first free ID and regenerates

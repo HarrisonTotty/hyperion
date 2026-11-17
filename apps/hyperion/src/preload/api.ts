@@ -1,4 +1,15 @@
-import type { PerfSceneId } from "@hyperion/perf";
+import type {
+  AdapterRecord,
+  ArrivalRecord,
+  JsonObject,
+  MemoryItem,
+  PassFigures,
+  PerfSceneId,
+  PerfTimer,
+  PerfViewRecord,
+  RowFigures,
+  StreamingFigures,
+} from "@hyperion/perf";
 
 /**
  * How this launch runs the GPU: Chromium's own path off Linux (no switches, never relaunched), the
@@ -154,6 +165,168 @@ export interface PerfLaunch {
 }
 
 /**
+ * Where the main process's arrival placed the ship on the scene's server (`just place-ship`, at the
+ * scene's pins): the universe it made there, the system, and the body, or `null` beside the
+ * system's barycentre.
+ */
+export interface PerfArrival {
+  /** The universe's ID, 16 lowercase hexadecimal digits: a fresh server's is new each start. */
+  readonly universe: string;
+  readonly system: string;
+  readonly body: string | null;
+}
+
+/** What a perf run's renderer is told at its start (Design note 14): the scene and its launch. */
+export interface PerfConfig {
+  readonly launch: PerfLaunch;
+  /** Every switch in force, as Chromium's command line writes them (Design note 5). */
+  readonly switches: ReadonlyArray<string>;
+  /** Whether R01's timing toggle is on: off on a control run (Design note 4). */
+  readonly gpuTiming: boolean;
+  readonly launchMode: GraphicsLaunchMode;
+  /** Whether the window is hidden and drawn offscreen, its frames paced by Chromium's timer. */
+  readonly hidden: boolean;
+  /**
+   * The server's bridge WebSocket URL for the warm-up: the main process's local server, on the
+   * port its `listening` line gave, or a remote one's from `--address` and `--port`; each
+   * repetition's start gives the restarted server's.
+   */
+  readonly serverUrl: string;
+  /** The warm-up's arrival on that server. */
+  readonly arrival: PerfArrival;
+}
+
+/** A view of a perf run as its renderer laid it out (the record's `PerfViewRecord` less its scale). */
+export type PerfDescribedView = Omit<PerfViewRecord, "internalScale">;
+
+/**
+ * What the renderer tells the main process once the scene's views are made, before the warm-up:
+ * what the record says of the scene, the setting and the views, and what `describeMachine` needs of
+ * the renderer (Design note 5).
+ */
+export interface PerfRunDescription {
+  readonly scene: { readonly version: number; readonly seed: string; readonly world: string };
+  /** The setting's ladder values, keyed `<module>.<field>` (Design note 3). */
+  readonly settingValues: JsonObject;
+  readonly views: ReadonlyArray<PerfDescribedView>;
+  readonly pacing: "every-vsync" | "every-second-vsync";
+  /** The scene's span, s, or `null` where it is measured (`arrival-memory`'s). */
+  readonly repetitionSeconds: number | null;
+  readonly heightWorkers: number;
+  /** R01's `AdapterSummary`, its `GpuCapabilities` and `selectKernel`'s paths. */
+  readonly adapter: AdapterRecord | null;
+  readonly capabilities: Readonly<Record<string, boolean>> | null;
+  readonly kernelPaths: Readonly<Record<string, string>> | null;
+}
+
+/** The renderer's frames since its last warm-up sample (Design note 7). */
+export interface PerfWarmUpSample {
+  /** Frame intervals, ms, oldest first. */
+  readonly intervalsMs: ReadonlyArray<number>;
+}
+
+/** The main process's warm-up verdict for the last window (Design note 7). */
+export interface PerfWarmUpVerdict {
+  readonly kind: "warming" | "steady" | "not-steady";
+  /** Since the warm-up's first sample, s. */
+  readonly elapsedS: number;
+}
+
+/**
+ * What a repetition's start gives the renderer (Design note 13): the restarted server's URL and the
+ * arrival on it, made inside the span, at the script's time 0.
+ */
+export interface PerfRepetitionStart {
+  readonly serverUrl: string;
+  readonly arrival: PerfArrival;
+}
+
+/** A release of 16 MiB or more the renderer's tally saw, for the kernel's settle window. */
+export interface PerfTallyRelease {
+  /** When, ms since the epoch: the page's `performance.timeOrigin` plus its `performance.now()`. */
+  readonly atEpochMs: number;
+  readonly bytes: number;
+}
+
+/** One repetition's measurements in the renderer (Design note 14), which `endRepetition` hands over. */
+export interface PerfRepetitionResult {
+  /** The span flown, s: the scene's, or the arrival's as it ran. */
+  readonly spanS: number;
+  /** The page's `performance.timeOrigin`, ms since the epoch, for its frames' times. */
+  readonly timeOriginMs: number;
+  /** One entry a frame of the span, in order. */
+  readonly frames: {
+    /** `requestAnimationFrame` intervals, ms; the first frame's is the warm-up's last to it. */
+    readonly intervalsMs: ReadonlyArray<number>;
+    /** Each frame callback's start, the page's `performance.now()`, ms. */
+    readonly callbackStartsMs: ReadonlyArray<number>;
+    /** The main thread's time in each frame callback, ms. */
+    readonly callbackMs: ReadonlyArray<number>;
+    readonly scriptTimesS: ReadonlyArray<number>;
+  };
+  /** The script's segments, s from the span's start. */
+  readonly segments: ReadonlyArray<{
+    readonly name: string;
+    readonly startS: number;
+    readonly endS: number;
+  }>;
+  readonly passes: ReadonlyArray<PassFigures>;
+  readonly rows: ReadonlyArray<RowFigures>;
+  /**
+   * The mean over frames of each frame's timed passes' sum, ms, for the `compositing` row (the GPU
+   * process's busy time less it, Design note 6); `null` where no pass was timed.
+   */
+  readonly timedPassesPerFrameMs: number | null;
+  readonly timer: PerfTimer;
+  readonly memory: {
+    readonly itemPeakBytes: Readonly<Partial<Record<MemoryItem, number>>>;
+    readonly tallyPeakBytes: number | null;
+    readonly workerFieldBytes: ReadonlyArray<number>;
+    readonly workerWasmBytes: ReadonlyArray<number>;
+  };
+  readonly releases: ReadonlyArray<PerfTallyRelease>;
+  readonly streaming: ReadonlyArray<StreamingFigures>;
+  /** Pipelines created after the warm-up (R05's shim). */
+  readonly latePipelines: number;
+  /** The height workers' cost, µs a point with its gradient, or `null` unmeasured. */
+  readonly heightPointUs: number | null;
+  /** Each view's internal scale over the span, in the description's order. */
+  readonly internalScale: ReadonlyArray<{ readonly min: number; readonly median: number }>;
+  readonly arrival: ArrivalRecord | null;
+}
+
+/**
+ * How a perf run ends: completed, with its notes, or failed (a `GraphicsFault`, a refused adapter,
+ * the scene's server or world not had), with the reason the record's notes give.
+ */
+export type PerfEnd =
+  | { readonly status: "complete"; readonly notes: string }
+  | { readonly status: "failed"; readonly reason: string };
+
+/**
+ * Perf mode's narrow functions (plan R12, R12.T4.b; Design note 14), present only on a
+ * `--perf-run` launch: the renderer asks, the main process answers, and the main process sends
+ * nothing the renderer did not ask for, so that a hung renderer leaves a record whose notes say so.
+ */
+export interface PerfApi {
+  /** The scene, the repetitions and the switches. */
+  config(): Promise<PerfConfig>;
+  /** Tells the main process what the record says of the scene, its views and the adapter. */
+  describe(description: PerfRunDescription): Promise<void>;
+  /** Hands over the warm-up's latest frames and answers the verdict for the last window. */
+  warmUpSample(sample: PerfWarmUpSample): Promise<PerfWarmUpVerdict>;
+  /**
+   * Restarts the server with a fresh data directory, opens repetition `n`'s span (1-based), and
+   * arrives: the universe made and the ship placed at the scene's pins.
+   */
+  beginRepetition(n: number): Promise<PerfRepetitionStart>;
+  /** Closes repetition `n`'s span with the renderer's measurements. */
+  endRepetition(n: number, result: PerfRepetitionResult): Promise<void>;
+  /** Ends the run: the record is assembled and appended, and the app exits. */
+  finish(end: PerfEnd): Promise<void>;
+}
+
+/**
  * A served world as a launch names it (plan R10, R10.T15.b): the universe's ID and the body's ID,
  * in their wire forms.
  */
@@ -266,6 +439,8 @@ export interface HyperionApi {
   readonly compileBudget?: number | "unlimited";
   /** The descent spike's functions, present only on a `--descent-spike` launch. */
   readonly spike?: SpikeApi;
+  /** Perf mode's functions (plan R12, R12.T4.b), present only on a `--perf-run` launch. */
+  readonly perf?: PerfApi;
   /** The several-views check's functions, present only on a `--views-check` launch (R07.T20). */
   readonly viewsCheck?: ViewsCheckApi;
   /** The still images' store under `userData/stills/` (plan R11, R11.T10.c), on every launch. */

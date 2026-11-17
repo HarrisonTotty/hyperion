@@ -43,3 +43,54 @@ export function perfSwitches(options: PerfGraphicsOptions): ReadonlyArray<Chromi
     gpuTiming: perfGpuTiming(options),
   });
 }
+
+/** The machines the rendering plans' README names (Target hardware), by what identifies them. */
+const KNOWN_MACHINES: ReadonlyArray<{
+  readonly slug: string;
+  readonly matches: (gpu: GpuIds | null, platform: NodeJS.Platform, cpu: string) => boolean;
+}> = [
+  { slug: "rtx3080", matches: (gpu) => gpu?.vendorId === 0x10_de && gpu.deviceId === 0x22_06 },
+  { slug: "uhd620", matches: (gpu) => gpu?.vendorId === 0x80_86 && gpu.deviceId === 0x3e_a0 },
+  {
+    slug: "m5",
+    matches: (_gpu, platform, cpu) => platform === "darwin" && cpu.includes("Apple M5"),
+  },
+];
+
+/** A PCI ID as four lowercase hexadecimal digits. */
+function hexId(id: number): string {
+  return id.toString(16).padStart(4, "0");
+}
+
+/** Google's PCI vendor ID, which Chromium's SwiftShader adapter reports. */
+const SWIFTSHADER_VENDOR_ID = 0x1a_e0;
+
+/** A GPU's PCI identity. */
+export interface GpuIds {
+  readonly vendorId: number;
+  readonly deviceId: number;
+}
+
+/**
+ * The machine's slug, a perf record ID's middle part (Design note 5): a Target hardware entry of
+ * the rendering plans' README by its GPU's PCI IDs (`rtx3080`, `uhd620`) or, for the owner's Mac,
+ * its platform and CPU (`m5`); `swiftshader` for Chromium's software adapter; otherwise `gpu-` and
+ * the vendor's and device's IDs in hexadecimal, never a host name.
+ */
+export function machineSlugOf(
+  gpu: GpuIds | null,
+  platform: NodeJS.Platform,
+  cpuModel: string,
+): string {
+  const known = KNOWN_MACHINES.find(({ matches }) => matches(gpu, platform, cpuModel));
+  if (known !== undefined) {
+    return known.slug;
+  }
+  if (gpu === null) {
+    return `unknown-${platform}`;
+  }
+  if (gpu.vendorId === SWIFTSHADER_VENDOR_ID) {
+    return "swiftshader";
+  }
+  return `gpu-${hexId(gpu.vendorId)}-${hexId(gpu.deviceId)}`;
+}

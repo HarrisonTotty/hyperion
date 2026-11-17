@@ -889,6 +889,7 @@ fixtures.
   that `parsePerfRecord` accepts; samples outside a repetition's span are not in it; the server is
   restarted once per repetition; a trace that never settles ends at ten minutes as `NOT STEADY`; a
   monotone five is flagged and a four-up-one-down five is not. Acceptance: `pnpm test`, `just ci`.
+  Records: [12-measurements-and-settings-ladder/records/R12.T4.b.md](12-measurements-and-settings-ladder/records/R12.T4.b.md).
   - _The local server's launch contract_ (added 2026-10-06 by a delegated decision,
     `decision-cross-platform-server.md` item 3, as plan 04's P04.T17.c built it):
     - Start `hyperion-server` with `--stop-on-stdin-close` (or `HYPERION_STOP_ON_STDIN_CLOSE=1`),

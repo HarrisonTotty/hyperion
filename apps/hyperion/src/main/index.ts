@@ -34,6 +34,7 @@ import { planetViewerSwitch } from "../preload/planetViewerLaunch";
 import { qualitySwitch } from "../preload/qualityLaunch";
 import { serverUrlSwitch } from "../preload/serverUrl";
 import { spikeSwitch } from "../preload/spikeLaunch";
+import { perfSwitch } from "../preload/perfLaunch";
 import { viewsCheckSwitch } from "../preload/viewsCheckLaunch";
 import { CdpTracing } from "./cdpTracing";
 import {
@@ -85,7 +86,9 @@ import {
   viewsCheckWatchdogMs,
 } from "./viewsCheck";
 import { GpuProcessMonitor } from "./graphics/gpuProcessMonitor";
-import { softwareModeRefusal } from "./graphics/softwareMode";
+import { SOFTWARE_WAIT_FACTOR, softwareModeRefusal } from "./graphics/softwareMode";
+import { registerPerfHandlers } from "./perf/handlers";
+import { isLoopback, PERF_RUN_ENV, preparePerfSession } from "./perf/session";
 import { x11RelaunchArgs } from "./graphics/x11Relaunch";
 import { isSafeExternalUrl, isSameDocument } from "./navigation";
 import { machinePerformanceThreads } from "./performanceThreads";
@@ -128,7 +131,7 @@ interface SpikeWindow {
 const SPIKE_HIDDEN_ENV = "HYPERION_SPIKE_HIDDEN";
 
 /** The spike window's content size: Design note 21's 1080p for high and 720p for low. */
-function spikeSize(launch: SpikeLaunch | ViewsCheckLaunch): {
+function spikeSize(launch: Pick<SpikeLaunch | ViewsCheckLaunch | PerfLaunch, "setting">): {
   readonly width: number;
   readonly height: number;
 } {
@@ -185,8 +188,9 @@ function createWindow(
   spike: SpikeWindow | null,
   check: ViewsCheckWindowRun | null = null,
   planetViewer = false,
+  perf: PerfWindow | null = null,
 ): BrowserWindow {
-  const run = spike ?? check;
+  const run = spike ?? check ?? perf;
   const size =
     check !== null
       ? // Offscreen rendering draws at a device-pixel ratio of 1, whatever the display's, times
@@ -202,9 +206,10 @@ function createWindow(
   const window = new BrowserWindow({
     ...size,
     useContentSize: run !== null,
-    // The spike holds its size; the check's may meet a smaller display, and records what it got.
-    minWidth: spike === null ? 1024 : size.width,
-    minHeight: spike === null ? 640 : size.height,
+    // The spike and a perf run hold their size; the check's may meet a smaller display, and
+    // records what it got.
+    minWidth: spike === null && perf === null ? 1024 : size.width,
+    minHeight: spike === null && perf === null ? 640 : size.height,
     show: false,
     backgroundColor: "#05080d",
     autoHideMenuBar: true,
@@ -225,6 +230,7 @@ function createWindow(
         planetViewerSwitch(planetViewer),
         ...(spike === null ? [] : [spikeSwitch(spike.launch)]),
         ...(check === null ? [] : [viewsCheckSwitch(check.launch)]),
+        ...(perf === null ? [] : [perfSwitch(perf.launch)]),
         ...(run?.geometry === undefined ? [] : [geometrySwitch(run.geometry)]),
         ...(run?.compileBudget === undefined ? [] : [compileBudgetSwitch(run.compileBudget)]),
       ],
@@ -280,6 +286,15 @@ function createWindow(
   return window;
 }
 
+/** A perf run's window (plan R12, R12.T4.b): its setting's size, shown unless hidden. */
+interface PerfWindow {
+  readonly launch: PerfLaunch;
+  /** A hidden run never shows its window and renders offscreen (the recipe's `--hidden`). */
+  readonly hidden: boolean;
+  readonly geometry: undefined;
+  readonly compileBudget: undefined;
+}
+
 /** The variable naming the `nvidia-smi -q -x` reading the recipe took before the launch. */
 const SPIKE_NVIDIA_BASELINE_ENV = "HYPERION_SPIKE_NVIDIA_BASELINE";
 
@@ -288,8 +303,8 @@ const SPIKE_NVIDIA_BASELINE_ENV = "HYPERION_SPIKE_NVIDIA_BASELINE";
  * 18): the recipe reads `nvidia-smi` before Electron starts, since the GPU process can start
  * before the main process could; `null` without a reading (off NVIDIA, or not the recipe).
  */
-function nvidiaBaseline(): number | null {
-  const path = process.env[SPIKE_NVIDIA_BASELINE_ENV];
+function nvidiaBaseline(variable: string = SPIKE_NVIDIA_BASELINE_ENV): number | null {
+  const path = process.env[variable];
   if (path === undefined) {
     return null;
   }
@@ -475,6 +490,93 @@ function startSpikeSession(
     if (!spikeSession.ended) {
       process.stdout.write("descent spike: FAIL the window was closed before the run ended\n");
       app.exit(1);
+    }
+  });
+}
+
+/**
+ * Starts a perf run (plan R12, R12.T4.b; Design note 14): the preconditions, the server and the
+ * samplers first, then the run window, its trace and its handlers, each call checked against the
+ * window's own page; the GPU or renderer process gone, or the window closed, ends the run as
+ * failed, with a record where a repetition has ended.
+ */
+async function startPerfRun(
+  args: ClientArgs,
+  launch: PerfLaunch,
+  graphics: GraphicsLaunch,
+  switches: ReadonlyArray<ChromiumSwitch>,
+): Promise<void> {
+  if (graphics.launchMode === "safe") {
+    process.stderr.write("perf run: REFUSED safe mode has no WebGPU to measure\n");
+    app.exit(2);
+    return;
+  }
+  const hidden = process.env[PERF_RUN_ENV.hidden] === "1";
+  let window: BrowserWindow | null = null;
+  const perfSession = await preparePerfSession({
+    launch,
+    graphics,
+    switches: switches.map(({ name, value }) =>
+      value === undefined ? `--${name}` : `--${name}=${value}`,
+    ),
+    hidden,
+    remoteUrl: isLoopback(args.address) ? null : serverUrlOf(args),
+    patience: graphics.launchMode === "software" ? SOFTWARE_WAIT_FACTOR : 1,
+    env: process.env,
+    // The built main process is `apps/hyperion/out/main/index.js`.
+    repoRoot: resolve(__dirname, "../../../.."),
+    userData: app.getPath("userData"),
+    appVersion: __APP_VERSION__,
+    gpuInfo: (kind) => app.getGPUInfo(kind),
+    appMetrics: () => app.getAppMetrics(),
+    display: () => (window === null ? null : screen.getDisplayMatching(window.getBounds())),
+    nvidiaBaselineBytes: nvidiaBaseline(PERF_RUN_ENV.nvidiaBaseline),
+    log: logLine,
+    exit: (code) => {
+      app.exit(code);
+    },
+  });
+  if (perfSession === null) {
+    app.exit(2);
+    return;
+  }
+  const { runner } = perfSession;
+  const opened = createWindow(
+    serverUrlOf(args),
+    graphics,
+    launch.setting,
+    args.framePacing,
+    null,
+    null,
+    false,
+    { launch, hidden, geometry: undefined, compileBudget: undefined },
+  );
+  window = opened;
+  perfSession.attachWindow(opened.webContents.debugger);
+  const page = pageUrl();
+  registerPerfHandlers<IpcMainInvokeEvent>({
+    handle: (channel, listener) => {
+      ipcMain.handle(channel, listener);
+    },
+    isSender: (event) => isOwnPage(event.senderFrame, page, opened.webContents.mainFrame),
+    operations: runner.operations(),
+  });
+  const fault = (reason: string): void => {
+    void runner.fault(reason).catch((error: unknown) => {
+      console.error("perf run: the run could not be ended:", error);
+    });
+  };
+  opened.webContents.once("render-process-gone", (_event, details) => {
+    fault(`the renderer exited (${details.reason})`);
+  });
+  app.on("child-process-gone", (_event, details) => {
+    if (details.type === "GPU" && !runner.ended) {
+      fault(`the GPU process exited (${details.reason})`);
+    }
+  });
+  opened.once("closed", () => {
+    if (!runner.ended) {
+      fault("the window was closed before the run ended");
     }
   });
 }
@@ -720,8 +822,10 @@ async function main(): Promise<void> {
         ? "views check"
         : args.spike !== undefined
           ? "descent spike"
-          : null,
-    out: args.viewsCheck?.out ?? args.spike?.out ?? null,
+          : args.perf !== undefined
+            ? "perf run"
+            : null,
+    out: args.viewsCheck?.out ?? args.spike?.out ?? args.perf?.out ?? null,
     cwd: process.cwd(),
     // The built main process is `apps/hyperion/out/main/index.js`.
     repoRoot: resolve(__dirname, "../../../.."),
@@ -756,9 +860,7 @@ async function main(): Promise<void> {
   denyPermissionRequests(session.defaultSession);
   registerStills();
   if (args.perf !== undefined) {
-    // The runner, the main process's half of a run, is R12.T4.b's.
-    process.stderr.write("perf run: the runner is not built yet (plan R12, R12.T4.b)\n");
-    app.exit(2);
+    await startPerfRun(args, args.perf, graphics, switches);
     return;
   }
   const spike = args.spike;

@@ -31,8 +31,12 @@ import { SOFTWARE_MODE_SWITCH } from "./switches";
  */
 export const SOFTWARE_WAIT_FACTOR = 5;
 
-/** The test runs that may take {@link SOFTWARE_MODE_SWITCH}: the views check and the descent spike. */
-export type SoftwareModeRun = "views check" | "descent spike";
+/**
+ * The test runs that may take {@link SOFTWARE_MODE_SWITCH}: the views check, the descent spike and
+ * a perf run (plan R12, R12.T4.b: a pod's run on SwiftShader, whose figures mean nothing but whose
+ * record checks the harness end to end).
+ */
+export type SoftwareModeRun = "views check" | "descent spike" | "perf run";
 
 /** What decides whether a launch may take {@link SOFTWARE_MODE_SWITCH}. */
 export interface SoftwareModeLaunch {
@@ -40,9 +44,9 @@ export interface SoftwareModeLaunch {
   readonly software: boolean;
   /** `app.isPackaged`. */
   readonly packaged: boolean;
-  /** The run the launch makes (`--views-check`, `--descent-spike`), or `null` for neither. */
+  /** The run the launch makes (`--views-check`, `--descent-spike`, `--perf-run`), or `null`. */
   readonly run: SoftwareModeRun | null;
-  /** The results directory the run names (`--out`), or `null` for its default. */
+  /** The results directory or file the run names (`--out`, `--perf-out`), or `null` for its default. */
   readonly out: string | null;
   /** The directory a relative `--out` resolves from: the process's working directory. */
   readonly cwd: string;
@@ -53,27 +57,29 @@ export interface SoftwareModeLaunch {
 /**
  * Why a launch may not take the software switch, as one usage line, or `null` where it may.
  *
- * @returns The refusal in a packaged build, then without `--views-check` or `--descent-spike`, on
- * every platform, so that no player's launch takes the switch, then with `--out`, so that a
- * software run's records go under `target/` alone (main's ruling, 2026-10-29): a views check's
- * `--out` always, a descent spike's unless it resolves strictly inside the repository's `target/`,
- * as the Mac batch's sweep's does in a pod's dry run; `null` without the switch.
+ * @returns The refusal in a packaged build, then without `--views-check`, `--descent-spike` or
+ * `--perf-run`, on every platform, so that no player's launch takes the switch, then with `--out`,
+ * so that a software run's records go under `target/` alone (main's ruling, 2026-10-29): a views
+ * check's `--out` always, a descent spike's `--out` or a perf run's `--perf-out` unless it resolves
+ * strictly inside the repository's `target/`, as the Mac batch's sweep's does in a pod's dry run;
+ * `null` without the switch.
  */
 export function softwareModeRefusal(launch: SoftwareModeLaunch): string | null {
   if (!launch.software) {
     return null;
   }
   if (launch.packaged) {
-    return `error: --${SOFTWARE_MODE_SWITCH} is a test switch of the views check and the descent spike, refused in a packaged build`;
+    return `error: --${SOFTWARE_MODE_SWITCH} is a test switch of the views check, the descent spike and the perf run, refused in a packaged build`;
   }
   if (launch.run === null) {
-    return `error: --${SOFTWARE_MODE_SWITCH} is an option of --views-check and --descent-spike, neither of which was given`;
+    return `error: --${SOFTWARE_MODE_SWITCH} is an option of --views-check, --descent-spike and --perf-run, none of which was given`;
   }
   if (
     launch.out !== null &&
-    !(launch.run === "descent spike" && isUnderTarget(launch.out, launch.cwd, launch.repoRoot))
+    !(launch.run !== "views check" && isUnderTarget(launch.out, launch.cwd, launch.repoRoot))
   ) {
-    return `error: --out is refused with --${SOFTWARE_MODE_SWITCH}, whose records go under target/ alone`;
+    const option = launch.run === "perf run" ? "--perf-out" : "--out";
+    return `error: ${option} is refused with --${SOFTWARE_MODE_SWITCH}, whose records go under target/ alone`;
   }
   return null;
 }

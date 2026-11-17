@@ -6,6 +6,7 @@ import { framePacingFromArgv } from "./framePacingLaunch";
 import { geometryFromArgv } from "./geometryLaunch";
 import { graphicsLaunchFromArgv, subscribeGpuProcessGone } from "./graphicsLaunch";
 import { performanceThreadsFromArgv } from "./machineLaunch";
+import { perfMember } from "./perfApi";
 import { planetViewerFromArgv } from "./planetViewerLaunch";
 import { qualityFromArgv } from "./qualityLaunch";
 import { serverUrlFromArgv } from "./serverUrl";
@@ -45,6 +46,10 @@ const api: HyperionApi = {
   ...spikeMember(process.argv, {
     invoke: (channel, ...args) => ipcRenderer.invoke(channel, ...args),
     privateKib: async () => (await process.getProcessMemoryInfo()).private,
+  }),
+  // Only a `--perf-run` launch has perf mode's functions (plan R12, R12.T4.b).
+  ...perfMember(process.argv, {
+    invoke: (channel, ...args) => ipcRenderer.invoke(channel, ...args),
   }),
   // Only a `--views-check` launch has the several-views check's functions (R07.T20).
   ...viewsCheckMember(process.argv, {
