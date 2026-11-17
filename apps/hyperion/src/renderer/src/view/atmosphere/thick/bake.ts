@@ -581,7 +581,7 @@ function ownPointChannel(point: number): RenderChannel | null {
 }
 
 /** A solve point's wavelength, nm: a bin's middle, or a channel's own (the module's remarks). */
-function pointWavelengthNm(point: number): number {
+export function pointWavelengthNm(point: number): number {
   return point < BAKE_BIN_COUNT
     ? (BAKE_WAVELENGTHS_NM[point] ?? Number.NaN)
     : (CHANNEL_WAVELENGTHS_NM[point - BAKE_BIN_COUNT] ?? Number.NaN);

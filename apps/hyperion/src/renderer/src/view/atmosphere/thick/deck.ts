@@ -128,6 +128,18 @@
  * light's terms and converted to the channels' luminance by V_cb (`thermal.ts`'
  * `EMISSION_CHANNEL_WEIGHTS`), cd m⁻².
  *
+ * **Own wavelengths** (R08.T15.b.2's route; `bake.ts`'s remarks, "Own wavelengths"). A deck over a
+ * surface solves the three channels at their own wavelengths, as a haze route's thick bake does,
+ * where its lights allow all three ({@link deckOwnChannels}), its scattered light at each channel
+ * that point's alone and its thermal light by the bins still. Beneath a Venus-class deck the field
+ * climbs steeply through the blue channel's weights (some 4 × 10⁻⁵ of the top's irradiance at
+ * 393 nm, 0.012 at 443 nm, in `venus-92bar`'s table at the ground), so that the bins' converted
+ * blue read 1.14–1.15 times the field at the channel's 433.6 nm, at every sun and view, the red and
+ * the green within 0.7%: the ground's, the disc's and the aerial images' blue missed the case's
+ * reference by up to 9%, which its re-trace judged (plan R08's record of the route). `giant-deck`,
+ * a deck over a surface too, keeps its tallies on them, its worst image a little nearer. An
+ * envelope's deck, which no gate reads beneath, keeps the bins.
+ *
  * **Bin and channel shares** (R08.T14.d's bake time). Every table here is summed in the bake bins
  * and converted to the channels last, as the thick bake's is, so a preparation of some bins alone
  * ({@link DeckOptions.bins}) and its {@link bakeDeckBins} give those bins as the whole band's bake
@@ -151,6 +163,7 @@ import {
   type BakeLayering,
   bakeBins,
   bakeLayering,
+  bakePointsOf,
   binGroundAlbedo,
   type BinSolve,
   type BinTerm,
@@ -162,6 +175,10 @@ import {
   mixedLayers,
   type MsBinShare,
   type MsSourceTable,
+  NO_OWN_CHANNELS,
+  type OwnChannels,
+  ownWavelengthChannels,
+  pointWavelengthNm,
   type PreparedBake,
   prepareBake,
   THICK_BAKE_GRID,
@@ -427,10 +444,27 @@ function phaseOnGrid(phase: SpectralPhase): Float64Array {
 }
 
 /**
+ * The channels a deck solves at their own wavelengths (the module's remarks, "Own wavelengths"): all
+ * three over a surface where `lights` allow all three (`bake.ts`'s `ownWavelengthChannels`), and
+ * none otherwise, so that its points stand at the bins' and the three channels' indices alike.
+ */
+export function deckOwnChannels(
+  split: DeckSplit,
+  lights: ReadonlyArray<ThickBakeLight>,
+): OwnChannels {
+  if (split.floor !== "ground") {
+    return NO_OWN_CHANNELS;
+  }
+  const own = ownWavelengthChannels(lights);
+  return own.every(Boolean) ? own : NO_OWN_CHANNELS;
+}
+
+/**
  * Everything of a deck's bake but the band (the module's remarks): the floor, the upper medium's and
  * the deck's layers, the upper medium's thick-bake preparation (the column's optics in the 15
- * bins, its table's point optics, and each light's exponential sums fitted over the whole column),
- * and each term's whole phase function in each bin for the deck's exact single scattering.
+ * bins and, over a surface, the channels' own points ({@link deckOwnChannels}), its table's point
+ * optics, and each light's exponential sums fitted over the whole column), and each term's whole
+ * phase function in each bin for the deck's exact single scattering.
  *
  * @throws RangeError as `bake.ts`'s `prepareBake` refuses the grid or lights, for deck layers that
  *   are not a whole number of the grid's strides, a floor albedo outside [0, 1], a split that does
@@ -458,19 +492,21 @@ export function prepareDeck(
   if (override !== null && !(override >= 0 && override <= 1)) {
     throw new RangeError(`a deck's floor albedo lies in [0, 1], not ${override}`);
   }
+  const own = deckOwnChannels(split, lights);
+  const pointCount = bakePointsOf(own).length;
   let floorAltitudeM: number;
   let floorAlbedo: Float64Array;
   switch (split.floor) {
     case "ground":
       floorAltitudeM = 0;
-      // The bake's own ground, bin by bin (`prepareBake`'s `groundAlbedo`).
-      floorAlbedo = Float64Array.from(BAKE_WAVELENGTHS_NM, (nm) =>
-        binGroundAlbedo(column.groundAlbedo, nm),
+      // The bake's own ground, point by point (`prepareBake`'s `groundAlbedo`).
+      floorAlbedo = Float64Array.from({ length: pointCount }, (_, b) =>
+        binGroundAlbedo(column.groundAlbedo, pointWavelengthNm(b)),
       );
       break;
     case "envelope":
       floorAltitudeM = envelopeDeckFloorM(column);
-      floorAlbedo = new Float64Array(BAKE_WAVELENGTHS_NM.length);
+      floorAlbedo = new Float64Array(pointCount);
       break;
   }
   if (override !== null) {
@@ -496,13 +532,20 @@ export function prepareDeck(
     { bottomM: floorAltitudeM, topM: split.altitudeM },
   );
   const whole = stackedLayering(upperLayering, deck);
+  // A share's bins, the share with bin 0 solving the own channels' points beside them, as a thick
+  // share does (`opticsJobs.ts`'s `thick-bake-bins`).
+  const share = options.bins ?? bakePointsOf(NO_OWN_CHANNELS);
+  const points = share.includes(0)
+    ? [...share, ...bakePointsOf(own).filter((b) => b >= BAKE_BIN_COUNT)]
+    : share;
   const upper = prepareBake(
     column,
     lights,
     grid,
     options.expSum ?? EXP_SUM_OPTIONS,
     { layering: upperLayering, fitLayering: whole },
-    options.bins,
+    points,
+    own,
   );
   return {
     split,
@@ -1401,15 +1444,20 @@ export function gatherDeckBins(shares: ReadonlyArray<DeckBinShare>): DeckTables 
       byBin[part.bin] = part;
     }
   }
-  const parts = Array.from({ length: BAKE_BIN_COUNT }, (_, b): DeckBinPart => {
+  const { conversions } = first.above;
+  // Every bin, then each own channel's point where the deck solves them (the module's remarks, "Own
+  // wavelengths"), as its conversions read them.
+  const points = conversions[0]?.[0]?.length ?? BAKE_BIN_COUNT;
+  const parts = Array.from({ length: points }, (_, b): DeckBinPart => {
     const part = byBin[b];
     if (part === undefined) {
       throw new RangeError(`a deck's bin shares hold no bin ${b}`);
     }
     return part;
   });
+  // The thermal light and the deck's optical depth by bin alone, as `bake.ts` converts its own.
+  const bins = parts.slice(0, BAKE_BIN_COUNT);
   const above = gatherBins(shares.map((share) => share.above));
-  const { conversions } = first.above;
   const entries = DECK_PHASE_U.length;
   const slots = conversions.map((factors, slot): DeckSlot => {
     const perBin = parts.map((part) => {
@@ -1459,11 +1507,11 @@ export function gatherDeckBins(shares: ReadonlyArray<DeckBinShare>): DeckTables 
     viewCosines: first.viewCosines.slice(),
     modes: first.modes,
     diffuseModes: first.diffuseModes,
-    deckOpticalDepth: Float64Array.from(parts, (part) => part.deckOpticalDepth),
+    deckOpticalDepth: Float64Array.from(bins, (part) => part.deckOpticalDepth),
     slots,
     below: first.below === null ? null : belowDeckOf(first.below, parts, conversions),
     thermalUp: emittedInChannels(
-      parts.map((part) => part.thermalUp),
+      bins.map((part) => part.thermalUp),
       first.viewCosines.length,
     ),
   };
@@ -1909,7 +1957,7 @@ function belowDeckOf(
   conversions: ReadonlyArray<BinConversion["factors"]>,
 ): BelowDeckTable {
   const thermal = emittedInChannels(
-    parts.map((part) => part.belowThermal),
+    parts.slice(0, BAKE_BIN_COUNT).map((part) => part.belowThermal),
     grid.altitudesM.length * grid.travelCosines.length,
   );
   const slots = conversions.map((factors, slot): BelowDeckSlot => {
