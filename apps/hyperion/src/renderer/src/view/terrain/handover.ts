@@ -431,6 +431,12 @@ export function handOverRegimes(
 export interface HandoverReliefSource {
   /** `body`'s relief, m, or `null` where it never hands over. */
   reliefM(body: BodyIdHex): number | null;
+  /**
+   * `body`'s relief, m, from its header alone, whatever its coverage, or `null` with none held: the
+   * range its disc's class edges are held out by near the hand-over (lane fix-jagged-biome-edges,
+   * part 2; `classEdgeWeight`), which must stand before the survey's coverage lets it hand over.
+   */
+  edgeReliefM?(body: BodyIdHex): number | null;
 }
 
 /** A store's bodies' reliefs, by {@link handoverReliefM} from its header and coverage. */
@@ -438,5 +444,11 @@ export function storeReliefSource(store: {
   header(body: BodyIdHex): Pick<SurfaceHeaderDto, "realised_relief_m"> | null;
   coverage(body: BodyIdHex): CoverageView | null;
 }): HandoverReliefSource {
-  return { reliefM: (body) => handoverReliefM(store.header(body), store.coverage(body)) };
+  return {
+    reliefM: (body) => handoverReliefM(store.header(body), store.coverage(body)),
+    edgeReliefM: (body) => {
+      const reliefM = store.header(body)?.realised_relief_m;
+      return reliefM !== undefined && Number.isFinite(reliefM) && reliefM > 0 ? reliefM : null;
+    },
+  };
 }

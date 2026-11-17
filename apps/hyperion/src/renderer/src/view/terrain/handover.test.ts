@@ -206,6 +206,19 @@ describe("the hand-over's relief", () => {
     expect(source.reliefM(BODY)).toBe(18_000);
     expect(source.reliefM("0200080020000000.0301")).toBeNull();
   });
+
+  it("reads a body's edges' relief from its header alone, whatever its coverage (fix-jagged-biome-edges)", () => {
+    const store = {
+      header: (body: BodyIdHex) => (body === BODY ? header : null),
+      coverage: () => null,
+    };
+    const source = storeReliefSource(store);
+    expect([
+      source.reliefM(BODY),
+      source.edgeReliefM?.(BODY),
+      source.edgeReliefM?.("0200080020000000.0301"),
+    ]).toEqual([null, 18_000, null]);
+  });
 });
 
 /** A body of 1 m `distanceM` ahead, whose limb is its centre's distance, and its relief. */

@@ -296,6 +296,13 @@ export interface LitBodyInput {
    * terrain draws by the plain forms.
    */
   readonly clouds?: CloudBodyGpu;
+  /**
+   * Its field's relief, m, from its header alone (lane fix-jagged-biome-edges, part 2;
+   * `HandoverReliefSource.edgeReliefM`), by which its class map's edges are held out near its
+   * hand-over range, known before the survey's coverage lets it hand over; absent,
+   * {@link handoverReliefM}'s, and with neither its edges are drawn shaped.
+   */
+  readonly classEdgeReliefM?: number;
 }
 
 /** A lit body's ring as its shadow on the body reads it (R11.T9.a). */
@@ -1238,14 +1245,15 @@ export function planLitBodies(
     }
     // A class map's edges are held out near the hand-over, where its terrain draws its cells
     // unshaped (lane fix-jagged-biome-edges, part 2).
+    const edgeReliefM = body.handoverReliefM ?? body.classEdgeReliefM;
     const record: DiscRecord =
-      made.surface.kind === "class-map" && body.handoverReliefM !== undefined
+      made.surface.kind === "class-map" && edgeReliefM !== undefined
         ? {
             ...made,
             edgeWeight: classEdgeWeight(
               handoverRangeRatio(
                 limbDistanceM(norm(body.centreM), body.figure.equatorialRadiusM),
-                body.handoverReliefM,
+                edgeReliefM,
                 tauPx,
                 radPerPx,
               ),

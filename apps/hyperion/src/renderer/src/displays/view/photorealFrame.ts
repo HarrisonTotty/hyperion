@@ -363,6 +363,9 @@ function litBodyOf(
   const surface = classMaps?.classMapOf(id, photometry.law) ?? null;
   // Its terrain, mask and class map are drawn in its body-fixed axes, so it hands over only with them.
   const reliefM = body.rotation === null ? null : (terrain.reliefs?.reliefM(id) ?? null);
+  // Its header's relief alone, by which its class map's edges are held out near the hand-over
+  // (lane fix-jagged-biome-edges, part 2), before its survey's coverage lets it hand over.
+  const edgeReliefM = body.rotation === null ? null : (terrain.reliefs?.edgeReliefM?.(id) ?? null);
   const coverage = terrain.terrain?.surveyCoverage(id) ?? null;
   const thermal = groundFields?.(id) ?? null;
   const ground = discGrounds?.(id) ?? null;
@@ -374,6 +377,7 @@ function litBodyOf(
     ...(body.rotation === null ? {} : { rotation: body.rotation }),
     ...(surface === null ? {} : { surface }),
     ...(reliefM === null ? {} : { handoverReliefM: reliefM }),
+    ...(edgeReliefM === null ? {} : { classEdgeReliefM: edgeReliefM }),
     // The mask is read in the body's axes, so it is given only with its rotation.
     ...(coverage === null || body.rotation === null
       ? {}

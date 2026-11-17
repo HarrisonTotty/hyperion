@@ -1616,6 +1616,25 @@ describe("the lit bodies' renderer's classes' edges (lane fix-jagged-biome-edges
     expect(mappedAt(1.15)?.edgeWeight).toBe(0);
   });
 
+  it("holds a class map's edges out by its header's relief alone before it may hand over (part 2)", () => {
+    const record = mappedAt(1.15);
+    const { bodies, hosts } = bodiesOf([13]);
+    const [body] = bodies;
+    if (body === undefined || record === undefined) {
+      throw new Error("no body");
+    }
+    const limbM = limbDistanceM(norm(body.centreM), body.figure.equatorialRadiusM);
+    const drawn: LitBodyInput = {
+      ...body,
+      surface: { ...classMapOf(`${body.id} class map`), edgeKeys: [0x51f00d] },
+      rotation: IDENTITY_ROTATION,
+      classEdgeReliefM:
+        (limbM * handoverTauPx("photorealistic", "high") * pixelAngleRad(CAMERA, VIEWPORT)) / 1.15,
+    };
+    const plan = planLitBodies([drawn], hosts, OPTIONS, new Map([[drawn.id, "disc"]]));
+    expect(plan.discs[0]?.edgeWeight).toBe(0);
+  });
+
   it("draws a class map's edges shaped whole far from its hand-over (part 2)", () => {
     expect(mappedAt(3)?.edgeWeight).toBe(1);
   });

@@ -1306,6 +1306,16 @@ describe("a disc's terrain warmed before its hand-over (HANDOVER_AT_CELLS; lane 
     ]).toEqual([18_000, null, 18_000]);
   });
 
+  it("gives a view its body's edges' relief while it withholds the hand-over's (fix-jagged-biome-edges)", async () => {
+    const h = await harness();
+    h.session.noteView(PRIMARY, handing(5e6));
+    h.session.step();
+    await answerField(h);
+    h.session.noteView(INSTRUMENT, handing(5e6, { regimes: new Map([[MOON, "disc"]]) }));
+    const reliefs = h.session.reliefsFor(INSTRUMENT);
+    expect([reliefs.reliefM(MOON), reliefs.edgeReliefM?.(MOON)]).toEqual([null, 18_000]);
+  });
+
   it("judges each warming view by its own patches: the first's drawn at the cells gives it the relief, the second's still coarse withholds its", async () => {
     const h = await harness();
     // 2,000 km from the moon's centre over its north pole, the horizon 30° from the pole: no ground

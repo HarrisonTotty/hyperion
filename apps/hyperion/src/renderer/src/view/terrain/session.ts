@@ -1218,11 +1218,17 @@ export class TerrainSession {
    * warmed pass's last selection draws the field's cells where that view sees it
    * (`TerrainPass.drawsCellsFor`): the view's first terrain frame then draws them as its settled one
    * does, whatever another view has handed over. Without the rule every view reads the store's.
+   * Its edges' relief (`edgeReliefM`) is the store's header's whatever the rule, so that a disc's
+   * class edges are held out by its range before it hands over.
    */
   reliefsFor(view: ViewId): HandoverReliefSource {
     let reliefs = this.#frameReliefs.get(view);
     if (reliefs === undefined) {
-      reliefs = { reliefM: (body) => this.#frameReliefM(body, view) };
+      reliefs = {
+        reliefM: (body) => this.#frameReliefM(body, view),
+        // The header's alone, which no hand-over rule withholds (lane fix-jagged-biome-edges).
+        edgeReliefM: (body) => this.#reliefs.edgeReliefM?.(body) ?? null,
+      };
       this.#frameReliefs.set(view, reliefs);
     }
     return reliefs;
