@@ -412,6 +412,16 @@ describe("an instance record's class sets (lane fix-coast-class-map)", () => {
     ]).toEqual([[NO_PARENT_SLOT, 0, 0, 0], [9, 3 | (5 << 5) | (6 << 18), 0.25, CLASS_MORPH], 272]);
   });
 
+  it("carries its classes' edges' weight in the high half of its flags, 0 unless given (fix-jagged-biome-edges)", () => {
+    const records = new InstanceRecords(2);
+    records.push(1, vec3(0, 0, 0), 0, 1);
+    records.setCells(9, 0, 0.25, CLASS_MORPH, 0.5);
+    records.push(2, vec3(0, 0, 0), 0, 1);
+    records.setCells(9, 0, 0.25, CLASS_MORPH);
+    const u = new Uint32Array(records.buffer);
+    expect([u[19], u[WORDS + 19]]).toEqual([(CLASS_MORPH | (32768 << 16)) >>> 0, CLASS_MORPH]);
+  });
+
   it("places a patch in its ancestor d levels up by its i and j mod 2^d, the patch itself at 0 levels", () => {
     expect([
       cellAncestorPlace(0, 77, 91),

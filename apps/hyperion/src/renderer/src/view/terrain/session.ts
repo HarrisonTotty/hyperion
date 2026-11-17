@@ -188,6 +188,7 @@ import {
   cellPatchLevel,
   HANDOVER_AT_CELLS,
   classCellFade,
+  terrainEdgeWeight,
   handoverRangeRatio,
   type HandoverReliefSource,
   handoverTauPx,
@@ -1378,7 +1379,14 @@ export class TerrainSession {
       return input;
     }
     const ratio = photorealRangeRatio(report, body, reliefM);
-    return { ...input, classSets: { cellFade: classCellFade(ratio), morph: true } };
+    return {
+      ...input,
+      classSets: {
+        cellFade: classCellFade(ratio),
+        morph: true,
+        edgeWeight: terrainEdgeWeight(ratio),
+      },
+    };
   }
 
   /**

@@ -448,14 +448,16 @@ fn terrain_shares(slot : u32, patch_uv : vec2f) -> TerrainShares {
 // `bodyDisc.wgsl`'s `edge_shape_disc`, whose rule it is, operation for operation): where two or
 // more named slots of an edge key hold a share at the unit body-fixed direction `d`, each one's
 // share of their sum sharpened about the others' by its own noise, under the gate of `at`'s
-// purities, at the footprint `footprint_rad` against the lattice's spacing `lattice_rad`, both on
-// the unit sphere; law 0 keeps its share, and the keyed slots' sum is kept.
+// purities scaled by `weight` (the hand-over's hold, part 2), at the footprint `footprint_rad`
+// against the lattice's spacing `lattice_rad`, both on the unit sphere; law 0 keeps its share, and
+// the keyed slots' sum is kept.
 fn edge_shape_terrain(
   at : ptr<function, TerrainShares>,
   slot : u32,
   d : vec3f,
   footprint_rad : f32,
   lattice_rad : f32,
+  weight : f32,
 ) {
   if (!((*at).purity_norm > 0.0)) {
     return;
@@ -471,7 +473,7 @@ fn edge_shape_terrain(
   if (keyed < 2u) {
     return;
   }
-  let gate = edge_gate((*at).purity / (*at).purity_norm, (*at).mix_purity);
+  let gate = edge_gate((*at).purity / (*at).purity_norm, (*at).mix_purity) * weight;
   if (!(gate > 0.0)) {
     return;
   }
@@ -689,6 +691,9 @@ fn class_sets(in : LitVertexOut, reference : bool, quad_st : f32) -> ClassSets {
   let pixel_rad = edge_pixel_rad(frame.viewport.y, frame.clipProjection[1][1]);
   let edge_mu = dot(normalize(in.datumNormal), -normalize(in.fromCameraBf));
   let footprint = edge_footprint(length(in.fromCameraBf) * draw.cameraBodyFixedM.w, pixel_rad, edge_mu);
+  // The weight of its own and its parent's sets' shaped edges, the high half of its class sets'
+  // flags (`terrainEdgeWeight`): 0, held out, for an instance given no class sets.
+  let edge_weight = f32(in.cells.w >> 16u) / 65535.0;
   var c = 0.0;
   var mu = 0.0;
   var ancestor_uv = in.patchUv;
@@ -733,8 +738,8 @@ fn class_sets(in : LitVertexOut, reference : bool, quad_st : f32) -> ClassSets {
     } else {
       var at = terrain_shares(sets.slot[s], sets.uv[s]);
       // Each set on its own patch's lattice, a cell coordinate's step about π ÷ 2 rad.
-      if (sets.lattice[s] > 0.0) {
-        edge_shape_terrain(&at, sets.slot[s], edge_d, footprint, edge_lattice_rad(sets.lattice[s]));
+      if (sets.lattice[s] > 0.0 && edge_weight > 0.0) {
+        edge_shape_terrain(&at, sets.slot[s], edge_d, footprint, edge_lattice_rad(sets.lattice[s]), edge_weight);
       }
       sets.shares[s] = at.shares;
     }

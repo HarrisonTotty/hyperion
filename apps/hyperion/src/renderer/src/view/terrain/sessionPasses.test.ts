@@ -83,7 +83,7 @@ import {
   terrainPassViewOf,
   type TerrainViewReport,
 } from "./session";
-import { classCellFade } from "./handover";
+import { classCellFade, terrainEdgeWeight } from "./handover";
 import type {
   TerrainPass,
   TerrainView,
@@ -1352,13 +1352,19 @@ describe("a disc's terrain warmed before its hand-over (HANDOVER_AT_CELLS; lane 
       reads.mockRestore();
       return draw.mock.calls[0]?.[1].classSets;
     };
-    const fade = classCellFade(photorealRangeRatio(handing(1.5e7), MOON, 18_000));
+    const ratio = photorealRangeRatio(handing(1.5e7), MOON, 18_000);
+    const fade = classCellFade(ratio);
     expect([
       await classSetsGiven(true),
       await classSetsGiven(false),
       await classSetsGiven(true, false),
       fade > 0 && fade < 1,
-    ]).toEqual([{ cellFade: fade, morph: true }, undefined, undefined, true]);
+    ]).toEqual([
+      { cellFade: fade, morph: true, edgeWeight: terrainEdgeWeight(ratio) },
+      undefined,
+      undefined,
+      true,
+    ]);
   });
 
   it("refines a level-7 field's seen survey to level 1, its cells' patches, where the rule off leaves its roots", async () => {

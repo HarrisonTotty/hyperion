@@ -23,7 +23,7 @@ import {
   edgeShapedShares,
 } from "../bodies/classEdge";
 import { faceUvToXyz, stToUv } from "./cube";
-import { classEdgeWeight } from "./handover";
+import { classEdgeWeight, terrainEdgeWeight } from "./handover";
 import { oblateAlbedoScale } from "../bodies/oblate";
 import { TERRAIN_DEPTH_FRACTION } from "../depth/groundPull";
 import { WGSL_CATALOGUE } from "../engine/catalogue";
@@ -2203,6 +2203,25 @@ describe("a coast's shaped edge at the hand-over (lane fix-jagged-biome-edges, p
     );
   });
 
+  it("holds its own and its parent's sets' edges out at both switches, as the disc does", () => {
+    const [, terrain] = sitesAt(0.86, 0.52);
+    if (terrain === undefined) {
+      throw new Error("no site");
+    }
+    const corners = [SEA, LAND, SEA, LAND];
+    for (const ratio of [1 / 1.1, 1 / 0.9]) {
+      const weight = terrainEdgeWeight(ratio);
+      expect(
+        terrainEdgeShapedShares(corners, 0.45, 0.3, NAMED, KEYS, { ...terrain, weight }),
+      ).toEqual(
+        terrainShares([0.55, 0.45, 0, 0, 0, 0, 0, 0], NAMED).map((v) => expect.closeTo(v, 12)),
+      );
+    }
+    expect(wgslFunction(terrainLitWgsl.replaceAll(/\/\/[^\n]*/gu, ""), "class_sets")).toContain(
+      "let edge_weight = f32(in.cells.w >> 16u) / 65535.0;",
+    );
+  });
+
   it("draws a coast's shaped shares as the disc does from the same cell's corners", () => {
     // A coast between a column of sea cells and one of land, at fractions across the cell.
     const [, terrain] = sitesAt(0.86, 0.52);
@@ -2282,7 +2301,7 @@ describe("a texel's classes' edges (lane fix-jagged-biome-edges)", () => {
 
   it("is drawn by each set's shares in the lit shader", () => {
     expect(collapseWhitespace(wgslFunction(terrainLitWgsl, "class_sets"))).toContain(
-      "edge_shape_terrain(&at, sets.slot[s], edge_d, footprint, edge_lattice_rad(sets.lattice[s])); } sets.shares[s] = at.shares;",
+      "edge_shape_terrain(&at, sets.slot[s], edge_d, footprint, edge_lattice_rad(sets.lattice[s]), edge_weight); } sets.shares[s] = at.shares;",
     );
   });
 

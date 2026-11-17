@@ -232,6 +232,17 @@ export function classEdgeWeight(rangeRatio: number): number {
 }
 
 /**
+ * The weight, 0 to 1, of a lit terrain's own and parent class sets' shaped edges at the range ratio
+ * `rangeRatio` (lane fix-jagged-biome-edges, part 2): 1 − {@link classCellFade}, so that within the
+ * switch's fade, from {@link CLASS_FADE_FAR} out, the terrain draws a coast unshaped as R07's disc
+ * does there ({@link classEdgeWeight}), and whole from {@link CLASS_FADE_NEAR} in. A terrain given
+ * no class sets holds its edges out (`TerrainFrameInput.classSets`).
+ */
+export function terrainEdgeWeight(rangeRatio: number): number {
+  return 1 - classCellFade(rangeRatio);
+}
+
+/**
  * The fade of a lit terrain's class weights to those of its patches' ancestors of the field's
  * cells' level, L − 6 (lane fix-coast-class-map; `TerrainFrameInput.classSets`), at the range ratio
  * `rangeRatio` ({@link handoverRangeRatio}): 1 from {@link CLASS_FADE_FAR} out, so that on either

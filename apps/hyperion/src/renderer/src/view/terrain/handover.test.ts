@@ -50,6 +50,7 @@ import {
   drawsCells,
   EDGE_FADE_FAR,
   EDGE_FADE_NEAR,
+  terrainEdgeWeight,
   handoverDetailShare,
   HANDOVER_FADE_SPAN,
   handoverRangeM,
@@ -911,6 +912,15 @@ describe("a disc's class edges near the hand-over (lane fix-jagged-biome-edges, 
 
   it("holds them out at a ratio that is not a number", () => {
     expect(classEdgeWeight(Number.NaN)).toBe(0);
+  });
+
+  it("holds a terrain's own edges out within the switch's fade and draws them whole within its near end", () => {
+    expect([
+      terrainEdgeWeight(1 / 1.1),
+      terrainEdgeWeight(CLASS_FADE_FAR),
+      terrainEdgeWeight(CLASS_FADE_NEAR),
+      terrainEdgeWeight(0),
+    ]).toEqual([0, 0, 1, 1]);
   });
 });
 

@@ -83,7 +83,8 @@ export const SLOT_RECORD_BYTES = 496;
  *   cells : vec4u,          // its class sets (lane fix-coast-class-map; {@link InstanceRecords.setCells}):
  *                           // x its ancestor of the field's cells' level, L − 6, or NO_PARENT_SLOT;
  *                           // y its place there ({@link cellAncestorPlace}); z the fade to it, an
- *                           // f32's bits; w its flags ({@link CLASS_MORPH})
+ *                           // f32's bits; w its flags ({@link CLASS_MORPH}) in its low half and
+ *                           // its classes' edges' weight in its high, a u16 unorm
  *   edgeBands : array<vec4u, 12>, // its edges' shared bands (`strideEdges.ts`), half floats of
  *                           // kilometres rounded up in pairs, half `edgeBandIndex(e, t, l)`,
  *                           // negative for none (words 20 to 67)
@@ -677,9 +678,14 @@ export class InstanceRecords {
    * @param place - The patch's place in it ({@link cellAncestorPlace}).
    * @param fade - The fade to it, 0 to 1.
    * @param flags - {@link CLASS_MORPH}, or 0.
-   * @throws RangeError with no record this frame, or for a slot, place, fade or flags out of range.
+   * @param edgeWeight - The weight, 0 to 1, of its own and its parent's classes' edges' shaping
+   *   (lane fix-jagged-biome-edges, part 2; `handover.ts`' `terrainEdgeWeight`), in the high half of
+   *   `cells.w` as a u16 unorm: 0, held out, unless given, as for a record whose class sets are
+   *   never set.
+   * @throws RangeError with no record this frame, or for a slot, place, fade, flags or weight out of
+   *   range.
    */
-  setCells(ancestorSlot: number, place: number, fade: number, flags: number): void {
+  setCells(ancestorSlot: number, place: number, fade: number, flags: number, edgeWeight = 0): void {
     if (this.#count === 0) {
       throw new RangeError("no record to set the class sets of");
     }
@@ -695,11 +701,14 @@ export class InstanceRecords {
     if (flags !== 0 && flags !== CLASS_MORPH) {
       throw new RangeError(`class flags ${flags} are not 0 or CLASS_MORPH`);
     }
+    if (!(edgeWeight >= 0 && edgeWeight <= 1)) {
+      throw new RangeError(`class edge weight ${edgeWeight} is not 0 to 1`);
+    }
     const base = (this.#count - 1) * F32_WORDS_PER_INSTANCE;
     this.#u32[base + 16] = ancestorSlot;
     this.#u32[base + 17] = place;
     this.#f32[base + 18] = fade;
-    this.#u32[base + 19] = flags;
+    this.#u32[base + 19] = (flags | (Math.round(edgeWeight * 0xffff) << 16)) >>> 0;
   }
 
   /**

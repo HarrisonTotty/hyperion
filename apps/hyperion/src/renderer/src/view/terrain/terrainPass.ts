@@ -498,7 +498,15 @@ export interface TerrainFrameInput {
    * hand-over range, and `morph`, whether a patch's class weights morph to its parent's by its morph
    * factor. Absent, neither: every texel shaded as before, bit for bit.
    */
-  readonly classSets?: { readonly cellFade: number; readonly morph: boolean };
+  readonly classSets?: {
+    readonly cellFade: number;
+    readonly morph: boolean;
+    /**
+     * The weight, 0 to 1, of its own and its parent's classes' edges' shaping (lane
+     * fix-jagged-biome-edges, part 2; `terrainEdgeWeight`); absent, 0, held out.
+     */
+    readonly edgeWeight?: number;
+  };
   /** Grounded and descending bodies, body-fixed (Design note 9). */
   readonly grounded: ReadonlyArray<GroundContact>;
   /** The unit direction towards the sun, body-fixed. */
@@ -5039,6 +5047,7 @@ export class TerrainPass {
             ancestor === undefined ? 0 : cellAncestorPlace(levels, patch.key.i, patch.key.j),
             Math.min(Math.max(classSets.cellFade, 0), 1),
             classSets.morph ? CLASS_MORPH : 0,
+            Math.min(Math.max(classSets.edgeWeight ?? 0, 0), 1),
           );
         }
         (inner ? state.interiorDrawn : drawnIndices).push(n);

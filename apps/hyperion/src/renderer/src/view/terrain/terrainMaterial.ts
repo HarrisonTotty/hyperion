@@ -1904,7 +1904,7 @@ export function terrainEdgeShapedShares(
   fy: number,
   named: ReadonlyArray<boolean>,
   keys: ReadonlyArray<number>,
-  site: Pick<EdgeSite, "direction" | "footprintRad" | "latticeRad">,
+  site: Pick<EdgeSite, "direction" | "footprintRad" | "latticeRad" | "weight">,
 ): number[] {
   const b = [(1 - fx) * (1 - fy), fx * (1 - fy), (1 - fx) * fy, fx * fy];
   const weights = Array.from({ length: TERRAIN_CLASSES }, (_, k) =>
