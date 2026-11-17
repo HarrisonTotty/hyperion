@@ -927,6 +927,7 @@ Files: `apps/hyperion/src/main/{cli,index}.ts`, `src/main/perf/`, `src/preload/{
   and the UHD 620 720p30 scenes' every second vsync; every view's style exists; the scripts are
   deterministic in R05's fixed-step mode (two evaluations at one time agree to the bit).
   Acceptance: `pnpm test`.
+  Records: [12-measurements-and-settings-ladder/records/R12.T5.a.md](12-measurements-and-settings-ladder/records/R12.T5.a.md).
 - **R12.T5.b The pins.** A search, recorded in the test's doc comment with its command, for a
   universe seed and system near the Sun holding an Earth-sized world with an atmosphere, an ocean
   fraction above 0.3, clouds and polar ice, and a ringed gas giant; and
