@@ -29,3 +29,12 @@ TS_RS_EXPORT_DIR = { value = "packages/protocol/src/generated", relative = true 
 # Those artefacts, with their DWARF, stay in the target directory until it is cleaned.
 [target.wasm32-wasip1]
 rustflags = ["-Cstrip=debuginfo", "-Cdebuginfo=0"]
+
+# The dependency cooldown (Cargo 1.100): the resolver takes no registry version published less than
+# 3 days before it resolves, unless `Cargo.lock` holds it already, so that a malicious release, most
+# often caught within days, is not taken by a `cargo update` or a new dependency. What is locked
+# never changes. To take a newer version at once, override it for that one update:
+# `CARGO_RESOLVER_INCOMPATIBLE_PUBLISH_AGE=allow cargo update <crate> --precise <version>`.
+# `cargo install` ignores it, for the crate installed and its dependencies (`just wasm-tools`).
+[registry]
+global-min-publish-age = "3 days"
