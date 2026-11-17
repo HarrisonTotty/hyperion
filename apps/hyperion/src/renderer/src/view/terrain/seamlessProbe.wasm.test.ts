@@ -2950,6 +2950,13 @@ class SelectionFlips {
   }
 }
 
+/**
+ * The law the primary view's frames take for the ground elsewhere: made once, since `lawFor` solves
+ * its exponents through pinned maths (R08.T18), about 43 ms a call in a pod, and the probe draws
+ * some 2,500 frames.
+ */
+const ELSEWHERE_LAW = lawFor([0.12, 0.12, 0.12], [0.6, 0.6, 0.6], "moon");
+
 /** The primary view's frame of `passView` drawn at `tS`: its view, a sun overhead, no lights. */
 function frameInputOf(passView: TerrainPassView, tS: number): TerrainViewFrameInput {
   return {
@@ -2961,7 +2968,7 @@ function frameInputOf(passView: TerrainPassView, tS: number): TerrainViewFrameIn
       lights: [],
       occluders: [],
       secondaries: [],
-      elsewhere: lawFor([0.12, 0.12, 0.12], [0.6, 0.6, 0.6], "moon"),
+      elsewhere: ELSEWHERE_LAW,
       exposureScale: 1e-5,
     },
     nowMs: 1000 * tS,
