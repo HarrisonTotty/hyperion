@@ -1,0 +1,8 @@
+--- TLP 1.6.1 --------------------------------------------
+
++++ TLP Status
+State          = enabled
+RDW state      = not installed
+Last run       = 09:12:04,   1212 sec(s) ago
+Mode           = AC
+Power source   = AC

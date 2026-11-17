@@ -32,6 +32,7 @@ const OPEN_MAPS = [
   "machine.capabilities",
   "machine.kernelPaths",
   /^runs\[\d+\]\.memory\.itemPeakBytes$/,
+  /^runs\[\d+\]\.throttle\.zoneMaxDegC$/,
 ];
 
 function isOpenMap(path: string): boolean {

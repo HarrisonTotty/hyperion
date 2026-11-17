@@ -1,0 +1,4 @@
+0, 1965, 2100, Not Active, Not Active, Not Active, Not Active, Not Active, 64
+0, 1890, 2100, Active, Not Active, Not Active, Not Active, Not Active, 71
+0, [N/A], 2100, [Not Supported], [Not Supported], [Not Supported], [Not Supported], [Not Supported], 71
+Failed to initialize NVML: Driver/library version mismatch

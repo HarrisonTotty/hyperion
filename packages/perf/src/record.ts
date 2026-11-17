@@ -362,17 +362,38 @@ export interface StreamingFigures {
   readonly streamingSeconds: number | null;
 }
 
-/** Throttling and clocks over a repetition (Design note 7), recorded and not excluded. */
+/**
+ * Throttling and clocks over a repetition (Design note 7), recorded and not excluded: R12.T2's
+ * samplers' summary at 10 Hz.
+ */
 export interface ThrottleFigures {
+  /** The package's `package_throttle_total_time_ms` over the span. */
   readonly packageThrottleMs: number | null;
+  /** The most any CPU's `core_throttle_total_time_ms` rose over the span. */
   readonly coreThrottleMs: number | null;
-  /** The share of the span throttled. */
+  /** The share of the span the package was throttled. */
   readonly throttleFraction: number | null;
-  /** The GPU's share of the span at `gt_RP0_freq_mhz`. */
+  /** The GPU's share of the span at `gt_RP0_freq_mhz`, or at NVIDIA's maximum graphics clock. */
   readonly rp0Share: number | null;
   readonly gpuMinMHz: number | null;
   readonly gpuMedianMHz: number | null;
+  /**
+   * The share of the span NVIDIA's driver reported a power or thermal slowdown among its clock
+   * event reasons (the development machine's stand-in for i915's files, hardware item 2); `null`
+   * without `nvidia-smi`.
+   */
+  readonly gpuThrottleShare: number | null;
+  /** The median of every CPU's `scaling_cur_freq` over the span. */
+  readonly cpuMedianMHz: number | null;
+  /** The package temperature's maximum: `x86_pkg_temp`, or `k10temp`'s `Tctl`. */
   readonly maxPackageDegC: number | null;
+  /** Every thermal zone's maximum over the span, by its `type`. */
+  readonly zoneMaxDegC: Readonly<Partial<Record<string, number>>>;
+  /**
+   * The package's mean power over the span from RAPL's `energy_uj`, which is root-only unless the
+   * owner makes it group-readable; `null` otherwise.
+   */
+  readonly packageWatts: number | null;
 }
 
 /** One repetition: one pass over the scene's span (Design note 13). */
@@ -560,7 +581,11 @@ const repetition = object<PerfRepetition>({
     rp0Share: nFraction,
     gpuMinMHz: nNonNegative,
     gpuMedianMHz: nNonNegative,
+    gpuThrottleShare: nFraction,
+    cpuMedianMHz: nNonNegative,
     maxPackageDegC: nNum,
+    zoneMaxDegC: keyed((key: string): key is string => key.length > 0, "a zone type", num),
+    packageWatts: nNonNegative,
   }),
   latePipelines: count,
   heightPointUs: nNonNegative,

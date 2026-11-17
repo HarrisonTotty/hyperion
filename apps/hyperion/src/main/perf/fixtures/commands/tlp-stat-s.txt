@@ -1,0 +1,18 @@
+--- TLP 1.10.2 --------------------------------------------
+
++++ System Info
+System         = LENOVO ThinkPad X1 Yoga 4th 20QF
+BIOS           = N2HET77W (1.60 )
+EC Firmware    = 1.27
+OS Release     = Arch Linux
+Kernel         = 6.18.0-arch1-1 #1 SMP PREEMPT_DYNAMIC x86_64
+/proc/cmdline  = initrd=\initramfs-linux.img rw quiet
+Init system    = systemd 258
+Boot mode      = UEFI
+
++++ TLP Status
+State          = enabled
+RDW state      = not installed
+Last run       = 09:12:04,   1212 sec(s) ago
+TLP profile    = performance/AC (default)
+Power source   = AC
