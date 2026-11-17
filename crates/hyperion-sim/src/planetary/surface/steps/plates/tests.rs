@@ -889,3 +889,30 @@ fn the_reference_earth_s_ridges_spread_at_about_earth_s_rate() {
         "{degrees_per_myr}° Myr⁻¹"
     );
 }
+
+/// A distance transform's heap entry is equal exactly where it is ordered equal: its distance's
+/// ±0 are ordered apart, so they are unequal (a derived `==` read them equal), and a NaN distance
+/// is ordered equal to itself, so it is equal to itself (a derived `==` read it unequal).
+#[test]
+fn a_heap_entry_is_equal_only_where_it_is_ordered_equal() {
+    let entry = |distance_m: f64, cell: u32, source: u32| Entry {
+        distance_m,
+        cell,
+        source,
+    };
+    let entries = [
+        entry(0.0, 1, 2),
+        entry(-0.0, 1, 2),
+        entry(f64::NAN, 1, 2),
+        entry(3.5, 1, 2),
+        entry(3.5, 1, 3),
+        entry(3.5, 4, 2),
+    ];
+    for a in &entries {
+        for b in &entries {
+            assert_eq!(a == b, a.cmp(b).is_eq(), "{a:?} against {b:?}");
+        }
+    }
+    assert_ne!(entries[0], entries[1], "±0");
+    assert_eq!(entries[2], entry(f64::NAN, 1, 2), "a NaN");
+}
