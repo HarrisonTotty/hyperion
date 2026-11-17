@@ -130,6 +130,12 @@ import type { MsSourceTable } from "./bake";
 import type { DeckFloor, DeckTables } from "./deck";
 import type { PolarisationTable } from "./polarisation";
 import {
+  deckBelowInto,
+  type DeckThermal,
+  deckScatteringRows,
+  THERMAL_TRAVEL_COSINES,
+} from "../thermalSource";
+import {
   THICK_SOURCE_MODES,
   THICK_SUN_COSINES,
   THICK_SUN_COSINES_BELOW,
@@ -827,6 +833,23 @@ function belowAltitudePlace(
 }
 
 /**
+ * The thermal field below a deck over a surface at h\* = `heightStarM` and the light's travel cosine
+ * `muTravel`, cd m⁻², into `out` (R08.T15.b.2; `belowDeckThermal.wgsl`'s belowDeckThermalAt): its
+ * rows the table below's altitudes, placed as the table's own reads place them, over its first
+ * layer's.
+ */
+export function belowDeckThermalInto(
+  deck: DeckThermal,
+  table: PackedBelowDeckTable,
+  heightStarM: number,
+  muTravel: number,
+  out: [number, number, number],
+): void {
+  const place = belowAltitudePlace(table, 0, heightStarM);
+  deckBelowInto(deck, place.i0, place.f, muTravel, out);
+}
+
+/**
  * Where `muSun` lies among the sun cosines: the row below it, its share to the next, held at the
  * last row; below the first row, (1/64), the first row, which the reads scale by μ₀ ÷ (1/64).
  */
@@ -1288,13 +1311,90 @@ function fromSplit(altitudesM: Float64Array, splitM: number): Float64Array {
 
 /**
  * The bake's J above the deck, one table a band, its altitudes from the split, as the upper medium's
- * kernels read it (`read.ts`'s `packThickTable` against {@link upperMediumOf}'s kernel medium).
+ * kernels read it (`read.ts`'s `packThickTable` against {@link upperMediumOf}'s kernel medium), and
+ * its scattered thermal light's with them (R08.T15.b.2), which the thermal source reads at the same
+ * heights, where the deck's thermal light is drawn ({@link deckThermalDrawn}); none where it is not,
+ * so that a body of several bands draws its glow unscattered throughout, as its note says
+ * (`AtmosphereCache.ts`'s `DECK_THERMAL_REASON`).
  */
 export function deckAboveTables(bands: ReadonlyArray<DeckTables>): MsSourceTable[] {
-  return bands.map((band) => ({
-    ...band.above,
-    altitudesM: fromSplit(band.above.altitudesM, band.deckAltitudeM),
-  }));
+  const drawn = deckThermalDrawn(bands);
+  return bands.map((band) => {
+    const { thermal, ...rest } = band.above;
+    return {
+      ...rest,
+      altitudesM: fromSplit(band.above.altitudesM, band.deckAltitudeM),
+      ...(thermal === undefined || !drawn
+        ? {}
+        : {
+            thermal: { ...thermal, altitudesM: fromSplit(thermal.altitudesM, band.deckAltitudeM) },
+          }),
+    };
+  });
+}
+
+/**
+ * Whether a deck's tables' thermal light is drawn (R08.T15.b.2): its bake holds it, J_th above, the
+ * glow at its top and, over a surface, the field below, on a body of one band, which
+ * {@link deckThermalOf} lays for the deck's marches; not for a body of several bands, whose marches'
+ * reads would have to search them, which SwiftShader's compiler refused (`thermalDeck.wgsl`).
+ */
+export function deckThermalDrawn(bands: ReadonlyArray<DeckTables>): boolean {
+  const [only] = bands;
+  return (
+    bands.length === 1 &&
+    only !== undefined &&
+    only.above.thermal !== undefined &&
+    only.thermalUp !== null &&
+    (only.below === null || only.below.thermal !== null)
+  );
+}
+
+/**
+ * A deck's thermal light as its tables' thermal source holds it (R08.T15.b.2; `thermalSource.ts`'s
+ * `DeckThermal`), on a body of one band: its J_th above the deck from the split, resampled to the
+ * source's rows; its glow at its top on the 16 travel cosines, the downward half mirrored; and its field
+ * below where it stands over a surface. No band where the bake holds none (a column without a
+ * temperature) or the body has several, so that the deck's marches' thermal forms read 0 of it:
+ * their reads search nothing, which SwiftShader's compiler needs of them (`thermalDeck.wgsl`).
+ *
+ * @param topHeightM - The upper medium's top above the split, m: the tables' medium's.
+ * @throws RangeError for a deck whose view cosines are not the 16 travel cosines' upper half.
+ */
+export function deckThermalOf(bands: ReadonlyArray<DeckTables>, topHeightM: number): DeckThermal {
+  const half = THERMAL_TRAVEL_COSINES / 2;
+  const [only] = bands;
+  const thermal = only?.above.thermal;
+  const glow = only?.thermalUp ?? null;
+  const below = only?.below ?? null;
+  if (!deckThermalDrawn(bands) || only === undefined || thermal === undefined || glow === null) {
+    return { topHeightM, belowAltitudeCount: 0, band: null };
+  }
+  if (
+    only.viewCosines.length !== half ||
+    only.viewCosines.some((mu, v) => Math.abs(mu - (v + 0.5) / half) > 1e-12)
+  ) {
+    throw new RangeError("a deck's glow is held at the 16 travel cosines' upper half alone");
+  }
+  // The downward half mirrors the upward, so that a ray grazing the deck reads the first upward
+  // cosine's glow, as the reads hold at their edges, not a blend toward 0.
+  const travelled = new Float32Array(THERMAL_TRAVEL_COSINES * 3);
+  travelled.set(glow, half * 3);
+  for (let v = 0; v < half; v += 1) {
+    travelled.set(glow.subarray((half - 1 - v) * 3, (half - v) * 3), v * 3);
+  }
+  return {
+    topHeightM,
+    belowAltitudeCount: below?.altitudesM.length ?? 0,
+    band: {
+      scattering: deckScatteringRows(
+        { ...thermal, altitudesM: fromSplit(thermal.altitudesM, only.deckAltitudeM) },
+        topHeightM,
+      ),
+      glow: travelled,
+      below: below?.thermal ?? new Float32Array(),
+    },
+  };
 }
 
 /**

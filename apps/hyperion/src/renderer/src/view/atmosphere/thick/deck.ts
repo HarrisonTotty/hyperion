@@ -113,6 +113,21 @@
  * deck's altitudes: the field the deck's reflectance summarises from above, solved once a bin and
  * term beside the bake's two. An envelope has no view from below, and no table.
  *
+ * **Thermal light** (plan R08, R08.T18.b over R08.T15.b.2's route). A column with a temperature
+ * (`SpectralColumn`'s) is solved for its thermal field as the thick bake's is (`bake.ts`'s remarks,
+ * "Thermal emission"), the upper medium's solve taking the deck as an emitting ground. The deck
+ * emits as its layers and what lies beneath them do, not as one body at the split's temperature:
+ * its own upward radiance at its top, nothing entering it from above, is solved once a bin and term
+ * over its layers and its floor (its layers' Planck radiance, B_λ(T(h\*)), and the floor's: a
+ * surface's at its albedo, an envelope's black), at mode 0 alone, and given to the upper medium's
+ * solve as its ground's emission (`discreteOrdinates.ts`'s `GroundEmission`), so that the upper
+ * medium's field, its J_th among them, is the whole column's above the split. The deck's upward
+ * thermal radiance at its top, its own and its reflection of the upper medium's, is that solve's at
+ * the split ({@link DeckTables.thermalUp}), and under a deck over a surface the whole column's solve
+ * carries the field below it too ({@link BelowDeckTable.thermal}). Each is weighted over the first
+ * light's terms and converted to the channels' luminance by V_cb (`thermal.ts`'
+ * `EMISSION_CHANNEL_WEIGHTS`), cd m⁻².
+ *
  * **Bin and channel shares** (R08.T14.d's bake time). Every table here is summed in the bake bins
  * and converted to the channels last, as the thick bake's is, so a preparation of some bins alone
  * ({@link DeckOptions.bins}) and its {@link bakeDeckBins} give those bins as the whole band's bake
@@ -132,6 +147,7 @@ import {
 } from "../medium";
 import {
   type BakeGround,
+  type BakeGroundEmission,
   type BakeLayering,
   bakeBins,
   bakeLayering,
@@ -139,6 +155,7 @@ import {
   type BinSolve,
   type BinTerm,
   checkBakeInputs,
+  columnPlanckAt,
   deltaMLayersOf,
   gatherBins,
   type LayerTermOptics,
@@ -162,6 +179,7 @@ import {
   type DiscreteOrdinatesProblem,
   type DiscreteOrdinatesSolution,
   type GroundCosines,
+  type GroundEmission,
   type GroundReflectance,
   type LayerKeep,
   normalizedAssociatedLegendre,
@@ -188,6 +206,7 @@ import {
   sphericalBeamPath,
 } from "./sphericalBeam";
 import { type SpectralColumn, spectralOptics, type SpectralPhase } from "./spectralColumn";
+import { EMISSION_CHANNEL_WEIGHTS } from "../thermal";
 import { cos, exp } from "../../../lib/pinnedMath";
 
 /**
@@ -296,6 +315,12 @@ export interface PreparedDeck {
   readonly floorAlbedo: Float64Array;
   /** {@link DeckOptions.floorAlbedo}, the polarisation correction's floor too, or `null`. */
   readonly floorAlbedoOverride: number | null;
+  /**
+   * Per bake point, the Planck radiance B_λ(λ_p, T(h)) at each of the deck's interfaces, from the
+   * split down to the floor (`bake.ts`'s `columnPlanckAt`), W m⁻² sr⁻¹ nm⁻¹, the last the floor's;
+   * `undefined` for a column without a temperature (the module's remarks, "Thermal light").
+   */
+  readonly deckPlanck: ReadonlyArray<Float64Array> | undefined;
   /**
    * Per bin, per term of the column, its whole phase function per steradian at the bin's wavelength
    * on {@link DECK_PHASE_U}, the exact single scattering's (the module's remarks); 0 for a term
@@ -488,6 +513,11 @@ export function prepareDeck(
     whole,
     floorAlbedo,
     floorAlbedoOverride: override,
+    deckPlanck: columnPlanckAt(
+      column,
+      deck.interfaceHeightsM,
+      upper.interfacePlanck?.length ?? BAKE_BIN_COUNT,
+    ),
     termPhases: upper.binPhases.map((terms, b) =>
       // A share's other bins hold no optics, and take no phase.
       terms.map((phase, t) =>
@@ -878,6 +908,13 @@ export interface DeckTables {
    * which has no view from below.
    */
   readonly below: BelowDeckTable | null;
+  /**
+   * The deck's upward thermal radiance at its top (the module's remarks, "Thermal light"): its own
+   * and its reflection of the upper medium's, at {@link DeckTables.viewCosines}, the light a ray
+   * meets at the deck where nothing is drawn, per channel, cd m⁻², V × 3, entry `v 3 + c`; `null`
+   * for a column without a temperature.
+   */
+  readonly thermalUp: Float32Array | null;
 }
 
 /** A solve's deck record in its bin: per point of S × V × M (or × M_D, or alone), and its phase's weights. */
@@ -895,6 +932,11 @@ interface DeckRecord {
   readonly phaseWeights: Float64Array;
   /** Σ_p W_p. */
   readonly nadirWeight: number;
+  /**
+   * The upper medium's solve's upward thermal radiance at the split, at the view cosines, in the
+   * bin's Planck unit; `undefined` without a temperature.
+   */
+  readonly thermalUp: Float64Array | undefined;
 }
 
 /** The deck record's tables summed over terms and converted, in their order. */
@@ -982,6 +1024,16 @@ export interface DeckBinPart {
   readonly lights: ReadonlyArray<DeckBinLight>;
   /** Below a deck over a surface, one a light; `null` for an envelope. */
   readonly below: ReadonlyArray<BelowBinLight> | null;
+  /**
+   * The deck's upward thermal radiance at its top over the first light's terms, V, in the bin's
+   * Planck unit; `null` without a temperature.
+   */
+  readonly thermalUp: Float64Array | null;
+  /**
+   * The thermal field below a deck over a surface over the first light's terms, A × 2V, in the bin's
+   * Planck unit; `null` without a temperature, and for an envelope.
+   */
+  readonly belowThermal: Float64Array | null;
 }
 
 /** One light's table below the deck in one bin, summed over its terms, before the channels. */
@@ -1076,6 +1128,31 @@ export function bakeDeckBins(
   };
   const ground: BakeGround = (bin, term, cosines, maxMode) =>
     deckReflectance(layersOf(bin, term).layers, floorAlbedo[bin] ?? Number.NaN, cosines, maxMode);
+  // The deck's own thermal emission at its top, nothing entering it from above (the module's
+  // remarks, "Thermal light"), once a bin and term, as the upper medium's solve asks it.
+  const { deckPlanck } = prepared;
+  const emissions = new Map<number, Map<BinTerm, GroundEmission>>();
+  const groundEmission: BakeGroundEmission | undefined =
+    deckPlanck === undefined
+      ? undefined
+      : (bin, term) => {
+          let byTerm = emissions.get(bin);
+          if (byTerm === undefined) {
+            byTerm = new Map();
+            emissions.set(bin, byTerm);
+          }
+          let found = byTerm.get(term);
+          if (found === undefined) {
+            found = deckEmission(
+              layersOf(bin, term).layers,
+              floorAlbedo[bin] ?? Number.NaN,
+              deckPlanck[bin] ?? new Float64Array(),
+              grid.upwardCosines,
+            );
+            byTerm.set(term, found);
+          }
+          return found;
+        };
   const records = new Map<number, Map<BinTerm, DeckRecord>>();
   const recordOf = (bin: number, term: BinTerm, solve: BinSolve): DeckRecord => {
     const coupling = solve.groundReflectance;
@@ -1149,7 +1226,11 @@ export function bakeDeckBins(
         phaseWeights[t] = (phaseWeights[t] ?? 0) + w * (shares?.[t] ?? 0);
       }
     }
-    return { ...out, phaseWeights, nadirWeight };
+    const thermalUp = solve.solution.thermal?.mode.userUp.slice(
+      layers * views,
+      (layers + 1) * views,
+    );
+    return { ...out, phaseWeights, nadirWeight, thermalUp };
   };
   // Under a deck over a surface, the whole column's solve of each bin and term follows the upper
   // medium's, whose layers it takes (R08.T16.b.2's lever), and the keep goes with it.
@@ -1186,6 +1267,7 @@ export function bakeDeckBins(
     },
     solveModes: diffuseModes,
     keepLayers: below !== null,
+    ...(groundEmission === undefined ? {} : { groundEmission }),
   });
   const deckLayerCount = prepared.deck.interfaceHeightsM.length - 1;
   const none = new Float64Array(prepared.whole.interfaceHeightsM.length - 1);
@@ -1248,8 +1330,24 @@ export function bakeDeckBins(
       }
       return { ...sum, weightedPhase, nadirWeight };
     });
+    // The thermal light over the first light's terms (the module's remarks, "Thermal light").
+    const firstTerms = upper.lights[0]?.bins[b]?.terms ?? [];
+    const thermalUp =
+      deckPlanck === undefined
+        ? null
+        : weightedOverTerms(firstTerms, views, (term) => records.get(b)?.get(term)?.thermalUp);
+    const belowThermal =
+      deckPlanck === undefined || below === null
+        ? null
+        : weightedOverTerms(
+            firstTerms,
+            prepared.deck.altitudesM.length * 2 * views,
+            (term) => belowRecords.get(b)?.get(term)?.thermal,
+          );
     return {
       bin: b,
+      thermalUp,
+      belowThermal,
       deckOpticalDepth: deckOrdinateLayers(
         upper.binOptics[b] ?? [],
         prepared.deck.layerColumnsM,
@@ -1364,7 +1462,96 @@ export function gatherDeckBins(shares: ReadonlyArray<DeckBinShare>): DeckTables 
     deckOpticalDepth: Float64Array.from(parts, (part) => part.deckOpticalDepth),
     slots,
     below: first.below === null ? null : belowDeckOf(first.below, parts, conversions),
+    thermalUp: emittedInChannels(
+      parts.map((part) => part.thermalUp),
+      first.viewCosines.length,
+    ),
   };
+}
+
+/**
+ * Bins' thermal radiances converted to the channels' luminance, cd m⁻² (`thermal.ts`'
+ * `EMISSION_CHANNEL_WEIGHTS`, L_c = Σ_b V_cb X_b), point by point: `size` points a bin, three
+ * channels a point; `null` where the bins hold none.
+ *
+ * @throws RangeError for bins of which some hold one and some not.
+ */
+function emittedInChannels(
+  perBin: ReadonlyArray<Float64Array | null>,
+  size: number,
+): Float32Array | null {
+  if (perBin.every((bin) => bin === null)) {
+    return null;
+  }
+  if (perBin.some((bin) => bin === null)) {
+    throw new RangeError("a deck's bins hold its thermal light in some bins and not others");
+  }
+  const values = new Float32Array(size * 3);
+  for (let i = 0; i < size; i += 1) {
+    for (const c of [0, 1, 2] as const) {
+      let x = 0;
+      for (const [b, bin] of perBin.entries()) {
+        x += (EMISSION_CHANNEL_WEIGHTS[b]?.[c] ?? Number.NaN) * (bin?.[i] ?? Number.NaN);
+      }
+      values[i * 3 + c] = x;
+    }
+  }
+  return values;
+}
+
+/**
+ * A bin's values summed over `terms` by their weights, `size` of them, each term's from `of`.
+ *
+ * @throws Error for a term `of` holds none of.
+ */
+function weightedOverTerms(
+  terms: ReadonlyArray<BinTerm>,
+  size: number,
+  of: (term: BinTerm) => Float64Array | undefined,
+): Float64Array {
+  const sum = new Float64Array(size);
+  for (const term of terms) {
+    const values = of(term);
+    if (values === undefined) {
+      throw new Error("a deck's term holds no thermal light");
+    }
+    for (let i = 0; i < size; i += 1) {
+      sum[i] = (sum[i] ?? 0) + term.weight * (values[i] ?? Number.NaN);
+    }
+  }
+  return sum;
+}
+
+/**
+ * A deck's own upward thermal radiance at its top, nothing entering it from above (the module's
+ * remarks, "Thermal light"): its layers' emission and its floor's, B at its last interface, emitted
+ * at 1 − `floorAlbedo` (a surface's, or an envelope's black floor), solved at mode 0 at the
+ * quadrature's nodes and at `userCosines`, as the upper medium's solve takes its ground's.
+ *
+ * @param planck - B at each of the deck's interfaces, from its top down, the floor's last.
+ */
+export function deckEmission(
+  layers: ReadonlyArray<OrdinateLayer>,
+  floorAlbedo: number,
+  planck: Float64Array,
+  userCosines: Float64Array,
+): GroundEmission {
+  const solution = solveDiscreteOrdinates({
+    layers,
+    groundAlbedo: floorAlbedo,
+    beamCosines: [],
+    userCosines,
+    maxMode: 0,
+    streams: THICK_BAKE_STREAMS,
+    thermal: { interfacePlanck: planck, groundPlanck: planck[planck.length - 1] ?? Number.NaN },
+    fieldInterfaces: [0],
+  });
+  const mode = solution.thermal?.mode;
+  if (mode === undefined) {
+    throw new Error("a deck's thermal solve has its field");
+  }
+  const n = THICK_BAKE_STREAMS / 2;
+  return { nodes: mode.quadratureUp.slice(0, n), users: mode.userUp.slice(0, userCosines.length) };
 }
 
 /**
@@ -1411,7 +1598,9 @@ export interface DeckColumnSolve {
  * deck"): the upper medium's delta-M layers and the deck's, each by `bake.ts`'s arithmetic, the
  * pseudo-spherical beams over all of them, and the ground's albedo beneath, at the grid's μ₀ above
  * the horizontal (the table below takes those alone, as R08.T15.b.1 built it) and its view cosines,
- * at the bake's modes.
+ * at the bake's modes; for a column with a temperature, its thermal field beside them (the module's
+ * remarks, "Thermal light"), each interface's B the upper medium's and then the deck's, the ground's
+ * the floor's.
  *
  * @param fields - The fields the solve makes (`discreteOrdinates.ts`'s `fieldInterfaces` and
  *   `userDown`): every one when absent; the table below asks its altitudes' alone.
@@ -1465,6 +1654,15 @@ export function deckColumnSolve(
   const kernelBeams = Array.from(suns, (mu0, s) =>
     sphericalBeamPath(radius, heights, kernelDepths, mu0, chords?.[s]),
   );
+  const upperPlanck = upper.interfacePlanck?.[bin];
+  const deckPlanck = prepared.deckPlanck?.[bin];
+  const thermal =
+    upperPlanck === undefined || deckPlanck === undefined
+      ? undefined
+      : {
+          interfacePlanck: [...upperPlanck, ...deckPlanck.subarray(1)],
+          groundPlanck: deckPlanck[deckPlanck.length - 1] ?? Number.NaN,
+        };
   const solution = solveDiscreteOrdinates({
     layers,
     groundAlbedo: floorAlbedo[bin] ?? Number.NaN,
@@ -1473,6 +1671,7 @@ export function deckColumnSolve(
     maxMode: THICK_BAKE_MODES - 1,
     streams: THICK_BAKE_STREAMS,
     beamPaths: scaledBeams,
+    ...(thermal === undefined ? {} : { thermal }),
     ...fields,
     ...(kept === undefined ? {} : { keptLayers: kept }),
   });
@@ -1533,6 +1732,13 @@ export interface BelowDeckTable {
   readonly modes: number;
   /** One a light of the preparation, in its order. */
   readonly slots: ReadonlyArray<BelowDeckSlot>;
+  /**
+   * The thermal field I_th(h, μ) of a column with a temperature (the module's remarks, "Thermal
+   * light"), the whole column's own emission scattered, per channel, cd m⁻², A × 2V × 3, entry
+   * `(a 2V + v) 3 + c` at {@link BelowDeckTable.travelCosines}: no light's, so one a band; `null`
+   * without a temperature.
+   */
+  readonly thermal: Float32Array | null;
 }
 
 /** A solve's record below the deck, in its bin. */
@@ -1542,6 +1748,8 @@ interface BelowRecord {
   /** A × S. */
   readonly irradiance: Float64Array;
   readonly direct: Float64Array;
+  /** The thermal field, A × 2V, in the bin's Planck unit; `undefined` without a temperature. */
+  readonly thermal: Float64Array | undefined;
 }
 
 /** The table below the deck's record of one bin and term, the upper medium's kept layers taken. */
@@ -1574,13 +1782,22 @@ function belowDeckRecorder(prepared: PreparedDeck, band: ThickBakeBand): BelowDe
   );
   return (bin, term, kept) => {
     const solve = deckColumnSolve(prepared, band, bin, term, { fieldInterfaces }, chords, kept);
+    const field = solve.solution.thermal?.mode;
     const out = {
       radiance: new Float64Array(size),
       irradiance: new Float64Array(altitudes * suns),
       direct: new Float64Array(altitudes * suns),
+      thermal: field === undefined ? undefined : new Float64Array(altitudes * v2),
     };
     for (let a = 0; a < altitudes; a += 1) {
       const k = ground - a * grid.altitudeStride;
+      if (field !== undefined && out.thermal !== undefined) {
+        // The travel cosines' downward half first, as the radiance's.
+        for (let u = 0; u < views; u += 1) {
+          out.thermal[a * v2 + views + u] = field.userUp[k * views + u] ?? Number.NaN;
+          out.thermal[a * v2 + views - 1 - u] = field.userDown[k * views + u] ?? Number.NaN;
+        }
+      }
       for (let s = 0; s < suns; s += 1) {
         const beam = solve.solution.beams[s];
         const kernel = solve.kernelBeams[s]?.interfaceTransmission[k] ?? Number.NaN;
@@ -1691,6 +1908,10 @@ function belowDeckOf(
   parts: ReadonlyArray<DeckBinPart>,
   conversions: ReadonlyArray<BinConversion["factors"]>,
 ): BelowDeckTable {
+  const thermal = emittedInChannels(
+    parts.map((part) => part.belowThermal),
+    grid.altitudesM.length * grid.travelCosines.length,
+  );
   const slots = conversions.map((factors, slot): BelowDeckSlot => {
     const sums = parts.map((part) => {
       const light = part.below?.[slot];
@@ -1724,6 +1945,7 @@ function belowDeckOf(
     travelCosines: grid.travelCosines,
     modes: grid.modes,
     slots,
+    thermal,
   };
 }
 

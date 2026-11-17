@@ -382,6 +382,7 @@ export function patternedBelowDeck(
       }
       return { radiance, irradiance, direct };
     }),
+    thermal: null,
   };
 }
 
@@ -475,6 +476,7 @@ export function patternedDeckTables(
       deckOpticalDepth: new Float64Array(15),
       slots: deckSlots,
       below: below ? patternedBelowDeck(b, slots, deckAltitudeM) : null,
+      thermalUp: null,
     };
   });
 }
@@ -514,4 +516,60 @@ export function leastZerothModes(
     }
   }
   return { above, belowShare: below / largest };
+}
+
+/** `withPatternedDeckThermal`'s glow at travel cosine `v` of 16 in channel `c`, cd m⁻². */
+function patternedGlowAt(v: number, c: number): number {
+  if (c === 0) {
+    return 3e3 * (1 + 0.5 * Math.sin(0.53 * v));
+  }
+  return c === 1 ? 4e2 * Math.sin(0.9 * v + 0.4) : -1e2 * (1 + 0.5 * Math.cos(0.61 * v));
+}
+
+/**
+ * `tables` with a self-luminous body's thermal light in a pattern (R08.T15.b.2; `thick/deck.ts`'s
+ * remarks, "Thermal light"), so that the reads' every axis moves: J_th above the deck at its
+ * altitudes, 5,000 to 15,000 cd m⁻² per unit of scattering; the deck's glow at its view cosines; and
+ * where a band stands over a surface the field below it at its altitudes; the glow's and the
+ * field's green and blue of either sign, as a cool glow's are. Each varies slowly in altitude, a
+ * few per cent a row, as a field does, so that the twins' `f32` heights at a grazing ray move it by
+ * little.
+ */
+export function withPatternedDeckThermal(tables: ReadonlyArray<DeckTables>): DeckTables[] {
+  const travel = 16;
+  return tables.map((band): DeckTables => {
+    const { altitudesM } = band.above;
+    const scattering = new Float32Array(altitudesM.length * travel * 3);
+    for (let a = 0; a < altitudesM.length; a += 1) {
+      for (let v = 0; v < travel; v += 1) {
+        for (let c = 0; c < 3; c += 1) {
+          scattering[(a * travel + v) * 3 + c] =
+            1e4 * (1 + 0.5 * Math.sin(0.04 * a + 0.71 * v + 1.3 * c));
+        }
+      }
+    }
+    const views = band.viewCosines.length;
+    const thermalUp = Float32Array.from({ length: views * 3 }, (_, i) =>
+      patternedGlowAt(Math.floor(i / 3) + travel / 2, i % 3),
+    );
+    const below = band.below;
+    return {
+      ...band,
+      above: { ...band.above, thermal: { altitudesM: altitudesM.slice(), values: scattering } },
+      thermalUp,
+      below:
+        below === null
+          ? null
+          : {
+              ...below,
+              thermal: Float32Array.from(
+                { length: below.altitudesM.length * travel * 3 },
+                (_, i) => {
+                  const a = Math.floor(i / (travel * 3));
+                  return patternedGlowAt(Math.floor(i / 3) % travel, i % 3) * (1 + 0.03 * a);
+                },
+              ),
+            },
+    };
+  });
 }

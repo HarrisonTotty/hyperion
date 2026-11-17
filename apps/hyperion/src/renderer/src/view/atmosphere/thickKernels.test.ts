@@ -27,6 +27,7 @@ import {
 } from "./earth";
 import {
   AERIAL_PERSPECTIVE_BELOW_DECK_KERNEL,
+  AERIAL_PERSPECTIVE_BELOW_DECK_THERMAL_KERNEL,
   AERIAL_PERSPECTIVE_KERNEL,
   AERIAL_PERSPECTIVE_THICK_KERNEL,
   AERIAL_PERSPECTIVE_THICK_THERMAL_KERNEL,
@@ -35,6 +36,7 @@ import {
   createAtmosphereFrameKernels,
   HillaireAtmosphere,
   RAY_MARCH_BELOW_DECK_KERNEL,
+  RAY_MARCH_BELOW_DECK_THERMAL_KERNEL,
   RAY_MARCH_CENTRE_KERNEL,
   RAY_MARCH_DECK_KERNEL,
   RAY_MARCH_DECK_SPECIAL_KERNEL,
@@ -56,6 +58,7 @@ import {
   RAY_MARCH_THICK_SPECIAL_KERNEL,
   RAY_MARCH_THICK_THERMAL_KERNEL,
   SKY_VIEW_BELOW_DECK_KERNEL,
+  SKY_VIEW_BELOW_DECK_THERMAL_KERNEL,
   SKY_VIEW_KERNEL,
   SKY_VIEW_THICK_KERNEL,
   SKY_VIEW_THICK_THERMAL_KERNEL,
@@ -65,11 +68,14 @@ import {
   tableRadiusM,
   THICK_DEPARTURE_WGSL,
   THICK_READ_WGSL,
+  withBelowDeckThermal,
   withDeckRead,
   withThickRead,
+  withThermalSource,
 } from "./hillaire";
 import deckReadWgsl from "./shaders/deckRead.wgsl?raw";
-import thermalSourceWgsl from "./shaders/thermalSource.wgsl?raw";
+import belowDeckThermalWgsl from "./shaders/belowDeckThermal.wgsl?raw";
+import thermalDeckWgsl from "./shaders/thermalDeck.wgsl?raw";
 import { AtmosphereTables, kernelMedium } from "./tables";
 import { upperMediumOf } from "./thick/deckRead";
 import { classifyRegime } from "./thick/regime";
@@ -581,6 +587,63 @@ describe("the kernels beneath a deck (R08.T15.b.2)", () => {
   });
 });
 
+/** The kernels beneath a deck in their thermal forms, beside the kernel each is made from. */
+const BELOW_DECK_THERMAL_KERNELS: ReadonlyArray<readonly [string, KernelPair, KernelPair]> = [
+  ["the sky view", SKY_VIEW_BELOW_DECK_KERNEL, SKY_VIEW_BELOW_DECK_THERMAL_KERNEL],
+  [
+    "the aerial perspective",
+    AERIAL_PERSPECTIVE_BELOW_DECK_KERNEL,
+    AERIAL_PERSPECTIVE_BELOW_DECK_THERMAL_KERNEL,
+  ],
+  ["the ray march", RAY_MARCH_BELOW_DECK_KERNEL, RAY_MARCH_BELOW_DECK_THERMAL_KERNEL],
+];
+
+describe("the kernels beneath a deck's thermal forms (R08.T15.b.2)", () => {
+  it.each(BELOW_DECK_THERMAL_KERNELS)(
+    "makes %s's from its plain form, the thermal source at binding 25, reaching every binding",
+    (_name, plain, thermal) => {
+      const bindings = kernelBindings(thermal.reference);
+      expect([
+        thermal.name,
+        [...bindings.keys()],
+        bindings.get("thermalSource")?.binding,
+        unreachedBindings(thermal.reference),
+        thermal.reference.endsWith(`\n${thermalDeckWgsl}\n${belowDeckThermalWgsl}`),
+      ]).toEqual([
+        `${plain.name}, thermal`,
+        [...kernelBindings(plain.reference).keys(), "thermalSource"],
+        25,
+        [],
+        true,
+      ]);
+    },
+  );
+
+  it.each(BELOW_DECK_THERMAL_KERNELS)(
+    "adds %s's path light outside the sources' clamp, and the camera's field in the sky view's alone",
+    (name, _plain, thermal) => {
+      const count = (part: string): number => thermal.reference.split(part).length - 1;
+      expect([
+        count("+ belowDeckThermalPath(fromM, toM, -mu, pathDepth) * view.marchSky.w"),
+        count("+ belowDeckThermalAt(fromM, -dot(bodyDir, frame.z)) * view.marchSky.w"),
+      ]).toEqual([1, name === "the sky view" ? 1 : 0]);
+    },
+  );
+
+  it("is catalogued beside the deck's marches", () => {
+    const names = WGSL_CATALOGUE.flatMap((entry) =>
+      entry.kind === "compute" ? [entry.spec.name] : [],
+    );
+    expect(names).toEqual(
+      expect.arrayContaining(BELOW_DECK_THERMAL_KERNELS.map(([, , thermal]) => thermal.name)),
+    );
+  });
+
+  it("refuses a kernel that holds no path to rewrite", () => {
+    expect(() => withBelowDeckThermal(RAY_MARCH_KERNEL)).toThrow(/holds 0 places for/u);
+  });
+});
+
 describe("AtmosphereTables' table below a deck (R08.T15.b.2)", () => {
   it("holds a deck over a surface's table below, of its whole column, counts its bytes, and gives it up with the deck", async () => {
     const engine = await countingRenderEngine();
@@ -688,6 +751,16 @@ describe("HillaireAtmosphere beneath a deck (R08.T15.b.2)", () => {
   });
 });
 
+/** How many times `part` stands in `text`. */
+function placesOf(text: string, part: string): number {
+  return text.split(part).length - 1;
+}
+
+/** `wgsl` without its line comments, whose words name loops the code does not hold. */
+function withoutComments(wgsl: string): string {
+  return wgsl.replaceAll(/\/\/.*$/gmu, "");
+}
+
 /** Each deck march's thermal form beside the deck form it is made from (R08.T15.b.2). */
 const DECK_THERMAL_PAIRS: ReadonlyArray<readonly [string, KernelPair, KernelPair]> = [
   ["the ray march", RAY_MARCH_DECK_KERNEL, RAY_MARCH_DECK_THERMAL_KERNEL],
@@ -701,9 +774,7 @@ describe("the deck's marches' thermal forms (R08.T15.b.2)", () => {
       const bindings = kernelBindings(thermal.reference);
       expect([
         thermal.name,
-        thermal.reference.endsWith(
-          `\n${thermalSourceWgsl.replace("@binding(25)", "@binding(26)")}`,
-        ),
+        thermal.reference.endsWith(`\n${thermalDeckWgsl}`),
         [...bindings.keys()],
         bindings.get("deckTable")?.binding,
         bindings.get("thermalSource")?.binding,
@@ -719,10 +790,37 @@ describe("the deck's marches' thermal forms (R08.T15.b.2)", () => {
     },
   );
 
+  it.each(DECK_THERMAL_PAIRS)(
+    "reads %s's scattered thermal light from the deck's section and adds the deck's glow once at its bare ground",
+    (_name, deck, thermal) => {
+      expect([
+        placesOf(thermal.reference, "thermalDeckScatteringAt(start.scaledHeightM, muTravel)"),
+        placesOf(thermal.reference, "thermalScatteringAt(start.gravityRatio"),
+        placesOf(thermal.reference, "luminance += march.throughput0 * thermalDeckGlowAt("),
+        placesOf(deck.reference, "thermalDeckGlowAt("),
+        thermal.reference.includes("local.planck * (local.absorbing * dtM"),
+      ]).toEqual([1, 0, 1, 0, true]);
+    },
+  );
+
+  it("holds no loop of its own in its reads of the deck's section, which SwiftShader's compiler needs of the marches over a deck", () => {
+    expect(
+      [thermalDeckWgsl, belowDeckThermalWgsl].map((wgsl) =>
+        /\b(for|while|loop)\b/u.test(withoutComments(wgsl)),
+      ),
+    ).toEqual([false, false]);
+  });
+
   it("leaves every other thermal form's source at binding 25", () => {
     expect(
       kernelBindings(RAY_MARCH_THICK_THERMAL_KERNEL.reference).get("thermalSource"),
     ).toMatchObject({ group: 0, binding: 25 });
+  });
+
+  it("refuses the thermal form of a kernel that holds binding 25 but over a deck", () => {
+    expect(() => withThermalSource(RAY_MARCH_DECK_KERNEL)).toThrow(
+      /holds binding 25: its thermal form is over a deck/u,
+    );
   });
 
   it("is catalogued beside the deck's marches", () => {
@@ -840,6 +938,58 @@ describe("HillaireAtmosphere over a deck, self-luminous (R08.T15.b.2)", () => {
     expect([tables.slotDepths === null, marches]).toEqual([
       false,
       [RAY_MARCH_SLOTS_DECK_THERMAL_KERNEL.name],
+    ]);
+  });
+});
+
+describe("HillaireAtmosphere beneath a deck, self-luminous (R08.T15.b.2)", () => {
+  it("draws a camera under the deck of a glowing body by the thermal forms, binding the thermal source, and a plain one's by the plain", async () => {
+    const engine = await countingRenderEngine();
+    const kernels = await createAtmosphereFrameKernels(engine);
+    const drawnBeneath = (
+      glowing: boolean,
+    ): ReadonlyArray<readonly [string, ReadonlyArray<string>]> => {
+      const tables = new AtmosphereTables(
+        engine,
+        EARTH_ABOVE_DECK,
+        tableRadiusM(WGS84),
+        [],
+        earthBody(),
+      );
+      tables.setDeckTables(
+        patternedDeckTables(
+          tables.plan.bands,
+          kernelMedium(tables.medium),
+          1,
+          DECK_ALTITUDE_M,
+          true,
+        ),
+        kernelMedium(R05_EARTH_REFERENCE),
+      );
+      if (glowing) {
+        tables.setThermalSource({
+          heightsM: Float64Array.of(0, 1e6),
+          temperaturesK: Float64Array.of(3_000, 3_000),
+        });
+      }
+      const view = HillaireAtmosphere.over(engine, tables, TABLE_SIZES.high, kernels);
+      engine.dispatched.length = 0;
+      view.drawFrame(BENEATH, [NOON], SCENE);
+      return engine.dispatched
+        .filter((d) => d.kernel.includes("beneath a deck"))
+        .map((d) => [d.kernel, boundNames(d.bindings)] as const);
+    };
+    const glowing = drawnBeneath(true);
+    expect([
+      drawnBeneath(false)
+        .map(([name]) => name)
+        .toSorted(),
+      glowing.map(([name]) => name).toSorted(),
+      glowing.every(([, bound]) => bound.includes("thermalSource")),
+    ]).toEqual([
+      BELOW_DECK_THERMAL_KERNELS.map(([, plain]) => plain.name).toSorted(),
+      BELOW_DECK_THERMAL_KERNELS.map(([, , thermal]) => thermal.name).toSorted(),
+      true,
     ]);
   });
 });

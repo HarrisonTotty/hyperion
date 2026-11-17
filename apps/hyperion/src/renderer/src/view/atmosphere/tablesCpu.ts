@@ -107,6 +107,7 @@ import {
   belowDeckPathDepthInto,
   belowDeckRadianceInto,
   belowDeckReadScratch,
+  belowDeckThermalInto,
   deckGroundInto,
   type DeckReadScratch,
   deckReadScratch,
@@ -184,7 +185,14 @@ import {
   irradianceDirections,
 } from "./irradianceQuadrature";
 import type { SurfaceLightingReader } from "./surfaceLighting";
-import { type ThermalSource, thermalPlanckInto, thermalScatteringInto } from "./thermalSource";
+import {
+  type DeckThermal,
+  deckGlowInto,
+  deckScatteringInto,
+  type ThermalSource,
+  thermalPlanckInto,
+  thermalScatteringInto,
+} from "./thermalSource";
 import {
   ABSORBER_SLOTS,
   type AbsorberCurveSlots,
@@ -2922,7 +2930,13 @@ class Marcher {
     const thermal = this.#thermal;
     if (thermal !== null) {
       const muView = (d.x * gx + d.y * gy + d.z * gz) / gLength;
-      thermalScatteringInto(thermal.source, ONE_BAND, 1, heightM, -muView, this.#thermalRead);
+      // Over a deck its own section's read (R08.T15.b.2; `thermalDeck.wgsl`).
+      const deck = thermal.source.deck;
+      if (deck === undefined) {
+        thermalScatteringInto(thermal.source, ONE_BAND, 1, heightM, -muView, this.#thermalRead);
+      } else {
+        deckScatteringInto(deck, heightM, -muView, this.#thermalRead);
+      }
       this.#addThermal(thermal, heightM);
     }
     this.#advance(dtM);
@@ -3020,7 +3034,12 @@ class Marcher {
         ? inBodyAxes(reads.frame, this.#ray.direction, false)
         : this.#ray.direction;
       const muView = (d.x * normal.x + d.y * normal.y + d.z * normal.z) / normalLength;
-      reader.thermalScatteringInto(s, scaledHeightM, -muView, this.#thermalRead);
+      const deck = thermal.source.deck;
+      if (deck === undefined) {
+        reader.thermalScatteringInto(s, scaledHeightM, -muView, this.#thermalRead);
+      } else {
+        deckScatteringInto(deck, scaledHeightM, -muView, this.#thermalRead);
+      }
       this.#addThermal(thermal, scaledHeightM);
     }
     this.#advance(dtM);
@@ -3747,6 +3766,29 @@ export interface TwinBelowDeck {
   readonly lnBands: ArrayLike<number>;
   readonly splitM: number;
   readonly gravityRatio: number;
+  /**
+   * A self-luminous body's thermal field there (R08.T15.b.2; `AtmosphereTables.thermal`'s deck) and
+   * the frame's scale, which the kernels' thermal forms beneath a deck draw; absent below the cut.
+   */
+  readonly thermal?: { readonly deck: DeckThermal; readonly scale: number };
+}
+
+/** The thermal field beneath a deck times the frame's scale, into `out`; 0 without one. */
+function belowThermalInto(
+  below: TwinBelowDeck,
+  heightStarM: number,
+  muTravel: number,
+  out: TwinRgb,
+): void {
+  const { thermal } = below;
+  if (thermal === undefined) {
+    out.fill(0);
+    return;
+  }
+  belowDeckThermalInto(thermal.deck, below.table, heightStarM, muTravel, out);
+  for (const c of CHANNELS) {
+    out[c] *= thermal.scale;
+  }
 }
 
 /** A camera's h\* above the ground beneath a deck: split + s h, h above the deck's datum, held. */
@@ -3808,6 +3850,7 @@ export function belowDeckSkyViewTexelsTwin(
   const heightStarM = belowDeckHeightStarM(below, view.heightM);
   const scratch = belowDeckReadScratch();
   const one: TwinRgb = [0, 0, 0];
+  const glow: TwinRgb = [0, 0, 0];
   const kept = new Map<number, Rgb>();
   const zenith = { x: 0, y: 0, z: 1 };
   return (x, y) => {
@@ -3817,7 +3860,9 @@ export function belowDeckSkyViewTexelsTwin(
       const ray = skyViewRayTwin(upper, view, x, y, size);
       const out: TwinRgb = [0, 0, 0];
       belowSkyInto(below, heightStarM, zenith, ray.direction, ray.sources ?? [], scratch, one, out);
-      texel = [out[0], out[1], out[2]];
+      // A self-luminous body's thermal field there, its light travelling towards the eye.
+      belowThermalInto(below, heightStarM, -ray.direction.z, glow);
+      texel = [out[0] + glow[0], out[1] + glow[1], out[2] + glow[2]];
       kept.set(key, texel);
     }
     return texel;
@@ -3877,6 +3922,8 @@ export function belowDeckPathTwin(
   const scratch = belowDeckReadScratch();
   const one: TwinRgb = [0, 0, 0];
   const atTarget: TwinRgb = [0, 0, 0];
+  const glowAtCamera: TwinRgb = [0, 0, 0];
+  const glowAtTarget: TwinRgb = [0, 0, 0];
   const depth: TwinRgb = [0, 0, 0];
   const r = bottom + heightM;
   const aboveGround = heightM * (2 * bottom + heightM);
@@ -3884,6 +3931,7 @@ export function belowDeckPathTwin(
     const mu = direction.x * n.x + direction.y * n.y + direction.z * n.z;
     const atCamera: TwinRgb = [0, 0, 0];
     belowSkyInto(below, fromM, n, direction, view.sources, scratch, one, atCamera);
+    belowThermalInto(below, fromM, -mu, glowAtCamera);
     return (t) => {
       const rT = Math.sqrt(Math.max(t * t + 2 * r * mu * t + r * r, 0));
       const heightAlongM = (t * t + 2 * r * mu * t + aboveGround) / (rT + bottom);
@@ -3901,11 +3949,15 @@ export function belowDeckPathTwin(
       );
       const transmitted: TwinRgb = [exp(-depth[0]), exp(-depth[1]), exp(-depth[2])];
       const mean = (transmitted[0] + transmitted[1] + transmitted[2]) / 3;
+      // A self-luminous body's thermal field's path light, outside the clamp, which a cool glow's
+      // negative green and blue would otherwise cut (R08.T15.b.2).
+      belowThermalInto(below, toM, -mu, glowAtTarget);
+      const thermal = (c: 0 | 1 | 2): number => glowAtCamera[c] - transmitted[c] * glowAtTarget[c];
       return {
         light: [
-          Math.max(atCamera[0] - transmitted[0] * atTarget[0], 0),
-          Math.max(atCamera[1] - transmitted[1] * atTarget[1], 0),
-          Math.max(atCamera[2] - transmitted[2] * atTarget[2], 0),
+          Math.max(atCamera[0] - transmitted[0] * atTarget[0], 0) + thermal(0),
+          Math.max(atCamera[1] - transmitted[1] * atTarget[1], 0) + thermal(1),
+          Math.max(atCamera[2] - transmitted[2] * atTarget[2], 0) + thermal(2),
           mean,
         ],
         transmittance: [transmitted[0], transmitted[1], transmitted[2], mean],
@@ -4521,6 +4573,20 @@ function rayMarchTexelInto(
           Math.PI;
       }
     }
+    // A self-luminous body's deck's glow at its top, after the sources' light, through slot 0's
+    // throughput (R08.T15.b.2; `hillaire.ts`'s DECK_GLOW).
+    const thermal =
+      reads.kind === "oblate" ? reads.reader.thermal : (reads.sources.thermal ?? null);
+    const deckThermal = thermal?.source.deck;
+    if (deck !== null && thermal !== null && deckThermal !== undefined) {
+      const n = deckNormalAt(deck, view.figure, groundM).normal;
+      const glow: TwinRgb = [0, 0, 0];
+      deckGlowInto(deckThermal, -(d.x * n.x + d.y * n.y + d.z * n.z), glow);
+      const through = marcher.throughputOf(0);
+      for (const c of CHANNELS) {
+        luminance[c] += through[c] * glow[c] * thermal.scale;
+      }
+    }
     meanTransmittance = 0;
     transmittance = [0, 0, 0];
   }
@@ -4594,6 +4660,28 @@ function departureLightInto(
 }
 
 /**
+ * The datum's unit normal at the bare ground `groundM` over a cloud deck, and s at its geodetic
+ * latitude, 1 for a body of no gravity's (`deckRead.wgsl`'s `deckGroundAt`'s).
+ */
+function deckNormalAt(
+  deck: MarchDeck,
+  figure: SpheroidFigure,
+  groundM: Vec3,
+): { readonly normal: Vec3; readonly s: number } {
+  if (deck.gravity === null) {
+    const a2 = figure.equatorialRadiusM ** 2;
+    const c2 = figure.polarRadiusM ** 2;
+    const nx = groundM.x / a2;
+    const ny = groundM.y / a2;
+    const nz = groundM.z / c2;
+    const length = Math.sqrt(nx * nx + ny * ny + nz * nz);
+    return { normal: { x: nx / length, y: ny / length, z: nz / length }, s: 1 };
+  }
+  const geodetic = geodeticOf(groundM, figure);
+  return { normal: geodetic.normal, s: gravityRatio(deck.gravity, geodetic.latitudeRad) };
+}
+
+/**
  * A cloud deck's light at the bare ground `groundM` for one source into `out`, per unit of its
  * weight (`deckRead.wgsl`'s `deckGroundAt`, `thick/deckRead.ts`'s `deckGroundInto`): the datum's
  * unit normal there, the ray's direction `direction`, the source's cosine `muSun` against that
@@ -4609,21 +4697,7 @@ function deckLightInto(
   toSun: TwinRgb,
   out: [number, number, number],
 ): void {
-  let n: Vec3;
-  let s = 1;
-  if (deck.gravity === null) {
-    const a2 = figure.equatorialRadiusM ** 2;
-    const c2 = figure.polarRadiusM ** 2;
-    const nx = groundM.x / a2;
-    const ny = groundM.y / a2;
-    const nz = groundM.z / c2;
-    const length = Math.sqrt(nx * nx + ny * ny + nz * nz);
-    n = { x: nx / length, y: ny / length, z: nz / length };
-  } else {
-    const geodetic = geodeticOf(groundM, figure);
-    n = geodetic.normal;
-    s = gravityRatio(deck.gravity, geodetic.latitudeRad);
-  }
+  const { normal: n, s } = deckNormalAt(deck, figure, groundM);
   const sun = light.direction;
   const muView = direction.x * n.x + direction.y * n.y + direction.z * n.z;
   const along = direction.x * sun.x + direction.y * sun.y + direction.z * sun.z;

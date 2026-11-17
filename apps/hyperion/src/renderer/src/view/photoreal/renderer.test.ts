@@ -78,6 +78,7 @@ import { OUTSIDE_VIEW_MARGIN_PX, type SurveyedDatumFrame } from "../wireframe/su
 import type { OverlayHider } from "./overlay";
 import {
   AERIAL_PERSPECTIVE_BELOW_DECK_KERNEL,
+  AERIAL_PERSPECTIVE_BELOW_DECK_THERMAL_KERNEL,
   AERIAL_PERSPECTIVE_KERNEL,
   ATMOSPHERE_BEHIND_PASS,
   ATMOSPHERE_COMPOSITE_PASS,
@@ -87,6 +88,7 @@ import {
   LIMB_KERNELS,
   MARCH_TABLE_ONLY_KERNELS,
   RAY_MARCH_BELOW_DECK_KERNEL,
+  RAY_MARCH_BELOW_DECK_THERMAL_KERNEL,
   RAY_MARCH_CENTRE_KERNEL,
   RAY_MARCH_CENTRE_ONE_BAND_KERNEL,
   RAY_MARCH_CENTRE_SPECIAL_KERNEL,
@@ -126,6 +128,7 @@ import {
   RAY_MARCH_THICK_TABLE_SPECIAL_KERNEL,
   THICK_LIMB_KERNELS,
   SKY_VIEW_BELOW_DECK_KERNEL,
+  SKY_VIEW_BELOW_DECK_THERMAL_KERNEL,
   SKY_VIEW_KERNEL,
   SKY_VIEW_THICK_KERNEL,
   tableRadiusM,
@@ -1924,7 +1927,8 @@ async function overlayDatums(
  * (`withDeckRead`), for a body whose tables hold one; since R08.T15.b.2 the sky view, the aerial
  * perspective and the march beneath a deck (`belowDeckKernel`), for a camera under a deck over a
  * surface, and both deck marches' footprints in their thermal forms, for a self-luminous body over
- * a deck; its per-planet tables' four, and since
+ * a deck, and the three beneath a deck in theirs, for its camera under one; its per-planet tables'
+ * four, and since
  * R08.T14.d.4 the sky's irradiance over the thick table; since R08.T9.b's lever the sources'
  * transmittance, which the lit passes read on both settings, and the `disc cells` kernels' eight
  * table-only twins, which the app's engine makes for a body of one band (`SourceTableEngine`), and
@@ -1939,7 +1943,7 @@ async function overlayDatums(
  * its WGSL fixed text with no value of a medium, a body or a
  * setting in it (term counts, slices, bands and light slots are uniforms; the specialised and
  * one-band marches, the thick read and the deck read are variants of fixed text, chosen from the
- * tables), so the records a device's cache holds for VIEW are bounded by this list's length, 119,
+ * tables), so the records a device's cache holds for VIEW are bounded by this list's length, 122,
  * however many bodies a session visits. The smoke's kernel
  * arm (`withKernelArmFormat`, twenty more) and its probes are the smoke's alone.
  */
@@ -1994,6 +1998,9 @@ const VIEW_KERNELS: ReadonlyArray<KernelPair> = [
   SKY_VIEW_BELOW_DECK_KERNEL,
   AERIAL_PERSPECTIVE_BELOW_DECK_KERNEL,
   RAY_MARCH_BELOW_DECK_KERNEL,
+  SKY_VIEW_BELOW_DECK_THERMAL_KERNEL,
+  AERIAL_PERSPECTIVE_BELOW_DECK_THERMAL_KERNEL,
+  RAY_MARCH_BELOW_DECK_THERMAL_KERNEL,
   TRANSMITTANCE_KERNEL,
   MULTI_SCATTERING_KERNEL,
   SLOT_DEPTHS_KERNEL,
@@ -2201,14 +2208,14 @@ describe("the device's kernels over a session's bodies (R01.T15)", () => {
     // (R08.T14.d.4), the thick read's six, made ahead; and the tables' five, the sources'
     // transmittance among them (R08.T9.b's lever). The thick pass makes
     // one more, the sky's irradiance over the thick table (R08.T14.d.4), and the deck's pass its four
-    // marches, 27 in all, bounded however many bodies follow. All but fifty-eight are made: the sky bake's four are the sky's, the `disc cells` kernels' eight twins and the marches' twenty-four the app's engine's (this test's engine makes none), the march's fill
+    // marches, 27 in all, bounded however many bodies follow. All but sixty-one are made: the sky bake's four are the sky's, the `disc cells` kernels' eight twins and the marches' twenty-four the app's engine's (this test's engine makes none), the march's fill
     // a reader's, which no frame asks, the tile cull's two centre ray's kernels its own cover's,
     // which a view takes only under a setting's `tiles` (R08.T11.d, R08.T8.d), the disc cells' emissive forms, per cell and packed, a body's above the
     // thermal cut, which none of these is (R08.T18.a), their air form a body's drawn by its disc
     // table, which none of these has (R08.T16.b), and their form for both and the per-frame
     // kernels' ten thermal forms (two over a deck, R08.T15.b.2) a glowing or self-luminous body's,
-    // which none of these is (R08.T18.b), and the three beneath a deck a camera's under one, which
-    // none of these frames is (R08.T15.b.2). Since R08.T8.d the cull's centre ray takes its six
+    // which none of these is (R08.T18.b), and the three beneath a deck and their three thermal forms
+    // a camera's under one, which none of these frames is (R08.T15.b.2). Since R08.T8.d the cull's centre ray takes its six
     // forms up front (its two general among the twenty-seven) where a setting takes `tiles`, and none
     // where both leave it off; and under `packed` the first frame of each read and form from above
     // the top makes that pair of the packed limb's fourteen, with the resolve and the dispatches, in
@@ -2223,7 +2230,7 @@ describe("the device's kernels over a session's bodies (R01.T15)", () => {
     const thickLimbMade = THICK_LIMB_KERNELS.filter((pair) => made.has(pair.name)).length;
     expect(thickLimbMade > 0).toBe(!leverOff((levers) => levers.limbRays === "packed"));
     const unmade =
-      54 +
+      57 +
       (leverOff((levers) => levers.marchCover === "tiles") ? 4 : -2) +
       (LIMB_KERNELS.length - limbMade) +
       (leverOff((levers) => levers.marchSourceTransmittance === "table") ? 2 : 0) +

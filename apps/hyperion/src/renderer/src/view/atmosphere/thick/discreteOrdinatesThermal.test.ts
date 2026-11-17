@@ -222,6 +222,90 @@ describe("the solver's thermal emission (R08.T18.b)", () => {
     }
   });
 
+  it("gives a slab's reflectance and its own emission as the ground the whole column's field above it, to 10⁻¹² (R08.T15.b.2)", () => {
+    const upper = slab(3, 0.4, 0.97, henyeyGreenstein(0.5));
+    const lower = slab(4, 2, 0.99, henyeyGreenstein(0.75));
+    // B rising with depth, a hot ground beneath: a deck's air, cool at its top.
+    const planck = [0.2, 0.3, 0.45, 0.6, 1, 1.6, 2.3, 3];
+    const groundPlanck = 3.5;
+    const albedo = 0.2;
+    const n = doubleGaussQuadrature(16).nodes.length;
+    const cosines = groundCosinesOf(16, USER_COSINES, []);
+    // ρ⁰(μ, μ′) = π I⁰(0, +μ) ÷ μ′ for a plane-parallel beam at μ′, as `deck.ts` reads a deck's.
+    const lit = solveDiscreteOrdinates({
+      layers: lower,
+      groundAlbedo: albedo,
+      beamCosines: cosines.incidentCosines,
+      userCosines: cosines.outgoingCosines,
+      maxMode: 0,
+    });
+    const columns = cosines.incidentCosines.length;
+    const rho = new Float64Array(cosines.outgoingCosines.length * columns);
+    for (let j = 0; j < columns; j += 1) {
+      const up = lit.beams[j]?.modes[0]?.userUp ?? new Float64Array();
+      for (let i = 0; i < cosines.outgoingCosines.length; i += 1) {
+        rho[i * columns + j] =
+          (Math.PI * (up[i] ?? Number.NaN)) / (cosines.incidentCosines[j] ?? Number.NaN);
+      }
+    }
+    const ground: GroundReflectance = { ...cosines, modes: [rho] };
+    // The slab's own emission at its top, nothing entering it from above.
+    const own = thermalOf(lower, planck.slice(3), groundPlanck, albedo);
+    const split = solveDiscreteOrdinates({
+      layers: upper,
+      groundAlbedo: 0,
+      groundReflectance: ground,
+      beamCosines: [],
+      userCosines: USER_COSINES,
+      maxMode: 0,
+      thermal: {
+        interfacePlanck: planck.slice(0, 4),
+        groundPlanck: 0,
+        groundEmission: {
+          nodes: own.mode.quadratureUp.slice(0, n),
+          users: own.mode.userUp.slice(0, USER_COSINES.length),
+        },
+      },
+    }).thermal;
+    const whole = thermalOf([...upper, ...lower], planck, groundPlanck, albedo);
+    const fields = ["quadratureUp", "quadratureDown", "userUp", "userDown"] as const;
+    const misses = fields.map((field) => {
+      const want = whole.mode[field];
+      const got = split?.mode[field] ?? new Float64Array();
+      const width = field.startsWith("quadrature") ? n : USER_COSINES.length;
+      const count = (upper.length + 1) * width;
+      let largest = 0;
+      let worst = 0;
+      for (let i = 0; i < count; i += 1) {
+        largest = Math.max(largest, Math.abs(want[i] ?? Number.NaN));
+      }
+      for (let i = 0; i < count; i += 1) {
+        worst = Math.max(worst, Math.abs((got[i] ?? Number.NaN) - (want[i] ?? Number.NaN)));
+      }
+      return worst / largest;
+    });
+    expect(misses).toEqual(fields.map(() => expect.toSatisfy((m: number) => m < 1e-12)));
+  });
+
+  it("refuses a ground's emission of the wrong size, or negative or not finite", () => {
+    const layers = slab(2, 0.5, 0.5);
+    const n = doubleGaussQuadrature(16).nodes.length;
+    const solve = (nodes: number[], users: number[]): unknown =>
+      solveDiscreteOrdinates({
+        layers,
+        groundAlbedo: 0.3,
+        beamCosines: [],
+        userCosines: [1],
+        maxMode: 0,
+        thermal: { interfacePlanck: [1, 1, 1], groundPlanck: 0, groundEmission: { nodes, users } },
+      });
+    const nodes = Array.from({ length: n }, () => 1);
+    expect(() => solve(nodes, [1])).not.toThrow();
+    expect(() => solve(nodes.slice(1), [1])).toThrow(/8 nodes and 1 user cosines, not 7 and 1/u);
+    expect(() => solve(nodes, [-1])).toThrow(/the ground's emission at users 0/u);
+    expect(() => solve([Number.NaN, ...nodes.slice(1)], [1])).toThrow(/at nodes 0/u);
+  });
+
   it("refuses an emission without a radiance an interface, or with one negative or not finite", () => {
     const layers = slab(2, 0.5, 0.5);
     const solve = (interfacePlanck: number[], groundPlanck = 0): unknown =>

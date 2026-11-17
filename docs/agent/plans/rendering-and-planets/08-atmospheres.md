@@ -6076,8 +6076,9 @@ Per Design notes 9 and 10, in six subtasks. R08.T14.d follows R08.T14.f.
       below the split after its re-trace; the gates recorded, no deck routed, the owner's runs
       pending_ (Risks, "Deviations in T15.b.2, as built"). _Routed 2026-11-02: a Venus-class
       deck over a surface opens on its gates, the thermal forms read a deck; the RTX frame a close
-      item_ (Risks, "T15.b.2's route, as built"). _The composite past the deck's datum built
-      2026-11-03_ (Risks, "The composite's reach over a deck, as built").
+      item. Its thermal light baked 2026-11-03: a one-band deck sheds its thermal note_ (Risks,
+      "T15.b.2's route, as built"). _The composite past the deck's datum built 2026-11-03_ (Risks,
+      "The composite's reach over a deck, as built").
 
   By hand, the Venus-class surface and a descent through its deck are recorded here.
 
@@ -24335,16 +24336,72 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
   - `ATMOSPHERE TEST` draws `TEST VENUS` and `TEST VENUS 5.80 MPa` under their deck's cover
     (`thickCases.ts`'s `venusDeckCover`, `thickCaseCovers`; `FixtureCase.cover`), so both route.
     `thickCasesReplyOf` takes the covers as a second argument.
-  - The thermal forms over a deck: `RAY_MARCH_DECK_THERMAL_KERNEL` and its form by slot,
-    `withThermalSource(pair, "emitted")`: emission alone, the step's shares the deck form's, since a
-    deck's bake holds no scattered thermal light. With the scattered read too, SwiftShader's GPU
-    process segfaulted compiling it (`exit_code=139`, about 300 s). The thermal source is at binding
-    26 where the kernel holds 25 (the deck's table). `FrameKernels.thermal` takes a `ThermalRead`,
-    `thin`, `thick` or `deck`. VIEW's bound is 49. Smoke part 14 holds both to their twin
-    (`checkDeckThermalFrameTwins`).
-  - A self-luminous body's deck keeps `atmosphereApproximate` with `DECK_THERMAL_REASON` once its
-    bake lands (lean, 2026-11-02; its words await the owner's UX sign-off): the deck's bake carries no
-    thermal light, and the kernels beneath a deck draw no emission. Both are left undone.
+  - The thermal forms over a deck: `RAY_MARCH_DECK_THERMAL_KERNEL` and its form by slot are
+    `withThermalSource(pair, "over a deck")`. They read J_th from the deck's section of the thermal
+    source (`thermalDeck.wgsl`'s `thermalDeckScatteringAt`) and add the deck's glow once at the bare
+    ground, through the march's throughput (`DECK_GLOW`). The source is at binding 26, where the
+    kernel holds 25 (the deck's table). `FrameKernels.thermal` takes a `ThermalRead`: `thin`,
+    `thick` or `deck`.
+  - The deck's bake carries its thermal light (2026-11-03, main's item 2). `deck.ts`'s
+    `deckEmission` solves the deck alone, mode 0, for its emission up at the nodes and view cosines.
+    The upper medium takes that as its ground's (`discreteOrdinates.ts`'s `GroundEmission`, through
+    `BakeBandOptions.groundEmission`), so its J_th and the glow at its top (`DeckTables.thermalUp`)
+    are the whole column's. The field below (`BelowDeckTable.thermal`) is the whole column's
+    thermal solve (`deckColumnSolve`).
+  - Its checks: a slab's reflectance plus its own emission as the ground gives the whole column's
+    field above it to 10⁻¹² (`discreteOrdinatesThermal.test.ts`). The glow at the split matches the
+    whole column's solve there (`deckColumnSolve`), and the J_th above it T14.b's whole-column bake,
+    each to 10⁻⁹. Beneath an isothermal column over a black floor the field below reads B upward at
+    the ground to 10⁻⁶, and an envelope glows over its black floor with no field below
+    (`deckThermal.test.ts`).
+  - The section (`deckThermalOf`, `thermalSource.ts`'s `DeckThermal`) follows the bands: its
+    header, 64 rows of J_th evenly in h* from the split to the top, the glow at the 16 travel
+    cosines, and the field below at the table below's altitudes. The glow's downward half mirrors
+    its upward, so that a ray within 1/16 of grazing the deck reads the first upward cosine's glow,
+    not a blend toward 0. `packThermalSource` lays the section only for a deck, so a body without
+    one packs as before, and refuses a band whose parts are not their rows' sizes.
+  - The deck march's reads of the section search nothing and loop over nothing, and a test holds
+    `thermalDeck.wgsl` and `belowDeckThermal.wgsl` to no loop of their own. With the altitudes'
+    search, SwiftShader's GPU process segfaulted compiling the deck march (exit 139, about 300 s),
+    and again with a search of the bands and a loop over two. The loop-free reads compile in
+    8.5–9.6 s on the pod's SwiftShader (32 cores, load average about 16, the re-trace running at
+    nice 19). Beneath a deck the field below is placed by the table below's own altitude search
+    (`belowDeck.wgsl`'s `belowDeckAltitudePlace`), as the plain kernels there are.
+  - So the section holds one band. On a body of several bands, `deckThermalDrawn` is false: the
+    section is laid empty and the J_th above the deck is stripped, so the glow is drawn unscattered,
+    and only from the air above the deck, as the note says.
+  - `deckAboveTables` now shifts the thermal altitudes into the split's frame, as it does J's; they
+    were the datum's. The bug was live from the route's opening (b0707c7): the deck's upper bake
+    already held a J_th for a column with a temperature, the deck taken as one ground at the
+    split's B, and the thick thermal sky view and aerial perspective over a deck read it a deck's
+    altitude off. A regression test holds the shift (`deckRead.test.ts`).
+  - Beneath a deck, `withBelowDeckThermal` forms the sky view, the aerial perspective and the march
+    with the field below (`belowDeckThermal.wgsl`). A path's light is I(h_camera) − T I(h_target),
+    computed as (I_c − I_t) + (1 − T) I_t from the rows' weights, so that f32 keeps its figures
+    where the two heights lie close. 1 − e^(−τ) is by its series under 0.045, where the series'
+    remainder meets the difference's error under WGSL's bound on `exp`, both 4 × 10⁻⁶.
+    `#dispatchFrame` picks those forms when the tables carry a thermal source. The three are
+    catalogued in `ATMOSPHERE_DECK_ENTRIES`, which smoke part 14 compiles. VIEW's bound rises by
+    three, to 122 as landed over train 33.
+  - Smoke part 14 holds the deck marches over the two Earth airs and a sphere with no gravity,
+    each of one band and so each with the deck's section and glow, and the kernels beneath a deck
+    with and without the glow, to their twins (`tablesCpu.ts`; `checkDeckThermalFrameTwins`,
+    `checkBelowDeckFrameTwins`). A cool glow's blue, and under about 960 K its green, are negative
+    in Rec. 709, so the glowing composite takes a signed range.
+  - Outside the thick routes nothing moves: the thin and thick kernels' pinned digests
+    (`thickKernels.test.ts`) and their thermal forms are unchanged, and a body without a deck packs
+    its thermal source as before. `withThermalSource` now refuses a kernel holding binding 25
+    unless it is formed over a deck.
+  - `DECK_THERMAL_REASON` takes research-leans-33 §3's words. A deck whose bake lands with its
+    thermal light drawn sheds it (`AtmosphereCache`'s `#deckLanded`, `deckThermalDrawn`); a body of
+    several bands keeps it, as does a bake that fails. The guide's APPROXIMATE row names the
+    strongly flattened body, at the cell's old length, so that the table keeps its padding.
+  - For later tasks: `GroundEmission`, `BakeBandOptions.groundEmission`, `columnPlanckAt`,
+    `PreparedDeck.deckPlanck`, `deckEmission`, `DeckTables.thermalUp`, `BelowDeckTable.thermal`,
+    `DeckThermal`, `DECK_THERMAL_ROWS`, `thermalSourceOf`'s fourth argument, `deckThermalDrawn`,
+    `deckThermalOf`, `belowDeckThermalInto`, `withBelowDeckThermal`, and `ThermalLight`'s
+    `"over a deck"`, in place of `"emitted"`. `deckThermalDrawn` holds for an envelope of one band,
+    which has no table below.
   - _By hand_: `just views-check --software --atmosphere`, high and low, pass with no fault line,
     engine fault or console error; the software tour's captures stand short of their range, so
     `TEST VENUS`'s look is not judged there. Pending, the owner's runs: the routed frame on the RTX

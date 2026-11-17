@@ -90,7 +90,8 @@
  * Σ_j w_j D(μ_i, μ_j) = 2 to the quadrature's exactness, b₀ + b₁t carries the source and z the
  * stream's slope, z_i = μ_i ÷ (1 − ωχ₁) for a phase function of χ₁ alone. The ground emits
  * (1 − a(μ)) B_g, a(μ) its directional albedo on the quadrature (Kirchhoff's law: 1 − A for a
- * Lambertian ground), and nothing enters the top. At a user cosine the source is
+ * Lambertian ground), or a radiance by direction given in its place (R08.T15.b.2: a deck's own
+ * emission, a ground not at one temperature), and nothing enters the top. At a user cosine the source is
  * (b₀ + b₁t)(1 − ω + ω̃) + b₁ J_z(±μ_u), ω̃ the scattered constant's quadrature (ω), integrated in
  * closed form through each layer ({@link ThermalEmission}).
  *
@@ -603,6 +604,22 @@ export interface ThermalEmission {
   readonly interfacePlanck: ArrayLike<number>;
   /** B_g, the ground's Planck radiance, finite and at least 0: it emits (1 − a(μ)) B_g. */
   readonly groundPlanck: number;
+  /**
+   * The ground's own upward radiance by direction, in place of (1 − a(μ)) B_g (plan R08,
+   * R08.T15.b.2: a cloud deck as the ground, which emits as its layers and what lies beneath them
+   * do, not as one body at one temperature); B_g's emission when absent.
+   */
+  readonly groundEmission?: GroundEmission;
+}
+
+/**
+ * A ground's own upward radiance ({@link ThermalEmission.groundEmission}), in the emission's unit,
+ * finite and at least 0: at the quadrature's N nodes, in its order, and at the user cosines, in
+ * theirs.
+ */
+export interface GroundEmission {
+  readonly nodes: ArrayLike<number>;
+  readonly users: ArrayLike<number>;
 }
 
 /** One mode's intensities I^m for one beam, at every interface. */
@@ -1714,7 +1731,9 @@ function solvedModes(
   });
 
   const planck =
-    problem.thermal === undefined ? undefined : checkedThermal(problem.thermal, layers);
+    problem.thermal === undefined
+      ? undefined
+      : checkedThermal(problem.thermal, layers, n, userCosines.length);
   const fields = solveFieldsOf(problem, layerCount);
   const lead = keptLeadOf(problem.keptLayers, layers, userCosines, streams, fields.userDown);
   const keeping: KeptSolve | undefined =
@@ -1762,7 +1781,12 @@ function solvedModes(
       perBeam[b]?.push(mode);
     });
     if (m === 0 && planck !== undefined) {
-      const mode = solveThermalMode(context, planck.interfaces, planck.ground);
+      const mode = solveThermalMode(
+        context,
+        planck.interfaces,
+        planck.ground,
+        planck.groundEmission,
+      );
       thermal = { mode, fluxes: thermalFluxesOf(mode, quadrature, layerCount, n) };
     }
   }
@@ -2422,15 +2446,22 @@ function fluxesOf(
 // ---------------------------------------------------------------------------------------------
 // Thermal emission (R08.T18.b).
 
-/** A thermal emission as validated: B at each interface and the ground's. */
+/**
+ * A thermal emission as validated: B at each interface and the ground's, and the ground's own
+ * emission by direction where given.
+ */
 interface CheckedThermal {
   readonly interfaces: Float64Array;
   readonly ground: number;
+  readonly groundEmission:
+    { readonly nodes: Float64Array; readonly users: Float64Array } | undefined;
 }
 
 function checkedThermal(
   thermal: ThermalEmission,
   layers: ReadonlyArray<PreparedLayer>,
+  nodes: number,
+  users: number,
 ): CheckedThermal {
   const interfaces = Float64Array.from(thermal.interfacePlanck);
   if (interfaces.length !== layers.length + 1) {
@@ -2443,7 +2474,31 @@ function checkedThermal(
     requireIn(`interface ${k}'s Planck radiance`, b, (v) => v >= 0, "finite and at least 0");
   });
   requireIn("groundPlanck", thermal.groundPlanck, (v) => v >= 0, "finite and at least 0");
-  return { interfaces, ground: thermal.groundPlanck };
+  const given = thermal.groundEmission;
+  let groundEmission: CheckedThermal["groundEmission"];
+  if (given !== undefined) {
+    groundEmission = {
+      nodes: Float64Array.from(given.nodes),
+      users: Float64Array.from(given.users),
+    };
+    if (groundEmission.nodes.length !== nodes || groundEmission.users.length !== users) {
+      throw new RangeError(
+        `a ground's emission needs a radiance at each of ${nodes} nodes and ${users} user cosines, ` +
+          `not ${groundEmission.nodes.length} and ${groundEmission.users.length}`,
+      );
+    }
+    for (const [where, values] of Object.entries(groundEmission)) {
+      values.forEach((v, i) => {
+        requireIn(
+          `the ground's emission at ${where} ${i}`,
+          v,
+          (x) => x >= 0,
+          "finite and at least 0",
+        );
+      });
+    }
+  }
+  return { interfaces, ground: thermal.groundPlanck, groundEmission };
 }
 
 /**
@@ -2484,12 +2539,14 @@ function thermalSlope(
 /**
  * The thermal field's mode 0 (the module's remarks, "Thermal emission"): each emitting layer's
  * particular solution for its linear B, its source integrated along the user streams in closed form,
- * the ground's emission (1 − a(μ)) B_g, and mode 0's stack solved once more.
+ * the ground's emission (1 − a(μ)) B_g or `groundEmission` in its place, and mode 0's stack solved
+ * once more.
  */
 function solveThermalMode(
   context: ModeContext,
   planck: Float64Array,
   groundPlanck: number,
+  groundEmission: CheckedThermal["groundEmission"],
 ): ModeIntensities {
   const { quadrature, layerModes, nodeLegendre, userLegendre, userCosines } = context;
   const { groundAlbedo, ground, transfers } = context;
@@ -2536,7 +2593,8 @@ function solveThermalMode(
       }
     }
   });
-  // The ground emits (1 − a(μ)) B_g, a(μ) its directional albedo on the quadrature: Σ_j R_ij.
+  // The ground emits (1 − a(μ)) B_g, a(μ) its directional albedo on the quadrature: Σ_j R_ij; or
+  // its own emission by direction where given.
   const groundNodes = ground?.nodes;
   const emissionAt = (row: Float64Array | undefined, i: number): number => {
     if (row === undefined) {
@@ -2548,10 +2606,12 @@ function solveThermalMode(
     }
     return (1 - albedo) * groundPlanck;
   };
-  const groundSource =
-    groundPlanck > 0
-      ? Float64Array.from({ length: n }, (_, i) => emissionAt(groundNodes, i))
-      : undefined;
+  let groundSource: Float64Array | undefined;
+  if (groundEmission !== undefined) {
+    groundSource = groundEmission.nodes;
+  } else if (groundPlanck > 0) {
+    groundSource = Float64Array.from({ length: n }, (_, i) => emissionAt(groundNodes, i));
+  }
   const coefficients = new Float64Array(span * layerCount);
   layerStackRightHandSideInto(context.stack, particulars, groundSource, coefficients, 0, 1);
   solveLayerStackColumns(context.stack, coefficients, 1);
@@ -2564,9 +2624,14 @@ function solveThermalMode(
         for (let j = 0; j < n; j += 1) {
           flux += at(quadrature.weights, j) * at(quadrature.nodes, j) * downAt(j);
         }
-        value = 2 * groundAlbedo * flux + (1 - groundAlbedo) * groundPlanck;
+        value =
+          2 * groundAlbedo * flux +
+          (groundEmission === undefined
+            ? (1 - groundAlbedo) * groundPlanck
+            : at(groundEmission.users, u));
       } else {
-        value = emissionAt(ground.users, u);
+        value =
+          groundEmission === undefined ? emissionAt(ground.users, u) : at(groundEmission.users, u);
         for (let j = 0; j < n; j += 1) {
           value += at(ground.users, u * n + j) * downAt(j);
         }

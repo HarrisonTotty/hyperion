@@ -54,6 +54,7 @@ import {
   patternedDeckCorrection,
   patternedDeckTables,
   patternedThickBake,
+  withPatternedDeckThermal,
 } from "../../test/thickTables";
 import { heldAppearanceOf } from "../appearance/fromWire";
 import { planLitBodies } from "../bodies/draw";
@@ -1909,7 +1910,35 @@ describe("the product's route through a Venus-class deck (R08.T15.b.2)", () => {
     ]);
   }, 180_000);
 
-  it("routes a hotter Venus-class world, at 1,000 K, through its deck, its tables taking the column's temperature above the split, and keeps its APPROXIMATE once the deck lands, its deck baking no thermal light", async () => {
+  it("sheds the deck's thermal note for a hotter Venus-class world once its deck's bake lands with its thermal light, a body of one band", async () => {
+    const h = harness(undefined, "product", "product");
+    const hot: MediumTemperature = {
+      heightsM: Float64Array.of(0, 100_000),
+      temperaturesK: Float64Array.of(1_000, 230),
+    };
+    const { setting, splitM } = venusSetting(hot);
+    const asked = keptFrame(h, [[A, setting, undefined]]);
+    const tables = madeAt(h, 0);
+    const decks = withPatternedDeckThermal(
+      patternedDeckTables(tables.plan.bands, tables.built.medium, 1, splitM, true),
+    );
+    latestDeck(h).settle({ kind: "baked", tables: decks, correction: null });
+    await microtasks();
+    const landed = keptFrame(h, [[A, setting, undefined]]);
+    expect([tables.plan.bands.length, asked.labels, [landed.labels, [...landed.reasons]]]).toEqual([
+      1,
+      ["atmosphereComputing"],
+      [[], []],
+    ]);
+  }, 180_000);
+
+  it("words the deck's thermal note as research-leans-33 §3 rules it", () => {
+    expect(DECK_THERMAL_REASON).toBe(
+      "thermal emission: drawn unscattered, and only from the air above its cloud deck",
+    );
+  });
+
+  it("routes a hotter Venus-class world, at 1,000 K, through its deck, its tables taking the column's temperature above the split, and keeps its APPROXIMATE once a deck lands that bakes no thermal light", async () => {
     const h = harness(undefined, "product", "product");
     // A test's profile, not fitted to Venus: only its peak at the ground decides the cut.
     const hot: MediumTemperature = {

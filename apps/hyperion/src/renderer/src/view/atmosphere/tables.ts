@@ -68,6 +68,7 @@ import {
 } from "./discTable";
 import {
   bandsScattering,
+  type DeckThermal,
   type MediumTemperature,
   packThermalSource,
   type ThermalSource,
@@ -83,6 +84,7 @@ import {
   DECK_TABLE_FORMAT,
   deckAboveTables,
   deckTableBytes,
+  deckThermalOf,
   packBelowDeckTable,
   type PackedBelowDeckTable,
   packDeckTable,
@@ -2363,6 +2365,11 @@ export class AtmosphereTables {
    */
   #deck: { readonly packed: PackedDeckTable; texture: TextureHandle } | null = null;
   /**
+   * The deck's thermal light its thermal source carries (R08.T15.b.2; `thick/deckRead.ts`'s
+   * `deckThermalOf`), held with the deck, or `null` without one.
+   */
+  #deckThermal: DeckThermal | null = null;
+  /**
    * The table below a deck over a surface (R08.T15.b.2; {@link AtmosphereTables.setDeckTables}),
    * packed and uploaded, or `null`, as an envelope's deck has none.
    */
@@ -2438,6 +2445,7 @@ export class AtmosphereTables {
       const temperature = this.#temperature;
       const deck = this.#deck?.packed ?? null;
       const below = this.#below?.packed ?? null;
+      const deckThermal = this.#deckThermal;
       this.#thick = null;
       this.#disc = null;
       this.#thermal = null;
@@ -2453,6 +2461,7 @@ export class AtmosphereTables {
       if (disc !== null) {
         this.#disc = { table: disc, texture: this.#uploadDisc(disc) };
       }
+      this.#deckThermal = deckThermal;
       if (temperature !== null) {
         this.#temperature = temperature;
         this.#packThermal();
@@ -2693,7 +2702,12 @@ export class AtmosphereTables {
       return;
     }
     const scattering = bandsScattering(this.#thickBands);
-    const source = thermalSourceOf(temperature, this.#medium.topHeightM, scattering);
+    const source = thermalSourceOf(
+      temperature,
+      this.#medium.topHeightM,
+      scattering,
+      this.#deckThermal,
+    );
     const packed = packThermalSource(source);
     const buffer = this.#engine.createBuffer({
       name: "atmosphere thermal source",
@@ -2989,7 +3003,9 @@ export class AtmosphereTables {
    *   (`thick/deckRead.ts`'s `packBelowDeckTable`); `null` for an envelope's deck.
    * @throws RangeError for bands that are not the plan's, as `packDeckTable`, `packBelowDeckTable`
    *   or `packThickTable` refuse them or the correction held, or for a deck over a surface given no
-   *   column, and the tables keep what they held; `EngineUnavailable`
+   *   column, or, on a body of one band whose deck carries its thermal light, for view cosines other
+   *   than the 16 travel cosines' upper half (`thick/deckRead.ts`'s `deckThermalOf`), and the tables
+   *   keep what they held; `EngineUnavailable`
    *   while the engine has no device (a loss); or Error once they are disposed.
    */
   setDeckTables(
@@ -2999,9 +3015,11 @@ export class AtmosphereTables {
     this.#checkPlanBands("deck", bands);
     if (bands === null) {
       this.#releaseDeck();
+      this.#deckThermal = null;
       this.#pack(null, this.#correction);
       return;
     }
+    const deckThermal = deckThermalOf(bands, this.#medium.topHeightM);
     const packed = packDeckTable(bands);
     let below: PackedBelowDeckTable | null = null;
     if (bands[0]?.below !== null) {
@@ -3012,7 +3030,15 @@ export class AtmosphereTables {
       }
       below = packBelowDeckTable(bands, column);
     }
-    this.#pack(deckAboveTables(bands), this.#correction);
+    // The thermal source packs the deck's thermal light with the J above (R08.T15.b.2).
+    const previous = this.#deckThermal;
+    this.#deckThermal = deckThermal;
+    try {
+      this.#pack(deckAboveTables(bands), this.#correction);
+    } catch (error: unknown) {
+      this.#deckThermal = previous;
+      throw error;
+    }
     const texture = this.#uploadDeck(packed);
     const belowTexture = below === null ? null : this.#uploadBelow(below);
     this.#releaseDeck();
@@ -3293,6 +3319,7 @@ export class AtmosphereTables {
     this.#correction = null;
     this.#releaseDisc();
     this.#releaseDeck();
+    this.#deckThermal = null;
     // So does its thermal source (R08.T18.b), whose temperature is the medium's column's.
     this.#releaseThermal();
     this.#temperature = null;

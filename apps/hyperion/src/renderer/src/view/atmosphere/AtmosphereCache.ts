@@ -160,8 +160,9 @@
  * kept scene's cover's, or a record's whose assembly drew its gas envelope, R08.T16.a.2), and
  * given to its tables when it lands (`AtmosphereTables`' `setDeckTables`, with the correction over
  * the deck the same job bakes). Its labels and its failures are a thick bake's, but a self-luminous
- * body's, whose deck's bake carries no thermal light, keeps `atmosphereApproximate` with
- * {@link DECK_THERMAL_REASON} once it lands (R08.T15.b.2); it asks no correction of its own.
+ * body's keeps `atmosphereApproximate` with {@link DECK_THERMAL_REASON} once it lands where its
+ * deck's thermal light is not drawn, on a body of several bands (R08.T15.b.2); it asks no
+ * correction of its own.
  */
 
 import type {
@@ -235,6 +236,7 @@ import {
   deckAboveTables,
   deckCorrectionAbove,
   deckDatumOf,
+  deckThermalDrawn,
   type PackedDeckTable,
   packDeckTable,
   upperMediumOf,
@@ -871,14 +873,16 @@ const DISC_FAILED = { kind: "failed" } as const;
 export const POLARISATION_REASON = "multiple scattering: drawn without its polarisation";
 
 /**
- * Why a self-luminous body routed through a cloud deck carries `atmosphereApproximate` once its
- * deck's bake lands (R08.T15.b.2; lean, 2026-11-02), as player text in {@link POLARISATION_REASON}'s
- * form: the deck's bake (`thick/deck.ts`) carries no thermal light, unlike a thick bake, so the light
- * its air emits is drawn above the deck without the deck's scattering of it, and the kernels beneath
- * a deck over a surface draw none. Its words await the owner's UX sign-off.
+ * Why a self-luminous body routed through a cloud deck carries `atmosphereApproximate` (R08.T15.b.2;
+ * its words research-leans-33 §3's ruling), as player text in {@link POLARISATION_REASON}'s form:
+ * once its deck's bake lands where its thermal light is not drawn, on a body of several bands
+ * (`thick/deckRead.ts`'s `deckThermalDrawn`), where none of the glow is scattered and the glow of
+ * the deck and of the air beneath it is not drawn at all, and when its bake fails. Where it is
+ * drawn, on a body of one band, the landed bake sheds it; while the bake runs the body reads
+ * `atmosphereComputing` alone.
  */
 export const DECK_THERMAL_REASON =
-  "thermal emission: drawn without its scattering by the cloud deck, and left out beneath it";
+  "thermal emission: drawn unscattered, and only from the air above its cloud deck";
 
 /**
  * What a kept body's thick bake carries as its input (R08.T14.c): no medium of its own, since a
@@ -2335,7 +2339,8 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
     tables: T,
     split: DeckSplit,
   ): void {
-    // A self-luminous body's deck bakes no thermal light: its note stands once the bake lands.
+    // A self-luminous body's deck bakes under its note, which stands once the bake lands unless its
+    // thermal light is drawn, on a body of one band (`#deckLanded`, `deckThermalDrawn`).
     const made: Labelled = {
       labels: entry.labels,
       reasons:
@@ -2394,7 +2399,13 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
     switch (outcome.kind) {
       case "baked":
         this.#showBake(held, {
-          made: bake.made,
+          // A self-luminous body's deck whose bake's thermal light is drawn sheds its note.
+          made: deckThermalDrawn(outcome.tables)
+            ? {
+                labels: bake.made.labels,
+                reasons: bake.made.reasons.filter((reason) => reason !== DECK_THERMAL_REASON),
+              }
+            : bake.made,
           state: {
             kind: "baked",
             tables: {

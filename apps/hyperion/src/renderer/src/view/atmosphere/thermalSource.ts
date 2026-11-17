@@ -109,6 +109,157 @@ export interface ThermalSource {
   readonly planck: Float32Array;
   /** Each band's scattered thermal light, the tables' plan's bands in order; `null` for none. */
   readonly scattering: ReadonlyArray<ThermalScattering> | null;
+  /** A cloud deck's thermal light (R08.T15.b.2; {@link DeckThermal}); absent for a body with none. */
+  readonly deck?: DeckThermal;
+}
+
+/** The rows a deck's scattered thermal light is resampled to, evenly in h\* from the split to the top. */
+export const DECK_THERMAL_ROWS = 64;
+
+/**
+ * A cloud deck's thermal light on a body of one latitude band (plan R08, R08.T15.b.2;
+ * `thick/deck.ts`'s remarks, "Thermal light"), laid for reads that search nothing, so that the
+ * deck's marches' thermal forms compile on SwiftShader, whose GPU process crashed on the marches
+ * with {@link thermalScatteringInto}'s search of the altitudes, and again with a search of the bands
+ * and a loop over two (2026-11-02).
+ */
+export interface DeckThermalBand {
+  /**
+   * J_th over the upper medium, cd m⁻² per unit of σ_s,k, at {@link DECK_THERMAL_ROWS} heights
+   * evenly from the split, 0, to the upper medium's top, and the 16 travel cosines, rgb, entry
+   * `(r 16 + v) 3 + c`: the band's own {@link ThermalScattering} read at each.
+   */
+  readonly scattering: Float32Array;
+  /**
+   * The deck's upward thermal radiance at its top, its own glow and its reflection of the air
+   * above, cd m⁻², at the 16 travel cosines, rgb, entry `v 3 + c`: the downward half the upward
+   * half mirrored, so that a read within 1/16 of grazing holds at the first upward cosine.
+   */
+  readonly glow: Float32Array;
+  /**
+   * The thermal field below a deck over a surface, cd m⁻², at the table below's altitudes and the
+   * 16 travel cosines, rgb, entry `(a 16 + v) 3 + c`; empty for an envelope.
+   */
+  readonly below: Float32Array;
+}
+
+/** A cloud deck's thermal light as its tables' thermal source carries it (R08.T15.b.2). */
+export interface DeckThermal {
+  /** The upper medium's top above the split, m: the rows span [0, top]. */
+  readonly topHeightM: number;
+  /** How many altitudes the table below holds, 0 for an envelope, which has no view from below. */
+  readonly belowAltitudeCount: number;
+  /**
+   * The light of the body's one band; `null` for a deck baked without it (a column without a
+   * temperature) or a body of several bands, whose deck's marches then read 0 of it.
+   */
+  readonly band: DeckThermalBand | null;
+}
+
+/**
+ * A band's J_th resampled to {@link DECK_THERMAL_ROWS} rows evenly in h\* from 0 to `topHeightM`,
+ * read at each row and travel cosine as {@link thermalScatteringInto} reads one band.
+ */
+export function deckScatteringRows(layer: ThermalScattering, topHeightM: number): Float32Array {
+  const out = new Float32Array(DECK_THERMAL_ROWS * THERMAL_TRAVEL_COSINES * 3);
+  const rgb: ThermalRgb = [0, 0, 0];
+  for (let r = 0; r < DECK_THERMAL_ROWS; r += 1) {
+    const heightM = (topHeightM * r) / (DECK_THERMAL_ROWS - 1);
+    for (let v = 0; v < THERMAL_TRAVEL_COSINES; v += 1) {
+      rgb[0] = 0;
+      rgb[1] = 0;
+      rgb[2] = 0;
+      scatteringLayerInto(layer, heightM, (v + 0.5) / (THERMAL_TRAVEL_COSINES / 2) - 1, 1, rgb);
+      out.set(rgb, (r * THERMAL_TRAVEL_COSINES + v) * 3);
+    }
+  }
+  return out;
+}
+
+/**
+ * One row of `values` at `row` and the travel cosine `muTravel`, linear between the travel cosines
+ * about it, held at the edges, into `out`, `weight` of it added: `thermalDeck.wgsl`'s thermalDeckRow.
+ */
+function deckRowInto(
+  values: Float32Array,
+  row: number,
+  muTravel: number,
+  weight: number,
+  out: ThermalRgb,
+): void {
+  const place = Math.min(
+    Math.max((muTravel + 1) * (THERMAL_TRAVEL_COSINES / 2) - 0.5, 0),
+    THERMAL_TRAVEL_COSINES - 1,
+  );
+  const v0 = Math.min(Math.floor(place), THERMAL_TRAVEL_COSINES - 2);
+  const g = place - v0;
+  for (const c of [0, 1, 2] as const) {
+    const at = (v: number): number =>
+      values[(row * THERMAL_TRAVEL_COSINES + v) * 3 + c] ?? Number.NaN;
+    out[c] += weight * (at(v0) * (1 - g) + at(v0 + 1) * g);
+  }
+}
+
+/**
+ * A deck's J_th at h\* = `heightM` above the split and the travel cosine `muTravel`, cd m⁻² per
+ * unit of σ_s,k, into `out` (`thermalDeck.wgsl`'s thermalDeckScatteringAt): its rows evenly from
+ * the split to the top, linear between them, held at the ends; 0 without it.
+ */
+export function deckScatteringInto(
+  deck: DeckThermal,
+  heightM: number,
+  muTravel: number,
+  out: ThermalRgb,
+): void {
+  out[0] = 0;
+  out[1] = 0;
+  out[2] = 0;
+  const { band } = deck;
+  if (band === null) {
+    return;
+  }
+  const last = DECK_THERMAL_ROWS - 1;
+  const place = Math.min(Math.max(heightM / deck.topHeightM, 0), 1) * last;
+  const r0 = Math.min(Math.floor(place), last - 1);
+  const f = place - r0;
+  deckRowInto(band.scattering, r0, muTravel, 1 - f, out);
+  deckRowInto(band.scattering, r0 + 1, muTravel, f, out);
+}
+
+/**
+ * The deck's glow at its top for the light's travel cosine `muTravel`, cd m⁻², into `out`
+ * (`thermalDeck.wgsl`'s thermalDeckGlowAt); 0 without it.
+ */
+export function deckGlowInto(deck: DeckThermal, muTravel: number, out: ThermalRgb): void {
+  out[0] = 0;
+  out[1] = 0;
+  out[2] = 0;
+  if (deck.band !== null) {
+    deckRowInto(deck.band.glow, 0, muTravel, 1, out);
+  }
+}
+
+/**
+ * The thermal field below a deck over a surface at the table below's altitude place (`a0`, `f`) and
+ * the light's travel cosine `muTravel`, cd m⁻², into `out` (`belowDeckThermal.wgsl`'s
+ * belowDeckThermalAt); 0 without it, and for an envelope.
+ */
+export function deckBelowInto(
+  deck: DeckThermal,
+  a0: number,
+  f: number,
+  muTravel: number,
+  out: ThermalRgb,
+): void {
+  out[0] = 0;
+  out[1] = 0;
+  out[2] = 0;
+  const { band } = deck;
+  if (band === null || deck.belowAltitudeCount === 0) {
+    return;
+  }
+  deckRowInto(band.below, a0, muTravel, 1 - f, out);
+  deckRowInto(band.below, a0 + 1, muTravel, f, out);
 }
 
 /**
@@ -138,7 +289,8 @@ export function blackBodyLuminance(temperatureK: number): Rgb {
 
 /**
  * The thermal source of a column of `temperature` under a medium whose top is `topHeightM`, its
- * scattered light `scattering` (the thick bake's, or none).
+ * scattered light `scattering` (the thick bake's, or none), and a cloud deck's thermal light `deck`
+ * where its tables hold a deck (R08.T15.b.2).
  *
  * @throws RangeError for a top that is not positive and finite.
  */
@@ -146,6 +298,7 @@ export function thermalSourceOf(
   temperature: MediumTemperature,
   topHeightM: number,
   scattering: ReadonlyArray<ThermalScattering> | null = null,
+  deck: DeckThermal | null = null,
 ): ThermalSource {
   if (!(topHeightM > 0) || !Number.isFinite(topHeightM)) {
     throw new RangeError(`a thermal source needs a positive top, not ${topHeightM} m`);
@@ -155,7 +308,7 @@ export function thermalSourceOf(
     const heightM = (topHeightM * i) / (THERMAL_SOURCE_HEIGHTS - 1);
     planck.set(blackBodyLuminance(mediumTemperatureK(temperature, heightM)), i * 3);
   }
-  return { topHeightM, planck, scattering };
+  return { topHeightM, planck, scattering, ...(deck === null ? {} : { deck }) };
 }
 
 /** A source's B̃ at h\* = `heightM`, cd m⁻², into `out`: `thermalSource.wgsl`'s thermalPlanckAt. */
@@ -274,9 +427,14 @@ export function thermalScatteringInto(
  * The buffer `thermalSource.wgsl` reads, `vec4f` by `vec4f`: the header (the top, m; the heights
  * B̃ is held at; the bands of scattered light, 0 for none; the altitudes a band); B̃ at each
  * height, rgb; then each band's altitudes in x, followed by its J_th, rgb, altitude by altitude and
- * travel cosine by travel cosine.
+ * travel cosine by travel cosine; then, for a cloud deck (R08.T15.b.2), `thermalDeck.wgsl`'s
+ * section: its header (the upper medium's top above the split, m; {@link DECK_THERMAL_ROWS}; 1, or 0
+ * for no band; the table below's altitudes), then its {@link DeckThermalBand}'s rows of J_th, its
+ * glow and its field below, rgb, each travel cosine by travel cosine.
  *
- * @throws RangeError for bands of scattered light whose altitudes differ in count.
+ * @throws RangeError for bands of scattered light whose altitudes differ in count, or a deck's
+ *   band whose rows, glow or field below are not {@link DECK_THERMAL_ROWS}, one and its
+ *   {@link DeckThermal.belowAltitudeCount} rows of the 16 travel cosines.
  */
 export function packThermalSource(source: ThermalSource): Float32Array {
   const bands = source.scattering ?? [];
@@ -284,8 +442,29 @@ export function packThermalSource(source: ThermalSource): Float32Array {
   if (bands.some((band) => band.altitudesM.length !== altitudes)) {
     throw new RangeError("every band of scattered thermal light needs the same altitudes");
   }
+  const deckBand = source.deck?.band ?? null;
+  const row = THERMAL_TRAVEL_COSINES * 3;
+  if (
+    deckBand !== null &&
+    (deckBand.scattering.length !== DECK_THERMAL_ROWS * row ||
+      deckBand.glow.length !== row ||
+      deckBand.below.length !== (source.deck?.belowAltitudeCount ?? 0) * row)
+  ) {
+    throw new RangeError(
+      `a deck's thermal light needs ${DECK_THERMAL_ROWS} rows, a glow and its table below's rows of ${THERMAL_TRAVEL_COSINES} travel cosines`,
+    );
+  }
   const perBand = altitudes * (1 + THERMAL_TRAVEL_COSINES);
-  const out = new Float32Array((1 + THERMAL_SOURCE_HEIGHTS + bands.length * perBand) * 4);
+  const deckAt = 1 + THERMAL_SOURCE_HEIGHTS + bands.length * perBand;
+  const { deck } = source;
+  let deckSize = 0;
+  if (deck !== undefined) {
+    deckSize =
+      deck.band === null
+        ? 1
+        : 1 + (DECK_THERMAL_ROWS + 1 + deck.belowAltitudeCount) * THERMAL_TRAVEL_COSINES;
+  }
+  const out = new Float32Array((deckAt + deckSize) * 4);
   out.set([source.topHeightM, THERMAL_SOURCE_HEIGHTS, bands.length, altitudes], 0);
   for (let i = 0; i < THERMAL_SOURCE_HEIGHTS; i += 1) {
     out.set(source.planck.subarray(i * 3, i * 3 + 3), (1 + i) * 4);
@@ -297,6 +476,21 @@ export function packThermalSource(source: ThermalSource): Float32Array {
     }
     for (let i = 0; i < altitudes * THERMAL_TRAVEL_COSINES; i += 1) {
       out.set(band.values.subarray(i * 3, i * 3 + 3), (base + altitudes + i) * 4);
+    }
+  }
+  if (deck !== undefined) {
+    // A deck's section (R08.T15.b.2): its header, then its band's rows, glow and field below.
+    const { band } = deck;
+    out.set(
+      [deck.topHeightM, DECK_THERMAL_ROWS, band === null ? 0 : 1, deck.belowAltitudeCount],
+      deckAt * 4,
+    );
+    let at = deckAt + 1;
+    for (const part of band === null ? [] : [band.scattering, band.glow, band.below]) {
+      for (let i = 0; i < part.length / 3; i += 1) {
+        out.set(part.subarray(i * 3, i * 3 + 3), (at + i) * 4);
+      }
+      at += part.length / 3;
     }
   }
   return out;

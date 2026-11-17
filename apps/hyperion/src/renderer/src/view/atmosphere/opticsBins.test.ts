@@ -172,7 +172,14 @@ function deckShareOf(bins: ReadonlyArray<number>): DeckBinShare {
     modes: 8,
     diffuseModes: 3,
     below: null,
-    bins: bins.map((bin) => ({ bin, deckOpticalDepth: bin, lights: [], below: null })),
+    bins: bins.map((bin) => ({
+      bin,
+      deckOpticalDepth: bin,
+      lights: [],
+      below: null,
+      thermalUp: null,
+      belowThermal: null,
+    })),
   };
 }
 

@@ -204,6 +204,7 @@ import {
   patternedDeckCorrection,
   patternedDeckTables,
   patternedThickBake,
+  withPatternedDeckThermal,
 } from "../test/thickTables";
 import type { MediumTemperature, ThermalScattering } from "../view/atmosphere/thermalSource";
 import type { TwinThermal } from "../view/atmosphere/tablesCpu";
@@ -554,6 +555,15 @@ export function requireDepth(depth: TextureHandle | null): TextureHandle {
 /** Every channel finite and within rgba16float's range. */
 function withinHalfRange(texels: Float32Array): boolean {
   return texels.every((v) => Number.isFinite(v) && v >= 0 && v <= HALF_FLOAT_MAX);
+}
+
+/**
+ * Whether every value of `texels` is finite and within rgba16float's range of either sign: a
+ * self-luminous body's light, whose cool glow's green and blue lie below 0 in Rec. 709 (R08.T18.b's
+ * signed targets; R08.T15.b.2).
+ */
+function withinSignedHalfRange(texels: Float32Array): boolean {
+  return texels.every((v) => Number.isFinite(v) && Math.abs(v) <= HALF_FLOAT_MAX);
 }
 
 /** The mean of each colour channel over the frame. */
@@ -2268,7 +2278,10 @@ interface ThickTwinBody {
   readonly medium: AtmosphereMedium;
   readonly curves: AbsorberCurveSlots;
   readonly figure: SpheroidFigure;
-  /** Its gravity: `null` for a sphere's tables of one slice and one band (R08.T11's Titan row). */
+  /**
+   * Its normal gravity: `null` for a sphere's tables of one slice and one band (R08.T11's Titan
+   * row; R08.T15.b.2's deck's, a sphere of no spin).
+   */
   readonly gravity: BodyGravity | null;
   readonly frames: ReadonlyArray<TwinFrame>;
   /** Its column's temperature, where it draws the medium's own light (R08.T18.b). */
@@ -2303,7 +2316,8 @@ export type RoutedTable =
  * Gives `tables` the smoke's pattern of `table` over `slots` light slots (at least one): the thick
  * table with its correction summed in ({@link withThickTable}), the correction alone
  * ({@link withCorrectionTable}), or a deck and the correction over it ({@link withDeckTable}), the
- * thick table holding a patterned scattered thermal light where `thermal` asks (R08.T18.b). The
+ * thick table holding a patterned scattered thermal light where `thermal` asks (R08.T18.b), and a
+ * deck its thermal light likewise (R08.T15.b.2; `withPatternedDeckThermal`). The
  * read's cost and arithmetic do not depend on the values, so R08.T11's routes' rows time it and their
  * twins hold it as a bake's.
  *
@@ -2326,7 +2340,7 @@ export function withRoutedTable(
       task = "R08.T14.f";
       break;
     case "deck":
-      withDeckTable(tables, slots, table.deckAltitudeM, null, table.floor);
+      withDeckTable(tables, slots, table.deckAltitudeM, null, table.floor, thermal);
       task = "R08.T15.a.2";
       break;
   }
@@ -2581,11 +2595,13 @@ function earthWithoutOzone(): AtmosphereMedium {
  * and its form by slot), with the thick read's thermal sky view and aerial perspective, held to
  * their CPU twin over the GPU's own per-planet tables, the same packed deck table and the same
  * thermal source, at 3,000 K, to 10⁻³ above 10⁻⁶ of the largest (R08.T6.b's bound), over a deck
- * 3 km up: R05's Earth's air without its ozone, its continental aerosol absorbing and so emitting,
- * by the shared read, and the measured Earth's air, its ozone under the Sun's curves, by slot; from
- * 400 km with the sun 20° up ahead and 3° down, where the deck's beam is 0 and the air's own light
- * is most of each frame's, on high. In part 14 after the deck's catalogue, which compiles the
- * marches.
+ * 3 km up, each body of one band, so that each carries the deck's thermal light in the source's
+ * deck section, its J_th and its glow where a ray meets the deck: R05's Earth's air without its
+ * ozone, its continental aerosol absorbing and so emitting, by the shared read; the measured Earth's
+ * air, its ozone under the Sun's curves, by slot; and R05's air without its ozone again on a sphere
+ * with no gravity, a Venus-class world's figure, whose glow takes the sphere's normal; from 400 km
+ * with the sun 20° up ahead and 3° down, where the deck's beam is 0 and the air's own light is most
+ * of each frame's, on high. In part 14 after the deck's catalogue, which compiles the marches.
  *
  * @remarks
  * Not R05's Earth itself: its ozone's tent falls linearly to 0 at 40 km, a kink in emission the
@@ -2621,6 +2637,21 @@ export async function checkDeckThermalFrameTwins(
       curves: EARTH_REFERENCE_CURVES,
       figure: deckDatumOf(WGS84, EARTH_GRAVITY, EARTH_DECK_ALTITUDE_M),
       gravity: EARTH_GRAVITY,
+      frames,
+      thermal: HOT_COLUMN,
+    },
+    {
+      // A sphere with no gravity, a Venus-class world's figure: the deck's glow takes the sphere's
+      // normal where a ray meets it (`tablesCpu.ts`'s `deckNormalAt`).
+      name: "R05's Earth's air without its ozone over a deck on a sphere at 3,000 K",
+      table: { kind: "deck", deckAltitudeM: EARTH_DECK_ALTITUDE_M, floor: "ground" },
+      medium: upperMediumOf(air, EARTH_DECK_ALTITUDE_M),
+      curves: NO_ABSORBER_CURVES,
+      figure: {
+        equatorialRadiusM: 6_371_000 + EARTH_DECK_ALTITUDE_M,
+        polarRadiusM: 6_371_000 + EARTH_DECK_ALTITUDE_M,
+      },
+      gravity: null,
       frames,
       thermal: HOT_COLUMN,
     },
@@ -2703,6 +2734,18 @@ export async function checkBelowDeckFrameTwins(
   engine: RenderEngine,
   checks: Checks,
 ): Promise<void> {
+  await checkBelowDeckBody(engine, checks, false);
+  // A self-luminous body's thermal forms beneath its deck, its thermal field's pattern with them,
+  // the column at 3,000 K (R08.T15.b.2).
+  await checkBelowDeckBody(engine, checks, true);
+}
+
+/** {@link checkBelowDeckFrameTwins}' body, its thermal field drawn where `glowing`. */
+async function checkBelowDeckBody(
+  engine: RenderEngine,
+  checks: Checks,
+  glowing: boolean,
+): Promise<void> {
   const radiusM = 6_371_000 + EARTH_DECK_ALTITUDE_M;
   const figure: SpheroidFigure = { equatorialRadiusM: radiusM, polarRadiusM: radiusM };
   const medium = upperMediumOf(R05_EARTH_REFERENCE, EARTH_DECK_ALTITUDE_M);
@@ -2717,16 +2760,30 @@ export async function checkBelowDeckFrameTwins(
   );
   try {
     const tables = atmosphere.tables;
-    withDeckTable(tables, 1, EARTH_DECK_ALTITUDE_M, kernelMedium(R05_EARTH_REFERENCE));
+    withDeckTable(
+      tables,
+      1,
+      EARTH_DECK_ALTITUDE_M,
+      kernelMedium(R05_EARTH_REFERENCE),
+      "ground",
+      glowing,
+    );
+    if (glowing) {
+      tables.setThermalSource(HOT_COLUMN);
+    }
     const packed = tables.belowDeckPacked;
-    if (packed === null) {
-      throw new Error("the deck's tables hold a table below it");
+    const deckThermal = tables.thermal?.deck;
+    if (packed === null || (glowing && (deckThermal === undefined || deckThermal.band === null))) {
+      throw new Error("the deck's tables hold a table below it, and its thermal field where asked");
     }
     const below: TwinBelowDeck = {
       table: packed,
       lnBands: tables.plan.bands.map((band) => Math.log(band.gravityRatio)),
       splitM: belowDeckSplitM(packed),
       gravityRatio: 1,
+      ...(deckThermal === undefined
+        ? {}
+        : { thermal: { deck: deckThermal, scale: Math.fround(SMOKE_EXPOSURE_SCALE) } }),
     };
     const read = kernelMedium(medium);
     await inOrder(checks, async (ordered) => {
@@ -2768,7 +2825,8 @@ export async function checkBelowDeckFrameTwins(
               marchTransmittance.set(marched.transmittance, (y * w + x) * 4);
             }
           }
-          const label = `R08.T15.b.2 R05's Earth beneath a deck, high, ${frame.name}`;
+          const glow = glowing ? " at 3,000 K, with its thermal field" : "";
+          const label = `R08.T15.b.2 R05's Earth beneath a deck${glow}, high, ${frame.name}`;
           for (const [what, held] of [
             [
               "the sky view",
@@ -2810,10 +2868,12 @@ export async function checkBelowDeckFrameTwins(
               `worst ${held.at}; ${held.above} channels above 10⁻⁶ of the largest, ${held.over} over the bound`,
             );
           }
+          // A glow's light is signed: its green and blue below 0 where it is cool.
+          const within = glowing ? withinSignedHalfRange(composite) : withinHalfRange(composite);
           later.check(
-            `${label}: the composite is finite and within rgba16float's range`,
-            withinHalfRange(composite),
-            withinHalfRange(composite) ? "every channel" : "a channel is not",
+            `${label}: the composite is finite and within rgba16float's range${glowing ? " of either sign" : ""}`,
+            within,
+            within ? "every channel" : "a channel is not",
           );
           return Promise.resolve();
         });
@@ -4430,7 +4490,9 @@ export async function checkFarLimbEdge(engine: RenderEngine, checks: Checks): Pr
  * and its phase in every texel of its read, and the march's bare ground read through them. With a
  * `column`, the whole medium as the kernels read it, the deck stands over a surface with the
  * pattern's table below it (R08.T15.b.2), its paths reading `column`'s depth and extinction. Its
- * `floor` is a surface's unless given (R08.T16.a.2).
+ * `floor` is a surface's unless given (R08.T16.a.2). A `glowing` deck holds the thermal light's
+ * pattern too (`test/thickTables.ts`'s `withPatternedDeckThermal`; R08.T15.b.2), which a
+ * self-luminous body's tables' thermal source carries.
  */
 export function withDeckTable(
   tables: AtmosphereTables,
@@ -4438,19 +4500,18 @@ export function withDeckTable(
   deckAltitudeM: number,
   column: AtmosphereMedium | null = null,
   floor: DeckFloor = "ground",
+  glowing = false,
 ): void {
   const count = Math.max(1, slots);
-  tables.setDeckTables(
-    patternedDeckTables(
-      tables.plan.bands,
-      kernelMedium(tables.medium),
-      count,
-      deckAltitudeM,
-      column !== null,
-      floor,
-    ),
-    column,
+  const deck = patternedDeckTables(
+    tables.plan.bands,
+    kernelMedium(tables.medium),
+    count,
+    deckAltitudeM,
+    column !== null,
+    floor,
   );
+  tables.setDeckTables(glowing ? withPatternedDeckThermal(deck) : deck, column);
   // The correction over the deck, brought to the split as the deck's J is.
   const correction = patternedDeckCorrection(
     tables.plan.bands,

@@ -122,6 +122,8 @@ import skyViewWgsl from "./shaders/skyView.wgsl?raw";
 import skyViewBelowDeckWgsl from "./shaders/skyViewBelowDeck.wgsl?raw";
 import sourceWgsl from "./shaders/source.wgsl?raw";
 import thermalSourceWgsl from "./shaders/thermalSource.wgsl?raw";
+import thermalDeckWgsl from "./shaders/thermalDeck.wgsl?raw";
+import belowDeckThermalWgsl from "./shaders/belowDeckThermal.wgsl?raw";
 import deckReadWgsl from "./shaders/deckRead.wgsl?raw";
 import thickDepartureWgsl from "./shaders/thickDeparture.wgsl?raw";
 import thickReadWgsl from "./shaders/thickRead.wgsl?raw";
@@ -1910,21 +1912,44 @@ const THERMAL_STEP_REWRITES = 3;
 /** The binding `thermalSource.wgsl` declares its buffer at. */
 const THERMAL_SOURCE_BINDING = "@group(0) @binding(25) var<storage, read> thermalSource";
 
+/** `thermalSource.wgsl`'s read of a thick bake's scattered thermal light in a step's shares. */
+const THERMAL_SCATTERING_READ =
+  "thermalScatteringAt(start.gravityRatio, start.scaledHeightM, muTravel)";
+
 /**
- * `thermalSource.wgsl` with its buffer at binding 26, for a kernel whose own sources hold binding 25
- * (a deck's march, its table; R08.T15.b.2), so that every other thermal form keeps its bytes.
+ * `thermalSource.wgsl` for a deck's march (R08.T15.b.2): its buffer at binding 26, the kernel's own
+ * 25 being the deck's table, so that every other thermal form keeps its bytes; a step's scattered
+ * thermal light read from the deck's section (`thermalDeck.wgsl`'s thermalDeckScatteringAt), one
+ * band's and searching nothing, in place of its bands' search of the altitudes, on which
+ * SwiftShader's GPU process crashed as it compiled the deck's march (`exit_code=139` after some
+ * 300 s, pod, 2026-11-02), as it did again with a search of the bands; and `thermalDeck.wgsl` after
+ * it.
  */
-const THERMAL_SOURCE_OVER_DECK_WGSL = thermalSourceWgsl.replace(
-  THERMAL_SOURCE_BINDING,
-  "@group(0) @binding(26) var<storage, read> thermalSource",
-);
+const THERMAL_SOURCE_OVER_DECK_WGSL = `${thermalSourceWgsl
+  .replace(THERMAL_SOURCE_BINDING, "@group(0) @binding(26) var<storage, read> thermalSource")
+  .replace(
+    THERMAL_SCATTERING_READ,
+    "thermalDeckScatteringAt(start.scaledHeightM, muTravel)",
+  )}\n${thermalDeckWgsl}`;
+
+/**
+ * A deck's march's bare ground in its thermal form (R08.T15.b.2): where the ray meets the deck with
+ * nothing drawn, after each source's light, the deck's glow at its top through slot 0's throughput,
+ * the light leaving it towards the eye at −(ray · zenith), times the frame's scale.
+ */
+const DECK_GLOW: readonly [string, string] = [
+  "    }\n  }\n  // A sky pixel whose ray meets the ground sees nothing of space behind it: no sun's disc there.",
+  "    }\n    luminance += march.throughput0 * thermalDeckGlowAt(-dot(dir, datum.normal))\n" +
+    "      * view.marchSky.w;\n  }\n" +
+    "  // A sky pixel whose ray meets the ground sees nothing of space behind it: no sun's disc there.",
+];
 
 /**
  * The thermal light a kernel's thermal form draws ({@link withThermalSource}): the medium's emission
- * and the scattered thermal light a thick bake holds, or its emission alone (R08.T15.b.2: a deck's
- * march, whose bake holds none).
+ * and the scattered thermal light a thick bake holds, or over a cloud deck (R08.T15.b.2) its
+ * emission, the deck's bake's scattered thermal light and the deck's glow where a ray meets it.
  */
-export type ThermalLight = "emitted and scattered" | "emitted";
+export type ThermalLight = "emitted and scattered" | "over a deck";
 
 /**
  * `pair`, a per-frame kernel (the sky view, the aerial perspective or a ray march, of the thin read
@@ -1934,11 +1959,13 @@ export type ThermalLight = "emitted and scattered" | "emitted";
  * kernel's own hold 25 (R08.T15.b.2: a deck's march, its table). Every other line is the kernel's
  * own, so that a body below the thermal cut draws by the kernel as it was to the byte.
  *
- * @param light - `emitted` leaves the step's shares as they are, reading no scattered thermal light
- *   (R08.T15.b.2): a deck's bake holds none, and on SwiftShader the deck's march with the read as
- *   well crashed its GPU process as it compiled (`exit_code=139` after some 300 s, pod, 2026-11-02).
+ * @param light - `over a deck` (R08.T15.b.2), for a deck's march, reads the scattered thermal light
+ *   from the deck's section ({@link THERMAL_SOURCE_OVER_DECK_WGSL}) and adds the deck's glow at the
+ *   bare ground ({@link DECK_GLOW}).
  * @throws Error naming the kernel when its sources hold a rewritten line more or fewer times than
- *   {@link THERMAL_SOURCE} allows, or no step's or more than one.
+ *   {@link THERMAL_SOURCE} allows, or no step's or more than one; when they hold binding 25 but
+ *   for a deck's march; or, over a deck, when they hold the bare ground's end other than once or no
+ *   binding 25.
  */
 export function withThermalSource(
   pair: KernelPair,
@@ -1958,19 +1985,34 @@ export function withThermalSource(
       }
       if (i >= THERMAL_SOURCE.length - THERMAL_STEP_REWRITES) {
         steps += count;
-        if (light === "emitted") {
-          return text;
-        }
       }
       return text.replaceAll(general, thermal);
     }, wgsl);
     if (steps !== 1) {
       throw new Error(`kernel ${pair.name} holds ${steps} steps' shares, not 1`);
     }
-    const source = wgsl.includes("@group(0) @binding(25) ")
-      ? THERMAL_SOURCE_OVER_DECK_WGSL
-      : thermalSourceWgsl;
-    return `${code}\n${source}`;
+    let formed: string;
+    switch (light) {
+      case "emitted and scattered":
+        // Its source at binding 25 would fall on the kernel's own there, a deck's table.
+        if (code.includes("@group(0) @binding(25) ")) {
+          throw new Error(`kernel ${pair.name} holds binding 25: its thermal form is over a deck`);
+        }
+        formed = `${code}\n${thermalSourceWgsl}`;
+        break;
+      case "over a deck": {
+        const [general, glow] = DECK_GLOW;
+        const ends = code.split(general).length - 1;
+        if (ends !== 1 || !code.includes("@group(0) @binding(25) ")) {
+          throw new Error(
+            `kernel ${pair.name} holds ${ends} bare grounds' ends, not 1, or no deck at binding 25`,
+          );
+        }
+        formed = `${code.replace(general, glow)}\n${THERMAL_SOURCE_OVER_DECK_WGSL}`;
+        break;
+      }
+    }
+    return formed;
   };
   return {
     ...pair,
@@ -2165,6 +2207,86 @@ export const RAY_MARCH_BELOW_DECK_KERNEL = belowDeckKernel(
   `${marchAreaWgsl}\n${rayMarchBelowDeckWgsl}`,
 );
 
+/**
+ * The thermal light's rewrites of the kernels beneath a cloud deck (R08.T15.b.2;
+ * `belowDeckThermal.wgsl`): a path's light gains the field's I_th(h*_camera, Ω) − T I_th(h*_t, Ω)
+ * (belowDeckThermalPath, formed so that f32 keeps its figures at close heights, its path's depth
+ * kept for it), outside the sources' clamp at 0, since a cool glow's blue, and under about 960 K
+ * its green, are negative; and the sky view's, I_th at the camera's h*, each times the frame's scale. The first two stand once
+ * in each kernel (`belowDeckView.wgsl`), the last in the sky view's alone.
+ */
+const BELOW_DECK_THERMAL: ReadonlyArray<{
+  readonly general: string;
+  readonly thermal: string;
+  readonly least: number;
+}> = [
+  {
+    general:
+      "  let transmitted = exp(-belowDeckPathDepth(belowDeckTable, body, oblateBody, s, fromM, toM, t));",
+    thermal:
+      "  let pathDepth = belowDeckPathDepth(belowDeckTable, body, oblateBody, s, fromM, toM, t);\n" +
+      "  let transmitted = exp(-pathDepth);",
+    least: 1,
+  },
+  {
+    general: "      max(atCamera - transmitted * atTarget, vec3f(0.0)),\n",
+    thermal:
+      "      max(atCamera - transmitted * atTarget, vec3f(0.0))\n" +
+      "        + belowDeckThermalPath(fromM, toM, -mu, pathDepth) * view.marchSky.w,\n",
+    least: 1,
+  },
+  {
+    general: "  let light = belowDeckSkyAt(body, frame.z, bodyDir, belowDeckCameraHeightStar());",
+    thermal:
+      "  let fromM = belowDeckCameraHeightStar();\n" +
+      "  let light = belowDeckSkyAt(body, frame.z, bodyDir, fromM)\n" +
+      "    + belowDeckThermalAt(fromM, -dot(bodyDir, frame.z)) * view.marchSky.w;",
+    least: 0,
+  },
+];
+
+/**
+ * `pair`, a kernel beneath a cloud deck ({@link belowDeckKernel}), drawing a self-luminous body's
+ * thermal field there (plan R08, R08.T15.b.2; `thermalSource.ts`'s `DeckThermal`): the rewrites of
+ * {@link BELOW_DECK_THERMAL}, the thermal source's buffer at binding 25, `thermalDeck.wgsl` and
+ * `belowDeckThermal.wgsl` appended. Every other line is the kernel's own.
+ *
+ * @throws Error naming the kernel when its sources hold a rewritten line more often than once, or
+ *   fewer times than it must.
+ */
+export function withBelowDeckThermal(pair: KernelPair): KernelPair {
+  const rewrite = (wgsl: string): string => {
+    const code = BELOW_DECK_THERMAL.reduce((text, { general, thermal, least }) => {
+      const count = text.split(general).length - 1;
+      if (count < least || count > 1) {
+        throw new Error(`kernel ${pair.name} holds ${count} places for: ${general.trim()}`);
+      }
+      return text.replace(general, thermal);
+    }, wgsl);
+    return (
+      `${code}\n${THERMAL_SOURCE_BINDING} : array<vec4f>;\n` +
+      `${thermalDeckWgsl}\n${belowDeckThermalWgsl}`
+    );
+  };
+  return {
+    ...pair,
+    name: `${pair.name}, thermal`,
+    reference: rewrite(pair.reference),
+    subgroup: pair.subgroup === null ? null : rewrite(pair.subgroup),
+  };
+}
+
+/** {@link SKY_VIEW_BELOW_DECK_KERNEL} drawing the thermal field there ({@link withBelowDeckThermal}). */
+export const SKY_VIEW_BELOW_DECK_THERMAL_KERNEL = withBelowDeckThermal(SKY_VIEW_BELOW_DECK_KERNEL);
+/** {@link AERIAL_PERSPECTIVE_BELOW_DECK_KERNEL} likewise (R08.T15.b.2). */
+export const AERIAL_PERSPECTIVE_BELOW_DECK_THERMAL_KERNEL = withBelowDeckThermal(
+  AERIAL_PERSPECTIVE_BELOW_DECK_KERNEL,
+);
+/** {@link RAY_MARCH_BELOW_DECK_KERNEL} likewise (R08.T15.b.2). */
+export const RAY_MARCH_BELOW_DECK_THERMAL_KERNEL = withBelowDeckThermal(
+  RAY_MARCH_BELOW_DECK_KERNEL,
+);
+
 /** {@link SKY_VIEW_KERNEL} drawing the medium's own light ({@link withThermalSource}; R08.T18.b). */
 export const SKY_VIEW_THERMAL_KERNEL = withThermalSource(SKY_VIEW_KERNEL);
 /** {@link AERIAL_PERSPECTIVE_KERNEL} drawing the medium's own light (R08.T18.b). */
@@ -2192,14 +2314,19 @@ export const RAY_MARCH_DECK_KERNEL = withDeckRead(RAY_MARCH_THICK_KERNEL);
 /** {@link RAY_MARCH_SLOTS_THICK_KERNEL} over a cloud deck (R08.T15.a.2). */
 export const RAY_MARCH_SLOTS_DECK_KERNEL = withDeckRead(RAY_MARCH_SLOTS_THICK_KERNEL);
 /**
- * {@link RAY_MARCH_DECK_KERNEL} drawing the medium's emission ({@link withThermalSource}, `emitted`;
- * R08.T18.b over R08.T15.b.2's deck route), so that a self-luminous body over a deck reads its deck.
+ * {@link RAY_MARCH_DECK_KERNEL} drawing the medium's own light over its deck
+ * ({@link withThermalSource}, `over a deck`; R08.T18.b over R08.T15.b.2's deck route): its emission,
+ * the deck's bake's scattered thermal light and the deck's glow, so that a self-luminous body over a
+ * deck reads its deck and its thermal light.
  */
-export const RAY_MARCH_DECK_THERMAL_KERNEL = withThermalSource(RAY_MARCH_DECK_KERNEL, "emitted");
+export const RAY_MARCH_DECK_THERMAL_KERNEL = withThermalSource(
+  RAY_MARCH_DECK_KERNEL,
+  "over a deck",
+);
 /** {@link RAY_MARCH_SLOTS_DECK_KERNEL} likewise (R08.T15.b.2). */
 export const RAY_MARCH_SLOTS_DECK_THERMAL_KERNEL = withThermalSource(
   RAY_MARCH_SLOTS_DECK_KERNEL,
-  "emitted",
+  "over a deck",
 );
 /** {@link RAY_MARCH_DECK_KERNEL} specialised for one band and no layer edge (R08.T15.a.2). */
 export const RAY_MARCH_DECK_SPECIAL_KERNEL = withMarchSpecialised(RAY_MARCH_DECK_KERNEL);
@@ -2894,6 +3021,8 @@ interface ThickKernels {
    * camera under the deck of tables that hold a table below it, made at its first frame.
    */
   readonly belowDeck: () => BelowDeckKernels;
+  /** Their thermal forms ({@link withBelowDeckThermal}), for a self-luminous body's, likewise. */
+  readonly belowDeckThermal: () => BelowDeckKernels;
 }
 
 /** The per-frame kernels beneath a cloud deck (R08.T15.b.2; {@link ThickKernels.belowDeck}). */
@@ -2903,18 +3032,25 @@ interface BelowDeckKernels {
   readonly rayMarch: ComputeHandle;
 }
 
-/** The kernels beneath a cloud deck, made synchronously on `engine` at their first ask. */
+/** The kernels beneath a cloud deck, or their thermal forms, made on `engine` at their first ask. */
 function belowDeckKernelsOf(
   engine: RenderEngine,
   as: (pair: KernelPair) => KernelPair,
+  thermal = false,
 ): () => BelowDeckKernels {
   let made: BelowDeckKernels | null = null;
   return () =>
-    (made ??= {
-      skyView: engine.createCompute(as(SKY_VIEW_BELOW_DECK_KERNEL)),
-      aerial: engine.createCompute(as(AERIAL_PERSPECTIVE_BELOW_DECK_KERNEL)),
-      rayMarch: engine.createCompute(as(RAY_MARCH_BELOW_DECK_KERNEL)),
-    });
+    (made ??= thermal
+      ? {
+          skyView: engine.createCompute(as(SKY_VIEW_BELOW_DECK_THERMAL_KERNEL)),
+          aerial: engine.createCompute(as(AERIAL_PERSPECTIVE_BELOW_DECK_THERMAL_KERNEL)),
+          rayMarch: engine.createCompute(as(RAY_MARCH_BELOW_DECK_THERMAL_KERNEL)),
+        }
+      : {
+          skyView: engine.createCompute(as(SKY_VIEW_BELOW_DECK_KERNEL)),
+          aerial: engine.createCompute(as(AERIAL_PERSPECTIVE_BELOW_DECK_KERNEL)),
+          rayMarch: engine.createCompute(as(RAY_MARCH_BELOW_DECK_KERNEL)),
+        });
 }
 
 /**
@@ -2960,6 +3096,7 @@ function thickKernelsOf(
         deckRayMarchSlots: () =>
           (deckSlots ??= marchOf(RAY_MARCH_SLOTS_DECK_KERNEL, RAY_MARCH_SLOTS_DECK_SPECIAL_KERNEL)),
         belowDeck: belowDeckKernelsOf(engine, as),
+        belowDeckThermal: belowDeckKernelsOf(engine, as, true),
       };
     })());
 }
@@ -3028,6 +3165,7 @@ async function thickKernelsAhead(
     deckRayMarchSlots,
     // The kernels beneath a deck are made at their first frame, as the deck's marches are.
     belowDeck: belowDeckKernelsOf(engine, (pair) => pair),
+    belowDeckThermal: belowDeckKernelsOf(engine, (pair) => pair, true),
   };
   return () => kernels;
 }
@@ -4587,10 +4725,15 @@ export class HillaireAtmosphere {
     // A camera beneath a deck over a surface, under the tables' datum, the deck's, draws by the
     // kernels that read the table below it in place of every other (R08.T15.b.2).
     const belowDeckTable = tables.belowDeckTable;
-    const beneath =
-      belowDeckTable !== null && inputs.heightM < 0 ? kernels.thick().belowDeck() : null;
+    // A self-luminous body's are their thermal forms, its thermal field beneath the deck with them.
+    let beneath: BelowDeckKernels | null = null;
+    if (belowDeckTable !== null && inputs.heightM < 0) {
+      beneath =
+        thermalSource === null ? kernels.thick().belowDeck() : kernels.thick().belowDeckThermal();
+    }
     const belowSampled =
       belowDeckTable === null ? null : { oblateBody: tables.oblateBody, belowDeckTable };
+    const belowBuffers = thermalSource === null ? {} : { thermalSource };
     const common = {
       buffers: { terms: tables.terms, ...(thermalSource === null ? {} : { thermalSource }) },
       sampled: {
@@ -4616,7 +4759,7 @@ export class HillaireAtmosphere {
         engine.dispatch(
           beneath.skyView,
           {
-            buffers: {},
+            buffers: belowBuffers,
             sampled: belowSampled,
             uniforms: { view: viewUniforms },
             storage: { skyViewOut: { texture: outputs.skyView, level: 0 } },
@@ -4652,7 +4795,7 @@ export class HillaireAtmosphere {
         engine.dispatch(
           beneath.aerial,
           {
-            buffers: {},
+            buffers: belowBuffers,
             sampled: belowSampled,
             uniforms: { view: viewUniforms },
             storage: aerialStorage,
@@ -4766,7 +4909,7 @@ export class HillaireAtmosphere {
       engine.dispatch(
         beneath.rayMarch,
         {
-          buffers: {},
+          buffers: belowBuffers,
           sampled: { ...belowSampled, sceneDepth: scene.depth },
           uniforms: { view: viewUniforms, marchArea: areaUniform },
           storage: marchStorage,

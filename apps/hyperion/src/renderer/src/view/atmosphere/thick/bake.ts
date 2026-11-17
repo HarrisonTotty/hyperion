@@ -193,6 +193,7 @@ import {
   doubleGaussQuadrature,
   type GroundCosines,
   groundCosinesOf,
+  type GroundEmission,
   type GroundReflectance,
   layerKeep,
   type LayerKeep,
@@ -584,6 +585,27 @@ function pointWavelengthNm(point: number): number {
   return point < BAKE_BIN_COUNT
     ? (BAKE_WAVELENGTHS_NM[point] ?? Number.NaN)
     : (CHANNEL_WAVELENGTHS_NM[point - BAKE_BIN_COUNT] ?? Number.NaN);
+}
+
+/**
+ * Each point's Planck radiance B_λ(λ_p, T(h)) at the heights `heightsM` under `column`'s temperature
+ * (the module's remarks, "Thermal emission"), W m⁻² sr⁻¹ nm⁻¹, one array a point of `points`, the
+ * bins' then any channels' own; `undefined` for a column without a temperature: what a bake's
+ * interfaces take, and a deck's below its split (`deck.ts`; R08.T15.b.2).
+ */
+export function columnPlanckAt(
+  column: SpectralColumn,
+  heightsM: ArrayLike<number>,
+  points: number = BAKE_BIN_COUNT,
+): Float64Array[] | undefined {
+  const { temperature } = column;
+  return temperature === undefined
+    ? undefined
+    : Array.from({ length: points }, (_, b) =>
+        Float64Array.from(heightsM, (h) =>
+          planckRadiance(pointWavelengthNm(b), mediumTemperatureK(temperature, h)),
+        ),
+      );
 }
 
 /**
@@ -1128,15 +1150,7 @@ export function prepareBake(
         }),
   );
   const fitted = bakeLightBins(column, layout?.fitLayering ?? layering, lights, bins, options);
-  const { temperature } = column;
-  const interfacePlanck =
-    temperature === undefined
-      ? undefined
-      : Array.from({ length: pointCount }, (_, b) =>
-          Float64Array.from(interfaceHeightsM, (h) =>
-            planckRadiance(pointWavelengthNm(b), mediumTemperatureK(temperature, h)),
-          ),
-        );
+  const interfacePlanck = columnPlanckAt(column, interfaceHeightsM, pointCount);
   return {
     column,
     grid,
@@ -1597,6 +1611,14 @@ export interface BinSolve {
 }
 
 /**
+ * A ground's own thermal emission for a band's solves (R08.T15.b.2: a cloud deck's, which emits as
+ * its layers and what lies beneath them do): in bin `bin` for one term of the bin's gases, at the
+ * solves' quadrature nodes and user cosines (`discreteOrdinates.ts`'s `GroundEmission`), in the Planck
+ * radiance's unit, in place of the ground's (1 − a(μ)) B_g.
+ */
+export type BakeGroundEmission = (bin: number, term: BinTerm) => GroundEmission;
+
+/**
  * A ground other than Lambertian for a band's solves (R08.T15's deck): its reflectance in bin
  * `bin` for one term of the bin's gases, at the cosines the solve reads it (`discreteOrdinates.ts`'s
  * `groundCosinesOf`) and modes 0 … `maxMode`, in place of the column's albedo.
@@ -1612,6 +1634,11 @@ export type BakeGround = (
 export interface BakeBandOptions {
   /** A ground other than Lambertian for every solve, in place of the column's albedo. */
   readonly ground?: BakeGround;
+  /**
+   * The ground's own thermal emission in every solve of a column with a temperature, in place of
+   * its (1 − a(μ)) B_g (R08.T15.b.2: a deck's); B_g's by default.
+   */
+  readonly groundEmission?: BakeGroundEmission;
   /**
    * Called with each solve once it is made, once a bin and term of the band, before the next: so
    * that a caller reads its fields (the deck, its radiance at the ground) without a second solve.
@@ -2067,6 +2094,7 @@ function solveOf(
   horizon: HorizonTerms | undefined,
   chords: ReadonlyArray<BeamChords> | undefined,
   keepLayers: boolean,
+  groundEmission?: BakeGroundEmission,
 ): BinSolve {
   const { grid, interfaceHeightsM } = prepared;
   const layers = grid.layers;
@@ -2103,7 +2131,13 @@ function solveOf(
     beamPaths: scaledBeams,
     ...(planck === undefined
       ? {}
-      : { thermal: { interfacePlanck: planck, groundPlanck: planck[layers] ?? Number.NaN } }),
+      : {
+          thermal: {
+            interfacePlanck: planck,
+            groundPlanck: planck[layers] ?? Number.NaN,
+            ...(groundEmission === undefined ? {} : { groundEmission: groundEmission(bin, term) }),
+          },
+        }),
     ...(interfaces === "table" ? { fieldInterfaces: tableInterfaces(prepared) } : {}),
     ...(keptLayers === undefined ? {} : { keepLayers: keptLayers }),
   };
@@ -2499,6 +2533,7 @@ export function bakeBins(
             options?.horizonTerms,
             chords,
             options?.keepLayers ?? false,
+            options?.groundEmission,
           );
           solved.set(term, solve);
           options?.onSolve?.(b, term, solve);

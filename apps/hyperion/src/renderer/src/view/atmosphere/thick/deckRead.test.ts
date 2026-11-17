@@ -5,7 +5,7 @@ import {
   SATURN_SPHEROID,
   saturnScaleHeightM,
 } from "../../../test/atmosphereFixtures";
-import { patternedDeckTables } from "../../../test/thickTables";
+import { patternedDeckTables, withPatternedDeckThermal } from "../../../test/thickTables";
 import type { Rgb } from "../../photometry/toneCurve";
 import { type AtmosphereMedium, densityAt, tabulatedDensity } from "../medium";
 import { bodyGravity, gravityRatio } from "../oblate";
@@ -436,6 +436,16 @@ describe("the kernels' medium over a deck (R08.T15.a.2)", () => {
       0, 10,
     ]);
     expect(() => packThickTable(deckAboveTables(bands), kernelMedium(upper))).not.toThrow();
+  });
+
+  it("lays the scattered thermal light above the deck from the split, as it lays J (R08.T15.b.2)", () => {
+    const [above] = deckAboveTables(withPatternedDeckThermal(decks(ONE_BAND, 1)));
+    expect([above?.altitudesM[0], above?.thermal?.altitudesM[0]]).toEqual([0, 0]);
+  });
+
+  it("leaves out the scattered thermal light above a deck on a body of several bands (R08.T15.b.2)", () => {
+    const bands = deckAboveTables(withPatternedDeckThermal(decks(TWO_BANDS, 1)));
+    expect(bands.map((band) => "thermal" in band)).toEqual([false, false]);
   });
 });
 
