@@ -229,6 +229,46 @@ describe("the reads below a deck (R08.T15.b.2)", () => {
     }
   });
 
+  it("reads across the horizon on the sky's side's last two rows carried to the horizontal, and holds the horizontal's beyond it (R08.T15.b.2)", () => {
+    // At a row's altitude and sun cosine, Δφ 0: the rows at -3/16 and -1/16, weighted by the share
+    // 8 (μ + 1) − ½ − 6 up to 1½, the horizontal's; from +1/16 the rows about μ, as before.
+    const h = altitudeAt(3);
+    const mu0 = sunAt(10);
+    const expectedAt = (mu: number, rows: readonly [number, number], f: number): number[] => {
+      const sines = Math.sqrt((1 - mu0 * mu0) * (1 - mu * mu));
+      return [0, 1, 2].map((c) => {
+        let expected = 0;
+        for (const [v, w] of [
+          [rows[0], 1 - f],
+          [rows[1], f],
+        ] as const) {
+          const stored = Math.sqrt((1 - mu0 ** 2) * (1 - travelAt(v) ** 2));
+          for (let m = 0; m < BELOW_DECK_MODES; m += 1) {
+            expected +=
+              w *
+              (Math.fround(belowPatternAt(3, 10, v, 0, 0, m, c).radiance * stored ** m) /
+                stored ** m) *
+              sines ** m;
+          }
+        }
+        return Math.max(expected, 0);
+      });
+    };
+    const read = (mu: number): number[] => {
+      belowDeckRadianceInto(packed, [0], 1, h, mu0, mu, horizontalOf(mu, mu0, 0), 0, scratch, out);
+      return [entry(out, 0), entry(out, 1), entry(out, 2)];
+    };
+    const cases: ReadonlyArray<readonly [number, readonly [number, number], number]> = [
+      [-0.03, [6, 7], 8 * (1 - 0.03) - 0.5 - 6],
+      [0, [6, 7], 1.5],
+      [0.03, [6, 7], 1.5],
+      [0.1, [8, 9], 8 * 1.1 - 0.5 - 8],
+    ];
+    for (const [mu, rows, f] of cases) {
+      expect(read(mu)).toEqual(expectedAt(mu, rows, f).map((x) => expect.closeTo(x, 6)));
+    }
+  });
+
   it("scales the field and the sky to 0 under the first sun row, and holds none below the horizontal", () => {
     const first = sunAt(0);
     const at = (mu0: number): number[] => {

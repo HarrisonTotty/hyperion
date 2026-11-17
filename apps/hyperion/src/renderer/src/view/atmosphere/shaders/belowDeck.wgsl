@@ -13,7 +13,8 @@
 // info rows, 544, at texel a the kernels' vertical optical depth from the top per channel and the
 // altitude's h* in the fourth, and 545, at texel a their extinction per unit of h*. A one-texel stub
 // holds no table. Each read is
-// linear between the cells' centres in h*, mu0 and mu, held at the table's edges, and in ln s
+// linear between the cells' centres in h*, mu0 and mu, held at the table's edges, in mu across the
+// horizon on the sky's side's last two rows' line (belowDeckTravelPlace), and in ln s
 // between the bands about the point's s, the nearer band beyond them; under the first sun row
 // (1/64) the field and the sky's irradiance are scaled by mu0 / (1/64), and nothing lights the
 // ground below the horizontal. The radiance sums its modes with the Chebyshev factors c^m of the
@@ -86,10 +87,16 @@ fn belowDeckLowSunScale(muSun : f32) -> f32 {
   return clamp(muSun * 2.0 * f32(BELOW_DECK_SUN_COSINES), 0.0, 1.0);
 }
 
-// Where `muTravel` lies among the travel cosines, y = 8 (mu + 1) - 1/2 held in [0, 15].
+// Where `muTravel` lies among the travel cosines, y = 8 (mu + 1) - 1/2 held in [0, 15], but across
+// the horizon, |mu| < 1/16, on the line of the sky's side's last two rows carried to mu and held at
+// the horizontal beyond it (`thick/deckRead.ts`'s belowTravelPlace): a near-horizontal path gathers
+// the source function there, and the row above the horizon holds the ground's light near it.
 fn belowDeckTravelPlace(muTravel : f32) -> BelowDeckPlace {
   let half = f32(BELOW_DECK_TRAVEL_COSINES / 2u);
   let y = clamp((muTravel + 1.0) * half - 0.5, 0.0, f32(BELOW_DECK_TRAVEL_COSINES - 1u));
+  if (y > half - 1.0 && y < half) {
+    return BelowDeckPlace(BELOW_DECK_TRAVEL_COSINES / 2u - 2u, min(y, half - 0.5) - (half - 2.0));
+  }
   let v0 = min(u32(y), BELOW_DECK_TRAVEL_COSINES - 2u);
   return BelowDeckPlace(v0, y - f32(v0));
 }

@@ -3,6 +3,17 @@
 // withBelowDeckThermal. Its rows are the table below's altitudes, found as that table's own reads
 // find them (`belowDeck.wgsl`'s belowDeckAltitudePlace, over its first layer's).
 
+// Row `row` of the part `offset` rows of 16 into the deck's section at the travel cosine's place
+// `travel` among the travel cosines, as the table below's own reads place it (belowDeckTravelPlace's
+// horizon among them): its rows at those cosines, weighted by the place.
+fn belowDeckThermalRow(offset : u32, row : u32, travel : BelowDeckPlace) -> vec3f {
+  let half = f32(THERMAL_DECK_TRAVEL_COSINES / 2u);
+  let mu0 = (f32(travel.i0) + 0.5) / half - 1.0;
+  let mu1 = (f32(travel.i0 + 1u) + 0.5) / half - 1.0;
+  return thermalDeckRow(offset, row, mu0) * (1.0 - travel.f)
+    + thermalDeckRow(offset, row, mu1) * travel.f;
+}
+
 // The field at h* = `heightStarM` above the ground and the light's travel cosine `muTravel`,
 // cd m^-2; 0 for a section with no field below.
 fn belowDeckThermalAt(heightStarM : f32, muTravel : f32) -> vec3f {
@@ -12,8 +23,9 @@ fn belowDeckThermalAt(heightStarM : f32, muTravel : f32) -> vec3f {
   }
   let place = belowDeckAltitudePlace(belowDeckTable, 0u, heightStarM);
   let offset = u32(header.y) + 1u;
-  return thermalDeckRow(offset, place.i0, muTravel) * (1.0 - place.f)
-    + thermalDeckRow(offset, place.i0 + 1u, muTravel) * place.f;
+  let travel = belowDeckTravelPlace(muTravel);
+  return belowDeckThermalRow(offset, place.i0, travel) * (1.0 - place.f)
+    + belowDeckThermalRow(offset, place.i0 + 1u, travel) * place.f;
 }
 
 // 1 - e^(-tau) per channel: by its series under 0.045, where f32's 1 - e^(-tau) keeps few figures.
@@ -37,21 +49,22 @@ fn belowDeckThermalPath(fromM : f32, toM : f32, muTravel : f32, depth : vec3f) -
   let offset = u32(header.y) + 1u;
   let camera = belowDeckAltitudePlace(belowDeckTable, 0u, fromM);
   let far = belowDeckAltitudePlace(belowDeckTable, 0u, toM);
+  let travel = belowDeckTravelPlace(muTravel);
   // Each height's field less the camera's lower row's.
   let b = camera.i0;
-  let rb = thermalDeckRow(offset, b, muTravel);
-  let rb1 = thermalDeckRow(offset, b + 1u, muTravel);
+  let rb = belowDeckThermalRow(offset, b, travel);
+  let rb1 = belowDeckThermalRow(offset, b + 1u, travel);
   let atCamera = camera.f * (rb1 - rb);
   var atTarget = vec3f(0.0);
   if (far.i0 == b) {
     atTarget = far.f * (rb1 - rb);
   } else if (far.i0 + 1u == b) {
-    atTarget = (far.f - 1.0) * (rb - thermalDeckRow(offset, b - 1u, muTravel));
+    atTarget = (far.f - 1.0) * (rb - belowDeckThermalRow(offset, b - 1u, travel));
   } else if (far.i0 == b + 1u) {
-    atTarget = (rb1 - rb) + far.f * (thermalDeckRow(offset, b + 2u, muTravel) - rb1);
+    atTarget = (rb1 - rb) + far.f * (belowDeckThermalRow(offset, b + 2u, travel) - rb1);
   } else {
-    atTarget = thermalDeckRow(offset, far.i0, muTravel) * (1.0 - far.f)
-      + thermalDeckRow(offset, far.i0 + 1u, muTravel) * far.f - rb;
+    atTarget = belowDeckThermalRow(offset, far.i0, travel) * (1.0 - far.f)
+      + belowDeckThermalRow(offset, far.i0 + 1u, travel) * far.f - rb;
   }
   return (atCamera - atTarget) + belowDeckOneLess(depth) * (rb + atTarget);
 }

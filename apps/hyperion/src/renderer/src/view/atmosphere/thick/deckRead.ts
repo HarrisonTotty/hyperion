@@ -835,8 +835,8 @@ function belowAltitudePlace(
 /**
  * The thermal field below a deck over a surface at h\* = `heightStarM` and the light's travel cosine
  * `muTravel`, cd m⁻², into `out` (R08.T15.b.2; `belowDeckThermal.wgsl`'s belowDeckThermalAt): its
- * rows the table below's altitudes, placed as the table's own reads place them, over its first
- * layer's.
+ * rows the table below's altitudes and its travel cosines, placed as the table's own reads place
+ * them ({@link belowTravelPlace}'s horizon among them), over its first layer's.
  */
 export function belowDeckThermalInto(
   deck: DeckThermal,
@@ -846,7 +846,18 @@ export function belowDeckThermalInto(
   out: [number, number, number],
 ): void {
   const place = belowAltitudePlace(table, 0, heightStarM);
-  deckBelowInto(deck, place.i0, place.f, muTravel, out);
+  const travel = belowTravelPlace(muTravel);
+  const row: [number, number, number] = [0, 0, 0];
+  out.fill(0);
+  for (const [dv, w] of [
+    [0, 1 - travel.f],
+    [1, travel.f],
+  ] as const) {
+    deckBelowInto(deck, place.i0, place.f, belowTravelCosineAt(travel.i0 + dv), row);
+    out[0] += w * row[0];
+    out[1] += w * row[1];
+    out[2] += w * row[2];
+  }
 }
 
 /**
@@ -868,10 +879,27 @@ function belowLowSunScale(muSun: number): number {
   return Math.min(Math.max(muSun * 2 * BELOW_DECK_SUN_COSINES, 0), 1);
 }
 
-/** Where `muTravel` lies among the travel cosines: y = 8 (μ + 1) − ½ in [0, 15]. */
-function belowTravelPlace(muTravel: number): BelowPlace {
+/**
+ * Where `muTravel` lies among the table below's travel cosines (R08.T15.b.2): y = 8 (μ + 1) − ½ in
+ * [0, 15], linear between the rows about it, but across the horizon, |μ| < 1/16, on the line of the
+ * sky's side's last two rows, −3/16 and −1/16, carried to μ and held at the horizontal beyond it
+ * (a share past 1 of the row at −1/16), so that no read is linear across μ = 0.
+ *
+ * @remarks
+ * Near the ground the row just above the horizon, +1/16, holds light from the ground a few metres
+ * off, and the one below it, −1/16, the sky's over a long path. A path near the horizontal gathers
+ * the source function there, an optically thick horizontal path's radiance, which is the sky's
+ * side's carried to the horizontal: a read between the rows drew `venus-92bar`'s `aerial` images
+ * some 27% too dim, their mean, and one held at −1/16 some 8% too bright in the red, where the
+ * source function rises with height and the sky 3.6° up reads more of it than the horizon. A ray just
+ * below the horizontal takes the horizon's, the source function about it varying little in μ.
+ */
+export function belowTravelPlace(muTravel: number): BelowPlace {
   const half = BELOW_DECK_TRAVEL_COSINES / 2;
   const y = Math.min(Math.max((muTravel + 1) * half - 0.5, 0), BELOW_DECK_TRAVEL_COSINES - 1);
+  if (y > half - 1 && y < half) {
+    return { i0: half - 2, f: Math.min(y, half - 0.5) - (half - 2) };
+  }
   const v0 = Math.min(Math.floor(y), BELOW_DECK_TRAVEL_COSINES - 2);
   return { i0: v0, f: y - v0 };
 }

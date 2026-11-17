@@ -40,7 +40,7 @@ import {
   type TwinRgb,
 } from "../tablesCpu";
 import type { DeckSlot, DeckTables } from "../thick/deck";
-import { upperMediumOf } from "../thick/deckRead";
+import { belowTravelPlace, upperMediumOf } from "../thick/deckRead";
 import {
   EARTH_REFERENCE_RADIUS_M,
   SATURN_OBLATE_GRAVITY,
@@ -978,14 +978,16 @@ describe("a twin beneath a cloud deck (R08.T15.b.2)", () => {
       const x = mu0 * 32 - 0.5;
       const s0 = Math.floor(x);
       const fs = x - s0;
+      // Level, the light travels at μ about 0, the cone's rays ±0.0085 off it: across the horizon the
+      // read lies on the line of travel cells 6 and 7 carried to μ and held at the horizontal past
+      // that (`deckRead.ts`'s belowTravelPlace, R08.T15.b.2), the rays' mean at their shares' mean.
+      const share = 0.5 * (belowTravelPlace(-0.0085).f + belowTravelPlace(0.0085).f);
       for (let c = 0; c < 3; c += 1) {
-        // Level, the light travels at μ 0, between travel cells 7 and 8, its azimuth 90° from
-        // the sun's: Σ_m Iᵐ cos mΔφ, m = 0 and 2, the m = 2 term −I² at Δφ 90°.
+        // Its azimuth 90° from the sun's: Σ_m Iᵐ cos mΔφ, m = 0 and 2, the m = 2 term −I² at Δφ 90°.
         const at = (a: number, s: number, m: number): number =>
-          0.5 *
-          (belowPatternAt(a, s, 7, 0, 0, m, c).radiance +
-            belowPatternAt(a, s, 8, 0, 0, m, c).radiance);
-        const sines = Math.sqrt(1 - mu0 * mu0) * Math.sqrt(1 - (0.5 / 8) ** 2);
+          (1 - share) * belowPatternAt(a, s, 6, 0, 0, m, c).radiance +
+          share * belowPatternAt(a, s, 7, 0, 0, m, c).radiance;
+        const sines = Math.sqrt(1 - mu0 * mu0);
         const field = (a: number, s: number): number => at(a, s, 0) - at(a, s, 2) * sines ** 2;
         const skyAt = (a: number): number => (1 - fs) * field(a, s0) + fs * field(a, s0 + 1);
         const skyHere = (h: number): number => {
