@@ -32,6 +32,10 @@ missing_debug_implementations = "warn"
 all = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
 
+# A dependency that none of the tool's targets uses fails the build, as in the root workspace.
+[lints.cargo]
+unused_dependencies = "deny"
+
 # The tests build the DAG of a 10⁶-triangle mesh, which takes minutes at `opt-level = 0`. Rust never
 # contracts or reorders float arithmetic at any level, so the pages are the same bytes either way,
 # and the debug assertions and overflow checks stay on.

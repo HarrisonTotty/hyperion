@@ -79,6 +79,15 @@ missing_debug_implementations = "warn"
 all = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
 
+# Cargo's own lints (Cargo 1.100), which every member inherits with `[lints] workspace = true`: a
+# dependency that none of a crate's targets uses fails the build. Cargo reports one only when a
+# build selects every target that could use it (the crate's library and binaries, for
+# `[dependencies]`): `--workspace`, or `-p` with no target filter, as `ci`, `just smart-ci` and the
+# commit hook's Clippy build. A build of `--lib`, `--bin` or a test alone, and rustdoc, stay quiet.
+# Dev-dependencies are never checked, since no build selects every target that may use them.
+[workspace.lints.cargo]
+unused_dependencies = "deny"
+
 [profile.release]
 lto = "thin"
 

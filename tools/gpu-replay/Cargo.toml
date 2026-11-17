@@ -33,3 +33,7 @@ missing_debug_implementations = "warn"
 [lints.clippy]
 all = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
+
+# A dependency that none of the tool's targets uses fails the build, as in the root workspace.
+[lints.cargo]
+unused_dependencies = "deny"
