@@ -52,6 +52,7 @@ import type { ViewPosition } from "../coords/position";
 import { IDENTITY_ROTATION } from "../coords/rotation";
 import { TERRAIN_SETTINGS } from "../quality/qualitySetting";
 import type { RetardedCentre, ViewBody, ViewCraft, ViewScene } from "../scene/model";
+import { TEST_HULL } from "../scene/hull";
 import { AU_M } from "../scenes/kept";
 import { blockBytes, type TerrainGolden } from "../scenes/terrainGolden";
 import { TERRAIN_TEST_SCRIPT, terrainScene, terrainTestGolden } from "../scenes/terrainScene";
@@ -67,13 +68,14 @@ import {
 import { type PatchKey, patchKeyString } from "./patchKey";
 import { type BodyFigure, levelBoundM, planetGeometry, surfacePoint } from "./planet";
 import { ResidentHeights } from "./residentHeights";
+import { hullBoundingRadiusM } from "../wireframe/hulls";
 import {
   type HeightRangeLookup,
   type Selection,
   selectPatches,
   type ViewSelectionInput,
 } from "./select";
-import { craftVelocityAgainst, sceneContacts, TerrainSession } from "./session";
+import { craftVelocityAgainst, sceneContacts, sceneSweeps, TerrainSession } from "./session";
 import {
   type BakedPatch,
   type BakeSettings,
@@ -1123,5 +1125,67 @@ describe("a craft held in another body's frame (R10.T14.c; decision-r10-t16-lean
       add(vMPerS, sub(retardedVelocityOf(held.p), retardedVelocityOf(held.m))),
       sub(vMPerS, retardedVelocityOf(system.m)),
     ]);
+  });
+});
+
+describe("the scene's descending craft as the rocks' sweep (R11.T4.d)", () => {
+  const moon = sceneMoon(SCENE);
+  const figure = moonLikeHeader(MOON);
+  const ground = datumGroundUnder({
+    equatorialRadiusM: figure.equatorial_radius_m,
+    polarRadiusM: figure.polar_radius_m,
+  });
+  const pole = vec3(0, 0, figure.polar_radius_m);
+
+  /** The scene with one craft in the moon's frame `heightM` above its north pole, at `v`. */
+  function withCraft(heightM: number, v: Vec3, path: ViewCraft["predictedPath"] = null): ViewScene {
+    return {
+      ...SCENE,
+      craft: [
+        aViewCraft({
+          pose: {
+            position: { kind: "body", body: MOON, m: add(pole, vec3(0, 0, heightM)) },
+            attitude: NO_TURN,
+          },
+          predictedPath: path,
+          velocityMPerS: v,
+        }),
+      ],
+    };
+  }
+
+  it("sweeps a descending craft with no plan along its pose's line, unwidened", () => {
+    const swept = sceneSweeps(withCraft(300, vec3(40, 0, -20)), moon, ground);
+    expect(swept).toEqual([
+      {
+        radiusM: hullBoundingRadiusM(TEST_HULL),
+        path: {
+          kind: "extrapolated",
+          positionM: add(pole, vec3(0, 0, 300)),
+          velocityMps: vec3(40, 0, -20),
+          gravityMps2: null,
+        },
+      },
+    ]);
+  });
+
+  it("sweeps a craft with a plan along the plan's poses", () => {
+    const at = (x: number, z: number): ViewCraft["pose"] => ({
+      position: { kind: "body", body: MOON, m: add(pole, vec3(x, 0, z)) },
+      attitude: NO_TURN,
+    });
+    const swept = sceneSweeps(
+      withCraft(300, vec3(40, 0, -20), [at(0, 300), at(400, 50)]),
+      moon,
+      ground,
+    );
+    expect(swept.map(({ path }) => path)).toEqual([
+      { kind: "planned", positionsM: [add(pole, vec3(0, 0, 300)), add(pole, vec3(400, 0, 50))] },
+    ]);
+  });
+
+  it("sweeps neither a climbing craft nor one at rest", () => {
+    expect(sceneSweeps(withCraft(300, vec3(40, 0, 20)), moon, ground)).toEqual([]);
+    expect(sceneSweeps(withCraft(0, vec3(0, 0, 0)), moon, ground)).toEqual([]);
   });
 });

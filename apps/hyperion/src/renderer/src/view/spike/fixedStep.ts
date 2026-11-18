@@ -254,6 +254,26 @@ export interface FixedStepOptions {
    * process under an outer timeout always writes what it has; none by default.
    */
   readonly wallDeadlineMs?: number;
+  /**
+   * The selection's contacts at a pose: {@link craftContacts}' by default; R11.T4.d's sweep adds
+   * its chain beside them.
+   */
+  readonly contacts?: (pose: DescentPose, patchSizeM: number) => GroundContact[];
+  /**
+   * How long a forced request (the grounded region's, Design note 9) takes to become resident,
+   * script seconds from its first request, the views' own being baked the same frame: none by
+   * default, the ideal pool's. R11.T4.d's descent sets it from the forced region's residency time.
+   */
+  readonly forcedLatencyS?: number;
+  /**
+   * Called with each frame's pose, its draw set and whether a patch is resident, before the
+   * frame's bakes.
+   */
+  readonly onFrame?: (
+    pose: DescentPose,
+    draw: DrawSet,
+    resident: (keyString: string) => boolean,
+  ) => void;
 }
 
 /** One frame of a run. */
@@ -360,6 +380,10 @@ export function runFixedStep(options: FixedStepOptions): FixedStepRun {
   const demandView: DemandView = { ...view, tauPx: selectionTauPx };
   // Every patch evicted so far, to tell a return from a first bake.
   const evicted = new Set<string>();
+  // Each patch requested and not yet resident, with when it was first asked for.
+  const requestedAtS = new Map<string, number>();
+  const latencyS = options.forcedLatencyS ?? 0;
+  const contactsAt = options.contacts ?? craftContacts;
   let bakeMs = 0;
   let truncated = false;
   for (let step = 0; step <= steps; step += 1) {
@@ -370,7 +394,7 @@ export function runFixedStep(options: FixedStepOptions): FixedStepRun {
     }
     const tS = options.fromS + step / options.rateHz;
     const pose = profile.poseAt(tS);
-    const grounded = craftContacts(pose, patchSizeM);
+    const grounded = contactsAt(pose, patchSizeM);
     const selectionView: ViewSelectionInput = {
       camera: { positionM: pose.positionM, orientation: pose.orientation },
       fovXRad: view.fovXRad,
@@ -398,13 +422,21 @@ export function runFixedStep(options: FixedStepOptions): FixedStepRun {
     const draw = resolver.resolve(selection);
     // Before this frame's bakes, as the draw set was resolved.
     const coarse = coarseStandIns(selection, draw, cache, evicted, planet, selectionView);
+    options.onFrame?.(pose, draw, (keyString) => cache.has(keyString));
     cache.retain(selection, draw);
     let demanded = 0;
     let forcedDemanded = 0;
     for (const request of selection.demand) {
-      if (cache.has(patchKeyString(request.key))) {
+      const keyString = patchKeyString(request.key);
+      if (cache.has(keyString)) {
         continue;
       }
+      const askedS = requestedAtS.get(keyString) ?? tS;
+      if (request.forced && tS - askedS < latencyS) {
+        requestedAtS.set(keyString, askedS);
+        continue;
+      }
+      requestedAtS.delete(keyString);
       const bakeStart = options.nowMs();
       const heightRangeM = options.rangeOf(request.key);
       bakeMs += options.nowMs() - bakeStart;

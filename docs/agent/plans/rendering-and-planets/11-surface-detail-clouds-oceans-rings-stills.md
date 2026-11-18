@@ -1114,6 +1114,8 @@ Acceptance: `cargo test -p hyperion-surface scatter`, `just ci` (both wasm targe
   descent in R05's harness never reaches a rock before its patch is drawn; an unpowered ballistic
   arc stays inside the widened sweep of its straight-line extrapolation over the horizon; a craft
   with a `planned_path` is swept along it without widening.
+  _Built 2026-11-18._
+  Records: [11-surface-detail-clouds-oceans-rings-stills/records/R11.T4.d.md](11-surface-detail-clouds-oceans-rings-stills/records/R11.T4.d.md).
 
 Files: `surface/scatter/{rockLayer,rockMesh,rockSelection}.ts`,
 `surface/scatter/rock.wgsl`, `crates/hyperion-surface/src/scatter/bake.rs` (`RockBakeHook`), R05's

@@ -154,6 +154,7 @@ import {
   DetailKernelSet,
   type DetailSetSource,
 } from "../surface/decoration/detailTextureBake";
+import { couldTouchContacts, type SweptBody } from "../surface/scatter/rockSelection";
 import {
   cameraSceneOf,
   sceneOrigins,
@@ -179,10 +180,12 @@ import { CoverageMask, type CoverageView } from "./coverage";
 import { MAX_CONTACTS } from "./gpu/uniforms";
 import {
   craftContact,
+  FORCED_REGION_RESIDENCY_S,
   finestPatchSizeM,
   type GroundContact,
   type GroundUnderFunction,
   heldGroundUnder,
+  isDescending,
 } from "./grounded";
 import {
   cellPatchLevel,
@@ -906,6 +909,59 @@ export function sceneContacts(
     }
   }
   return contacts;
+}
+
+/**
+ * The scene's descending craft over `body` as the rocks' sweep takes them (plan R11, T4.d): each
+ * craft {@link sceneContacts} passes as descending (`isDescending` over `ground`), at its hull's
+ * bounding radius, along its predicted path, R03's `predictedPath`: the planned path's poses where
+ * it has one, else the straight line of its pose at its velocity against the body, body-fixed.
+ *
+ * @remarks
+ * The line is not widened: the view's bodies hold no mass, so no gravity bounds the arc (lean,
+ * 2026-11-18). The velocity is {@link craftVelocityAgainst}'s, which for a craft held in the
+ * body's non-rotating frame carries the ground's own ω × r, its rotation's rate not being held.
+ */
+export function sceneSweeps(
+  scene: ViewScene,
+  body: ViewBody,
+  ground: GroundUnderFunction,
+): SweptBody[] {
+  const rotation = body.rotation;
+  if (rotation === null) {
+    return [];
+  }
+  const origins = cameraSceneOf(scene).origins;
+  const centre = { kind: "body", body: body.id, m: vec3(0, 0, 0) } as const;
+  const bodyFixed = (position: ViewPosition): Vec3 =>
+    rotateToBodyFixed(rotation, differenceM(position, centre, origins));
+  const swept: SweptBody[] = [];
+  for (const craft of scene.craft) {
+    if (!placeableAgainst(craft.pose.position, body, scene)) {
+      continue;
+    }
+    const positionM = bodyFixed(craft.pose.position);
+    const against = craftVelocityAgainst(craft, body, scene);
+    if (against === null) {
+      continue;
+    }
+    const velocityMps = rotateToBodyFixed(rotation, against);
+    const under = ground(positionM);
+    const n = under.normal;
+    const vertical = velocityMps.x * n.x + velocityMps.y * n.y + velocityMps.z * n.z;
+    if (!isDescending(under.heightM, vertical)) {
+      continue;
+    }
+    const planned = craft.predictedPath;
+    swept.push({
+      radiusM: hullBoundingRadiusM(craft.hull),
+      path:
+        planned === null
+          ? { kind: "extrapolated", positionM, velocityMps, gravityMps2: null }
+          : { kind: "planned", positionsM: planned.map((pose) => bodyFixed(pose.position)) },
+    });
+  }
+  return swept;
 }
 
 /** What the session's masks and maps make on its engine. */
@@ -2271,15 +2327,24 @@ export class TerrainSession {
       .flatMap(({ id, report, body: seen }) => terrainPassViewOf(id, report, seen, shading) ?? [])
       .slice(0, MAX_SELECTION_VIEWS);
     const seen = this.#sceneWith(body);
-    const grounded =
-      seen === null
-        ? []
-        : sceneContacts(
-            seen.scene,
-            seen.body,
-            heldGroundUnder(pass.planet.figure, pass.heights),
-            finestPatchSizeM(pass.planet),
-          );
+    let grounded: GroundContact[] = [];
+    if (seen !== null) {
+      const ground = heldGroundUnder(pass.planet.figure, pass.heights);
+      const patchSizeM = finestPatchSizeM(pass.planet);
+      const own = sceneContacts(seen.scene, seen.body, ground, patchSizeM);
+      // The rocks' sweep beside them (R11.T4.d), its forced patches held to half the budget's.
+      const swept = couldTouchContacts(
+        sceneSweeps(seen.scene, seen.body, ground),
+        FORCED_REGION_RESIDENCY_S,
+        {
+          figure: pass.planet.figure,
+          ground,
+          patchSizeM,
+          maxForcedPatches: Math.floor(pass.maxPatches / 2),
+        },
+      );
+      grounded = [...own, ...swept].slice(0, MAX_CONTACTS);
+    }
     pass.step({ views: passViews, grounded });
   }
 

@@ -20,14 +20,22 @@
  * - **The annunciation** ({@link rocksLimitDetail}): on the low setting, exactly where a finest
  *   patch in view outside the region holds a rock that would subtend the tolerance at the patch's
  *   nearest point.
+ * - **The swept region** ({@link couldTouchContacts}, R11.T4.d): a descending body's footprint
+ *   swept along its path ahead over R05's `FORCED_REGION_RESIDENCY_S`, R03's `predictedPath`: the
+ *   planned path where one is sent, else the straight line of its pose at its velocity, which is
+ *   widened by the ground's share of {@link extrapolationMargin} ({@link sweptWideningM}). It is
+ *   handed to selection as a chain of contacts on the ground beneath the path, so that every
+ *   finest patch the body could touch over the horizon is forced, and so resident, before it
+ *   arrives; the rocks there are drawn whole once its own contact reaches them.
  * - Every answer is a function of its arguments alone: the camera's pose and the view's field of
  *   view and viewport (through the distances and the pixels a radian), the setting and the bodies.
  */
 
-import { type Vec3, norm, sub } from "../../../geometry/vec3";
+import { add, type Vec3, norm, scale, sub } from "../../../geometry/vec3";
 import type { QualitySetting } from "../../quality/qualitySetting";
 import type { DrawSet } from "../../terrain/cache";
-import type { GroundContact } from "../../terrain/grounded";
+import type { GroundContact, GroundUnderFunction } from "../../terrain/grounded";
+import type { BodyFigure } from "../../terrain/planet";
 
 /**
  * The reach of the largest rock octave from a rock's axis, m: the surface crate's
@@ -174,4 +182,251 @@ export function rocksToDraw(
     }
   }
   return { patches, inView };
+}
+
+/**
+ * How far an unpowered arc departs from the straight line of its pose at its velocity within `tS`
+ * seconds, metres: ½ g t² (Design note 7), `gravityMps2` the most the gravity along the arc reaches.
+ */
+export function extrapolationMargin(gravityMps2: number, tS: number): number {
+  return 0.5 * gravityMps2 * tS * tS;
+}
+
+/**
+ * How far the ground beneath an unpowered arc departs from the ground beneath its straight line
+ * at `tS`, metres: the {@link extrapolationMargin} m times the sine of the most its direction can
+ * turn from the datum's normal under the line, at most m.
+ *
+ * @remarks
+ * Gravity pulls the arc towards the body's centre, so it falls from the line along the vertical
+ * and the ground beneath the two is the same but for the turn between that pull and the normal
+ * beneath the line: the radial directions along the arc turn from the line's by at most
+ * (|p(t) − p(0)| + m) ÷ c, c the datum's polar radius, the least distance of the ground above
+ * the datum from the centre; and the radial direction and gravity each stand off the datum's
+ * normal by at most δ = atan((a² − c²) ÷ 2ac), a spheroid's greatest difference of geodetic and
+ * geocentric latitude, 0 on a sphere. So the widening is m · min(1, (|p(t) − p(0)| + m) ÷ c + 2δ)
+ * (lean, 2026-11-18): ½ g t² as a ground radius would force the finest level over 1.7 km² at 30 s
+ * on a Moon and 61 km² on an Earth, some 3 × 10³ and 10⁵ finest patches.
+ *
+ * @param travelledM - |p(t) − p(0)|, the line's distance from the pose, m.
+ */
+export function sweptWideningM(
+  figure: Pick<BodyFigure, "equatorialRadiusM" | "polarRadiusM">,
+  gravityMps2: number,
+  tS: number,
+  travelledM: number,
+): number {
+  const a = figure.equatorialRadiusM;
+  const c = figure.polarRadiusM;
+  const m = extrapolationMargin(gravityMps2, tS);
+  const offNormal = Math.atan(Math.abs(a * a - c * c) / (2 * a * c));
+  return m * Math.min(1, (travelledM + m) / Math.min(a, c) + 2 * offNormal);
+}
+
+/**
+ * A descending body's path ahead, body-fixed m (R03's `predictedPath`): its pose's straight line at
+ * its velocity, with the most gravity reaches along it (`null` where the body's gravity is not
+ * known, when the line is not widened), or the planned path's positions in order.
+ */
+export type SweptPath =
+  | {
+      readonly kind: "extrapolated";
+      readonly positionM: Vec3;
+      /** Its velocity against the ground, body-fixed m/s. */
+      readonly velocityMps: Vec3;
+      readonly gravityMps2: number | null;
+    }
+  | { readonly kind: "planned"; readonly positionsM: ReadonlyArray<Vec3> };
+
+/** A descending body as the sweep takes it. */
+export interface SweptBody {
+  /** Its bounding radius, m. */
+  readonly radiusM: number;
+  readonly path: SweptPath;
+}
+
+/** The body's ground the sweep is laid on. */
+export interface SweptSurface {
+  readonly figure: Pick<BodyFigure, "equatorialRadiusM" | "polarRadiusM">;
+  /** The ground under a point: the workers' where it is held, the datum's elsewhere. */
+  readonly ground: GroundUnderFunction;
+  /** The finest patch's edge, m (`finestPatchSizeM`): R05's forced region reaches 3 past a contact. */
+  readonly patchSizeM: number;
+  /**
+   * The most finest patches the chain may force, by its contacts' new ground, beyond which it is
+   * cut, in time order; absent, no limit.
+   */
+  readonly maxForcedPatches?: number;
+}
+
+/** A sample of a path: its ground point, its footprint there, m, and whether it could touch. */
+interface SweepSample {
+  readonly groundM: Vec3;
+  readonly footprintM: number;
+  /**
+   * Whether the body could be within its footprint and the reach of the ground there: the path no
+   * higher above it than the footprint, the reach and the arc's fall, and not yet through it.
+   */
+  readonly near: boolean;
+}
+
+/**
+ * The finest steps a path is sampled at: an eighth of the farthest a contact may stand from a
+ * sample it covers.
+ */
+const SAMPLES_A_COVER = 8;
+
+/** The samples of `path` over `sweepS` at most `stepM` apart along it, each footprint `radiusM` widened. */
+function sweepSamples(
+  path: SweptPath,
+  radiusM: number,
+  sweepS: number,
+  stepM: number,
+  surface: SweptSurface,
+): SweepSample[] {
+  const samples: SweepSample[] = [];
+  const at = (positionM: Vec3, footprintM: number, fallM: number): void => {
+    const under = surface.ground(positionM);
+    const reachM = radiusM + LARGEST_ROCK_REACH_M;
+    samples.push({
+      groundM: under.groundPointM,
+      footprintM,
+      near: under.heightM - fallM <= reachM && under.heightM >= -reachM,
+    });
+  };
+  switch (path.kind) {
+    case "extrapolated": {
+      const speed = norm(path.velocityMps);
+      const steps = Math.max(1, Math.ceil((speed * sweepS) / stepM));
+      for (let k = 0; k <= steps; k += 1) {
+        const tS = (sweepS * k) / steps;
+        const move = scale(path.velocityMps, tS);
+        const g = path.gravityMps2;
+        at(
+          add(path.positionM, move),
+          radiusM + (g === null ? 0 : sweptWideningM(surface.figure, g, tS, norm(move))),
+          g === null ? 0 : extrapolationMargin(g, tS),
+        );
+      }
+      break;
+    }
+    case "planned": {
+      const [first] = path.positionsM;
+      if (first !== undefined) {
+        at(first, radiusM, 0);
+      }
+      for (let n = 1; n < path.positionsM.length; n += 1) {
+        const from = path.positionsM[n - 1];
+        const to = path.positionsM[n];
+        if (from === undefined || to === undefined) {
+          continue;
+        }
+        const leg = sub(to, from);
+        const steps = Math.max(1, Math.ceil(norm(leg) / stepM));
+        for (let k = 1; k <= steps; k += 1) {
+          at(add(from, scale(leg, k / steps)), radiusM, 0);
+        }
+      }
+      break;
+    }
+  }
+  return samples;
+}
+
+/** The ground point of sample `k` of `samples`, which must be there. */
+function groundOf(samples: ReadonlyArray<SweepSample>, k: number): Vec3 {
+  const sample = samples[k];
+  if (sample === undefined) {
+    throw new Error(`a sweep has no sample ${String(k)}`);
+  }
+  return sample.groundM;
+}
+
+/**
+ * The chain of contacts that covers what `bodies` could touch over `sweepS` seconds ahead (see the
+ * module's remarks), on the ground beneath their paths: what R05's selection takes beside the
+ * bodies' own (`SelectionInput.grounded`).
+ *
+ * @remarks
+ * - **Where**: only over the stretches of the path where the body could be within its footprint
+ *   and the reach of the ground: no higher above it than those and, on an extrapolation with its
+ *   gravity known, the {@link extrapolationMargin} it could have fallen, and not yet through it,
+ *   past which a body on that line would have touched down already (lean, 2026-11-18).
+ * - **The chain**: each contact stands on a sample of a stretch's ground track, its radius the
+ *   largest footprint of the samples it covers and of the one after, and every sample lies within
+ *   L = 3 P − reach − s of a contact that covers it, P the finest patch's edge, reach
+ *   {@link LARGEST_ROCK_REACH_M} and s the sampling step: so R05's forced region about the chain,
+ *   a contact's radius and 3 P, holds every point within the footprint and the reach of the track
+ *   at every time of the stretch (lean, 2026-11-18: contacts up to 2 L apart rather than one
+ *   radius, which at 300 m/s would be some 800 contacts, each selection's forced test looping over
+ *   them all).
+ * - **The cap**: where `surface.maxForcedPatches` is given, the chain stops at the first contact
+ *   whose new ground, 2 (radius + 3 P) times its step from the one before, would take the patches
+ *   it forces past it; the bodies in order, each path in time.
+ * - A planned path is swept whole, its poses carrying no times, and not widened.
+ *
+ * @param sweepS - The horizon, s: R05's `FORCED_REGION_RESIDENCY_S`.
+ * @throws RangeError where the patch is too small for the forced region to reach past the reach.
+ */
+export function couldTouchContacts(
+  bodies: ReadonlyArray<SweptBody>,
+  sweepS: number,
+  surface: SweptSurface,
+): GroundContact[] {
+  const patchM = surface.patchSizeM;
+  const coverM = 3 * patchM - LARGEST_ROCK_REACH_M;
+  if (!(coverM > 0)) {
+    throw new RangeError(`a finest patch of ${String(patchM)} m forces too little`);
+  }
+  const stepM = coverM / SAMPLES_A_COVER;
+  const reachM = coverM - stepM;
+  const contacts: GroundContact[] = [];
+  let forcedPatches = 0;
+  const budget = surface.maxForcedPatches ?? Infinity;
+  for (const body of bodies) {
+    const samples = sweepSamples(body.path, body.radiusM, sweepS, stepM, surface);
+    let previous: GroundContact | null = null;
+    let first = 0;
+    while (first < samples.length) {
+      if (samples[first]?.near !== true) {
+        previous = null;
+        first += 1;
+        continue;
+      }
+      const start = groundOf(samples, first);
+      // The farthest sample within reach of the first uncovered one stands for both sides.
+      let anchor = first;
+      while (
+        samples[anchor + 1]?.near === true &&
+        norm(sub(groundOf(samples, anchor + 1), start)) <= reachM
+      ) {
+        anchor += 1;
+      }
+      const centre = groundOf(samples, anchor);
+      let last = anchor;
+      while (
+        samples[last + 1]?.near === true &&
+        norm(sub(groundOf(samples, last + 1), centre)) <= reachM
+      ) {
+        last += 1;
+      }
+      let radiusM = 0;
+      for (let k = first; k <= Math.min(last + 1, samples.length - 1); k += 1) {
+        radiusM = Math.max(radiusM, samples[k]?.footprintM ?? 0);
+      }
+      const forcedM = radiusM + 3 * patchM;
+      const newM2 =
+        previous === null
+          ? Math.PI * forcedM * forcedM
+          : 2 * forcedM * norm(sub(centre, previous.positionM));
+      forcedPatches += newM2 / (patchM * patchM);
+      if (forcedPatches > budget) {
+        return contacts;
+      }
+      previous = { positionM: centre, radiusM };
+      contacts.push(previous);
+      first = last + 1;
+    }
+  }
+  return contacts;
 }
