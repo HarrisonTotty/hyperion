@@ -258,51 +258,49 @@ export const ABOVE_DECK_GATE_TALLIES: ReadonlyArray<GateImageTally> = [
  * The Venus-class cases' recorded verdicts by image through their deck (R08.T15.b.2):
  * `vectorGate.json`'s `deck.venusClass.cases.<case>.routed.images`, each case split at its deck's
  * top over its ground, the uncorrected twin against the scalar I, held to the file by the test.
- * `venus-92bar` passes 70 of its 360 values and `venus-58bar` 69, and neither misses one: their
- * night under the deck (s95), one value at the horizon's sun (s90) and the limb above the top. Every
- * value of `ground-s0`, `ground-s30`, `ground-s60`, `ground-s80`, the disc's five images and
- * `aerial` is refused, noise past the references' σ at their 1,024 samples, so that
- * {@link deckGatePasses} passes those images over, drawn unlabelled by day once the deck routes
- * (main's ruling of 2026-11-02, research-rm4-rm5-close-out §1.1), where the haze's gate passes over
- * images by their sun and labels them ({@link HAZE_UNJUDGED_IMAGES}). The analytic path reads worse
- * on the same values (a probe of 2026-11-02, not kept): it misses 63 and 43 of the night's (its
- * twilight's light where the references read none), and `venus-92bar`'s ground's flux beneath the
- * deck at the probe's sun (`flux-lsfr`) is 9 × 10⁻⁵ of the reference's in red, 2 × 10⁻⁶ in green
- * and 3 × 10⁻¹⁹ in blue, where the route's reads −1.5%, −0.8% and +19.9% of them (`venus-92bar`) and −2.0%, +3.1%
- * and +5.1% (`venus-58bar`), every one refused.
+ * On the references re-traced at ruling 8's counts (2026-11-18), which judge the ground under the
+ * deck, `venus-92bar` passes 237 of its 360 values and `venus-58bar` 234, and neither misses one:
+ * every value of the ground's images at s0 to s80, the disc's five, the limb and `aerial`, the worst
+ * 0.77 and 0.67 of the edge. The twilight's suns, s90 and s95 (one sun 90° or more from the zenith),
+ * are refused but for three of `venus-92bar`'s night, noise past the references' σ, so that
+ * {@link deckGatePasses} passes those images over (main's ruling of 2026-11-02,
+ * research-rm4-rm5-close-out §1.1). The route reads them so after two fixes the re-trace asked for:
+ * the table below's horizon read off the sky's side, which drew `aerial` 27% dim, and a surface
+ * deck's channels at their own wavelengths, whose bins' converted blue read up to 9% bright
+ * (`deckRead.ts`'s `belowTravelPlace`, `deck.ts`'s remarks, "Own wavelengths").
  */
 export const SURFACE_DECK_GATE_TALLIES: Readonly<
   Record<"venus-92bar" | "venus-58bar", ReadonlyArray<GateImageTally>>
 > = {
   "venus-92bar": [
-    { image: "ground-s0", comparisons: 12, passes: 0, misses: 0, refusals: 12 },
-    { image: "ground-s30", comparisons: 60, passes: 0, misses: 0, refusals: 60 },
-    { image: "ground-s60", comparisons: 60, passes: 0, misses: 0, refusals: 60 },
-    { image: "ground-s80", comparisons: 63, passes: 0, misses: 0, refusals: 63 },
-    { image: "ground-s90", comparisons: 63, passes: 1, misses: 0, refusals: 62 },
-    { image: "ground-s95", comparisons: 63, passes: 63, misses: 0, refusals: 0 },
-    { image: "disc-p0", comparisons: 3, passes: 0, misses: 0, refusals: 3 },
-    { image: "disc-p30", comparisons: 3, passes: 0, misses: 0, refusals: 3 },
-    { image: "disc-p60", comparisons: 3, passes: 0, misses: 0, refusals: 3 },
-    { image: "disc-p75", comparisons: 3, passes: 0, misses: 0, refusals: 3 },
-    { image: "disc-p85", comparisons: 3, passes: 0, misses: 0, refusals: 3 },
-    { image: "limb", comparisons: 15, passes: 6, misses: 0, refusals: 9 },
-    { image: "aerial", comparisons: 9, passes: 0, misses: 0, refusals: 9 },
+    { image: "ground-s0", comparisons: 12, passes: 12, misses: 0, refusals: 0 },
+    { image: "ground-s30", comparisons: 60, passes: 60, misses: 0, refusals: 0 },
+    { image: "ground-s60", comparisons: 60, passes: 60, misses: 0, refusals: 0 },
+    { image: "ground-s80", comparisons: 63, passes: 63, misses: 0, refusals: 0 },
+    { image: "ground-s90", comparisons: 63, passes: 0, misses: 0, refusals: 63 },
+    { image: "ground-s95", comparisons: 63, passes: 3, misses: 0, refusals: 60 },
+    { image: "disc-p0", comparisons: 3, passes: 3, misses: 0, refusals: 0 },
+    { image: "disc-p30", comparisons: 3, passes: 3, misses: 0, refusals: 0 },
+    { image: "disc-p60", comparisons: 3, passes: 3, misses: 0, refusals: 0 },
+    { image: "disc-p75", comparisons: 3, passes: 3, misses: 0, refusals: 0 },
+    { image: "disc-p85", comparisons: 3, passes: 3, misses: 0, refusals: 0 },
+    { image: "limb", comparisons: 15, passes: 15, misses: 0, refusals: 0 },
+    { image: "aerial", comparisons: 9, passes: 9, misses: 0, refusals: 0 },
   ],
   "venus-58bar": [
-    { image: "ground-s0", comparisons: 12, passes: 0, misses: 0, refusals: 12 },
-    { image: "ground-s30", comparisons: 60, passes: 0, misses: 0, refusals: 60 },
-    { image: "ground-s60", comparisons: 60, passes: 0, misses: 0, refusals: 60 },
-    { image: "ground-s80", comparisons: 63, passes: 0, misses: 0, refusals: 63 },
-    { image: "ground-s90", comparisons: 63, passes: 1, misses: 0, refusals: 62 },
-    { image: "ground-s95", comparisons: 63, passes: 62, misses: 0, refusals: 1 },
-    { image: "disc-p0", comparisons: 3, passes: 0, misses: 0, refusals: 3 },
-    { image: "disc-p30", comparisons: 3, passes: 0, misses: 0, refusals: 3 },
-    { image: "disc-p60", comparisons: 3, passes: 0, misses: 0, refusals: 3 },
-    { image: "disc-p75", comparisons: 3, passes: 0, misses: 0, refusals: 3 },
-    { image: "disc-p85", comparisons: 3, passes: 0, misses: 0, refusals: 3 },
-    { image: "limb", comparisons: 15, passes: 6, misses: 0, refusals: 9 },
-    { image: "aerial", comparisons: 9, passes: 0, misses: 0, refusals: 9 },
+    { image: "ground-s0", comparisons: 12, passes: 12, misses: 0, refusals: 0 },
+    { image: "ground-s30", comparisons: 60, passes: 60, misses: 0, refusals: 0 },
+    { image: "ground-s60", comparisons: 60, passes: 60, misses: 0, refusals: 0 },
+    { image: "ground-s80", comparisons: 63, passes: 63, misses: 0, refusals: 0 },
+    { image: "ground-s90", comparisons: 63, passes: 0, misses: 0, refusals: 63 },
+    { image: "ground-s95", comparisons: 63, passes: 0, misses: 0, refusals: 63 },
+    { image: "disc-p0", comparisons: 3, passes: 3, misses: 0, refusals: 0 },
+    { image: "disc-p30", comparisons: 3, passes: 3, misses: 0, refusals: 0 },
+    { image: "disc-p60", comparisons: 3, passes: 3, misses: 0, refusals: 0 },
+    { image: "disc-p75", comparisons: 3, passes: 3, misses: 0, refusals: 0 },
+    { image: "disc-p85", comparisons: 3, passes: 3, misses: 0, refusals: 0 },
+    { image: "limb", comparisons: 15, passes: 15, misses: 0, refusals: 0 },
+    { image: "aerial", comparisons: 9, passes: 9, misses: 0, refusals: 0 },
   ],
 };
 

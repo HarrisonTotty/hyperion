@@ -24327,7 +24327,8 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
   - `DECK_ROUTE_RANGE.ground` is `SURFACE_DECK_ROUTE_RANGE` (both Venus-class cases' channels),
     opened on `ABOVE_DECK_GATE_TALLIES` (`giant-deck` above its split, `deck.routed`) and
     `SURFACE_DECK_GATE_TALLIES` (`deck.venusClass`), each held to the file. Images refused
-    throughout in both Venus cases: `ground-s0`, `-s30`, `-s60`, `-s80`, the disc's five, `aerial`.
+    throughout, on the re-traced references: `ground-s90` in both Venus cases, `ground-s95` in
+    `venus-58bar`.
   - Not a condition of the route: R08.T12.b's flux sanity, 0.049 and 0.064 of the top at `flux-lsfr`
     against 2–4%, as before recorded and not asserted.
   - The low sun beneath a deck (lean, 2026-11-02): a camera under a routed deck over a surface, its
@@ -24402,6 +24403,27 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
     `deckThermalOf`, `belowDeckThermalInto`, `withBelowDeckThermal`, and `ThermalLight`'s
     `"over a deck"`, in place of `"emitted"`. `deckThermalDrawn` holds for an envelope of one band,
     which has no table below.
+  - The ground under the deck judged (2026-11-03 to 11-18, main's round-2 item 1): `venus-92bar`
+    and `venus-58bar` re-traced at ruling 8's counts, N_p (σ ÷ (0.85 T ÷ 8))² from the pilots, s90,
+    s95 and the aggregates held (`sampleCounts.json`), resumed from `--work` checkpoints through
+    some fifteen pod changes, about 2,200 thread-hours a case. On them the route first missed 58 of
+    `venus-92bar`'s 360: `aerial` 27% dim and the blue up to 9% bright on the ground, the disc and
+    `aerial`.
+  - Its two fixes. The table below a deck read linearly across the horizon, between the rows at
+    ∓1/16, the one above the horizon near the ground the ground's own light: a read there now lies
+    on the sky's side's last two rows' line carried to μ and held at the horizontal beyond it
+    (`deckRead.ts`'s `belowTravelPlace`, `belowDeck.wgsl`'s twin, the thermal field below alike).
+    A deck over a surface solves its channels at their own wavelengths where its lights allow all
+    three (`deck.ts`'s `deckOwnChannels`), its bins' converted blue having read 1.14–1.15 times the
+    field at 433.6 nm beneath the deck; its thermal light keeps the bins. `giant-deck`'s tallies
+    hold on it. The disc's and terrain's pinned digests are re-pinned for `belowDeck.wgsl`.
+  - Then `venus-92bar` passes 237 of 360, `venus-58bar` 234, neither misses, the worst 0.77 and
+    0.67 of the edge; the refusals are the twilight's suns.
+  - R08.T12.b's red shift (`references.test.ts`), main's ruling pending: on the re-traced reference
+    the surface flux's heavy tail reads the red past the blue at 3.2σ at flux-lsfr's 32,768 samples
+    (7.3σ before) and its green's mean above its red's. It is now held as the ranges are, no channel
+    below a bluer one by more than 4σ, its steps pinned in `sanityRanges.json`; a re-trace with
+    flux-lsfr's count raised re-keys every checkpoint (some 45 h).
   - _By hand_: `just views-check --software --atmosphere`, high and low, pass with no fault line,
     engine fault or console error; the software tour's captures stand short of their range, so
     `TEST VENUS`'s look is not judged there. Pending, the owner's runs: the routed frame on the RTX

@@ -459,23 +459,17 @@ describe("the Venus-class cases' deck gate (R08.T15.b.2)", () => {
     const refusedThroughout = Object.values(SURFACE_DECK_GATE_TALLIES).map((tallies) =>
       tallies.filter((image) => image.refusals === image.comparisons).map((image) => image.image),
     );
-    const wholly = [
-      "ground-s0",
-      "ground-s30",
-      "ground-s60",
-      "ground-s80",
-      "disc-p0",
-      "disc-p30",
-      "disc-p60",
-      "disc-p75",
-      "disc-p85",
-      "aerial",
-    ];
+    // Since the references' re-trace at ruling 8's counts judged the ground under the deck, only
+    // the twilight's images are refused throughout: venus-92bar's night holds three values.
     expect([
       Object.values(SURFACE_DECK_GATE_TALLIES).map(deckGatePasses),
       refusedThroughout,
       DECK_ROUTE_RANGE?.ground,
-    ]).toEqual([[true, true], [wholly, wholly], SURFACE_DECK_ROUTE_RANGE]);
+    ]).toEqual([
+      [true, true],
+      [["ground-s90"], ["ground-s90", "ground-s95"]],
+      SURFACE_DECK_ROUTE_RANGE,
+    ]);
   });
 
   it("routes venus-92bar and venus-58bar through their deck over the ground, and neither where either case's gate misses", () => {

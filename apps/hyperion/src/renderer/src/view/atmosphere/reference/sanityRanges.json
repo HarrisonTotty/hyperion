@@ -1,20 +1,20 @@
 {
   "description": "The references' sanity ranges, written by references.test.ts (plan R08, R08.T12.b.2): each probe's downwelling luminance over the top's, its σ, and gate.ts's verdict, and the Venus-class surface's red shift in σ. Do not edit by hand.",
   "venus-92bar-surface": {
-    "fraction": 0.041628556816212796,
-    "sigma": 0.015634122281785984,
+    "fraction": 0.10645055153694145,
+    "sigma": 0.0587532883063767,
     "refused": true,
     "within": true,
-    "channels": [0.051580615951977875, 0.04286875990644848, 0.000014878510825109235],
+    "channels": [0.07559741732024149, 0.12635674265808444, 0.00012102909067727047],
     "low": 0.02,
     "high": 0.04
   },
   "venus-58bar-surface": {
-    "fraction": 0.06807156774652653,
-    "sigma": 0.020154010489738125,
+    "fraction": 0.053103585183235304,
+    "sigma": 0.004118651925305488,
     "refused": true,
     "within": true,
-    "channels": [0.09915766332796591, 0.06548666133493351, 0.002085174641699068],
+    "channels": [0.08035464477925348, 0.049964159483322806, 0.003912119573672391],
     "low": 0.02,
     "high": 0.04
   },
@@ -28,8 +28,8 @@
     "high": 0.15
   },
   "venus-92bar-red-shift": {
-    "redOverGreen": 0.38093345178103455,
-    "greenOverBlue": 1.9693040457472626,
-    "redOverBlue": 7.330119560059141
+    "redOverGreen": -0.5955906008442694,
+    "greenOverBlue": 1.5422626069401801,
+    "redOverBlue": 3.1788080651966157
   }
 }
