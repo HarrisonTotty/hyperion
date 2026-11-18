@@ -221,8 +221,13 @@ const GB = 1e9;
 /** The descents' span, s: R05's whole script, 1,230 s as built (R12.T0's record). */
 export const DESCENT_SPAN_S = DESCENT_SEGMENTS.reduce((sum, { durationS }) => sum + durationS, 0);
 
-/** R05's spike seed, which draws the descents' landing site and approach (`landingSiteOf`). */
-export const PERF_LANDING_SEED = "7";
+/**
+ * The spike's seed that draws the descents' landing site and approach (`bodySiteOf`) on the pinned
+ * world: 10 (research-leans-54, ruling 8). R05's 7 drew a site 2,500.8 m below the world's sea
+ * level, and 8 and 9 drew sites under it too; 10's ground stands 275.3 m above it (−1,097.1 m
+ * against a sea level of −1,372.4 m, a pod's run at generator version 32, 2026-11-18).
+ */
+export const PERF_LANDING_SEED = "10";
 
 /** R09's survey before `arrival-memory`'s field is posted: orbital, at 50 m, as place-ship's. */
 export const ARRIVAL_SURVEY = PERF_SURVEY;
@@ -241,7 +246,8 @@ export const NUCLEAR_DISC_REASON =
 export const PERF_SCENES: Readonly<Record<PerfSceneId, PerfScene>> = {
   "cockpit-descent": {
     id: "cockpit-descent",
-    version: 1,
+    // 2: landing seed 10, on land (research-leans-54, ruling 8).
+    version: 2,
     universe: UNIVERSE,
     system: PERF_PINS.system,
     body: PERF_PINS.world,
@@ -257,8 +263,9 @@ export const PERF_SCENES: Readonly<Record<PerfSceneId, PerfScene>> = {
   },
   "station-wireframe-descent": {
     id: "station-wireframe-descent",
-    // 2: the station's wireframe drawn alone at 1920 × 1080 (research-leans-54, ruling 7).
-    version: 2,
+    // 2: the station's wireframe drawn alone at 1920 × 1080 (research-leans-54, ruling 7); 3:
+    // landing seed 10, on land (ruling 8).
+    version: 3,
     universe: UNIVERSE,
     system: PERF_PINS.system,
     body: PERF_PINS.world,
@@ -297,7 +304,8 @@ export const PERF_SCENES: Readonly<Record<PerfSceneId, PerfScene>> = {
   },
   "arrival-memory": {
     id: "arrival-memory",
-    version: 1,
+    // 2: landing seed 10, whose deepest pose stands on land (research-leans-54, ruling 8).
+    version: 2,
     universe: UNIVERSE,
     system: PERF_PINS.system,
     body: PERF_PINS.world,

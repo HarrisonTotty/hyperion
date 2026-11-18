@@ -22,11 +22,12 @@ import {
   fieldResident,
   measuredOnce,
   PerfEngine,
+  siteSeaNote,
   undisposable,
 } from "./descentDriver";
 import { attributePasses, passRolesOf } from "./passRows";
 import type { MeasuredSpan, PerfFailure, PerfFrameSample, PerfSceneSink } from "./runPerfScene";
-import { PERF_SCENES } from "./scenes";
+import { PERF_LANDING_SEED, PERF_SCENES } from "./scenes";
 
 const PROFILE = new DescentProfile(TEST_PLANET_FIGURE, landingSiteOf(7n));
 
@@ -179,7 +180,7 @@ describe("the descent driver", () => {
       serverUrl: "ws://a/bridge",
       universe: "0000000000000001",
       body: PERF_PINS.world,
-      seed: 7n,
+      seed: BigInt(PERF_LANDING_SEED),
       setting: "low",
       style: "photorealistic",
       workers: 3,
@@ -513,6 +514,26 @@ describe("arrival-memory's driver", () => {
         shown: null,
       },
     ]);
+  });
+});
+
+describe("the landing site against the sea", () => {
+  it("states the site's ground against sea level, under the sea where it is below", () => {
+    expect(siteSeaNote(-3873.1, { sea_level_m: -1372.4, main_liquid: 2 })).toEqual({
+      note: "The landing site's ground stands -3873.1 m above the datum, 2500.7 m below sea level -1372.4 m: under the sea.",
+      belowSea: true,
+    });
+    expect(siteSeaNote(120, { sea_level_m: -1372.4, main_liquid: 2 })).toEqual({
+      note: "The landing site's ground stands 120.0 m above the datum, 1492.4 m above sea level -1372.4 m.",
+      belowSea: false,
+    });
+  });
+
+  it("states a world with no sea, or no field, as no sea level", () => {
+    expect(siteSeaNote(5, { sea_level_m: -40, main_liquid: null }).note).toBe(
+      "The landing site's ground stands 5.0 m above the datum; the world has no sea.",
+    );
+    expect(siteSeaNote(5, null).belowSea).toBe(false);
   });
 });
 

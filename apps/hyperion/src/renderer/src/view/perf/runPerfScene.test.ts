@@ -14,6 +14,7 @@ import type { PassTimes } from "../engine/types";
 import type { WorkerMemory } from "../terrain/workers/pool";
 import type { LedgerFigures } from "./ledger";
 import { RELEASE_MIN_BYTES } from "./repetitionMetrics";
+import { PERF_SCENES } from "./scenes";
 import {
   type MeasuredSpan,
   type PerfClock,
@@ -409,7 +410,7 @@ describe("a perf run in the renderer", () => {
     const { main } = await ran();
     const description = main.descriptions[0];
     expect(description?.scene).toEqual({
-      version: 1,
+      version: PERF_SCENES["cockpit-descent"].version,
       seed: PERF_PINS.seed,
       world: PERF_PINS.world,
     });

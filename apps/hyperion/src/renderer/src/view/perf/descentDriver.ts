@@ -24,6 +24,7 @@
  */
 
 import type { AdapterRecord, InternalScaleRecord } from "@hyperion/perf";
+import type { SurfaceHeaderDto } from "@hyperion/protocol";
 
 import type { PerfDescribedView } from "../../../../preload/api";
 import type { ViewEngineSource } from "../../displays/view/useViewEngine";
@@ -286,6 +287,29 @@ export interface DescentDriverOptions {
   readonly stages: DescentStages;
   /** How the descent is measured the first time: R05's `measureWorldDescent`, or a test's. */
   readonly measure?: MeasureDescent;
+}
+
+/**
+ * The landing site's ground against the world's sea (research-leans-54, ruling 8), for the record's
+ * notes: its height above the datum, and how far it stands above or below the sea's surface where
+ * the world has a sea (`SurfaceHeaderDto.sea_level_m` under a `main_liquid`).
+ */
+export function siteSeaNote(
+  siteHeightM: number,
+  header: Pick<SurfaceHeaderDto, "sea_level_m" | "main_liquid"> | null,
+): { readonly note: string; readonly belowSea: boolean } {
+  const ground = `The landing site's ground stands ${siteHeightM.toFixed(1)} m above the datum`;
+  if (header === null) {
+    return { note: `${ground}; the world's field gave no sea level.`, belowSea: false };
+  }
+  if (header.main_liquid === null) {
+    return { note: `${ground}; the world has no sea.`, belowSea: false };
+  }
+  const aboveM = siteHeightM - header.sea_level_m;
+  const sea = `sea level ${header.sea_level_m.toFixed(1)} m`;
+  return aboveM < 0
+    ? { note: `${ground}, ${(-aboveM).toFixed(1)} m below ${sea}: under the sea.`, belowSea: true }
+    : { note: `${ground}, ${aboveM.toFixed(1)} m above ${sea}.`, belowSea: false };
 }
 
 /** Whether `scene` draws the spike's two instruments on `setting`: every scene but a station's. */
@@ -558,6 +582,14 @@ export class DescentDriver implements PerfSceneDriver {
     const capabilities = engine.capabilities;
     const demand = this.#demandOf(prepared);
     const arrival = scene.script.kind === "arrival";
+    const body = this.#body;
+    const site = siteSeaNote(
+      prepared.siteHeightM,
+      body === null ? null : (frame.session?.survey(body)?.header ?? null),
+    );
+    if (site.belowSea) {
+      console.warn(`perf run: ${site.note}`);
+    }
     return {
       views: [
         {
@@ -590,6 +622,7 @@ export class DescentDriver implements PerfSceneDriver {
         drawsInstruments(scene, setting)
           ? `The renderer drew ${scene.id} with R05's descent spike over the served world: its main view (${main.style}) and its two wireframe instruments every frame, unscaled; kernel paths are not read (R12.T4.c).`
           : `The renderer drew ${scene.id} with R05's descent spike over the served world: its main view (${main.style}) alone every frame, unscaled, at its canvas's size; kernel paths are not read (R12.T4.c).`,
+        site.note,
         ...(arrival
           ? [
               `arrival-memory held the descent's first pose until the world's field was whole in every height worker, then its deepest until its patches drew for ${String(ARRIVAL_SETTLE_S)} s without TERRAIN: STREAMING or a patch made resident (at most ${String(ARRIVAL_SETTLE_LIMIT_S)} s), then ${String(ARRIVAL_HELD_S)} s; the field's and the sky's transfer bytes and times are not read (R12.T4.c).`,
