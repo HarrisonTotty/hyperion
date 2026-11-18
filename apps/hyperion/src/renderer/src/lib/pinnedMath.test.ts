@@ -26,6 +26,8 @@ import {
   log1p,
   log2,
   pow,
+  powFromLog2Parts,
+  powLog2Parts,
   sin,
   tan,
 } from "./pinnedMath";
@@ -245,4 +247,56 @@ describe("the pinned ports against libm 0.2.16", () => {
       expect(digest.finish()).toBe(sweep.digest);
     },
   );
+});
+
+/** pow as `lawFor` takes it: the base's log₂ parts first, written to `parts`, then the power. */
+function powBySplit(parts: Float64Array, x: number, y: number): number {
+  powLog2Parts(x, parts, 0);
+  return powFromLog2Parts(x, parts[0] ?? Number.NaN, parts[1] ?? Number.NaN, y);
+}
+
+describe("pow split at its exponent", () => {
+  it("gives libm's bits at every pinned input of pow", () => {
+    const parts = new Float64Array(2);
+    const mismatches = PAIRS.filter((p) => p.name === "pow").flatMap((p) => {
+      const [x, y] = p.args.map(valueOf);
+      const got = word(powBySplit(parts, x ?? Number.NaN, y ?? Number.NaN));
+      return got === p.result ? [] : [`pow(${p.args.join(", ")}) = ${got}, libm ${p.result}`];
+    });
+    expect(mismatches).toEqual([]);
+  });
+
+  it.each(SWEEPS.filter((s) => s.name === "pow").map((s) => [s.domains.join(" "), s] as const))(
+    "gives libm's digest over pow's sweep %s",
+    (_, sweep) => {
+      const next = mulberry32(sweep.seed);
+      const draws = sweep.domains.map(drawer);
+      const digest = new Digest();
+      const parts = new Float64Array(2);
+      for (let i = 0; i < sweep.count; i += 1) {
+        const [x, y] = draws.map((draw) => draw(next));
+        digest.value(powBySplit(parts, x ?? Number.NaN, y ?? Number.NaN));
+      }
+      expect(digest.finish()).toBe(sweep.digest);
+    },
+  );
+
+  it("raises one base's parts to many exponents as pow does", () => {
+    const next = mulberry32(0x5eed);
+    const mismatches: string[] = [];
+    const parts = new Float64Array(2);
+    for (let b = 0; b < 64; b += 1) {
+      // Bases in (0, 1], as Φ_t is, and a few beyond.
+      const x = b < 56 ? (next() + 1) / 2 ** 32 : 1 + next() / 2 ** 28;
+      powLog2Parts(x, parts, 0);
+      const [t1, t2] = [parts[0] ?? Number.NaN, parts[1] ?? Number.NaN];
+      for (let e = 0; e < 256; e += 1) {
+        const y = (1 / 16) * 256 ** (next() / 2 ** 32);
+        if (word(powFromLog2Parts(x, t1, t2, y)) !== word(pow(x, y))) {
+          mismatches.push(`${String(x)} ** ${String(y)}`);
+        }
+      }
+    }
+    expect(mismatches).toEqual([]);
+  });
 });

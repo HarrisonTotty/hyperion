@@ -25311,3 +25311,8 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
   - test-render part 1's captures, both variants, at BASE and after each part: byte-identical (157
     frames each); none draws an emitting point, the smoke page stepping no slice. NOT RUN: the RTX
     look.
+- **R08.T18, `lawFor` kept per template (2026-11-18, perf-law-for-cache).** `phase.ts` keeps each
+  template's grid with its nodes' pinned `pow` log₂ parts (`pinnedMath.ts`' `powLog2Parts`,
+  `powFromLog2Parts`, pow's main path split at y) and the last 256 solved exponents per template by
+  q; every law bit for bit (`phase.test.ts`). Pod, no CPU quota: a cold colour law 14–45 → 7–24 ms,
+  a repeated one 44 → 0.001 ms, and the app's twelve Lambert q 1.5 laws 542 → 21 ms.

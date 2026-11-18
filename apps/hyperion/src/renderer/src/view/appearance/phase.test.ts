@@ -2,7 +2,14 @@ import { describe, expect, it } from "vitest";
 
 import { SOLAR_SYSTEM_PHOTOMETRY } from "../../test/litFixtures";
 import type { Rgb } from "../photometry/toneCurve";
-import { PHASE_F_CLAMP, phaseFactor, type PhaseTemplateId, type PhotometricLaw } from "./law";
+import { pow, sin } from "../../lib/pinnedMath";
+import {
+  limbShareAt,
+  PHASE_F_CLAMP,
+  phaseFactor,
+  type PhaseTemplateId,
+  type PhotometricLaw,
+} from "./law";
 import { bodyReflection } from "../bodies/oblate";
 import { vec3 } from "../../geometry/vec3";
 import {
@@ -10,9 +17,10 @@ import {
   geometricAlbedo,
   lawFor,
   lawPhaseIntegral as exactLawPhaseIntegral,
+  SOLVED_EXPONENTS_KEPT,
   withTemplateCurve,
 } from "./phase";
-import { phaseIntegral, shapePhase } from "./shapes";
+import { phaseIntegral, shapeGeometricAlbedo, shapePhase } from "./shapes";
 import { PHASE_TEMPLATES } from "./templates";
 
 const RAD_PER_DEG = Math.PI / 180;
@@ -351,5 +359,134 @@ describe("the Moon under McEwen's L(α) (plan R10, R10.T10.b; decision-r07-t8b)"
     const theirs = exactLawPhaseIntegral(constant)[1];
     expect(ours / theirs - 1).toBeCloseTo(-1.8e-4, 5);
     expect(Math.abs(ours / theirs - 1)).toBeLessThan(2e-4);
+  });
+});
+
+/**
+ * `lawFor` as it stood before its grids and exponents were kept (R08.T18, aecd3e49): each law
+ * samples its template's grid again, and each channel's every bisection step integrates pinned pow
+ * at every node.
+ */
+function uncachedLawFor(p: Rgb, q: Rgb, template: PhaseTemplateId): PhotometricLaw {
+  const curve = PHASE_TEMPLATES[template];
+  const { phaseV, validToRad, lommelSeeligerShare } = curve;
+  const n = 1800;
+  const h = Math.PI / n;
+  const weight: number[] = [];
+  const phaseTemplate: number[] = [];
+  const shape: number[] = [];
+  const inRange: boolean[] = [];
+  for (let i = 0; i <= n; i += 1) {
+    const alpha = i * h;
+    const simpson = i === 0 || i === n ? 1 : i % 2 === 1 ? 4 : 2;
+    weight.push(((2 * h) / 3) * simpson * sin(alpha));
+    phaseTemplate.push(phaseV(alpha));
+    shape.push(shapePhase(lommelSeeligerShare, alpha, limbShareAt(curve, alpha)));
+    inRange.push(alpha <= validToRad);
+  }
+  const endTemplate = phaseV(validToRad);
+  const endShape = shapePhase(lommelSeeligerShare, validToRad, limbShareAt(curve, validToRad));
+  const qOf = (s: number): number => {
+    const heldF =
+      endShape > 0 ? Math.min(PHASE_F_CLAMP, pow(endTemplate, s) / endShape) : PHASE_F_CLAMP;
+    let sum = 0;
+    for (let i = 0; i <= n; i += 1) {
+      const shapeI = shape[i] ?? 0;
+      const phase =
+        inRange[i] === true
+          ? Math.min(pow(phaseTemplate[i] ?? 0, s), PHASE_F_CLAMP * shapeI)
+          : heldF * shapeI;
+      sum += (weight[i] ?? 0) * phase;
+    }
+    return sum;
+  };
+  const solve = (target: number): number => {
+    let [low, high] = [1 / 16, 16];
+    if (target >= qOf(low)) {
+      return low;
+    }
+    if (target <= qOf(high)) {
+      return high;
+    }
+    for (let step = 0; step < 60; step += 1) {
+      const middle = Math.sqrt(low * high);
+      if (qOf(middle) > target) {
+        low = middle;
+      } else {
+        high = middle;
+      }
+    }
+    return Math.sqrt(low * high);
+  };
+  const k = shapeGeometricAlbedo(lommelSeeligerShare);
+  return withTemplateCurve({
+    a: [p[0] / k, p[1] / k, p[2] / k],
+    lommelSeeligerShare,
+    template,
+    phaseExponent: [solve(q[0]), solve(q[1]), solve(q[2])],
+  });
+}
+
+/** A law's numbers as their bits, so that NaN, −0 and the last bit all count. */
+function lawBits(law: PhotometricLaw): ReadonlyArray<string> {
+  const view = new DataView(new ArrayBuffer(8));
+  const bits = (x: number): string => {
+    view.setFloat64(0, x);
+    return view.getBigUint64(0).toString(16);
+  };
+  return [
+    ...law.a.map(bits),
+    ...law.phaseExponent.map(bits),
+    bits(law.lommelSeeligerShare),
+    law.template,
+    String(law.lommelSeeligerCurve),
+    String(law.lommelSeeligerCeiling),
+  ];
+}
+
+describe("lawFor's kept grids and exponents", () => {
+  // Colours, greys, q beyond either bracket end, zero, −0 and NaN, each p a channel apart.
+  const CASES: ReadonlyArray<readonly [Rgb, Rgb]> = [
+    [
+      [0.3, 0.25, 0.2],
+      [0.31, 0.3, 0.29],
+    ],
+    [
+      [0.2, 0.2, 0.2],
+      [1.5, 1.5, 1.5],
+    ],
+    [
+      [0.71, 0.69, 0.66],
+      [0.77, 1.234, 2.2],
+    ],
+    [
+      [0, 0, 0],
+      [0, -0, 5],
+    ],
+    [
+      [0.12, 0.1, 0.07],
+      [Number.NaN, 1, 0.05],
+    ],
+  ];
+
+  it.each(IDS)("gives %s's laws bit for bit as solving afresh, kept or not", (id) => {
+    for (const [p, q] of CASES) {
+      const expected = lawBits(uncachedLawFor(p, q, id));
+      expect(lawBits(lawFor(p, q, id))).toEqual(expected);
+      expect(lawBits(lawFor(p, q, id))).toEqual(expected);
+    }
+  });
+
+  it("gives the same laws past the exponents it keeps, in either order", () => {
+    // More q than a template keeps, three a law: the second pass re-solves those let go.
+    const laws = Array.from({ length: Math.ceil((SOLVED_EXPONENTS_KEPT + 2) / 3) }, (_, j) => {
+      const q: Rgb = [0.4 + 0.009 * j, 0.403 + 0.009 * j, 0.406 + 0.009 * j];
+      return { q, expected: lawBits(uncachedLawFor([0.2, 0.2, 0.2], q, "mars")) };
+    });
+    for (const pass of [laws, laws.toReversed()]) {
+      for (const { q, expected } of pass) {
+        expect(lawBits(lawFor([0.2, 0.2, 0.2], q, "mars"))).toEqual(expected);
+      }
+    }
   });
 });

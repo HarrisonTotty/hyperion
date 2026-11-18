@@ -44,6 +44,9 @@
  * `sin` 26.2 against 18.4, `atan2` 34.7 against 25.5, `cbrt` 66.1 against 37.5, and `pow` of a
  * fractional power 186 against 124.
  *
+ * {@link powLog2Parts} and {@link powFromLog2Parts} split pow's main path where y enters it, for a
+ * base raised to many exponents (`view/appearance/phase.ts`' `lawFor`).
+ *
  * The module imports nothing, and must not: the client's tests load it as Node's own module
  * (`vitest.config.mts`'s `server.deps.external`), outside Vite's module runner.
  *
@@ -2280,6 +2283,190 @@ export function pow(x: number, y: number): number {
   const dpH = kk === 0 ? 0.0 : dpH1;
   const t1 = zeroLowWord(zH + zL + dpH + t);
   const t2 = zL - (t1 - t - dpH - zH);
+
+  /* split up y into y1+y2 and compute (y1+y2)*(t1+t2) */
+  const y1 = zeroLowWord(y);
+  const pL = (y - y1) * t1 + y * t2;
+  let pH = y1 * t1;
+  let z = pL + pH;
+  BITS.setFloat64(0, z);
+  const jz = BITS.getUint32(0) | 0;
+  if (jz >= 0x40900000 || (jz & 0x7fffffff) >= 0x4090cc00) {
+    /* z >= 1024 or z <= -1075: pow.rs's overflow and underflow tests, from z's words */
+    // The unary plus types the port's result as a number (see `exp`).
+    // oxlint-disable-next-line no-unnecessary-type-conversion
+    return +powPort(x, y);
+  }
+
+  /* compute 2**(p_h+p_l) */
+  const i = jz & 0x7fffffff;
+  let k = (i >> 20) - 0x3ff;
+  let m = 0; /* pow.rs's n, the integer part */
+  if (i > 0x3fe00000) {
+    /* if |z| > 0.5, set n = [z+0.5] */
+    m = jz + (0x00100000 >> (k + 1));
+    k = ((m & 0x7fffffff) >> 20) - 0x3ff; /* new k for n */
+    m = ((m & 0x000fffff) | 0x00100000) >> (20 - k);
+    if (jz < 0) {
+      m = -m;
+    }
+    /* pow.rs's t, the double of n's sign, exponent and integer bits and no others, is n */
+    pH -= m;
+  }
+
+  const tz = zeroLowWord(pL + pH);
+  const uz = tz * lg2H;
+  const vz = (pL - (tz - pH)) * lg2 + tz * lg2L;
+  z = uz + vz;
+  const w = vz - (z - uz);
+  const tt = z * z;
+  const tt1 = z - tt * (p1 + tt * (p2 + tt * (p3 + tt * (p4 + tt * p5))));
+  const rz = (z * tt1) / (tt1 - 2.0) - (w + z * w);
+  z = 1.0 - (rz - z);
+  if (m < -1021 || m > 1023) {
+    /* z 2**n subnormal, or 2**n beyond the table: pow.rs's scalbn and word edits */
+    // The unary plus types the port's result as a number (see `exp`).
+    // oxlint-disable-next-line no-unnecessary-type-conversion
+    return +powPort(x, y);
+  }
+  /* pow.rs adds n to z's exponent, z being in [1/sqrt(2), sqrt(2)]: z × 2**n, normal; its sign
+  s is 1 */
+  return z * twoTo(m);
+}
+
+/**
+ * {@link pow}'s log₂ x in its two pieces, t1 to `out[index]` and t2 to `out[index + 1]`, for a
+ * base that {@link powFromLog2Parts} raises to many exponents; NaN in both where x is off pow's main
+ * path.
+ *
+ * @remarks
+ * pow's main path split where y enters it: this is its first half, which reads x alone, its
+ * operations in its order, so that a base raised to many exponents pays it once. The main path is
+ * that of a positive, normal and finite x other than 1. pow keeps its own copy of both halves: pow
+ * calling them measured 10% slower a call (pod, no CPU quota, 2026-11-18), and the optics call pow
+ * most. `pinnedMath.test.ts` holds the two halves to libm's pow at every pinned input and sweep.
+ */
+export function powLog2Parts(x: number, out: Float64Array, index: number): void {
+  const l1 = 5.99999999999994648725e-1; /* 0x3fe33333_33333303 */
+  const l2 = 4.28571428578550184252e-1; /* 0x3fdb6db6_db6fabff */
+  const l3 = 3.33333329818377432918e-1; /* 0x3fd55555_518f264d */
+  const l4 = 2.72728123808534006489e-1; /* 0x3fd17460_a91d4101 */
+  const l5 = 2.30660745775561754067e-1; /* 0x3fcd864a_93c9db65 */
+  const l6 = 2.06975017800338417784e-1; /* 0x3fca7e28_4a454eef */
+  const cp = 9.61796693925975554329e-1; /* 0x3feec709_dc3a03fd =2/(3ln2) */
+  const cpH = 9.61796700954437255859e-1; /* 0x3feec709_e0000000 =(float)cp */
+  const cpL = -7.02846165095275826516e-9; /* 0xbe3e2fe0_145b01f5 =tail of cp_h*/
+  const dpH1 = 5.84962487220764160156e-1; /* dp_h[1]: 0x3fe2b803_40000000 */
+  const dpL1 = 1.35003920212974897128e-8; /* dp_l[1]: 0x3E4CFDEB, 0x43CFD006 */
+
+  if (!(x >= 2.2250738585072014e-308 && x < Infinity && x !== 1)) {
+    /* x not positive, normal and finite, or x = 1: off the main path */
+    out[index] = Number.NaN;
+    out[index + 1] = Number.NaN;
+    return;
+  }
+
+  BITS.setFloat64(0, x);
+  const ix = BITS.getUint32(0);
+  let n = (ix >> 20) - 0x3ff;
+  const j = ix & 0x000fffff;
+
+  /* determine interval */
+  let jx = j | 0x3ff00000; /* normalize ix */
+  let kk: number;
+  if (j <= 0x3988e) {
+    /* |x|<sqrt(3/2) */
+    kk = 0;
+  } else if (j < 0xbb67a) {
+    /* |x|<sqrt(3)   */
+    kk = 1;
+  } else {
+    kk = 0;
+    n += 1;
+    jx -= 0x00100000;
+  }
+  /* pow.rs's ax, x with the high word jx: x × 2**-n */
+  const ax = x * twoTo(-n);
+
+  /* compute ss = s_h+s_l = (x-1)/(x+1) or (x-1.5)/(x+1.5) */
+  const bp = kk === 0 ? 1.0 : 1.5; /* bp[0]=1.0, bp[1]=1.5 */
+  const u = ax - bp;
+  const v = 1.0 / (ax + bp);
+  const ss = u * v;
+  const sH = zeroLowWord(ss);
+
+  /* t_h=ax+bp[k] High: the double of high word h and low word 0, the significand's 21 bits as an
+  integer times 2**(e - 1043), e being h's exponent field (0x3ff or 0x400 here) */
+  const h = ((jx >>> 1) | 0x20000000) + 0x00080000 + kk * 0x40000;
+  let tH = (0x00100000 + (h & 0x000fffff)) * twoTo((h >>> 20) - 1043);
+  let tL = ax - (tH - bp);
+  const sL = v * (u - sH * tH - sH * tL);
+
+  /* compute log(ax) */
+  let s2 = ss * ss;
+  let r = s2 * s2 * (l1 + s2 * (l2 + s2 * (l3 + s2 * (l4 + s2 * (l5 + s2 * l6)))));
+  r += sL * (sH + ss);
+  s2 = sH * sH;
+  /* 3 + s2 + r lies in [3, 3.02) here, where clearing its low word keeps 19 bits after the point;
+  the guard keeps the general form for any other value */
+  const th = 3.0 + s2 + r;
+  tH = th >= 2 && th < 4 ? Math.trunc(th * 524288) * 1.9073486328125e-6 : zeroLowWord(th);
+  tL = r - (tH - 3.0 - s2);
+
+  /* u+v = ss*(1+...) */
+  const uu = sH * tH;
+  const vv = sL * tH + tL * ss;
+
+  /* 2/(3log2)*(ss+...) */
+  const pH0 = zeroLowWord(uu + vv);
+  const pL0 = vv - (pH0 - uu);
+  const zH = cpH * pH0; /* cp_h+cp_l = 2/(3*log2) */
+  const zL = cpL * pH0 + pL0 * cp + (kk === 0 ? 0.0 : dpL1);
+
+  /* log2(ax) = (ss+..)*2/(3*log2) = n + dp_h + z_h + z_l */
+  const t = n;
+  const dpH = kk === 0 ? 0.0 : dpH1;
+  const t1 = zeroLowWord(zH + zL + dpH + t);
+  const t2 = zL - (t1 - t - dpH - zH);
+
+  out[index] = t1;
+  out[index + 1] = t2;
+}
+
+/**
+ * `x` raised to the power `y` from x's {@link powLog2Parts}, `t1` and `t2` as it wrote them: bit for
+ * bit {@link pow}(x, y).
+ *
+ * @remarks
+ * pow's main path from y on, its operations in its order. pow's own values of y (0, ±1, 2 and ½),
+ * an exponent its main path does not take, and an x off it (t1 NaN) go to pow itself; results that
+ * overflow, underflow or go subnormal go to its whole port, as they do from pow. The parts must be
+ * x's: those of another base give that base's power on the main path, and x's on the others.
+ */
+export function powFromLog2Parts(x: number, t1: number, t2: number, y: number): number {
+  const p1 = 1.66666666666666019037e-1; /* 0x3fc55555_5555553e */
+  const p2 = -2.77777777770155933842e-3; /* 0xbf66c16c_16bebd93 */
+  const p3 = 6.61375632143793436117e-5; /* 0x3f11566a_af25de2c */
+  const p4 = -1.6533902205465251539e-6; /* 0xbebbbd41_c5d26bf1 */
+  const p5 = 4.13813679705723846039e-8; /* 0x3e663769_72bea4d0 */
+  // pow.rs's literal for ln 2, kept as written (the double Math.LN2 is).
+  // oxlint-disable-next-line approx-constant
+  const lg2 = 6.93147180559945286227e-1; /* 0x3fe62e42_fefa39ef */
+  const lg2H = 6.93147182464599609375e-1; /* 0x3fe62e43_00000000 */
+  const lg2L = -1.90465429995776804525e-9; /* 0xbe205c61_0ca86c39 */
+
+  if (
+    y === 0 ||
+    y === 1 ||
+    y === -1 ||
+    y === 2 ||
+    !(Math.abs(y) < 2147485696) ||
+    y === 0.5 ||
+    Number.isNaN(t1)
+  ) {
+    /* pow's own values of y, those its main path does not take, and an x off it */
+    return pow(x, y);
+  }
 
   /* split up y into y1+y2 and compute (y1+y2)*(t1+t2) */
   const y1 = zeroLowWord(y);

@@ -9,7 +9,7 @@
  * and solves each channel's exponent s in Φ_t^s by bisection: q falls monotonically as s rises,
  * since Φ_t ≤ 1 wherever the integrand's weight sin α is not negligible.
  */
-import { pow, sin } from "../../lib/pinnedMath";
+import { pow, powFromLog2Parts, powLog2Parts, sin } from "../../lib/pinnedMath";
 import type { Rgb } from "../photometry/toneCurve";
 import {
   limbShareAt,
@@ -82,62 +82,166 @@ const BISECTION_STEPS = 60;
 const SOLVE_INTERVALS = 1800;
 
 /**
- * The phase integral of a template's law as a function of the exponent s, over a grid sampled
- * once: q(s) = 2 ∫ min(Φ_t^s, 4 Φ_shape) sin α dα inside the range and f(α_end) Φ_shape beyond,
- * Φ_shape with the template's L(α).
+ * A template's grid for {@link phaseIntegralAt}, sampled once and kept ({@link exponentGridOf}): q(s)
+ * = 2 ∫ min(Φ_t^s, 4 Φ_shape) sin α dα inside the range and f(α_end) Φ_shape beyond, Φ_shape with
+ * the template's L(α).
  */
-function phaseIntegralOfExponent(template: PhaseTemplateId): (s: number) => number {
+interface ExponentGrid {
+  /** The nodes within the template's range, 0 to `inRange` − 1: α rises with the node. */
+  readonly inRange: number;
+  /** Each node's Simpson weight times 2h ÷ 3 times sin α. */
+  readonly weight: Float64Array;
+  /** Φ_t at each node, the base its exponent raises. */
+  readonly phaseTemplate: Float64Array;
+  /** `pinnedMath.ts`' {@link powLog2Parts} of each node's Φ_t, two a node. */
+  readonly log2Parts: Float64Array;
+  /** Φ_shape at each node. */
+  readonly shape: Float64Array;
+  /** Φ_t and Φ_shape at the range's end, which f is held at beyond it. */
+  readonly endTemplate: number;
+  readonly endShape: number;
+  /** q at the bracket's ends, which every solve reads first. */
+  readonly bracketQ: readonly [number, number];
+}
+
+/** Each template's grid, made on its first law. */
+const GRIDS = new Map<PhaseTemplateId, ExponentGrid>();
+
+/** The template's {@link ExponentGrid}, sampled on first use and kept. */
+function exponentGridOf(template: PhaseTemplateId): ExponentGrid {
+  const held = GRIDS.get(template);
+  if (held !== undefined) {
+    return held;
+  }
   const curve = PHASE_TEMPLATES[template];
   const { phaseV, validToRad, lommelSeeligerShare } = curve;
   const h = Math.PI / SOLVE_INTERVALS;
   const weight = new Float64Array(SOLVE_INTERVALS + 1);
   const phaseTemplate = new Float64Array(SOLVE_INTERVALS + 1);
+  const log2Parts = new Float64Array(2 * (SOLVE_INTERVALS + 1));
   const shape = new Float64Array(SOLVE_INTERVALS + 1);
-  const inRange: boolean[] = [];
+  let inRange = 0;
   for (let i = 0; i <= SOLVE_INTERVALS; i += 1) {
     const alpha = i * h;
     const simpson = i === 0 || i === SOLVE_INTERVALS ? 1 : i % 2 === 1 ? 4 : 2;
     weight[i] = ((2 * h) / 3) * simpson * sin(alpha);
     phaseTemplate[i] = phaseV(alpha);
+    powLog2Parts(phaseTemplate[i] ?? 0, log2Parts, 2 * i);
     shape[i] = shapePhase(lommelSeeligerShare, alpha, limbShareAt(curve, alpha));
-    inRange.push(alpha <= validToRad);
+    if (alpha <= validToRad) {
+      inRange = i + 1;
+    }
   }
   const endTemplate = phaseV(validToRad);
   const endShape = shapePhase(lommelSeeligerShare, validToRad, limbShareAt(curve, validToRad));
-  return (s) => {
-    const heldF =
-      endShape > 0 ? Math.min(PHASE_F_CLAMP, pow(endTemplate, s) / endShape) : PHASE_F_CLAMP;
-    let q = 0;
-    for (let i = 0; i <= SOLVE_INTERVALS; i += 1) {
-      const shapeI = shape[i] ?? 0;
-      const phase =
-        inRange[i] === true
-          ? Math.min(pow(phaseTemplate[i] ?? 0, s), PHASE_F_CLAMP * shapeI)
-          : heldF * shapeI;
-      q += (weight[i] ?? 0) * phase;
-    }
-    return q;
+  const sampled = { inRange, weight, phaseTemplate, log2Parts, shape, endTemplate, endShape };
+  const grid: ExponentGrid = {
+    ...sampled,
+    bracketQ: [
+      phaseIntegralAt(sampled, EXPONENT_BRACKET[0]),
+      phaseIntegralAt(sampled, EXPONENT_BRACKET[1]),
+    ],
   };
+  GRIDS.set(template, grid);
+  return grid;
 }
 
-/** The exponent s at which `qOf(s)` equals `q`, by bisection; a bracket end where q is beyond it. */
-function solveExponent(qOf: (s: number) => number, q: number): number {
+/**
+ * The phase integral of the grid's template at the exponent s.
+ *
+ * @remarks
+ * Each node's Φ_t^s is pinned `pow`'s, from the node's log₂ parts ({@link powFromLog2Parts}), and
+ * the nodes are summed in order, so q is bit for bit what pow at every node gives.
+ */
+function phaseIntegralAt(grid: Omit<ExponentGrid, "bracketQ">, s: number): number {
+  const { inRange, weight, phaseTemplate, log2Parts, shape, endTemplate, endShape } = grid;
+  const heldF =
+    endShape > 0 ? Math.min(PHASE_F_CLAMP, pow(endTemplate, s) / endShape) : PHASE_F_CLAMP;
+  let q = 0;
+  for (let i = 0; i < inRange; i += 1) {
+    const power = powFromLog2Parts(
+      phaseTemplate[i] ?? 0,
+      log2Parts[2 * i] ?? Number.NaN,
+      log2Parts[2 * i + 1] ?? Number.NaN,
+      s,
+    );
+    q += (weight[i] ?? 0) * Math.min(power, PHASE_F_CLAMP * (shape[i] ?? 0));
+  }
+  for (let i = inRange; i <= SOLVE_INTERVALS; i += 1) {
+    q += (weight[i] ?? 0) * (heldF * (shape[i] ?? 0));
+  }
+  return q;
+}
+
+/**
+ * The exponent s at which the grid's q(s) equals `q`, by bisection; a bracket end where q is beyond
+ * it.
+ *
+ * @remarks
+ * Once the bracket closes to two neighbouring doubles, the middle is one of its ends, whose q is
+ * already known, and is not integrated again.
+ */
+function solveExponent(grid: ExponentGrid, q: number): number {
   let [low, high] = EXPONENT_BRACKET;
-  if (q >= qOf(low)) {
+  let [qLow, qHigh] = grid.bracketQ;
+  if (q >= qLow) {
     return low;
   }
-  if (q <= qOf(high)) {
+  if (q <= qHigh) {
     return high;
   }
   for (let step = 0; step < BISECTION_STEPS; step += 1) {
     const middle = Math.sqrt(low * high);
-    if (qOf(middle) > q) {
+    const qMiddle = middle === low ? qLow : middle === high ? qHigh : phaseIntegralAt(grid, middle);
+    if (qMiddle > q) {
       low = middle;
+      qLow = qMiddle;
     } else {
       high = middle;
+      qHigh = qMiddle;
     }
   }
   return Math.sqrt(low * high);
+}
+
+/**
+ * How many solved exponents `lawFor` keeps a template: far more than the phase integrals a scene's
+ * laws ask of one.
+ */
+export const SOLVED_EXPONENTS_KEPT = 256;
+
+/** Each template's solved exponents, by q, the least recently used first. */
+const SOLVED = new Map<PhaseTemplateId, Map<number, number>>();
+
+/**
+ * The exponent at which the template's law reaches q ({@link solveExponent}), solved once for equal
+ * q and kept among the {@link SOLVED_EXPONENTS_KEPT} used most recently.
+ *
+ * @remarks
+ * A solve reads nothing but its template's grid and q, so a kept exponent is the one solving again
+ * gives. The map's keys are equal for 0 and −0 and for every NaN, each of which compares alike.
+ */
+function exponentFor(template: PhaseTemplateId, q: number): number {
+  let solved = SOLVED.get(template);
+  if (solved === undefined) {
+    solved = new Map();
+    SOLVED.set(template, solved);
+  }
+  const held = solved.get(q);
+  if (held !== undefined) {
+    solved.delete(q);
+    solved.set(q, held);
+    return held;
+  }
+  const s = solveExponent(exponentGridOf(template), q);
+  solved.set(q, s);
+  if (solved.size > SOLVED_EXPONENTS_KEPT) {
+    const oldest = solved.keys().next();
+    if (oldest.done !== true) {
+      solved.delete(oldest.value);
+    }
+  }
+  return s;
 }
 
 /**
@@ -147,7 +251,10 @@ function solveExponent(qOf: (s: number) => number, q: number): number {
  * L(0) and the L(α) curve are the template's; A = p ÷ [L(0) + ⅔(1 − L(0))]; each channel's s is
  * solved so that the law's phase integral, under its L(α), is q. A q beyond what s from 1/16 to 16
  * reaches takes the bracket's end, the nearest law the template allows. The phase integral is that
- * of the exact, clamped and held f; the table's interpolation moves it by about 10⁻⁴.
+ * of the exact, clamped and held f; the table's interpolation moves it by about 10⁻⁴. Each
+ * template's grid is sampled on its first law and kept, and each channel's exponent is solved once
+ * for equal q and kept among the {@link SOLVED_EXPONENTS_KEPT} last used: a solve reads nothing
+ * else, so a law is bit for bit the same whatever came before it.
  *
  * @param p - Geometric albedo per display channel (r, g, b).
  * @param q - Phase integral per display channel (r, g, b).
@@ -155,12 +262,15 @@ function solveExponent(qOf: (s: number) => number, q: number): number {
 export function lawFor(p: Rgb, q: Rgb, template: PhaseTemplateId): PhotometricLaw {
   const { lommelSeeligerShare } = PHASE_TEMPLATES[template];
   const k = shapeGeometricAlbedo(lommelSeeligerShare);
-  const qOf = phaseIntegralOfExponent(template);
   return withTemplateCurve({
     a: [p[0] / k, p[1] / k, p[2] / k],
     lommelSeeligerShare,
     template,
-    phaseExponent: [solveExponent(qOf, q[0]), solveExponent(qOf, q[1]), solveExponent(qOf, q[2])],
+    phaseExponent: [
+      exponentFor(template, q[0]),
+      exponentFor(template, q[1]),
+      exponentFor(template, q[2]),
+    ],
   });
 }
 
