@@ -1962,9 +1962,9 @@ export interface TerrainEdgeTexel {
  * A class set's {@link EdgeSite} at a lit texel, as `class_sets` takes it (lane
  * fix-jagged-biome-edges): the texel's cube-sphere direction from its cell coordinates, a pixel's
  * footprint from its distance in radii and the datum's μ ({@link edgeFootprintRad}, the disc's
- * own), and the lattice of the set's patch `levelsUp` levels above the texel's own, 0 its own, 1
- * its parent and d its ancestor of the field's cells' level, L − 6, whose quad is the disc's
- * refined cell at the hand-over.
+ * own), and the lattice of the set's patch `levelsUp` levels above the texel's own, 0 its own and
+ * 1 its parent; d levels up is its ancestor of the field's cells' level, L − 6, whose quad is the
+ * disc's refined cell, which `class_sets` never shapes but which the twin test holds to the disc's.
  */
 export function terrainEdgeSite(
   texel: TerrainEdgeTexel,

@@ -42,7 +42,9 @@ const TERRAIN_MIXES : bool = true;
 // fix-coast-class-map; uniforms.ts' `InstanceRecords.setCells`): x the slot of its ancestor of the
 // field's cells' level, L − 6, whose class weights it fades to near the hand-over range, or
 // NO_PARENT_SLOT for none; y its place in that ancestor (`cellAncestorPlace`); z the fade, an f32's
-// bits; w its flags (`CLASS_MORPH`); all of them 0 but x where the instance takes none. `edgeBands`
+// bits; w its flags (`CLASS_MORPH`) in its low half and its classes' edges' weight in its high, a
+// u16 unorm (`setEdgeWeight`, lane fix-jagged-biome-edges); all of them 0 but x where the instance
+// takes none. `edgeBands`
 // are its edges' shared stride bands, half floats of kilometres (`strideEdges.ts`), negative for
 // none.
 struct Instance {

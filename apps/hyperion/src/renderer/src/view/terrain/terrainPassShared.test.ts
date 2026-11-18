@@ -2342,6 +2342,16 @@ describe("a lit pass's class sets (lane fix-coast-class-map; terrainLit.wgsl's c
     ];
   }
 
+  it("gives each record the view's classes' edges' weight in its flags' high half, class sets or none (fix-jagged-biome-edges)", async () => {
+    const { made, view } = await flooredPass();
+    made.pass.drawFor(PRIMARY, { ...frameOf(view, 50, LIGHTING), edgeWeight: 0.5 });
+    const written = primaryRecords(made);
+    expect([
+      written.length > 0,
+      written.every(([, , , , flags]) => flags >>> 16 === 32768),
+    ]).toEqual([true, true]);
+  });
+
   it("gives each record its ancestor of the floor's level, its place there, the view's fade and the morph flag", async () => {
     const { made, view } = await flooredPass();
     made.pass.drawFor(PRIMARY, {

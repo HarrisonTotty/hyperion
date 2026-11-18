@@ -1363,7 +1363,9 @@ export class TerrainSession {
   }
 
   /**
-   * `input` with the class sets `view`'s lit terrain of `body` takes (`TerrainFrameInput.classSets`;
+   * `input` with its classes' edges' weight (`TerrainFrameInput.edgeWeight`, lane
+   * fix-jagged-biome-edges) where the view's range is known, and the class sets `view`'s lit
+   * terrain of `body` takes (`TerrainFrameInput.classSets`;
    * lane fix-coast-class-map): under `HANDOVER_AT_CELLS`, where the body's class map was read at its
    * refined texels' cells' corners (the worker's map from generator version 28), its fade to its patches'
    * ancestors of the field's cells' level at the view's range ratio ({@link classCellFade}) and its
@@ -1376,23 +1378,27 @@ export class TerrainSession {
   ): TerrainViewFrameInput {
     const report = this.#reports.get(view);
     const reliefM = this.#reliefs.reliefM(body);
+    // The classes' edges' weight wherever the view's range is known, by the header's relief, so
+    // that the terrain holds them out near the switch whether or not it takes class sets (lane
+    // fix-jagged-biome-edges, part 2); held out where it is not.
+    const edgeReliefM = this.#reliefs.edgeReliefM?.(body) ?? reliefM;
+    const weighted: TerrainViewFrameInput =
+      report === undefined || edgeReliefM === null
+        ? input
+        : {
+            ...input,
+            edgeWeight: terrainEdgeWeight(photorealRangeRatio(report, body, edgeReliefM)),
+          };
     if (
       !this.#handoverAtCells ||
       report === undefined ||
       reliefM === null ||
       !this.#classMaps.readsCellCorners(body)
     ) {
-      return input;
+      return weighted;
     }
     const ratio = photorealRangeRatio(report, body, reliefM);
-    return {
-      ...input,
-      classSets: {
-        cellFade: classCellFade(ratio),
-        morph: true,
-        edgeWeight: terrainEdgeWeight(ratio),
-      },
-    };
+    return { ...weighted, classSets: { cellFade: classCellFade(ratio), morph: true } };
   }
 
   /**

@@ -1362,6 +1362,20 @@ describe("a disc's terrain warmed before its hand-over (HANDOVER_AT_CELLS; lane 
       reads.mockRestore();
       return draw.mock.calls[0]?.[1].classSets;
     };
+    const weightGiven = async (corners: boolean): Promise<unknown> => {
+      const h = await harness("high");
+      await handedOver(h);
+      const reads = vi.spyOn(ClassMapStore.prototype, "readsCellCorners").mockReturnValue(corners);
+      const pass = h.session.pass(MOON);
+      if (pass === null) {
+        throw new Error("no pass");
+      }
+      const draw = vi.spyOn(pass, "drawFor");
+      h.session.noteView(PRIMARY, handing(1.5e7));
+      h.session.drawTerrain(PRIMARY, MOON, frameAt(0));
+      reads.mockRestore();
+      return draw.mock.calls[0]?.[1].edgeWeight;
+    };
     const ratio = photorealRangeRatio(handing(1.5e7), MOON, 18_000);
     const fade = classCellFade(ratio);
     expect([
@@ -1369,11 +1383,11 @@ describe("a disc's terrain warmed before its hand-over (HANDOVER_AT_CELLS; lane 
       await classSetsGiven(false),
       await classSetsGiven(true, false),
       fade > 0 && fade < 1,
-    ]).toEqual([
-      { cellFade: fade, morph: true, edgeWeight: terrainEdgeWeight(ratio) },
-      undefined,
-      undefined,
-      true,
+    ]).toEqual([{ cellFade: fade, morph: true }, undefined, undefined, true]);
+    // Its classes' edges' weight whether or not it takes class sets (fix-jagged-biome-edges).
+    expect([await weightGiven(true), await weightGiven(false)]).toEqual([
+      terrainEdgeWeight(ratio),
+      terrainEdgeWeight(ratio),
     ]);
   });
 

@@ -299,8 +299,9 @@ export interface LitBodyInput {
   /**
    * Its field's relief, m, from its header alone (lane fix-jagged-biome-edges, part 2;
    * `HandoverReliefSource.edgeReliefM`), by which its class map's edges are held out near its
-   * hand-over range, known before the survey's coverage lets it hand over; absent,
-   * {@link handoverReliefM}'s, and with neither its edges are drawn shaped.
+   * hand-over range, known before the survey's coverage lets it hand over. The planner takes
+   * {@link handoverReliefM} where given, the same header's relief, and this one otherwise; with
+   * neither its edges are drawn shaped.
    */
   readonly classEdgeReliefM?: number;
 }

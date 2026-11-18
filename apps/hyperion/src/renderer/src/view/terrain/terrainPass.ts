@@ -498,15 +498,14 @@ export interface TerrainFrameInput {
    * hand-over range, and `morph`, whether a patch's class weights morph to its parent's by its morph
    * factor. Absent, neither: every texel shaded as before, bit for bit.
    */
-  readonly classSets?: {
-    readonly cellFade: number;
-    readonly morph: boolean;
-    /**
-     * The weight, 0 to 1, of its own and its parent's classes' edges' shaping (lane
-     * fix-jagged-biome-edges, part 2; `terrainEdgeWeight`); absent, 0, held out.
-     */
-    readonly edgeWeight?: number;
-  };
+  readonly classSets?: { readonly cellFade: number; readonly morph: boolean };
+  /**
+   * The weight, 0 to 1, of a lit pass's own and parent class sets' shaped edges (lane
+   * fix-jagged-biome-edges, part 2; `handover.ts`' `terrainEdgeWeight` of the view's range ratio),
+   * written into each record (`InstanceRecords.setEdgeWeight`) whether or not it takes class sets;
+   * absent, 0, held out, as where the session knows no range.
+   */
+  readonly edgeWeight?: number;
   /** Grounded and descending bodies, body-fixed (Design note 9). */
   readonly grounded: ReadonlyArray<GroundContact>;
   /** The unit direction towards the sun, body-fixed. */
@@ -4871,6 +4870,7 @@ export class TerrainPass {
     const subGridStrides = strides && this.#geometry.standInStrides !== "off";
     // The class sets a lit pass's patches take (lane fix-coast-class-map), none on another shading.
     const classSets = lit ? input.classSets : undefined;
+    const edgeWeight = lit ? Math.min(Math.max(input.edgeWeight ?? 0, 0), 1) : 0;
     const patchM = finestPatchSizeM(this.#planet);
     if (strides && drawSet !== undefined) {
       this.#sharedStridesOf(device, state, input, drawSet, mask, holds);
@@ -5047,8 +5047,10 @@ export class TerrainPass {
             ancestor === undefined ? 0 : cellAncestorPlace(levels, patch.key.i, patch.key.j),
             Math.min(Math.max(classSets.cellFade, 0), 1),
             classSets.morph ? CLASS_MORPH : 0,
-            Math.min(Math.max(classSets.edgeWeight ?? 0, 0), 1),
           );
+        }
+        if (edgeWeight > 0) {
+          target.setEdgeWeight(edgeWeight);
         }
         (inner ? state.interiorDrawn : drawnIndices).push(n);
         const phasesOf = inner ? interiorPhases : phases;

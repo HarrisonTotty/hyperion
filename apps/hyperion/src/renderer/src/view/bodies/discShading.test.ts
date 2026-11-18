@@ -1156,6 +1156,17 @@ describe("a disc's classes' edges (lane fix-jagged-biome-edges)", () => {
     expect(draw(halves(undefined))).toEqual(draw(halves([0, 0])));
   });
 
+  it("weighs its edges' gate by the share its record holds out near the hand-over (part 2)", () => {
+    const body = wgslFunction(bodyDiscWgsl, "surface_at");
+    expect([
+      body.includes("let edge_weight = 1.0 - disc_row(SECONDARY_COUNT_ROW).w;"),
+      body.includes("if (sums.purity_norm > 0.0 && edge_weight > 0.0) {"),
+      wgslFunction(bodyDiscWgsl, "edge_shape_disc").includes(
+        "let gate = edge_gate(mean_purity, squares / (classes * classes)) * weight;",
+      ),
+    ]).toEqual([true, true, true]);
+  });
+
   it("moves the pixels along a keyed edge and leaves those within one class's texels", () => {
     const record = recordAt(240, 60, SPHERE);
     const draw = (surface: OrientedClassMap): ReturnType<typeof rasteriseDisc> =>

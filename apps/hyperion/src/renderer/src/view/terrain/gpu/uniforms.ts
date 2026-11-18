@@ -678,14 +678,9 @@ export class InstanceRecords {
    * @param place - The patch's place in it ({@link cellAncestorPlace}).
    * @param fade - The fade to it, 0 to 1.
    * @param flags - {@link CLASS_MORPH}, or 0.
-   * @param edgeWeight - The weight, 0 to 1, of its own and its parent's classes' edges' shaping
-   *   (lane fix-jagged-biome-edges, part 2; `handover.ts`' `terrainEdgeWeight`), in the high half of
-   *   `cells.w` as a u16 unorm: 0, held out, unless given, as for a record whose class sets are
-   *   never set.
-   * @throws RangeError with no record this frame, or for a slot, place, fade, flags or weight out of
-   *   range.
+   * @throws RangeError with no record this frame, or for a slot, place, fade or flags out of range.
    */
-  setCells(ancestorSlot: number, place: number, fade: number, flags: number, edgeWeight = 0): void {
+  setCells(ancestorSlot: number, place: number, fade: number, flags: number): void {
     if (this.#count === 0) {
       throw new RangeError("no record to set the class sets of");
     }
@@ -701,14 +696,31 @@ export class InstanceRecords {
     if (flags !== 0 && flags !== CLASS_MORPH) {
       throw new RangeError(`class flags ${flags} are not 0 or CLASS_MORPH`);
     }
-    if (!(edgeWeight >= 0 && edgeWeight <= 1)) {
-      throw new RangeError(`class edge weight ${edgeWeight} is not 0 to 1`);
-    }
     const base = (this.#count - 1) * F32_WORDS_PER_INSTANCE;
     this.#u32[base + 16] = ancestorSlot;
     this.#u32[base + 17] = place;
     this.#f32[base + 18] = fade;
-    this.#u32[base + 19] = (flags | (Math.round(edgeWeight * 0xffff) << 16)) >>> 0;
+    this.#u32[base + 19] = (flags | ((this.#u32[base + 19] ?? 0) & 0xffff_0000)) >>> 0;
+  }
+
+  /**
+   * Sets the last record's classes' edges' weight, 0 to 1 (lane fix-jagged-biome-edges, part 2;
+   * `handover.ts`' `terrainEdgeWeight`; `terrainLit.wgsl`'s `class_sets`): the high half of
+   * `cells.w` as a u16 unorm, its flags kept. A record takes 0 until this is called: its own and
+   * its parent's class sets' edges held out, every texel shaded as before.
+   *
+   * @throws RangeError with no record this frame, or for a weight out of 0 to 1.
+   */
+  setEdgeWeight(weight: number): void {
+    if (this.#count === 0) {
+      throw new RangeError("no record to set the classes' edges' weight of");
+    }
+    if (!(weight >= 0 && weight <= 1)) {
+      throw new RangeError(`class edge weight ${weight} is not 0 to 1`);
+    }
+    const base = (this.#count - 1) * F32_WORDS_PER_INSTANCE;
+    const flags = (this.#u32[base + 19] ?? 0) & 0xffff;
+    this.#u32[base + 19] = (flags | (Math.round(weight * 0xffff) << 16)) >>> 0;
   }
 
   /**

@@ -2290,7 +2290,7 @@ describe("a texel's classes' edges (lane fix-jagged-biome-edges)", () => {
     ]);
   });
 
-  it("takes a pixel's footprint and its ancestor's lattice as the shader does", () => {
+  it("takes a pixel's footprint as the shader does, the disc's and the terrain's alike", () => {
     expect(collapseWhitespace(wgslFunction(terrainLitWgsl, "class_sets"))).toContain(
       "let footprint = edge_footprint(length(in.fromCameraBf) * draw.cameraBodyFixedM.w, pixel_rad, edge_mu);",
     );
