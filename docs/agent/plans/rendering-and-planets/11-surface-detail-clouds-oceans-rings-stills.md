@@ -1402,6 +1402,29 @@ on it.
   labelled `TERRAIN: STREAMING`; the handlers refuse a foreign sender, an oversized image and a
   malformed label; the control and list by keyboard, through `getByRole`.
   Records: [11-surface-detail-clouds-oceans-rings-stills/records/R11.T10.c.md](11-surface-detail-clouds-oceans-rings-stills/records/R11.T10.c.md).
+- **R11.T10.e Stills at the output size, tiled, at the high setting's passes, with their own
+  terrain view** (decision-leans-54, rulings 4 to 6, 2026-11-18). Before T10.d, whose soak measures
+  the streaming wait and whether the tiles fit the memory ceiling. First the still's terrain view
+  (ruling 4a): the cells surveyed at the request frozen, its patches selected at the still's size and
+  streamed at bulk priority through R05, and a real `streamed()`, so that a still is taken with a
+  body handed over to terrain. Then, in order:
+  1. **The size.** The console's choice: by default the view's output size at scale 1, never below
+     it, up to `STILL_MAX_SIDE_PX`. R06's discs and the sprites are prepared at the still's viewport.
+  2. **The tiles.** R07's `bodyDisc.wgsl`, `bodyDiscDraw.wgsl` and `starSprite.wgsl` and R06's
+     `sky/shaders/disc.wgsl` take the off-axis projection M · P and a tile origin, drawn through
+     `tileProjection` and culled by `tileFrustum`. A frame's projection is the on-axis case, bit for
+     bit.
+  3. **The passes.** The high setting's passes, their pipelines and the atmospheres' kernels are made
+     asynchronously in `prepare()` on either setting, and `STILL_SAMPLES` is 8 on both, averaged in
+     linear HDR (ruling 5).
+
+  Tests: smoke part 28 takes a still with a body handed over to terrain; `stillLabel` shows
+  `TERRAIN: STREAMING` when the frustum has not streamed within `STILL_STREAMING_TIMEOUT_S`; a still
+  larger than the view has its disc and sprites on T10.a's predicted pixels; a 2 × 2-tiled still
+  equals an untiled still of the same size within the projection test's tolerance; test-render's
+  captures are byte-identical; no synchronous pipeline is created in a batch; the renderer test pins
+  8 samples on both settings.
+
 - **R11.T10.d The soak, by hand, recorded.** On the otherwise idle development machine (RTX 3080)
   and, by the owner, on an otherwise idle UHD 620, whose i915 preemption limit is the one the cap
   guards, at the batch cap: repeated
