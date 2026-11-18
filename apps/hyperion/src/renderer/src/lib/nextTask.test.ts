@@ -24,4 +24,20 @@ describe("nextTask (lane perf-long-tasks-3)", () => {
     vi.useFakeTimers();
     await expect(untilNextTask()).resolves.toBeUndefined();
   });
+
+  it("runs its work once, at a fake clock's advance that gives the channel no turn", async () => {
+    vi.useFakeTimers();
+    let runs = 0;
+    nextTask(() => {
+      runs += 1;
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    const atAdvance = runs;
+    vi.useRealTimers();
+    // The channel's message, come since, finds the work run.
+    await new Promise((resolve) => {
+      setTimeout(resolve, 5);
+    });
+    expect([atAdvance, runs]).toEqual([1, 1]);
+  });
 });

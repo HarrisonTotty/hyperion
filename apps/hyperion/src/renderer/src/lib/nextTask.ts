@@ -4,21 +4,26 @@
  *
  * @remarks
  * A message on a channel of its own, which runs once the tasks queued before it have, and which a
- * hidden page does not throttle as it throttles timers (the views check's windows are hidden), nor
- * a test's fake clock hold.
+ * hidden page does not throttle as it throttles timers (the views check's windows are hidden); or
+ * a timer of no delay, whichever comes first, so that a test whose fake clock advances timers runs
+ * it there too, though it gives the channel's message no turn. The work runs once.
  */
 
 /** Runs `task` in a task of its own, after those already queued. */
 export function nextTask(task: () => void): void {
   const channel = new MessageChannel();
-  channel.port1.addEventListener(
-    "message",
-    () => {
-      channel.port1.close();
-      task();
-    },
-    { once: true },
-  );
+  let ran = false;
+  const run = (): void => {
+    if (ran) {
+      return;
+    }
+    ran = true;
+    clearTimeout(timer);
+    channel.port1.close();
+    task();
+  };
+  const timer = setTimeout(run, 0);
+  channel.port1.addEventListener("message", run, { once: true });
   channel.port1.start();
   channel.port2.postMessage(null);
 }
