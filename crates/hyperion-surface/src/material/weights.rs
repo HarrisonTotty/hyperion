@@ -317,7 +317,7 @@ fn coarse_weights<F: FieldView>(
     let header = field.header();
     let sample = *sample;
     let (key, cell) = synth.cell_at(dir)?;
-    // The record the rules read, the warped point's cell's from generator version 33 (lane
+    // The record the rules read, the warped point's cell's from generator version 34 (lane
     // fix-jagged-biome-edges); the omitted closed forms and the channels stay the point's own.
     let (site_key, site_cell) = site_cell_at(synth, cache, dir, level)?;
     let site = Site::kept(synth, cache, site_key, site_cell)?;

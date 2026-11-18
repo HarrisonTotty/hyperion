@@ -58,7 +58,7 @@
 //! ([`maturity_node_albedo`]).
 //!
 //! Nothing here draws from a stream but the class edges' warp (lane fix-jagged-biome-edges;
-//! `edges`, from generator version 33), which opens `surface.class_edges`.
+//! `edges`, from generator version 34), which opens `surface.class_edges`.
 
 mod albedo;
 mod bearing;

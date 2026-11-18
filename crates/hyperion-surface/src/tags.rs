@@ -126,7 +126,7 @@ hyperion_base::domain_tags! {
     /// fix-jagged-biome-edges; `material::edges`), keyed by `surface_item` of a 3D lattice corner's
     /// word, i << 32 | j of the corner's 32-bit two's complements, with the draw number
     /// octave << 32 | k, as [`noise`](crate::noise) keys its corners; octave m's lattice offset is
-    /// words 2⁴⁰ + 4m + axis of item 0, above every corner's draw. Read from generator version 33
+    /// words 2⁴⁰ + 4m + axis of item 0, above every corner's draw. Read from generator version 34
     /// (`CLASS_EDGES_VERSION`).
     SURFACE_CLASS_EDGES: SurfaceDetail = "surface.class_edges";
 }

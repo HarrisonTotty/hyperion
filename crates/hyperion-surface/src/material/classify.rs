@@ -839,7 +839,7 @@ impl<'a> Point<'a> {
         let level = finest_band(field.header());
         let sample = *sample;
         let (key, cell) = synth.cell_at(dir)?;
-        // The record the rules read, the warped point's cell's from generator version 33 (lane
+        // The record the rules read, the warped point's cell's from generator version 34 (lane
         // fix-jagged-biome-edges); the channels and the ice cut's grid stay the point's own cell's,
         // which the view holds wherever it holds the point.
         let (site_key, site_cell) = super::edges::site_cell_at(synth, cache, dir, level)?;
