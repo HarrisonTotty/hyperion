@@ -7837,3 +7837,9 @@ a_held_bare_core_beside_a_main_sequence_star_stays_a_helium_star}`.
   every Be/X host draws its active mark. The tests are `high_mass_side_tests`. Leans as recorded:
   the outburst rate is counted before the young lists' age thinning. The binary classes' and the
   Type Ia yield's manifests and fingerprint galaxies are at 32 (their census is 31's).
+- **P11.T8.b's giant outbursts as drawn (train 33, 2026-11-18; a measurement, not a gate;
+  research-leans-53 item 1):** every feature's list walked at 33 (`FeatureLevelList`'s X-ray
+  binary entries, each read by `XrbScanMarks::kind` and `is_bex_active` as the alert walk reads
+  it) draws 834 Be/X hosts, 9 active, all in nurseries (849 of their 1,790.42 expected high-mass
+  hosts kept after the age thinning): (1,184.0 + 834) × 0.01 × 0.1 = 2.02 a year, or 2.08 with the
+  lists' drawn active hosts, inside 1.18–2.96; 2,049.8 high-mass hosts drawn of the 3,000.

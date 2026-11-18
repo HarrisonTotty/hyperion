@@ -1019,8 +1019,8 @@ _The names T3 calls, re-validated against the code (2026-11-02): `QueryHeightErr
 - The goldens over the synthetic worlds live in the library (`scatter/golden.rs`, as
   `ground/golden.rs`), since `ci`'s wasip1 run does not enable `testing` for `tests/`; the slow
   test is a library `#[ignore = "slow: …"]` test.
-- No `GENERATOR_VERSION` bump: every rock is held at `ROCKS_VERSION` = 33 (rule B), and tests reach
-  the 33 rules through `scatter::with_rock_rules`.
+- No `GENERATOR_VERSION` bump: every rock was held at `ROCKS_VERSION` = 33 (rule B), and tests
+  reached the 33 rules through `scatter::with_rock_rules`, until train 33 folded the hold (records).
 - The sketches' `BodyFixed` and `Gyr` are `[f64; 3]` and `Gigayears`.
 
 - **R11.T3.a The law and the site.** `RockAbundance`, `exponential_integral_e1`, `RockSite`,
