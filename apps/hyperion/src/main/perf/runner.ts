@@ -279,6 +279,7 @@ export class PerfRunner {
     if (arrival === null) {
       throw new PerfRunRefused("config refused: the run has not arrived; prepare it first");
     }
+    this.#deps.log("perf run: the renderer's config answered");
     return {
       arrival,
       launch,
@@ -291,6 +292,9 @@ export class PerfRunner {
   }
 
   #refuseUnless(kind: Phase["kind"], call: string): void {
+    if (this.ended) {
+      throw new PerfRunRefused(`${call} refused: the run has ended`);
+    }
     if (this.#phase.kind !== kind) {
       throw new PerfRunRefused(`${call} refused: the run is ${this.#phase.kind}, not ${kind}`);
     }
@@ -299,6 +303,10 @@ export class PerfRunner {
   async #describe(description: PerfRunDescription): Promise<void> {
     this.#refuseUnless("describing", "describe");
     this.#description = description;
+    const views = description.views.length;
+    this.#deps.log(
+      `perf run: the renderer described ${String(views)} view${views === 1 ? "" : "s"}`,
+    );
     this.#phase = { kind: "warming", startMs: null };
     this.#arm(WARM_UP_SILENCE_MS, "send a warm-up sample");
     await Promise.resolve();
@@ -351,11 +359,23 @@ export class PerfRunner {
     return answer;
   }
 
+  /**
+   * Repetition `n`'s start: the server restarted in a fresh data directory, the trace started and
+   * the span opened, the ship placed inside it.
+   *
+   * @remarks
+   * A step that fails (the restart's `ServerError`, the trace not started, the placement
+   * refused) ends the run as failed, with a record of the repetitions done whose notes say why, and
+   * the call is refused, so that the renderer stops. A run that ends while a step is awaited, by a
+   * fault or the watchdog, starts nothing after it: no server, trace or watchdog outlives it.
+   *
+   * @throws {@link PerfRunRefused} out of turn, once the run has ended, or where a step failed.
+   */
   async #beginRepetition(n: number): Promise<PerfRepetitionStart> {
     this.#refuseUnless("between", "beginRepetition");
     const phase = this.#phase;
     const done = phase.kind === "between" ? phase.done : 0;
-    const { launch, server, freshDataDir, trace, now, log } = this.#deps;
+    const { launch } = this.#deps;
     if (n !== done + 1 || n > launch.repetitions) {
       throw new PerfRunRefused(
         `beginRepetition refused: repetition ${String(n)} follows ${String(done)} of ${String(launch.repetitions)}`,
@@ -363,17 +383,61 @@ export class PerfRunner {
     }
     // Outside the span: the restart takes a few seconds, the thermal state carrying across it.
     this.#disarm();
+    try {
+      return await this.#openRepetition(n);
+    } catch (error: unknown) {
+      if (error instanceof PerfRunRefused) {
+        throw error;
+      }
+      const reason = `repetition ${String(n)} could not begin: ${reasonOf(error)}`;
+      await this.#finish({ status: "failed", reason });
+      throw new PerfRunRefused(`beginRepetition refused: ${reason}`, { cause: error });
+    }
+  }
+
+  /**
+   * `beginRepetition`'s steps, the run's end checked after each `await`.
+   *
+   * @throws {@link PerfRunRefused} where the run ended during a step; whatever a step throws.
+   */
+  async #openRepetition(n: number): Promise<PerfRepetitionStart> {
+    const { launch, server, freshDataDir, trace, now, log } = this.#deps;
+    // A call, not a property read, so that each check reads the run's state after its `await`.
+    const throwIfEnded = (): void => {
+      if (this.ended) {
+        throw new PerfRunRefused(
+          `beginRepetition refused: the run ended as repetition ${String(n)} began`,
+        );
+      }
+    };
     if (server !== null) {
       await server.stop();
-      this.#serverUrl = await server.start(await freshDataDir(n));
+      throwIfEnded();
+      const dataDir = await freshDataDir(n);
+      throwIfEnded();
+      const url = await server.start(dataDir);
+      if (this.ended) {
+        // The run's end stopped the server it found: this one may have started after it did.
+        await server.stop();
+      }
+      throwIfEnded();
+      this.#serverUrl = url;
     }
-    await trace?.start(n);
+    if (trace !== null) {
+      await trace.start(n);
+      if (this.ended) {
+        // Outside a span the run's end stops no trace, so this one is stopped here.
+        await trace.stop();
+      }
+      throwIfEnded();
+    }
     const fromMs = now();
     this.#phase = { kind: "spanning", n, fromMs };
     this.#arm(this.#spanLimitMs(), `end repetition ${String(n)}`);
     log(`perf run: repetition ${String(n)} of ${String(launch.repetitions)} begins`);
     // The arrival at script time 0, inside the span, so that its work lands in every repetition.
     const arrival = await this.#deps.place(this.#serverUrl);
+    throwIfEnded();
     this.#arrival = arrival;
     return { serverUrl: this.#serverUrl, arrival };
   }
@@ -552,4 +616,9 @@ export class PerfRunner {
     this.#watchdog?.abort();
     this.#watchdog = null;
   }
+}
+
+/** A failure's reason in words. */
+function reasonOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

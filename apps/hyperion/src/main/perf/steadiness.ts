@@ -2,8 +2,10 @@
  * A perf run's warm-up verdict and its trend screen (plan R12, R12.T4.b; Design note 7).
  *
  * @remarks
- * The warm-up lasts at least {@link WARM_UP_MIN_S}, 4.3 τ of the UHD 620's RAPL PL1 window
- * (τ = 28 s), so that the PL1 average has converged to about 1.4%, and then until a sliding
+ * The warm-up lasts at least {@link WARM_UP_MIN_S}, 4.3 τ of the UHD 620's RAPL PL1, whose τ
+ * (28 s) is the time constant of the exponentially weighted moving average of package power that
+ * PL1 limits (Intel's processor datasheets, "Turbo Time Parameter", Tau), so that the average has
+ * converged to within e^−4.3 ≈ 1.4% of its steady value (the plan's 1.4%), and then until a sliding
  * {@link WINDOW_S} window changes from the one before by less than {@link GPU_CLOCK_TOLERANCE} in
  * median GPU frequency and {@link PACKAGE_TOLERANCE_DEGC} in package temperature, for at most
  * {@link WARM_UP_MAX_S}, after which the record says `NOT STEADY` (Kalibera and Jones, ISMM 2013,
@@ -19,7 +21,7 @@
  * repetitions are independent.
  */
 
-/** The warm-up's least length, s: two minutes, 4.3 τ of PL1's 28 s window (Design note 7). */
+/** The warm-up's least length, s: two minutes, 4.3 times PL1's τ of 28 s (Design note 7). */
 export const WARM_UP_MIN_S = 120;
 
 /** The warm-up's most, s: ten minutes, after which it is `NOT STEADY` (Design note 7). */

@@ -2,6 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import { arrivalOf, isLoopback, placeShipArgs, runBuildOf } from "./session";
 
+/** Place-ship's JSON line for an arrival in the universe whose ID is written `id`. */
+function placeShipLine(id: string): string {
+  return JSON.stringify({ universe: { id }, system: "4200acb20000000d", body: null });
+}
+
 describe("a perf run's session", () => {
   it("reads the build the recipe states, or refuses a run without it", () => {
     const commit = "0123456789abcdef0123456789abcdef01234567";
@@ -58,6 +63,12 @@ describe("a perf run's session", () => {
       body: "4200acb20000000d.0004",
     });
     expect(arrivalOf("no JSON")).toBeNull();
+  });
+
+  it("refuses an arrival whose universe ID is not 16 lowercase hexadecimal digits", () => {
+    expect(arrivalOf(placeShipLine("3504954FF4FEABF4"))).toBeNull();
+    expect(arrivalOf(placeShipLine("3504954ff4feabf"))).toBeNull();
+    expect(arrivalOf(placeShipLine("HYPERION PERF"))).toBeNull();
   });
 
   it("takes only this machine's addresses as the local server's", () => {

@@ -66,7 +66,7 @@ describe("the trend screen", () => {
     expect(trendOf([14, 13, 12, 11, 10])).toEqual({ direction: "falling", s: -10 });
   });
 
-  it("does not flag four up and one down", () => {
+  it("does not flag a five with one pair out of order", () => {
     expect(mannKendallS([10, 11, 12, 14, 13])).toBe(8);
     expect(trendOf([10, 11, 12, 14, 13])).toBeNull();
     expect(trendOf([10, 12, 11, 13, 14])).toBeNull();

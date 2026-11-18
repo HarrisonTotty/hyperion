@@ -121,14 +121,15 @@ describe("the perf scenes' scripts", () => {
     expect(profile.poseAt(profile.durationS).clearanceM).toBeCloseTo(1, 6);
   });
 
-  it("sweep 10 au across the nuclear disc's system in 120 s, turning once", () => {
+  it("sweep 300 au about the nuclear disc's barycentre in 120 s, turning once", () => {
     const script = nuclearDiscSweep();
     expect(script.durationS).toBe(SWEEP_DURATION_S);
     expect(script.frame).toBe("system");
     const start = script.poseAt(0);
     const end = script.poseAt(SWEEP_DURATION_S);
-    expect(end.positionM.x - start.positionM.x).toBeCloseTo(SWEEP_LENGTH_M, -3);
-    expect(SWEEP_LENGTH_M).toBe(10 * AU_M);
+    expect(SWEEP_LENGTH_M).toBe(300 * AU_M);
+    expect(start.positionM.x).toBeCloseTo(-150 * AU_M, -3);
+    expect(end.positionM.x).toBeCloseTo(150 * AU_M, -3);
     const half = lookOf(script.poseAt(SWEEP_DURATION_S / 2));
     expect(half.x).toBeCloseTo(-1, 9);
     expect(lookOf(start).x).toBeCloseTo(1, 9);

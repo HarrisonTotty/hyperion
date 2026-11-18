@@ -66,7 +66,7 @@ export interface PerfSceneServer {
 /**
  * The pins (R12.T5.b): the universe's seed, the system and the bodies the scenes fly, at generator
  * version 31, in the wire's text forms. `crates/hyperion-server/tests/perf_scenes.rs` holds them
- * to what each scene needs, and a Vitest (`view/perf/scenes.test.ts`) holds its constants and these
+ * to what each scene needs, and a Vitest (`scenes.pins.test.ts`) holds its constants and these
  * equal; a generator bump that moves one re-pins it and bumps the scenes' versions.
  */
 export const PERF_PINS = {

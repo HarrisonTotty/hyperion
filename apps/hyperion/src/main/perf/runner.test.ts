@@ -234,6 +234,8 @@ class FakeMemory implements RunMemory {
 class FakeServer implements RunServer {
   readonly starts: string[] = [];
   stops = 0;
+  /** What the next stop waits on before it resolves, where a test holds it. */
+  hold: Promise<void> | null = null;
 
   start(dataDir: string): Promise<string> {
     this.starts.push(dataDir);
@@ -242,7 +244,9 @@ class FakeServer implements RunServer {
 
   stop(): Promise<null> {
     this.stops += 1;
-    return Promise.resolve(null);
+    const hold = this.hold;
+    this.hold = null;
+    return hold === null ? Promise.resolve(null) : hold.then(() => null);
   }
 }
 
@@ -275,6 +279,11 @@ class Waits {
 
 const QUIET: PreconditionReport = { quiet: true, refusals: [], state: STATE, cooledMs: 0 };
 
+/** Does nothing: a resolver's stand-in until its promise is made. */
+function ignore(): void {
+  // Nothing to resolve yet.
+}
+
 /** A runner over stand-ins, and what it did. */
 function harness(
   launch: PerfLaunch = LAUNCH,
@@ -289,6 +298,10 @@ function harness(
   const waits = new Waits();
   let out = "";
   const exits: number[] = [];
+  let exited: (code: number) => void = ignore;
+  const exit = new Promise<number>((resolve) => {
+    exited = resolve;
+  });
   const log: string[] = [];
   const deps: PerfRunnerDeps = {
     launch,
@@ -326,7 +339,10 @@ function harness(
     },
     outPath: "target/perf-run/runs.v1.jsonl",
     log: (line) => log.push(line),
-    exit: (code) => exits.push(code),
+    exit: (code) => {
+      exits.push(code);
+      exited(code);
+    },
     ...overrides,
   };
   const runner = new PerfRunner(deps);
@@ -339,6 +355,8 @@ function harness(
     trace,
     waits,
     exits,
+    /** Resolves with the run's exit code once it has exited. */
+    exit,
     log,
     out: () => out,
   };
@@ -492,7 +510,7 @@ describe("the perf runner", () => {
     expect(onlyRecord(out()).harness.warmUp).toEqual({ seconds: WARM_UP_MAX_S, steady: false });
   });
 
-  it("flags a monotone five in its notes, and not four up and one down", async () => {
+  it("flags a monotone five in its notes, and not a five with one pair out of order", async () => {
     const monotone = harness();
     await monotone.runner.prepare();
     const ops = monotone.runner.operations();
@@ -539,7 +557,7 @@ describe("the perf runner", () => {
   });
 
   it("ends a run whose renderer stops answering with a record whose notes say so", async () => {
-    const { runner, clock, waits, out, exits } = harness();
+    const { runner, clock, waits, out, exits, exit } = harness();
     await runner.prepare();
     const ops = runner.operations();
     await ops.describe(DESCRIPTION);
@@ -549,13 +567,58 @@ describe("the perf runner", () => {
     const watchdog = waits.pending.at(-1);
     expect(watchdog?.ms).toBe(DESCRIBE_SILENCE_MS);
     watchdog?.fire();
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await exit;
     const record = onlyRecord(out());
     expect(record.runs).toHaveLength(2);
     expect(record.harness.repetitions).toBe(2);
     expect(record.notes).toContain("the renderer stopped answering");
     expect(record.notes).toContain("Ended after 2 of 5 repetitions.");
     expect(exits).toEqual([1]);
+  });
+
+  it("ends the run where a repetition's placement fails, its record holding those done", async () => {
+    let places = 0;
+    const { runner, clock, out, exits } = harness(LAUNCH, QUIET, {
+      place: () => {
+        places += 1;
+        // The warm-up's and repetition 1's arrivals, then repetition 2's refused.
+        return places <= 2
+          ? Promise.resolve({ universe: "00000000000000aa", system: "s", body: "b" })
+          : Promise.reject(new Error("place-ship: the ship could not be placed"));
+      },
+    });
+    await runner.prepare();
+    const ops = runner.operations();
+    await ops.describe(DESCRIPTION);
+    await warmUp(ops, clock);
+    await repetitions(ops, clock, 1);
+    await expect(ops.beginRepetition(2)).rejects.toBeInstanceOf(PerfRunRefused);
+    const record = onlyRecord(out());
+    expect(record.runs).toHaveLength(1);
+    expect(record.notes).toContain(
+      "FAILED: repetition 2 could not begin: place-ship: the ship could not be placed.",
+    );
+    expect(record.notes).toContain("Ended after 1 of 5 repetitions.");
+    expect(exits).toEqual([1]);
+  });
+
+  it("starts nothing after a fault that ends the run during a repetition's restart", async () => {
+    const { runner, clock, server, trace, waits } = harness();
+    await runner.prepare();
+    const ops = runner.operations();
+    await ops.describe(DESCRIPTION);
+    await warmUp(ops, clock);
+    let release: () => void = ignore;
+    server.hold = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const begun = ops.beginRepetition(1);
+    await runner.fault("the GPU process exited (crashed)");
+    release();
+    await expect(begun).rejects.toBeInstanceOf(PerfRunRefused);
+    expect(server.starts).toEqual(["/userData/perf-run/server-data-0"]);
+    expect(trace.started).toEqual([]);
+    expect(waits.pending).toEqual([]);
   });
 
   it("ends a fault before any repetition with no record, saying why", async () => {

@@ -36,12 +36,14 @@ import { DescentProfile, landingSiteOf, trackStretches } from "./descentProfile"
 import {
   DESCENT_REFUSED,
   DescentSpike,
+  type DescentSpikePerf,
   groundSpeedReading,
   heightReading,
   heightUnitFor,
   patchesReading,
   siteElevationReading,
   siteSurveyReading,
+  type SpikeDrawnFrame,
   TEST_PLANET_STATEMENT,
   VIEWS_NOT_MADE,
 } from "./DescentSpike";
@@ -240,6 +242,7 @@ function renderSpike(
     readonly prepare?: typeof prepareDescent;
     readonly listeners?: SpikeListeners;
     readonly variant?: TerrainVariant;
+    readonly perf?: DescentSpikePerf;
   } = {},
 ): ReturnType<typeof render> {
   return render(
@@ -254,6 +257,7 @@ function renderSpike(
         prepare={options.prepare}
         listeners={options.listeners}
         variant={options.variant}
+        perf={options.perf}
       />
     </GraphicsStatusContext>,
   );
@@ -367,6 +371,32 @@ describe("DescentSpike", () => {
     });
     expect(made.views().length).toBe(3);
     expect(samples.at(-1)).toBe(2);
+  }, 30_000);
+
+  it("tells a perf run each frame's drawn sizes, its script held at time 0 by a constant clock", async () => {
+    fakeFramesAndTimeouts();
+    stubLayout();
+    const made = readyEngine({ refuseFrames: false });
+    const drawn: SpikeDrawnFrame[] = [];
+    const scriptTimesS: number[] = [];
+    renderSpike({
+      engine: made.source,
+      listeners: { onFrame: (sample) => scriptTimesS.push(sample.scriptTimeS) },
+      perf: { scriptNowMs: () => 12_345, onDrawn: (frame) => drawn.push(frame) },
+    });
+    await screen.findByText(/SELECTED/, undefined, { timeout: 20_000 });
+    // A second of frames on the faked clock, over which an unheld script would move on.
+    await act(async () => {
+      vi.advanceTimersByTime(1000);
+      await Promise.resolve();
+    });
+    const size = { widthPx: 640, heightPx: 360 };
+    expect(drawn.length).toBeGreaterThan(1);
+    expect(drawn.at(-1)).toEqual({
+      session: null,
+      sizes: { main: size, orbit: size, craft: size },
+    });
+    expect(new Set(scriptTimesS)).toEqual(new Set([0]));
   }, 30_000);
 
   it("refuses to fly when the script cannot clear the measured terrain", async () => {

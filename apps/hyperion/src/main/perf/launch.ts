@@ -13,7 +13,7 @@
  * move with it.
  */
 
-import type { GraphicsLaunchMode } from "../../preload/api";
+import type { GraphicsLaunchMode, PerfLaunch } from "../../preload/api";
 import { type ChromiumSwitch, graphicsSwitches } from "../graphics/switches";
 
 /** What decides a perf launch's switches. */
@@ -42,6 +42,64 @@ export function perfSwitches(options: PerfGraphicsOptions): ReadonlyArray<Chromi
     mode: options.mode,
     gpuTiming: perfGpuTiming(options),
   });
+}
+
+/** A switch as Chromium's command line writes it: `--name`, or `--name=value`. */
+function switchText({ name, value }: ChromiumSwitch): string {
+  return value === undefined ? `--${name}` : `--${name}=${value}`;
+}
+
+/** The profile's directory: the run's own, which says nothing of how it draws. */
+const USER_DATA_DIR = "--user-data-dir";
+
+/**
+ * The switches in force on a perf launch, for its record (Design note 5): Chromium's that the
+ * launch was given on its command line, then perf mode's own appended graphics switches.
+ *
+ * @remarks
+ * The given ones are `argv`'s `--` arguments before the entry script, where the recipe puts them
+ * (`perfRun.sh`: `--ozone-platform=…`, and with `--software` test-render's SwiftShader and
+ * headless switches, `--enable-unsafe-webgpu` among them), as written; `--user-data-dir`, the
+ * run's profile, is left out, and so is everything from the entry on, the client's own options. A
+ * packaged launch has no entry to stop at, so its own options cannot be told from Chromium's, and
+ * it gives none.
+ *
+ * @param argv - `process.argv`, its executable first.
+ * @param packaged - `app.isPackaged`: a packaged app is launched as `hyperion <args>`, and in
+ *   development Electron as `electron [switches] <entry> <args>`.
+ * @param appended - Perf mode's switches, which it put on the command line itself (`perfSwitches`).
+ */
+export function perfSwitchesInForce(
+  argv: ReadonlyArray<string>,
+  packaged: boolean,
+  appended: ReadonlyArray<ChromiumSwitch>,
+): ReadonlyArray<string> {
+  const given: string[] = [];
+  if (!packaged) {
+    for (const arg of argv.slice(1)) {
+      if (!arg.startsWith("--")) {
+        break;
+      }
+      if (arg !== USER_DATA_DIR && !arg.startsWith(`${USER_DATA_DIR}=`)) {
+        given.push(arg);
+      }
+    }
+  }
+  return [...given, ...appended.map(switchText)];
+}
+
+/**
+ * A perf run's window's content size, DIP: the station's 1080p on both settings (Design note 8's
+ * station, the wireframe alone at 1080p), and every other scene's R05 Design note 21's 1080p at
+ * `high` and 720p at `low`.
+ */
+export function perfWindowSize(launch: Pick<PerfLaunch, "scene" | "setting">): {
+  readonly width: number;
+  readonly height: number;
+} {
+  return launch.scene === "station-wireframe-descent" || launch.setting === "high"
+    ? { width: 1920, height: 1080 }
+    : { width: 1280, height: 720 };
 }
 
 /** The machines the rendering plans' README names (Target hardware), by what identifies them. */
@@ -74,14 +132,21 @@ export interface GpuIds {
 /**
  * The machine's slug, a perf record ID's middle part (Design note 5): a Target hardware entry of
  * the rendering plans' README by its GPU's PCI IDs (`rtx3080`, `uhd620`) or, for the owner's Mac,
- * its platform and CPU (`m5`); `swiftshader` for Chromium's software adapter; otherwise `gpu-` and
- * the vendor's and device's IDs in hexadecimal, never a host name.
+ * its platform and CPU (`m5`); `swiftshader` for Chromium's software adapter, which the software
+ * mode draws on and whose PCI IDs Chromium may report as 0 (a pod's run, 2026-11-18); otherwise
+ * `gpu-` and the vendor's and device's IDs in hexadecimal, never a host name.
+ *
+ * @param software - Whether the launch is the check-only software mode (R01.T16).
  */
 export function machineSlugOf(
   gpu: GpuIds | null,
   platform: NodeJS.Platform,
   cpuModel: string,
+  software = false,
 ): string {
+  if (software) {
+    return "swiftshader";
+  }
   const known = KNOWN_MACHINES.find(({ matches }) => matches(gpu, platform, cpuModel));
   if (known !== undefined) {
     return known.slug;

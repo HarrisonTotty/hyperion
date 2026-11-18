@@ -50,6 +50,7 @@
 mod common;
 
 use std::collections::VecDeque;
+use std::fmt;
 use std::num::NonZeroUsize;
 use std::ops::RangeInclusive;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -60,11 +61,11 @@ use common::{TestClient, TestServer};
 use hyperion_protocol::{
     BodyDetailRequest, BodyIdHex, BodyKindDto, BodyRecordDto, BodyStateDto, BodySummaryDto,
     ClimateForcingDto, DetailLevelDto, PlanetClassDto, PopulationDto, QueryModeDto, RequestBody,
-    ResponseBody, RingDto, RingKindDto, SectionDto, SeedHex, SurfaceStateDto, SystemBodiesDto,
-    SystemBodiesRequest, SystemExistenceDto, SystemIdHex, SystemSummaryDto, SystemSummaryRequest,
-    UniverseIdHex, UniverseTime,
+    RequestError, ResponseBody, RingDto, RingKindDto, SectionDto, SeedHex, SurfaceStateDto,
+    SystemBodiesDto, SystemBodiesRequest, SystemExistenceDto, SystemIdHex, SystemSummaryDto,
+    SystemSummaryRequest, UniverseIdHex, UniverseTime,
 };
-use hyperion_server::surface::RECORD_TIME;
+use hyperion_server::surface::{InputsSource, RECORD_TIME, RecordInputs};
 use hyperion_sim::coords::GalacticPosition;
 use hyperion_sim::galaxy::placement::{CellKey, Existence, SystemRecord, generate_cell, resolve};
 use hyperion_sim::galaxy::{Galaxy, Population};
@@ -131,16 +132,18 @@ const SEARCH: &str = concat!(
 const SEARCH_ENV: &str = "HYPERION_PERF_SEARCH";
 
 /// Earth's mean radius, m: the IUGG's mean radius R₁ of the Geodetic Reference System 1980
-/// (Moritz 2000, Journal of Geodesy 74, 128), 6,371.0 km.
+/// (Moritz 2000, Journal of Geodesy 74, 128), 6,371,008.8 m, rounded here to 6,371.0 km.
 const EARTH_RADIUS_M: f64 = 6_371_000.0;
 
-/// An Earth-sized radius, in Earth radii: Kepler's Earth-size class, 0.8–1.25 R⊕ (Borucki et al.
-/// 2011, Astrophys. J. 736, 19).
+/// An Earth-sized radius, in Earth radii: the Earth-size bin of Kepler's planet occurrence,
+/// 0.8–1.25 R⊕ (Fressin et al. 2013, Astrophys. J. 766, 81; Borucki et al. 2011, Astrophys. J.
+/// 736, 19, bound only its top, at 1.25 R⊕).
 const EARTH_SIZED_RADII: RangeInclusive<f64> = 0.8..=1.25;
 
-/// The surface pressures of an air the descents fly down through, Pa: from a tenth of Earth's
-/// 101.325 kPa, an air whose scattering lights the sky, to ten times it, below which the ground
-/// is still seen from orbit through the clouds' gaps.
+/// The surface pressures of an air the descents fly down through, Pa: from a tenth of the
+/// standard atmosphere, 101.325 kPa (a defined value: the 10th CGPM, 1954, Resolution 4), an air
+/// whose scattering lights the sky, to ten times it, below which the ground is still seen from
+/// orbit through the clouds' gaps.
 const SURFACE_PRESSURE_PA: RangeInclusive<f64> = 10_000.0..=1_000_000.0;
 
 /// The ocean fraction the world's ocean must exceed: the plan's (R12.T5.b).
@@ -228,12 +231,50 @@ async fn bodies(client: &mut TestClient, universe: &UniverseIdHex, system: u64) 
     }
 }
 
+/// Why the server's answer to a pin's question cannot be read; a pin it no longer answers has
+/// moved.
+#[derive(Debug)]
+enum UnansweredError {
+    /// The server refused the request.
+    Refused(RequestError),
+    /// The server answered with a response of another kind.
+    Unexpected(Box<ResponseBody>),
+    /// The server granted less than the full detail asked.
+    Withheld(DetailLevelDto),
+}
+
+impl fmt::Display for UnansweredError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Refused(error) => write!(f, "the server refused it: {error:?}"),
+            Self::Unexpected(body) => write!(f, "the server answered another kind: {body:?}"),
+            Self::Withheld(granted) => write!(f, "the server granted {granted:?}, not full detail"),
+        }
+    }
+}
+
+/// The answer of a pin's question, or a failure naming `subject` with the message to re-pin `pin`
+/// and bump the version of `scenes`.
+fn pinned<T>(
+    answer: Result<T, UnansweredError>,
+    subject: impl fmt::Display,
+    pin: &str,
+    scenes: &str,
+) -> T {
+    answer.unwrap_or_else(|error| panic!("{subject}: {error}; {}", repin(pin, scenes)))
+}
+
 /// The whole record of `body` at the epoch, at the `full` level.
+///
+/// # Errors
+///
+/// [`UnansweredError`] where the server refuses it, answers another kind, or grants less than the
+/// full detail.
 async fn detail(
     client: &mut TestClient,
     universe: &UniverseIdHex,
     body: &BodyIdHex,
-) -> BodyRecordDto {
+) -> Result<BodyRecordDto, UnansweredError> {
     let request = RequestBody::BodyDetail(BodyDetailRequest {
         universe: universe.clone(),
         body: body.clone(),
@@ -241,20 +282,25 @@ async fn detail(
         detail: DetailLevelDto::Full,
     });
     match client.request(request).await {
-        Ok(ResponseBody::BodyDetail(answer)) => {
-            assert_eq!(answer.granted, DetailLevelDto::Full, "{body}");
-            answer.record
+        Ok(ResponseBody::BodyDetail(answer)) if answer.granted == DetailLevelDto::Full => {
+            Ok(answer.record)
         }
-        other => panic!("expected the record of {body}, got {other:?}"),
+        Ok(ResponseBody::BodyDetail(answer)) => Err(UnansweredError::Withheld(answer.granted)),
+        Ok(other) => Err(UnansweredError::Unexpected(Box::new(other))),
+        Err(error) => Err(UnansweredError::Refused(error)),
     }
 }
 
 /// The summary of `system`'s stars at the epoch.
+///
+/// # Errors
+///
+/// [`UnansweredError`] where the server refuses it or answers another kind.
 async fn summary(
     client: &mut TestClient,
     universe: &UniverseIdHex,
     system: u64,
-) -> SystemSummaryDto {
+) -> Result<SystemSummaryDto, UnansweredError> {
     let body = RequestBody::SystemSummary(SystemSummaryRequest {
         universe: universe.clone(),
         system: SystemIdHex::from_u64(system),
@@ -262,8 +308,9 @@ async fn summary(
         mode: QueryModeDto::Now,
     });
     match client.request(body).await {
-        Ok(ResponseBody::SystemSummary(answer)) => answer,
-        other => panic!("expected the summary of {system:016x}, got {other:?}"),
+        Ok(ResponseBody::SystemSummary(answer)) => Ok(answer),
+        Ok(other) => Err(UnansweredError::Unexpected(Box::new(other))),
+        Err(error) => Err(UnansweredError::Refused(error)),
     }
 }
 
@@ -432,24 +479,29 @@ fn giant_misses(record: &BodyRecordDto, rings: &[BodyRecordDto]) -> Vec<String> 
 }
 
 /// The records of a giant's rings, by its record's `rings`.
+///
+/// # Errors
+///
+/// [`UnansweredError`] for the first ring whose record the server does not give ([`detail`]).
 async fn ring_records(
     client: &mut TestClient,
     universe: &UniverseIdHex,
     record: &BodyRecordDto,
-) -> Vec<BodyRecordDto> {
+) -> Result<Vec<BodyRecordDto>, UnansweredError> {
     let SectionDto::Ok(ids) = &record.rings else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
     let mut rings = Vec::with_capacity(ids.len());
     for id in ids {
-        rings.push(detail(client, universe, id).await);
+        rings.push(detail(client, universe, id).await?);
     }
-    rings
+    Ok(rings)
 }
 
 /// The coarse-pass inputs the surface service reads for `body` from its record at the record
-/// time, as the production source, `RecordInputs`, reads them: an error is a field the server
-/// answers `not_modelled`, or a body with no solid surface.
+/// time, read by the production source, [`RecordInputs`]: an error is a field the server answers
+/// `not_modelled`, or a body with no solid surface. It generates the body's system, a few
+/// milliseconds of CPU, so that async code calls it through `spawn_blocking`.
 fn coarse_inputs(body: &BodyIdHex) -> Result<CoarseInputs, ReadCoarseInputsError> {
     let (system, index) = body.to_parts();
     let id = SystemId::from_raw(system).expect("a pin's system is a system ID");
@@ -463,7 +515,14 @@ fn coarse_inputs(body: &BodyIdHex) -> Result<CoarseInputs, ReadCoarseInputsError
         .map(|planet| planets.body_at(&ctx, planet, RECORD_TIME))
         .transpose()
         .expect("a moon's planet has a record");
-    CoarseInputs::for_body(&record, planet.as_ref(), &ctx)
+    RecordInputs.inputs(&record, planet.as_ref(), &ctx)
+}
+
+/// [`coarse_inputs`] off the runtime's threads, on its blocking pool.
+async fn coarse_inputs_off_runtime(body: BodyIdHex) -> Result<CoarseInputs, ReadCoarseInputsError> {
+    tokio::task::spawn_blocking(move || coarse_inputs(&body))
+        .await
+        .expect("reading a body's coarse inputs does not panic")
 }
 
 /// A system's galactocentric radius in the plane and its height above it, ly, at the epoch.
@@ -545,7 +604,12 @@ fn the_pins_text_forms_are_their_ids() {
 async fn the_earth_sized_world_has_an_air_an_ocean_clouds_and_polar_ice() {
     let (server, mut client, universe) = started("Perf scenes world").await;
     let world = body_id(EARTH_SIZED_WORLD);
-    let record = detail(&mut client, &universe, &world).await;
+    let record = pinned(
+        detail(&mut client, &universe, &world).await,
+        &world,
+        "EARTH_SIZED_WORLD",
+        WORLD_SCENES,
+    );
     let misses = world_misses(&record);
     assert!(
         misses.is_empty(),
@@ -553,7 +617,7 @@ async fn the_earth_sized_world_has_an_air_an_ocean_clouds_and_polar_ice() {
         misses.join("; "),
         repin("EARTH_SIZED_WORLD", WORLD_SCENES)
     );
-    if let Err(error) = coarse_inputs(&world) {
+    if let Err(error) = coarse_inputs_off_runtime(world.clone()).await {
         panic!(
             "{world}: the server reads no coarse inputs from its record: {error:?}; {}",
             repin("EARTH_SIZED_WORLD", WORLD_SCENES)
@@ -569,8 +633,18 @@ async fn the_earth_sized_world_has_an_air_an_ocean_clouds_and_polar_ice() {
 async fn the_ringed_giant_has_an_envelope_and_a_massive_ring() {
     let (server, mut client, universe) = started("Perf scenes giant").await;
     let giant = body_id(RINGED_GIANT);
-    let record = detail(&mut client, &universe, &giant).await;
-    let rings = ring_records(&mut client, &universe, &record).await;
+    let record = pinned(
+        detail(&mut client, &universe, &giant).await,
+        &giant,
+        "RINGED_GIANT",
+        GIANT_SCENES,
+    );
+    let rings = pinned(
+        ring_records(&mut client, &universe, &record).await,
+        format_args!("{giant}'s rings"),
+        "RINGED_GIANT",
+        GIANT_SCENES,
+    );
     let misses = giant_misses(&record, &rings);
     assert!(
         misses.is_empty(),
@@ -588,9 +662,19 @@ async fn the_ringed_giant_has_an_envelope_and_a_massive_ring() {
 #[tokio::test]
 async fn the_nuclear_disc_system_exists_in_the_nuclear_disc() {
     let (server, mut client, universe) = started("Perf scenes nuclear disc").await;
-    let answer = summary(&mut client, &universe, NUCLEAR_DISC_SYSTEM).await;
+    let answer = pinned(
+        summary(&mut client, &universe, NUCLEAR_DISC_SYSTEM).await,
+        NUCLEAR_DISC_SYSTEM_HEX,
+        "NUCLEAR_DISC_SYSTEM",
+        NUCLEAR_DISC_SCENES,
+    );
     let id = SystemId::from_raw(NUCLEAR_DISC_SYSTEM).expect("a system ID");
-    let record = resolve(galaxy(), id).expect("the system resolves, as the server answered it");
+    let record = resolve(galaxy(), id).unwrap_or_else(|error| {
+        panic!(
+            "{NUCLEAR_DISC_SYSTEM_HEX} does not resolve: {error:?}; {}",
+            repin("NUCLEAR_DISC_SYSTEM", NUCLEAR_DISC_SCENES)
+        )
+    });
     let misses = nuclear_disc_misses(&record, &answer);
     assert!(
         misses.is_empty(),
@@ -602,29 +686,43 @@ async fn the_nuclear_disc_system_exists_in_the_nuclear_disc() {
     server.stop().await;
 }
 
+/// An Earth-sized world the search asked about: its record, what it lacks, and, where it lacks
+/// nothing, whether the surface service reads its coarse inputs ([`coarse_inputs`]'s answer, as
+/// its debug text where it does not).
+struct WorldFound {
+    record: BodyRecordDto,
+    misses: Vec<String>,
+    /// `None` for a world that lacks a criterion, whose inputs are not read.
+    coarse: Option<Result<(), String>>,
+}
+
+/// A ringed giant the search asked about: its record, its rings' records and what it lacks.
+struct GiantFound {
+    record: BodyRecordDto,
+    rings: Vec<BodyRecordDto>,
+    misses: Vec<String>,
+}
+
 /// What the search found in one system: its place in the search's order, its distance from
-/// [`SOLAR_CIRCLE_LY`], ly, and each world and giant it asked about, with what each lacks.
+/// [`SOLAR_CIRCLE_LY`], ly, and each world and giant it asked about.
 struct Found {
     order: usize,
     distance_ly: f64,
     system: u64,
-    worlds: Vec<(BodyRecordDto, Vec<String>)>,
-    giants: Vec<(BodyRecordDto, Vec<BodyRecordDto>, Vec<String>)>,
+    worlds: Vec<WorldFound>,
+    giants: Vec<GiantFound>,
 }
 
 impl Found {
     /// The system's first world meeting every criterion whose coarse inputs the server reads, and
-    /// its first giant meeting every criterion, with its rings, where it holds both.
-    fn both(&self) -> Option<(&BodyRecordDto, &BodyRecordDto, &[BodyRecordDto])> {
-        let (world, _) = self
+    /// its first giant meeting every criterion, where it holds both.
+    fn both(&self) -> Option<(&WorldFound, &GiantFound)> {
+        let world = self
             .worlds
             .iter()
-            .find(|(record, misses)| misses.is_empty() && coarse_inputs(&record.id).is_ok())?;
-        let (giant, rings, _) = self
-            .giants
-            .iter()
-            .find(|(_, _, misses)| misses.is_empty())?;
-        Some((world, giant, rings))
+            .find(|world| world.misses.is_empty() && matches!(world.coarse, Some(Ok(()))))?;
+        let giant = self.giants.iter().find(|giant| giant.misses.is_empty())?;
+        Some((world, giant))
     }
 }
 
@@ -791,23 +889,9 @@ fn pin_figures(record: &BodyRecordDto, rings: &[BodyRecordDto]) -> Vec<String> {
     lines
 }
 
-/// The search for the pins, by the module documentation's command.
-///
-/// It reads the systems of [`SOLAR_CIRCLE_CELLS`] nearest [`SOLAR_CIRCLE_LY`] first, and stops
-/// once every system nearer than the nearest holding both an Earth-sized world and a ringed giant
-/// is read, so that what it prints does not depend on how its clients' requests interleave: every
-/// world and giant of those systems that meets its criteria, the worlds that miss one, the system
-/// holding both, and the nuclear disc's systems nearest [`nuclear_disc_target_ly`] that meet
-/// [`nuclear_disc_misses`]'s criteria; then the pins it chooses, the nearest of each.
-#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-#[ignore = "the pins' search, five minutes on 32 cores: by hand with HYPERION_PERF_SEARCH=1"]
-#[expect(clippy::too_many_lines, reason = "one search, printed as it goes")]
-async fn search_pins() {
-    if std::env::var_os(SEARCH_ENV).is_none() {
-        eprintln!("search_pins: set {SEARCH_ENV}=1 to search ({SEARCH})");
-        return;
-    }
-    let start = Instant::now();
+/// The systems of [`SOLAR_CIRCLE_CELLS`], each with its distance from [`SOLAR_CIRCLE_LY`], ly,
+/// nearest first and then by ID.
+fn solar_circle_systems() -> Vec<(f64, u64)> {
     let mut systems = Vec::new();
     let mut cell = Vec::new();
     let [xs, ys, zs] = SOLAR_CIRCLE_CELLS;
@@ -817,27 +901,81 @@ async fn search_pins() {
                 cell.clear();
                 let key = CellKey::new(Layer::C, [x, y, z]).expect("a cell of the grid");
                 generate_cell(galaxy(), key, &mut cell);
-                for record in &cell {
-                    let distance = distance_ly(record, SOLAR_CIRCLE_LY);
-                    systems.push((distance, record.id().raw()));
-                }
+                systems.extend(
+                    cell.iter()
+                        .map(|record| (distance_ly(record, SOLAR_CIRCLE_LY), record.id().raw())),
+                );
             }
         }
     }
     systems.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
-    let count = systems.len();
-    println!(
-        "seed {SEED_HEX}, generator version {GENERATOR_VERSION}: {count} systems of layer C in \
-         cells {SOLAR_CIRCLE_CELLS:?}, nearest {SOLAR_CIRCLE_LY:?} ly first ({:.1} s)",
-        start.elapsed().as_secs_f64()
-    );
+    systems
+}
 
-    let workers = search_workers();
-    let temp = tempfile::tempdir().expect("a temporary directory");
-    let config = TestServer::config(temp.path()).workers(workers).build();
-    let server = TestServer::start_with(config).await;
-    let mut first = server.connected().await;
-    let universe = first.create_universe("Perf scenes search", SEED).await.id;
+/// What one system holds of the pins' worlds and giants, each asked of the server: the record of
+/// every body `system_bodies` lists as one, with what it lacks, and a world's coarse inputs read
+/// off the runtime where it lacks nothing.
+async fn found_in(
+    client: &mut TestClient,
+    universe: &UniverseIdHex,
+    order: usize,
+    distance_ly: f64,
+    system: u64,
+) -> Found {
+    let answer = bodies(client, universe, system).await;
+    let mut worlds = Vec::new();
+    let mut giants = Vec::new();
+    for body in &answer.bodies {
+        if may_be_earth_sized(body) {
+            let record = detail(client, universe, &body.id)
+                .await
+                .expect("the server gives a listed world's record");
+            let misses = world_misses(&record);
+            let coarse = if misses.is_empty() {
+                let read = coarse_inputs_off_runtime(record.id.clone()).await;
+                Some(read.map(|_| ()).map_err(|error| format!("{error:?}")))
+            } else {
+                None
+            };
+            worlds.push(WorldFound {
+                record,
+                misses,
+                coarse,
+            });
+        } else if may_be_ringed_giant(body) {
+            let record = detail(client, universe, &body.id)
+                .await
+                .expect("the server gives a listed giant's record");
+            let rings = ring_records(client, universe, &record)
+                .await
+                .expect("the server gives a listed giant's rings' records");
+            let misses = giant_misses(&record, &rings);
+            giants.push(GiantFound {
+                record,
+                rings,
+                misses,
+            });
+        }
+    }
+    Found {
+        order,
+        distance_ly,
+        system,
+        worlds,
+        giants,
+    }
+}
+
+/// Reads `systems`, in their order, with a client per worker of `server`, until every system
+/// nearer than the nearest holding both a world and a giant is read; what was found in each of
+/// those, in order.
+async fn search_solar_circle(
+    server: &TestServer,
+    universe: &UniverseIdHex,
+    systems: Vec<(f64, u64)>,
+    workers: NonZeroUsize,
+) -> Vec<Found> {
+    let count = systems.len();
     let queue = Arc::new(Mutex::new(
         systems.into_iter().enumerate().collect::<VecDeque<_>>(),
     ));
@@ -860,32 +998,11 @@ async fn search_pins() {
                 if order > nearest_both.load(Ordering::Acquire) {
                     break;
                 }
-                let answer = bodies(&mut client, &universe, system).await;
-                let mut worlds = Vec::new();
-                let mut giants = Vec::new();
-                for body in &answer.bodies {
-                    if may_be_earth_sized(body) {
-                        let record = detail(&mut client, &universe, &body.id).await;
-                        let misses = world_misses(&record);
-                        worlds.push((record, misses));
-                    } else if may_be_ringed_giant(body) {
-                        let record = detail(&mut client, &universe, &body.id).await;
-                        let rings = ring_records(&mut client, &universe, &record).await;
-                        let misses = giant_misses(&record, &rings);
-                        giants.push((record, rings, misses));
-                    }
-                }
-                let found_here = Found {
-                    order,
-                    distance_ly,
-                    system,
-                    worlds,
-                    giants,
-                };
-                if found_here.both().is_some() {
+                let here = found_in(&mut client, &universe, order, distance_ly, system).await;
+                if here.both().is_some() {
                     nearest_both.fetch_min(order, Ordering::AcqRel);
                 }
-                found.push(found_here);
+                found.push(here);
             }
             client.close().await;
             found
@@ -898,64 +1015,70 @@ async fn search_pins() {
     let last = nearest_both.load(Ordering::Acquire);
     found.retain(|each| each.order <= last);
     found.sort_by_key(|each| each.order);
-    println!(
-        "read the bodies of the nearest {} systems, to {:.1} ly ({:.1} s)",
-        found.len(),
-        found.last().map_or(0.0, |each| each.distance_ly),
-        start.elapsed().as_secs_f64()
-    );
+    found
+}
 
+/// Prints what the search found: every world meeting every criterion, with whether its coarse
+/// inputs are read, the worlds missing one criterion, and every giant meeting every criterion.
+fn print_found(found: &[Found]) {
     println!("\nEarth-sized worlds meeting every criterion:");
-    for each in &found {
-        for (record, misses) in &each.worlds {
-            if misses.is_empty() {
-                let inputs = coarse_inputs(&record.id)
-                    .map(|_| ())
-                    .map_err(|e| format!("{e:?}"));
+    for each in found {
+        for world in &each.worlds {
+            if let Some(inputs) = &world.coarse {
                 println!(
                     "  {:.1} ly: {}; coarse inputs {inputs:?}",
                     each.distance_ly,
-                    world_line(record)
+                    world_line(&world.record)
                 );
             }
         }
     }
     println!("\nEarth-sized worlds missing one criterion:");
-    for each in &found {
-        for (record, misses) in &each.worlds {
-            if let [miss] = misses.as_slice() {
-                println!("  {:.1} ly: {}: {miss}", each.distance_ly, record.id);
+    for each in found {
+        for world in &each.worlds {
+            if let [miss] = world.misses.as_slice() {
+                println!("  {:.1} ly: {}: {miss}", each.distance_ly, world.record.id);
             }
         }
     }
     println!("\nRinged gas giants meeting every criterion:");
-    for each in &found {
-        for (record, rings, misses) in &each.giants {
-            if misses.is_empty() {
+    for each in found {
+        for giant in &each.giants {
+            if giant.misses.is_empty() {
                 println!(
                     "  {:.1} ly: {}",
                     each.distance_ly,
-                    giant_line(record, rings)
+                    giant_line(&giant.record, &giant.rings)
                 );
             }
         }
     }
-    let chosen = found.iter().find_map(|each| {
-        let (world, giant, rings) = each.both()?;
-        println!(
-            "\nThe nearest system holding both, {:016x} at {:.1} ly:\n  world {}\n  giant {}",
-            each.system,
-            each.distance_ly,
-            world_line(world),
-            giant_line(giant, rings)
-        );
-        Some((each.system, world.clone(), giant.clone(), rings.to_vec()))
-    });
+}
 
-    // The nuclear disc: the layer-C cells about the point one scale length out, and the nearest
-    // system there that meets the scene's criteria.
+/// The nearest system the search found holding both, printed with its world and giant.
+fn nearest_both(found: &[Found]) -> Option<(&Found, &WorldFound, &GiantFound)> {
+    let (each, world, giant) = found.iter().find_map(|each| {
+        let (world, giant) = each.both()?;
+        Some((each, world, giant))
+    })?;
+    println!(
+        "\nThe nearest system holding both, {:016x} at {:.1} ly:\n  world {}\n  giant {}",
+        each.system,
+        each.distance_ly,
+        world_line(&world.record),
+        giant_line(&giant.record, &giant.rings)
+    );
+    Some((each, world, giant))
+}
+
+/// The nuclear disc's search: the systems of the 27 layer-C cells about
+/// [`nuclear_disc_target_ly`], nearest it first, the first eight that exist in the nuclear disc
+/// asked of the server and printed; the nearest of them that meets [`nuclear_disc_misses`]'s
+/// criteria.
+async fn search_nuclear_disc(client: &mut TestClient, universe: &UniverseIdHex) -> Option<u64> {
     let target = nuclear_disc_target_ly();
     let mut near_centre = Vec::new();
+    let mut cell = Vec::new();
     for dx in -1..=1 {
         for dy in -1..=1 {
             for dz in -1..=1 {
@@ -983,16 +1106,19 @@ async fn search_pins() {
          {} systems of its 27 cells:",
         near_centre.len()
     );
-    let mut nuclear_disc = None;
-    let mut shown = 0;
-    for (distance, record) in &near_centre {
-        if record.population() != Population::NuclearDisc
-            || record.existence_at(RECORD_TIME) != Existence::Exists
-        {
-            continue;
-        }
+    let candidates = near_centre
+        .iter()
+        .filter(|(_, record)| {
+            record.population() == Population::NuclearDisc
+                && record.existence_at(RECORD_TIME) == Existence::Exists
+        })
+        .take(8);
+    let mut chosen = None;
+    for (distance, record) in candidates {
         let system = record.id().raw();
-        let answer = summary(&mut first, &universe, system).await;
+        let answer = summary(client, universe, system)
+            .await
+            .expect("the server gives an existing system's summary");
         let misses = nuclear_disc_misses(record, &answer);
         let (radius, height) = radius_and_height_ly(record);
         let classes = answer
@@ -1005,20 +1131,22 @@ async fn search_pins() {
              ly, stars {classes:?}, misses {misses:?}"
         );
         if misses.is_empty() {
-            nuclear_disc.get_or_insert(system);
-        }
-        shown += 1;
-        if shown == 8 {
-            break;
+            chosen.get_or_insert(system);
         }
     }
+    chosen
+}
 
-    println!("\nChosen ({:.1} s):", start.elapsed().as_secs_f64());
+/// Prints the pins the search chose: each system's place, population, age, metallicity and stars,
+/// then the chosen world's and giant's figures ([`pin_figures`]).
+async fn print_chosen(
+    client: &mut TestClient,
+    universe: &UniverseIdHex,
+    both: Option<(&Found, &WorldFound, &GiantFound)>,
+    nuclear_disc: Option<u64>,
+) {
     for (system, scene) in [
-        (
-            chosen.as_ref().map(|(system, ..)| *system),
-            "NEAR_SUN_SYSTEM",
-        ),
+        (both.map(|(each, ..)| each.system), "NEAR_SUN_SYSTEM"),
         (nuclear_disc, "NUCLEAR_DISC_SYSTEM"),
     ] {
         let Some(system) = system else {
@@ -1028,7 +1156,9 @@ async fn search_pins() {
         let record = resolve(galaxy(), SystemId::from_raw(system).expect("a system ID"))
             .expect("a found system resolves");
         let (radius, height) = radius_and_height_ly(&record);
-        let answer = summary(&mut first, &universe, system).await;
+        let answer = summary(client, universe, system)
+            .await
+            .expect("the server gives a found system's summary");
         let star_list = answer
             .stars
             .iter()
@@ -1042,10 +1172,10 @@ async fn search_pins() {
             answer.fe_h_dex
         );
     }
-    if let Some((_, world, giant, rings)) = &chosen {
+    if let Some((_, world, giant)) = both {
         for (pin, record, rings) in [
-            ("EARTH_SIZED_WORLD", world, &[][..]),
-            ("RINGED_GIANT", giant, rings.as_slice()),
+            ("EARTH_SIZED_WORLD", &world.record, &[][..]),
+            ("RINGED_GIANT", &giant.record, giant.rings.as_slice()),
         ] {
             println!("  {pin}:");
             for line in pin_figures(record, rings) {
@@ -1053,6 +1183,51 @@ async fn search_pins() {
             }
         }
     }
+}
+
+/// The search for the pins, by the module documentation's command.
+///
+/// It reads the systems of [`SOLAR_CIRCLE_CELLS`] nearest [`SOLAR_CIRCLE_LY`] first, and stops
+/// once every system nearer than the nearest holding both an Earth-sized world and a ringed giant
+/// is read, so that what it prints does not depend on how its clients' requests interleave: every
+/// world and giant of those systems that meets its criteria, the worlds that miss one, the system
+/// holding both, and the nuclear disc's systems nearest [`nuclear_disc_target_ly`] that meet
+/// [`nuclear_disc_misses`]'s criteria; then the pins it chooses, the nearest of each.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+#[ignore = "the pins' search, five minutes on 32 cores: by hand with HYPERION_PERF_SEARCH=1"]
+async fn search_pins() {
+    if std::env::var_os(SEARCH_ENV).is_none() {
+        eprintln!("search_pins: set {SEARCH_ENV}=1 to search ({SEARCH})");
+        return;
+    }
+    let start = Instant::now();
+    let systems = solar_circle_systems();
+    println!(
+        "seed {SEED_HEX}, generator version {GENERATOR_VERSION}: {} systems of layer C in \
+         cells {SOLAR_CIRCLE_CELLS:?}, nearest {SOLAR_CIRCLE_LY:?} ly first ({:.1} s)",
+        systems.len(),
+        start.elapsed().as_secs_f64()
+    );
+
+    let workers = search_workers();
+    let temp = tempfile::tempdir().expect("a temporary directory");
+    let config = TestServer::config(temp.path()).workers(workers).build();
+    let server = TestServer::start_with(config).await;
+    let mut first = server.connected().await;
+    let universe = first.create_universe("Perf scenes search", SEED).await.id;
+    let found = search_solar_circle(&server, &universe, systems, workers).await;
+    println!(
+        "read the bodies of the nearest {} systems, to {:.1} ly ({:.1} s)",
+        found.len(),
+        found.last().map_or(0.0, |each| each.distance_ly),
+        start.elapsed().as_secs_f64()
+    );
+    print_found(&found);
+    let both = nearest_both(&found);
+    let nuclear_disc = search_nuclear_disc(&mut first, &universe).await;
+
+    println!("\nChosen ({:.1} s):", start.elapsed().as_secs_f64());
+    print_chosen(&mut first, &universe, both, nuclear_disc).await;
     first.close().await;
     server.stop().await;
 }

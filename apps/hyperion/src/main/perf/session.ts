@@ -123,7 +123,13 @@ export function placeShipArgs(serverUrl: string, placement: PerfPlacement): Read
   ];
 }
 
-/** The arrival `just place-ship --json`'s last line states, or `null` where it is not one. */
+/** A universe's ID as the wire writes it: 16 lowercase hexadecimal digits. */
+const UNIVERSE_ID = /^[0-9a-f]{16}$/u;
+
+/**
+ * The arrival `just place-ship --json`'s last line states, or `null` where it is not one: its
+ * universe's ID 16 lowercase hexadecimal digits, as the preload's `readArrival` takes it.
+ */
 export function arrivalOf(stdout: string): PerfArrival | null {
   const line = stdout.trim().split("\n").at(-1) ?? "";
   let parsed: unknown;
@@ -141,6 +147,7 @@ export function arrivalOf(stdout: string): PerfArrival | null {
   const system: unknown = Reflect.get(parsed, "system");
   const body: unknown = Reflect.get(parsed, "body");
   return typeof id === "string" &&
+    UNIVERSE_ID.test(id) &&
     typeof system === "string" &&
     (body === null || typeof body === "string")
     ? { universe: id, system, body }
@@ -303,7 +310,12 @@ export async function preparePerfSession(inputs: PerfSessionInputs): Promise<Per
   const late = new LateTrace();
   const runDir = join(inputs.userData, "perf-run");
   const outPath = resolve(launch.out ?? DEFAULT_PERF_OUT);
-  const slug = machineSlugOf(gpu.value, process.platform, cpus()[0]?.model ?? "");
+  const slug = machineSlugOf(
+    gpu.value,
+    process.platform,
+    cpus()[0]?.model ?? "",
+    inputs.graphics.launchMode === "software",
+  );
   const ozone = inputs.switches.find((each) => each.startsWith("--ozone-platform="));
   const runner = new PerfRunner({
     launch,

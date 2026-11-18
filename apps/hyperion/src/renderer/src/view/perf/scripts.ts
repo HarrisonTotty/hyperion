@@ -15,9 +15,9 @@
  * - {@link arrivalHold}: `arrival-memory`'s two poses, the descent's first (the orbit, script time
  *   0) while the field arrives and the descent's deepest (a metre above the site) once it has, held
  *   for {@link ARRIVAL_HELD_S}.
- * - {@link nuclearDiscSweep}: 120 s beside a system of the nuclear disc, 10 au along the galactic
+ * - {@link nuclearDiscSweep}: 120 s about a system of the nuclear disc, 300 au along the galactic
  *   x axis while the camera turns once about galactic z, so that the star bake is redone as it
- *   moves.
+ *   moves, about ten times ({@link SWEEP_LENGTH_M}).
  */
 
 import { add, scale, type Vec3, vec3 } from "../../geometry/vec3";
@@ -254,20 +254,28 @@ export function arrivalHold(profile: DescentProfile): ArrivalHold {
 export const SWEEP_DURATION_S = 120;
 
 /**
- * How far the sweep moves along galactic x, m: 10 au, which shifts a baked star 0.03 ly away by
- * about ten pixels at 1080 rows (R06's re-bake shift is 0.1 px), so that the bake is redone many
- * times over the sweep (a lean, 2026-11-17).
+ * How far the sweep moves along galactic x, m: 300 au, so that the sky's bake is redone about ten
+ * times in the 120 s (a lean, 2026-11-17).
+ *
+ * @remarks
+ * R06's rule (`view/sky/model.ts`): a star is baked only beyond `bakedBeyondM`, where a 30 au
+ * crossing (`PARALLAX_BASELINE_M`) shifts it by less than a tenth of a pixel
+ * (`PARALLAX_THRESHOLD_PX`), about 8.7 ly for a 60° view 1920 px wide (`view/sky/select.ts`
+ * splits the stars there), and the bake is redone once the nearest baked star has shifted by that
+ * tenth (`view/sky/setting.ts`'s `rebakeShiftPx`). Each re-bake therefore needs about 30 au of
+ * motion: a 10 au sweep shifts the nearest baked star by under 0.033 px and never re-bakes.
  */
-export const SWEEP_LENGTH_M = 10 * AU_M;
+export const SWEEP_LENGTH_M = 300 * AU_M;
 
 /** The sweep's height above the barycentre along galactic z, m: 1 au, clear of the system's stars. */
 export const SWEEP_HEIGHT_M = AU_M;
 
 /**
- * `nuclear-disc-sky`'s sweep beside the pinned system's barycentre, in the system's frame (galactic
- * axes): from x = −5 au to +5 au at {@link SWEEP_HEIGHT_M}, at a constant speed, while the camera
- * turns once about galactic z, looking along the galactic plane, so that every direction of the
- * nuclear disc's sky is drawn and the bake follows the motion. One segment, `sweep`.
+ * `nuclear-disc-sky`'s sweep about the pinned system's barycentre, in the system's frame
+ * (galactic axes): from x = −150 au to +150 au at {@link SWEEP_HEIGHT_M}, at a constant speed,
+ * while the camera turns once about galactic z, looking along the galactic plane, so that every
+ * direction of the nuclear disc's sky is drawn and the bake follows the motion. One segment,
+ * `sweep`.
  */
 export function nuclearDiscSweep(): PerfScript {
   const segments: ReadonlyArray<PerfSegmentSpan> = [

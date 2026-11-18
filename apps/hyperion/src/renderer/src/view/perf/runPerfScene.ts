@@ -19,8 +19,9 @@
  *
  * Any failure (a `GraphicsFault`, no adapter, the views not made, the served world not read, an
  * unmapped pass, a call the main process refuses) ends the run once with `finish` `failed` and its
- * reason. Only frames of a repetition's span are in its result: the warm-up's never reach its
- * percentiles.
+ * reason in full, the screen told how it ended first (`onEnded`: the views' own fault line, or the
+ * run's in the guide's voice). Only frames of a repetition's span are in its result: the warm-up's
+ * never reach its percentiles.
  */
 
 import {
@@ -47,7 +48,7 @@ import { type QualitySetting, SETTINGS } from "../quality/qualitySetting";
 import type { PatchEvent } from "../spike/metrics";
 import type { WorkerMemory } from "../terrain/workers/pool";
 import type { LedgerFigures } from "./ledger";
-import { type PassRoles, passRolesOf } from "./passRows";
+import { type PassRoles, passRolesOf, UnmappedPass } from "./passRows";
 import { type PerfFrameSample, RELEASE_MIN_BYTES, RepetitionMetrics } from "./repetitionMetrics";
 import { PERF_SCENES, type PerfScene } from "./scenes";
 
@@ -98,6 +99,44 @@ export const PAGE_CLOCK: PerfClock = {
     }),
 };
 
+/**
+ * A failure of the scene: its reason in the record's words, and what the screen shows of it once
+ * the run has ended.
+ */
+export interface PerfFailure {
+  /** The record's words in full: `finish`'s reason, and the record's notes. */
+  readonly reason: string;
+  /**
+   * The cause as the run's fault line states it, in the guide's voice, with no scene ID, plan
+   * reference or `GraphicsFault:` prefix ({@link perfFailedLine}); or `null` where the views stand
+   * on their own fault line, which stays shown.
+   */
+  readonly shown: string | null;
+}
+
+/** How the run ended, as the screen shows it once it has (the guide's "Data states"). */
+export type PerfRunOutcome =
+  | { readonly kind: "complete" }
+  | {
+      readonly kind: "failed";
+      /** The cause on the run's fault line, or `null` where the views' own line stands. */
+      readonly shown: string | null;
+    };
+
+/** The status line of a run that ended complete. */
+export const PERF_COMPLETE = "PERFORMANCE RUN COMPLETE";
+
+/**
+ * The cause on the run's fault line where the views stood on their own fault line and are gone, or
+ * where an error the run did not word ended it: the main process's log gives its reason in full.
+ */
+export const PERF_FAILED_LOGGED = "the run's log states why";
+
+/** The run's fault line: `PERFORMANCE RUN FAILED: <cause>`. */
+export function perfFailedLine(cause: string): string {
+  return `PERFORMANCE RUN FAILED: ${cause}`;
+}
+
 /** What a scene's views and engine tell the run as they draw. */
 export interface PerfSceneSink {
   /** A frame drawn, with the run's resolve count by its end (`ResolveCounter.value`). */
@@ -108,8 +147,8 @@ export interface PerfSceneSink {
   passTimes(times: PassTimes): void;
   /** One of the engine's allocation events. */
   allocation(event: AllocationEvent): void;
-  /** The scene cannot go on, with why, in the words the record's notes give. */
-  failed(reason: string): void;
+  /** The scene cannot go on, with why, in the record's words and the screen's. */
+  failed(failure: PerfFailure): void;
 }
 
 /** Where a mount of the scene's views draws: the warm-up's server and arrival, or a span's. */
@@ -168,10 +207,13 @@ export interface PerfSceneDriver {
   internalScale(views: ReadonlyArray<PerfDescribedView>): ReadonlyArray<InternalScaleRecord>;
 }
 
-/** The run's driver for its scene, or why the renderer has none. */
+/**
+ * The run's driver for its scene, or why the renderer has none, in the record's words and the
+ * screen's.
+ */
 export type PerfDriverChoice =
   | { readonly kind: "driver"; readonly driver: PerfSceneDriver }
-  | { readonly kind: "refused"; readonly reason: string };
+  | { readonly kind: "refused"; readonly reason: string; readonly shown: string };
 
 /** What a {@link PerfSceneRun} is given. */
 export interface PerfSceneRunDeps {
@@ -182,6 +224,11 @@ export interface PerfSceneRunDeps {
   readonly driverFor: (config: PerfConfig) => PerfDriverChoice;
   /** Stops the run without finishing it: the page is going. */
   readonly signal: AbortSignal;
+  /**
+   * Told once as the run ends, before the main process is told (`finish` ends the launch, and the
+   * page with it), so that the screen shows how it ended; never told of a run its signal stopped.
+   */
+  readonly onEnded: (outcome: PerfRunOutcome) => void;
 }
 
 /** A failure of the scene, its reason the record's. */
@@ -286,7 +333,7 @@ export class PerfSceneRun implements PerfSceneSink {
   #phase: Phase = { kind: "idle" };
   #driver: PerfSceneDriver | null = null;
   #lastRafMs: number | null = null;
-  #failure: string | null = null;
+  #failure: PerfFailure | null = null;
   readonly #failed: Promise<never>;
   #rejectFailed: (error: Error) => void = () => undefined;
   #finished = false;
@@ -309,7 +356,11 @@ export class PerfSceneRun implements PerfSceneSink {
 
   /**
    * Runs the scene to its end: `finish` with `complete` after the last repetition, or `failed` at
-   * the first failure. Stopped by the signal, it ends without finishing.
+   * the first failure, `onEnded` told first. Stopped by the signal, it ends without finishing.
+   *
+   * @remarks
+   * A failed run leaves its views mounted where they stand on their own fault line, so that the
+   * line stays; otherwise they go, and the run's fault line stands in their place.
    */
   async run(): Promise<void> {
     const { api, signal } = this.#deps;
@@ -317,7 +368,10 @@ export class PerfSceneRun implements PerfSceneSink {
       const config = await this.#step(api.config());
       const choice = this.#deps.driverFor(config);
       if (choice.kind === "refused") {
-        await this.#finish({ status: "failed", reason: choice.reason });
+        await this.#finish(
+          { status: "failed", reason: choice.reason },
+          { kind: "failed", shown: choice.shown },
+        );
         return;
       }
       const driver = choice.driver;
@@ -341,14 +395,21 @@ export class PerfSceneRun implements PerfSceneSink {
         await this.#repetition(n, driver, warm, roles);
       }
       driver.unmount();
-      await this.#finish({ status: "complete", notes: warm.notes.join(" ") });
+      await this.#finish({ status: "complete", notes: warm.notes.join(" ") }, { kind: "complete" });
     } catch (error: unknown) {
       this.#phase = { kind: "idle" };
-      this.#driver?.unmount();
+      // An error the run did not word, a call the main process refused among them, is in its log.
+      const failure = this.#failure ?? { reason: reasonOf(error), shown: PERF_FAILED_LOGGED };
+      if (signal.aborted || failure.shown !== null) {
+        this.#driver?.unmount();
+      }
       if (signal.aborted) {
         return;
       }
-      await this.#finish({ status: "failed", reason: this.#failure ?? reasonOf(error) });
+      await this.#finish(
+        { status: "failed", reason: failure.reason },
+        { kind: "failed", shown: failure.shown },
+      );
     }
   }
 
@@ -436,18 +497,19 @@ export class PerfSceneRun implements PerfSceneSink {
       throw new RunStopped("the perf run was stopped");
     }
     if (this.#failure !== null) {
-      throw new SceneFailed(this.#failure);
+      throw new SceneFailed(this.#failure.reason);
     }
     return value;
   }
 
-  /** Ends the run once, its end told to the main process. */
-  async #finish(end: PerfEnd): Promise<void> {
+  /** Ends the run once, its end shown and then told to the main process. */
+  async #finish(end: PerfEnd, outcome: PerfRunOutcome): Promise<void> {
     // A run stopped by its page tells nothing: another run of the page, or none, ends it.
     if (this.#finished || this.#deps.signal.aborted) {
       return;
     }
     this.#finished = true;
+    this.#deps.onEnded(outcome);
     try {
       await this.#deps.api.finish(end);
     } catch (error: unknown) {
@@ -487,9 +549,10 @@ export class PerfSceneRun implements PerfSceneSink {
       phase.started = true;
       const cached = this.#driver?.cachedPatches() ?? 0;
       if (cached > 0) {
-        this.failed(
-          `the patch cache held ${String(cached)} patches at repetition ${String(phase.n)}'s start: Design note 13's reset did not happen`,
-        );
+        this.failed({
+          reason: `the patch cache held ${String(cached)} patches at repetition ${String(phase.n)}'s start: Design note 13's reset did not happen`,
+          shown: "the patch cache was not empty at a repetition's start",
+        });
         return;
       }
     }
@@ -517,7 +580,13 @@ export class PerfSceneRun implements PerfSceneSink {
     try {
       phase.metrics.passTimes(times);
     } catch (error: unknown) {
-      this.failed(reasonOf(error));
+      this.failed({
+        reason: reasonOf(error),
+        shown:
+          error instanceof UnmappedPass
+            ? "a timed pass has no row in the record"
+            : PERF_FAILED_LOGGED,
+      });
     }
   }
 
@@ -537,13 +606,13 @@ export class PerfSceneRun implements PerfSceneSink {
     }
   }
 
-  /** The scene cannot go on: the run fails with the first reason told. */
-  failed(reason: string): void {
+  /** The scene cannot go on: the run fails with the first failure told. */
+  failed(failure: PerfFailure): void {
     if (this.#failure !== null) {
       return;
     }
-    this.#failure = reason;
-    this.#rejectFailed(new SceneFailed(reason));
+    this.#failure = failure;
+    this.#rejectFailed(new SceneFailed(failure.reason));
   }
 }
 

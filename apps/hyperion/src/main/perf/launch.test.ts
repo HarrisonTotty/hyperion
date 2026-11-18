@@ -2,7 +2,13 @@ import { describe, expect, it } from "vitest";
 
 import type { GraphicsLaunchMode } from "../../preload/api";
 import { graphicsSwitches } from "../graphics/switches";
-import { machineSlugOf, perfGpuTiming, perfSwitches } from "./launch";
+import {
+  machineSlugOf,
+  perfGpuTiming,
+  perfSwitches,
+  perfSwitchesInForce,
+  perfWindowSize,
+} from "./launch";
 
 const PLATFORMS: ReadonlyArray<NodeJS.Platform> = ["linux", "darwin", "win32"];
 const MODES: ReadonlyArray<GraphicsLaunchMode> = ["default", "vulkan", "safe", "software"];
@@ -58,6 +64,77 @@ describe("perf mode's switches", () => {
   });
 });
 
+describe("the switches in force, for the record", () => {
+  it("are the recipe's before the entry script, then perf mode's own", () => {
+    const argv = [
+      "/repo/apps/hyperion/node_modules/electron/dist/electron",
+      "--ozone-platform=x11",
+      "/repo/apps/hyperion/out/main/index.js",
+      "--perf-run",
+      "cockpit-descent",
+      "--perf-reps",
+      "5",
+      "--user-data-dir=/repo/target/perf-run/profile.abc",
+    ];
+    expect(
+      perfSwitchesInForce(argv, false, [
+        { name: "use-angle", value: "vulkan" },
+        { name: "disable-gpu-vsync" },
+      ]),
+    ).toEqual(["--ozone-platform=x11", "--use-angle=vulkan", "--disable-gpu-vsync"]);
+  });
+
+  it("keep the software mode's SwiftShader switches, unsafe WebGPU among them, less the profile", () => {
+    const argv = [
+      "electron",
+      "--enable-unsafe-webgpu",
+      "--use-webgpu-adapter=swiftshader",
+      "--ozone-platform=headless",
+      "--user-data-dir=/tmp/profile",
+      "--hyperion-graphics-software",
+      "out/main/index.js",
+      "--perf-run",
+      "nuclear-disc-sky",
+    ];
+    expect(perfSwitchesInForce(argv, false, [])).toEqual([
+      "--enable-unsafe-webgpu",
+      "--use-webgpu-adapter=swiftshader",
+      "--ozone-platform=headless",
+      "--hyperion-graphics-software",
+    ]);
+  });
+
+  it("are perf mode's alone on a packaged launch, whose own options have no entry before them", () => {
+    expect(
+      perfSwitchesInForce(["hyperion", "--perf-run", "cockpit-descent"], true, [
+        { name: "use-angle", value: "vulkan" },
+      ]),
+    ).toEqual(["--use-angle=vulkan"]);
+  });
+});
+
+describe("a perf run's window", () => {
+  it("is the station's 1080p on both settings", () => {
+    for (const setting of ["high", "low"] as const) {
+      expect(perfWindowSize({ scene: "station-wireframe-descent", setting })).toEqual({
+        width: 1920,
+        height: 1080,
+      });
+    }
+  });
+
+  it("is every other scene's 1080p at high and 720p at low", () => {
+    expect(perfWindowSize({ scene: "cockpit-descent", setting: "high" })).toEqual({
+      width: 1920,
+      height: 1080,
+    });
+    expect(perfWindowSize({ scene: "cockpit-descent", setting: "low" })).toEqual({
+      width: 1280,
+      height: 720,
+    });
+  });
+});
+
 describe("the machine's slug", () => {
   it("names the README's machines by their GPU or, for the Mac, its CPU", () => {
     expect(
@@ -77,5 +154,9 @@ describe("the machine's slug", () => {
       "gpu-1002-73bf",
     );
     expect(machineSlugOf(null, "win32", "x")).toBe("unknown-win32");
+    // The software mode's SwiftShader, whose IDs Chromium gave as 0 in a pod's run.
+    expect(machineSlugOf({ vendorId: 0, deviceId: 0 }, "linux", "AMD EPYC 7571", true)).toBe(
+      "swiftshader",
+    );
   });
 });

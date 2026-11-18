@@ -13,6 +13,7 @@ import { planetGeometry } from "../terrain/planet";
 import {
   capabilityFlags,
   DescentDriver,
+  faultFailure,
   descentDriverFor,
   type DescentStage,
   DescentStages,
@@ -20,7 +21,7 @@ import {
   PerfEngine,
   undisposable,
 } from "./descentDriver";
-import type { PerfFrameSample, PerfSceneSink } from "./runPerfScene";
+import type { PerfFailure, PerfFrameSample, PerfSceneSink } from "./runPerfScene";
 import { PERF_SCENES } from "./scenes";
 
 const PROFILE = new DescentProfile(TEST_PLANET_FIGURE, landingSiteOf(7n));
@@ -51,15 +52,15 @@ function config(scene: PerfSceneId): PerfConfig {
 /** A sink that records what it is told. */
 class RecordingSink implements PerfSceneSink {
   readonly frames: PerfFrameSample[] = [];
-  readonly failures: string[] = [];
+  readonly failures: PerfFailure[] = [];
   frame(drawn: PerfFrameSample): void {
     this.frames.push(drawn);
   }
   patch(): void {}
   passTimes(): void {}
   allocation(): void {}
-  failed(reason: string): void {
-    this.failures.push(reason);
+  failed(failure: PerfFailure): void {
+    this.failures.push(failure);
   }
 }
 
@@ -286,7 +287,40 @@ describe("the descent driver", () => {
         sink,
       ),
     ).rejects.toThrow("beside no body");
-    expect(sink.failures).toHaveLength(1);
+    expect(sink.failures).toEqual([
+      {
+        reason: "cockpit-descent: the arrival placed the ship beside no body",
+        shown: "the arrival placed the ship beside no body",
+      },
+    ]);
+  });
+
+  it("tells a failure the spike shows as its own fault line as one the screen keeps", async () => {
+    const { driver, stages } = driven();
+    const sink = new RecordingSink();
+    const mounted = driver.mount(
+      {
+        phase: "warm-up",
+        n: 0,
+        serverUrl: "ws://a/bridge",
+        arrival: config("cockpit-descent").arrival,
+      },
+      sink,
+    );
+    current(stages).listeners.onFailed?.("SCENE TIMED OUT: relaunch to retry");
+    await expect(mounted).rejects.toThrow("SCENE TIMED OUT");
+    expect(sink.failures).toEqual([{ reason: "SCENE TIMED OUT: relaunch to retry", shown: null }]);
+  });
+});
+
+describe("a graphics fault's failure", () => {
+  it("keeps its kind and detail for the record and shows the guide's words alone", () => {
+    expect(
+      faultFailure({ kind: "device-lost", reason: "unknown", message: "the driver reset" }),
+    ).toEqual({
+      reason: "GraphicsFault: the device was lost (unknown: the driver reset)",
+      shown: "the graphics device was lost, relaunch to retry",
+    });
   });
 });
 
@@ -329,6 +363,7 @@ describe("the driver for a scene", () => {
       expect(descentDriverFor(config(scene), page)).toEqual({
         kind: "refused",
         reason: `${scene}: no renderer driver yet (R12.T4.c)`,
+        shown: "this build draws no view of this scene",
       });
     }
   });
@@ -337,10 +372,12 @@ describe("the driver for a scene", () => {
     expect(descentDriverFor(config("cockpit-descent"), { ...page, launchMode: "safe" })).toEqual({
       kind: "refused",
       reason: "the graphics safe mode draws no WebGPU view",
+      shown: "the graphics safe mode draws no view, relaunch to retry",
     });
     expect(descentDriverFor(config("cockpit-descent"), { ...page, webGpu: false })).toEqual({
       kind: "refused",
       reason: "this renderer has no WebGPU",
+      shown: "no WebGPU",
     });
   });
 });

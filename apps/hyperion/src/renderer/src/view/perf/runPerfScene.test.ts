@@ -18,10 +18,13 @@ import {
   type PerfClock,
   type PerfDrawn,
   type PerfDriverChoice,
+  type PerfFailure,
+  type PerfRunOutcome,
   PerfSceneRun,
   type PerfSceneDriver,
   type PerfSceneSink,
   type PerfStage,
+  PERF_FAILED_LOGGED,
   settingValuesOf,
 } from "./runPerfScene";
 
@@ -104,7 +107,7 @@ interface FakeOptions {
   /** Whether unmounting leaves the patches in the cache, a reset that does not happen. */
   readonly keepsCache?: boolean;
   /** Why the views cannot be made, where they cannot. */
-  readonly refuses?: string;
+  readonly refuses?: PerfFailure;
   /** The tally's releases at each repetition's mount, bytes. */
   readonly releases?: ReadonlyArray<number>;
 }
@@ -135,7 +138,7 @@ class FakeDriver implements PerfSceneDriver {
     this.#stage = stage;
     if (this.#options.refuses !== undefined) {
       sink.failed(this.#options.refuses);
-      return Promise.reject(new Error(this.#options.refuses));
+      return Promise.reject(new Error(this.#options.refuses.reason));
     }
     if (this.#late !== null) {
       sink.passTimes(this.#late);
@@ -336,6 +339,8 @@ function fakeClock(driver: FakeDriver): PerfClock & { readonly waits: number[] }
 interface Ran {
   readonly main: FakeMain;
   readonly driver: FakeDriver;
+  /** What the screen was told of the run's end. */
+  readonly outcomes: ReadonlyArray<PerfRunOutcome>;
 }
 
 async function ran(
@@ -345,14 +350,19 @@ async function ran(
 ): Promise<Ran> {
   const driver = new FakeDriver(options);
   const main = fakeMain(verdicts);
+  const outcomes: PerfRunOutcome[] = [];
   const run = new PerfSceneRun({
     api: main.api,
     clock: fakeClock(driver),
     driverFor: () => choice ?? { kind: "driver", driver },
     signal: new AbortController().signal,
+    onEnded: (outcome) => {
+      main.calls.push(`ended ${outcome.kind}`);
+      outcomes.push(outcome);
+    },
   });
   await run.run();
-  return { main, driver };
+  return { main, driver, outcomes };
 }
 
 describe("a perf run in the renderer", () => {
@@ -368,6 +378,7 @@ describe("a perf run in the renderer", () => {
       "endRepetition 1",
       "beginRepetition 2",
       "endRepetition 2",
+      "ended complete",
       "finish",
     ]);
     expect(main.ends).toEqual([{ status: "complete", notes: "The fake's views." }]);
@@ -452,18 +463,51 @@ describe("a perf run in the renderer", () => {
   });
 
   it("fails once where the views cannot be made, before describing them", async () => {
-    const { main } = await ran({ refuses: "GRAPHICS NO ADAPTER: views not available" });
-    expect(main.calls).toEqual(["config", "finish"]);
-    expect(main.ends).toEqual([
-      { status: "failed", reason: "GRAPHICS NO ADAPTER: views not available" },
-    ]);
+    const reason = "GRAPHICS NO ADAPTER: views not available";
+    const { main } = await ran({ refuses: { reason, shown: null } });
+    expect(main.calls).toEqual(["config", "ended failed", "finish"]);
+    expect(main.ends).toEqual([{ status: "failed", reason }]);
+  });
+
+  it("leaves the views mounted on a failure they show their own fault line for", async () => {
+    const reason = "GRAPHICS NO ADAPTER: views not available";
+    const { driver, outcomes } = await ran({ refuses: { reason, shown: null } });
+    expect(driver.unmounts).toBe(0);
+    expect(outcomes).toEqual([{ kind: "failed", shown: null }]);
+  });
+
+  it("drops the views on a failure the run's own fault line states", async () => {
+    const failure = { reason: "the scene: no view", shown: "the scene has no view" };
+    const { driver, outcomes } = await ran({ refuses: failure });
+    expect(driver.unmounts).toBe(1);
+    expect(outcomes).toEqual([{ kind: "failed", shown: "the scene has no view" }]);
+  });
+
+  it("states a failure it did not word as one its log gives the reason of", async () => {
+    const driver = new FakeDriver();
+    const main = fakeMain(["steady"]);
+    const outcomes: PerfRunOutcome[] = [];
+    await new PerfSceneRun({
+      api: {
+        ...main.api,
+        describe: () => Promise.reject(new Error("PerfRunRefused: describe refused")),
+      },
+      clock: fakeClock(driver),
+      driverFor: () => ({ kind: "driver", driver }),
+      signal: new AbortController().signal,
+      onEnded: (outcome) => outcomes.push(outcome),
+    }).run();
+    expect(main.ends).toEqual([{ status: "failed", reason: "PerfRunRefused: describe refused" }]);
+    expect(outcomes).toEqual([{ kind: "failed", shown: PERF_FAILED_LOGGED }]);
   });
 
   it("ends at once where the renderer has no driver for its scene", async () => {
     const reason = "ringed-giant-approach: no renderer driver yet (R12.T4.c)";
-    const { main } = await ran({}, ["steady"], { kind: "refused", reason });
-    expect(main.calls).toEqual(["config", "finish"]);
+    const shown = "this build draws no view of this scene";
+    const { main, outcomes } = await ran({}, ["steady"], { kind: "refused", reason, shown });
+    expect(main.calls).toEqual(["config", "ended failed", "finish"]);
     expect(main.ends).toEqual([{ status: "failed", reason }]);
+    expect(outcomes).toEqual([{ kind: "failed", shown }]);
   });
 
   it("goes on to the repetitions after a warm-up that is not steady", async () => {
@@ -487,10 +531,32 @@ describe("a perf run in the renderer", () => {
       clock: fakeClock(driver),
       driverFor: () => ({ kind: "driver", driver }),
       signal: stop.signal,
+      onEnded: () => undefined,
     });
     await run.run();
     expect(main.ends).toEqual([]);
     expect(driver.unmounts).toBe(1);
+  });
+
+  it("tells the screen nothing of a run its signal stopped", async () => {
+    const driver = new FakeDriver();
+    const main = fakeMain(["warming"]);
+    const stop = new AbortController();
+    const outcomes: PerfRunOutcome[] = [];
+    await new PerfSceneRun({
+      api: {
+        ...main.api,
+        describe: () => {
+          stop.abort();
+          return Promise.resolve();
+        },
+      },
+      clock: fakeClock(driver),
+      driverFor: () => ({ kind: "driver", driver }),
+      signal: stop.signal,
+      onEnded: (outcome) => outcomes.push(outcome),
+    }).run();
+    expect(outcomes).toEqual([]);
   });
 
   it("tells of each release of 16 MiB or more within a repetition, at the page's epoch time", async () => {

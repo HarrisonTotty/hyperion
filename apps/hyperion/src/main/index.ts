@@ -92,7 +92,7 @@ import { isLoopback, PERF_RUN_ENV, preparePerfSession } from "./perf/session";
 import { x11RelaunchArgs } from "./graphics/x11Relaunch";
 import { isSafeExternalUrl, isSameDocument } from "./navigation";
 import { machinePerformanceThreads } from "./performanceThreads";
-import { perfGpuTiming, perfSwitches } from "./perf/launch";
+import { perfGpuTiming, perfSwitches, perfSwitchesInForce, perfWindowSize } from "./perf/launch";
 import { denyPermissionRequests } from "./permissions";
 
 function reportLoadFailure(error: unknown): void {
@@ -131,7 +131,7 @@ interface SpikeWindow {
 const SPIKE_HIDDEN_ENV = "HYPERION_SPIKE_HIDDEN";
 
 /** The spike window's content size: Design note 21's 1080p for high and 720p for low. */
-function spikeSize(launch: Pick<SpikeLaunch | ViewsCheckLaunch | PerfLaunch, "setting">): {
+function spikeSize(launch: Pick<SpikeLaunch | ViewsCheckLaunch, "setting">): {
   readonly width: number;
   readonly height: number;
 } {
@@ -200,9 +200,12 @@ function createWindow(
           check.hidden ? 1 : screen.getPrimaryDisplay().scaleFactor,
           check.zoom,
         )
-      : run === null
-        ? { width: 1600, height: 900 }
-        : spikeSize(run.launch);
+      : perf !== null
+        ? // A perf run's from its scene: the station's 1080p on both settings.
+          perfWindowSize(perf.launch)
+        : spike === null
+          ? { width: 1600, height: 900 }
+          : spikeSize(spike.launch);
   const window = new BrowserWindow({
     ...size,
     useContentSize: run !== null,
@@ -516,9 +519,8 @@ async function startPerfRun(
   const perfSession = await preparePerfSession({
     launch,
     graphics,
-    switches: switches.map(({ name, value }) =>
-      value === undefined ? `--${name}` : `--${name}=${value}`,
-    ),
+    // Every switch in force (Design note 5): the recipe's on the command line, then perf mode's.
+    switches: perfSwitchesInForce(process.argv, app.isPackaged, switches),
     hidden,
     remoteUrl: isLoopback(args.address) ? null : serverUrlOf(args),
     patience: graphics.launchMode === "software" ? SOFTWARE_WAIT_FACTOR : 1,
@@ -553,6 +555,15 @@ async function startPerfRun(
   );
   window = opened;
   perfSession.attachWindow(opened.webContents.debugger);
+  // A perf run shows the renderer's console nowhere else: its warnings and errors go to the run's
+  // log, so that a run that stalls is placed.
+  opened.webContents.on("console-message", (details) => {
+    if (details.level === "warning" || details.level === "error") {
+      for (const line of details.message.split("\n")) {
+        logLine(`perf run: renderer: ${line}`);
+      }
+    }
+  });
   const page = pageUrl();
   registerPerfHandlers<IpcMainInvokeEvent>({
     handle: (channel, listener) => {

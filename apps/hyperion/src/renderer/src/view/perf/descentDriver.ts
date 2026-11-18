@@ -43,6 +43,7 @@ import { MemoryLedger } from "./ledger";
 import type {
   PerfDrawn,
   PerfDriverChoice,
+  PerfFailure,
   PerfSceneDriver,
   PerfSceneSink,
   PerfStage,
@@ -55,24 +56,39 @@ const INSTRUMENT_RATE_HZ = 30;
 /** Each view drawn at its full internal scale: the spike's session views draw unscaled. */
 const UNSCALED: InternalScaleRecord = { min: 1, median: 1 };
 
-/** A run's fault in the words the record's notes give. */
-export function faultReason(fault: GraphicsFault): string {
-  let reason: string;
+/**
+ * A run's graphics fault: in the record's words, its kind and detail, and on the screen in the
+ * guide's, after its `GRAPHICS` rows (`GRAPHICS DISABLED`, `GRAPHICS VIEW REFUSED`).
+ */
+export function faultFailure(fault: GraphicsFault): PerfFailure {
+  let failure: PerfFailure;
   switch (fault.kind) {
     case "device-lost":
-      reason = `GraphicsFault: the device was lost (${fault.reason}: ${fault.message})`;
+      failure = {
+        reason: `GraphicsFault: the device was lost (${fault.reason}: ${fault.message})`,
+        shown: "the graphics device was lost, relaunch to retry",
+      };
       break;
     case "gpu-process-gone":
-      reason = `GraphicsFault: the GPU process is gone (${String(fault.count)} this launch)`;
+      failure = {
+        reason: `GraphicsFault: the GPU process is gone (${String(fault.count)} this launch)`,
+        shown: "the GPU process is gone, relaunch to retry",
+      };
       break;
     case "shader-refused":
-      reason = `GraphicsFault: the shader of ${fault.effectName} was refused`;
+      failure = {
+        reason: `GraphicsFault: the shader of ${fault.effectName} was refused`,
+        shown: "a shader was refused on this device",
+      };
       break;
     case "view-refused":
-      reason = `GraphicsFault: the view ${fault.viewName} was not made again`;
+      failure = {
+        reason: `GraphicsFault: the view ${fault.viewName} was not made again`,
+        shown: "a view was not re-created after a device loss, relaunch to retry",
+      };
       break;
   }
-  return reason;
+  return failure;
 }
 
 /** The boolean members of R01's `GpuCapabilities`, by name, as the record lists them. */
@@ -139,7 +155,8 @@ export class PerfEngine {
           const { vendor, architecture, description, fallback } = outcome.summary;
           this.#adapter = { vendor, architecture, description, fallback };
         } else {
-          this.sink?.failed(`no GPU adapter (${outcome.kind})`);
+          // The spike's views stand on `GRAPHICS NO ADAPTER`, its line for an engine not had.
+          this.sink?.failed({ reason: `no GPU adapter (${outcome.kind})`, shown: null });
         }
         return outcome;
       });
@@ -159,7 +176,7 @@ export class PerfEngine {
     try {
       engine = await this.#load(outcome, status);
     } catch (error: unknown) {
-      this.sink?.failed("the engine could not be made");
+      this.sink?.failed({ reason: "the engine could not be made", shown: null });
       throw error;
     }
     this.gpu.resolves.follow(engine);
@@ -176,7 +193,7 @@ export class PerfEngine {
         this.sink?.allocation(event);
       }),
       engine.onFault((fault) => {
-        this.sink?.failed(faultReason(fault));
+        this.sink?.failed(faultFailure(fault));
       }),
       () => {
         this.#ledger?.dispose();
@@ -314,13 +331,13 @@ export class DescentDriver implements PerfSceneDriver {
     const body = stage.arrival.body;
     if (body === null) {
       const reason = `${scene.id}: the arrival placed the ship beside no body`;
-      sink.failed(reason);
+      sink.failed({ reason, shown: "the arrival placed the ship beside no body" });
       return Promise.reject(new Error(reason));
     }
     const main = scene.views[setting][0];
     if (main === undefined) {
       const reason = `${scene.id}: the scene has no view at ${setting}`;
-      sink.failed(reason);
+      sink.failed({ reason, shown: "the scene has no view at this quality setting" });
       return Promise.reject(new Error(reason));
     }
     return new Promise<PerfDrawn>((resolve, reject) => {
@@ -346,7 +363,8 @@ export class DescentDriver implements PerfSceneDriver {
         },
         onFailed: (status) => {
           if (current()) {
-            sink.failed(status);
+            // The spike shows `status` as its own fault line, which stays.
+            sink.failed({ reason: status, shown: null });
             reject(new Error(status));
           }
         },
@@ -526,13 +544,21 @@ export function descentDriverFor(config: PerfConfig, page: DescentDriverPage): P
     case "approach":
     case "arrival":
     case "sweep":
-      return { kind: "refused", reason: `${scene.id}: no renderer driver yet (R12.T4.c)` };
+      return {
+        kind: "refused",
+        reason: `${scene.id}: no renderer driver yet (R12.T4.c)`,
+        shown: "this build draws no view of this scene",
+      };
   }
   if (page.launchMode === "safe") {
-    return { kind: "refused", reason: "the graphics safe mode draws no WebGPU view" };
+    return {
+      kind: "refused",
+      reason: "the graphics safe mode draws no WebGPU view",
+      shown: "the graphics safe mode draws no view, relaunch to retry",
+    };
   }
   if (!page.webGpu) {
-    return { kind: "refused", reason: "this renderer has no WebGPU" };
+    return { kind: "refused", reason: "this renderer has no WebGPU", shown: "no WebGPU" };
   }
   return {
     kind: "driver",

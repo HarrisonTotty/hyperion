@@ -13,6 +13,8 @@ export default defineConfig({
       __APP_VERSION__: JSON.stringify(pkg.version),
     },
     build: {
+      // Bundled, not required: its sources are TypeScript, which Node loads from no package.
+      externalizeDeps: { exclude: ["@hyperion/perf"] },
       rolldownOptions: {
         input: { index: resolve("src/main/index.ts"), smoke: resolve("src/smoke/main.ts") },
       },
@@ -20,6 +22,8 @@ export default defineConfig({
   },
   preload: {
     build: {
+      // Bundled, not required: a sandboxed preload can require no package, only `electron`.
+      externalizeDeps: { exclude: ["@hyperion/perf"] },
       rolldownOptions: {
         input: { index: resolve("src/preload/index.ts"), smoke: resolve("src/smoke/preload.ts") },
       },
