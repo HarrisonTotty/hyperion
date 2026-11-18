@@ -1686,6 +1686,8 @@ describe("a view's sky while its cube is baked (lane perf-long-tasks-3)", () => 
    */
   async function bakingDrawer(failing = false): Promise<{
     readonly frameWith: (sky: DrawnSky | null) => ReadonlyArray<TextureHandle>;
+    /** Whether the last frame drew a sky: the kept scene's own stars stand in where it drew none. */
+    readonly skyDrawn: () => boolean;
     readonly runTasks: () => void;
     readonly restore: () => void;
     readonly tasks: Array<() => void>;
@@ -1730,10 +1732,15 @@ describe("a view's sky while its cube is baked (lane perf-long-tasks-3)", () => 
     });
     const view = new RecordingView("view");
     const drawer = new ViewFrameDrawer(engine, view, "view");
+    // The phase scene with stars of its own, which stand in where no sky is drawn.
+    const run = phaseRun(false);
+    const starred = { ...run, scene: { ...run.scene, stars: ATMOSPHERE_STARS } };
+    let last: ViewFrameDrawn | null = null;
     return {
+      skyDrawn: () => last?.sceneStars === false,
       frameWith: (sky) => {
-        drawer.draw({
-          run: phaseRun(false),
+        last = drawer.draw({
+          run: starred,
           size: { widthPx: 320, heightPx: 180, devicePixelRatio: 1, remPx: 16 },
           tokens: TOKENS,
           exposure: DEFAULT_EXPOSURE,
@@ -1823,16 +1830,31 @@ describe("a view's sky while its cube is baked (lane perf-long-tasks-3)", () => 
     expect([frameWith(newer), cubes.length]).toEqual([[cubes[1]], 2]);
   });
 
-  it("draws no cube after a device loss's restore until its sky's is baked again", async () => {
-    const { frameWith, runTasks, restore, cubes } = await bakingDrawer();
+  it("draws no sky after a device loss's restore until its cube is baked again", async () => {
+    const { frameWith, skyDrawn, runTasks, restore, cubes } = await bakingDrawer();
     const sky = drawnSky();
     frameWith(sky);
     runTasks();
-    expect(frameWith(sky)).toEqual([cubes[0]]);
+    expect([frameWith(sky), skyDrawn()]).toEqual([[cubes[0]], true]);
     restore();
-    expect(frameWith(sky)).toEqual([]);
+    // Not the sky's sprites and band without its cube: none of it, the stand-in drawn.
+    expect([frameWith(sky), skyDrawn()]).toEqual([[], false]);
     runTasks();
-    expect(frameWith(sky)).toEqual([cubes[1]]);
+    expect([frameWith(sky), skyDrawn()]).toEqual([[cubes[1]], true]);
+  });
+
+  it("draws a sky that a held cube serves at once though another's bake runs, and bakes no more", async () => {
+    const { frameWith, runTasks, cubes, released } = await bakingDrawer();
+    const first = drawnSky();
+    frameWith(first);
+    runTasks();
+    expect(frameWith(first)).toEqual([cubes[0]]);
+    frameWith(drawnSky());
+    // The first sky again, culled anew (a zoom and back): the cube it holds serves it.
+    const again: DrawnSky = { ...first, selection: { ...first.selection } };
+    expect(frameWith(again)).toEqual([cubes[0]]);
+    runTasks();
+    expect([frameWith(again), cubes, released]).toEqual([[cubes[0]], [cubes[0]], []]);
   });
 
   it("drops a bake under way where the frame's sky goes", async () => {
@@ -1841,5 +1863,97 @@ describe("a view's sky while its cube is baked (lane perf-long-tasks-3)", () => 
     expect(frameWith(null)).toEqual([]);
     runTasks();
     expect(cubes).toEqual([]);
+  });
+});
+
+describe("a view's lights while its sky's cube is baked (lane perf-long-tasks-3)", () => {
+  /** The phase scene served, lit by its held sky's hosts rather than its own discs. */
+  function servedPhaseRun(): ViewRun {
+    const run = phaseRun(false);
+    // Its own discs left out: a served scene's lights are its held sky's.
+    const { hostDiscs: _own, ...scene } = run.scene;
+    return { ...run, scene: { ...scene, provenance: { kind: "server" } } };
+  }
+
+  /** A drawn sky of the phase scene's system, its hosts the scene's own discs. */
+  function litSky(): DrawnSky {
+    const sky = drawnSky();
+    const scene = phaseRun(false).scene;
+    const request = skyRequest(0, scene.system);
+    return {
+      ...sky,
+      model: {
+        ...sky.model,
+        request,
+        response: { ...sky.model.response, hosts: [...(scene.hostDiscs ?? [])] },
+      },
+    };
+  }
+
+  /**
+   * The bodies' writes of a photorealistic frame drawn with `sky`, once the
+   * renderer is made; its bake's tasks never run where `bake` is false, so that the frame is drawn
+   * while its first cube is baked.
+   */
+  async function bodiesLitWith(sky: DrawnSky | null, bake: boolean): Promise<string> {
+    const engine = await countingRenderEngine();
+    const tasks: Array<() => void> = [];
+    skyCubeCacheOf(engine, {
+      schedule: (task) => {
+        tasks.push(task);
+      },
+      now: () => 0,
+    });
+    vi.spyOn(engine, "createPackedCube").mockImplementation(() => ({
+      kind: "texture",
+      name: "cube",
+    }));
+    vi.spyOn(engine, "writePackedCubeLevel").mockImplementation(() => undefined);
+    const drawer = new ViewFrameDrawer(engine, new RecordingView("view"), "view");
+    const inputs: ViewFrameInputs = {
+      run: servedPhaseRun(),
+      size: { widthPx: 320, heightPx: 180, devicePixelRatio: 1, remPx: 16 },
+      tokens: TOKENS,
+      exposure: DEFAULT_EXPOSURE,
+      white: null,
+      stars: [],
+      sky,
+      hostDiscs: null,
+      selection: null,
+      style: "photorealistic",
+      setting: "low",
+      geometry: undefined,
+      renderScale: 1,
+      availability: { wireframe: true, photorealistic: true },
+      meter: null,
+    };
+    drawer.draw(inputs);
+    await vi.waitFor(() => {
+      expect(drawer.photorealStatus).toBe("ready");
+    });
+    // Frames enough for the bake's tasks and its frame's step, where it is to end.
+    const frames = bake ? 20 : 0;
+    for (let frame = 0; frame < frames; frame += 1) {
+      for (let task = tasks.shift(); task !== undefined; task = tasks.shift()) {
+        task();
+      }
+      drawer.draw(inputs);
+    }
+    const from = engine.writes.length;
+    drawer.draw(inputs);
+    // What the frame wrote of its bodies, their lights among it.
+    const written = engine.writes
+      .slice(from)
+      .filter((write) => write.buffer.startsWith("bodies:"))
+      .map((write) => [write.buffer, write.offsetBytes, Array.from(write.data)]);
+    drawer.dispose();
+    return JSON.stringify(written);
+  }
+
+  it("lights the bodies by the arrived sky's hosts, as once its cube is baked", async () => {
+    const baking = await bodiesLitWith(litSky(), false);
+    expect(baking).toBe(await bodiesLitWith(litSky(), true));
+    // Not as with no sky, which brings no light.
+    expect(baking).not.toBe(await bodiesLitWith(null, false));
   });
 });

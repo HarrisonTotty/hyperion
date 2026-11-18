@@ -325,18 +325,26 @@ describe("startSkyBake: the bake in steps (lane perf-long-tasks-3)", () => {
       bakeSourceOf({ ...TILED, ...manyStars(BAKE_STARS_A_STEP + 5) }),
     );
     const now = expiring();
-    // The stars' steps in tasks; then nothing more, uploaded or made, outside a frame.
-    expect([job.step(Number.POSITIVE_INFINITY, now, false), job.awaitsFrame]).toEqual([null, true]);
-    expect(job.step(Number.POSITIVE_INFINITY, now, false)).toBeNull();
-    expect([seen.made, seen.writes]).toEqual([[], []]);
-    expect(job.step(0, now, true)).toBeNull();
-    expect(job.awaitsFrame).toBe(false);
-    expect(seen.writes.map((write) => write.name)).toEqual([
-      "sky cube: test points",
-      "sky cube: test solid angles",
-    ]);
-    // The rest in tasks.
-    expect(job.step(Number.POSITIVE_INFINITY, now, false)?.path).toBe("gpu");
+    try {
+      // The stars' steps in tasks; then nothing more, uploaded or made, outside a frame.
+      expect([job.step(Number.POSITIVE_INFINITY, now, false), job.awaitsFrame]).toEqual([
+        null,
+        true,
+      ]);
+      expect(job.step(Number.POSITIVE_INFINITY, now, false)).toBeNull();
+      expect([seen.made, seen.writes]).toEqual([[], []]);
+      expect(job.step(0, now, true)).toBeNull();
+      expect(job.awaitsFrame).toBe(false);
+      expect(seen.writes.map((write) => write.name)).toEqual([
+        "sky cube: test points",
+        "sky cube: test solid angles",
+      ]);
+      // The rest in tasks.
+      expect(job.step(Number.POSITIVE_INFINITY, now, false)?.path).toBe("gpu");
+    } finally {
+      // The page's points array goes back whatever this test finds.
+      job.cancel();
+    }
   });
 
   it("splats at most one tile a step, and makes the cube once the peak pass has ended", async () => {

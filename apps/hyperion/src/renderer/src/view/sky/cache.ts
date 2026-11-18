@@ -55,9 +55,8 @@ export type CubeState =
 
 /**
  * The time after which a task of bake steps ends, at the end of its step, ms (lane
- * perf-long-tasks-3): most steps, a tile's splat and levels or 16,384 stars' layout, take a few ms
- * on a pod. The kernels' and the scratch's making take one step each, and so does a face size's
- * solid angles where a bake comes before the worker forming them has answered.
+ * perf-long-tasks-3): a task's steps, a tile's splat and levels or 16,384 stars' layout, take a few
+ * ms on a pod. The kernels', uploads' and scratch's making is a frame's step, run by `want`.
  */
 export const SKY_BAKE_SLICE_MS = 6;
 
@@ -96,7 +95,10 @@ function sameStars(a: Uint32Array, b: Uint32Array): boolean {
 }
 
 /** Whether an entry or a bake serves a request: the same sky's same baked stars. */
-function fits(held: Pick<Entry, "stars" | "baked">, request: CubeRequest): boolean {
+function fits(
+  held: Pick<Entry, "stars" | "baked">,
+  request: Pick<CubeRequest, "stars" | "baked">,
+): boolean {
   return held.stars === request.stars && sameStars(held.baked, request.baked);
 }
 
@@ -187,7 +189,8 @@ export class SkyCubeCache {
    * A view's cube as its frame asks for it (lane perf-long-tasks-3): its own or another view's
    * where one fits, else a bake begun, or joined, in the tasks after the frame, the view keeping
    * the cube it holds meanwhile ({@link SkyCubeCache.held}); once baked, the view takes it up at
-   * its next ask, and lets its old one go.
+   * its next ask, and lets its old one go. A bake whose next step is a frame's runs it here, in
+   * the asking frame: its uploads and scratch, or the CPU bake's cube and levels written.
    *
    * @param view - The view's name, which holds its cube until released or given another.
    */
@@ -213,6 +216,21 @@ export class SkyCubeCache {
   /** The cube a view holds, which its frames draw while its next is baked; `null` with none. */
   held(view: string): BakedCube | null {
     return this.#byView.get(view)?.cube ?? null;
+  }
+
+  /**
+   * Whether a request is served with no bake: its stars are none, or a cube the view holds,
+   * another view's, the spare or a bake ended fits it. Asks nothing, and changes nothing.
+   */
+  serves(view: string, request: Pick<CubeRequest, "stars" | "baked">): boolean {
+    const held = this.#byView.get(view);
+    return (
+      request.baked.length === 0 ||
+      (held !== undefined && fits(held, request)) ||
+      this.#entries.some((entry) => fits(entry, request)) ||
+      (this.#spare !== null && fits(this.#spare, request)) ||
+      this.#bakes.some((bake) => bake.outcome?.kind === "baked" && fits(bake, request))
+    );
   }
 
   /** Lets a view's cube go, releasing it with its last view, and stops its wait on a bake. */

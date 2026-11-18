@@ -983,8 +983,15 @@ export class ViewFrameDrawer {
       return { sky, cube: null };
     }
     const earlier = this.#baking;
-    if (earlier !== null && earlier !== sky && earlier !== this.#failedFor) {
-      // The earlier sky's bake first: drawn once it ends, then this sky's begun.
+    if (
+      earlier !== null &&
+      earlier !== sky &&
+      earlier !== this.#failedFor &&
+      !cache.serves(this.#name, { stars: sky.model.stars, baked: sky.selection.baked })
+    ) {
+      // The earlier sky's bake first: drawn once it ends, then this sky's begun. A sky a cube
+      // serves already (the one drawn, after a zoom and back) is drawn at once, and the earlier
+      // bake let go.
       if (this.#want(cache, earlier, setting) === "baking") {
         return this.#held(cache);
       }

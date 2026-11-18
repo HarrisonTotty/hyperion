@@ -485,14 +485,16 @@ function placed(size: Uint32Array, origin: readonly [number, number, number, num
  * A bake under way, made a step at a time ({@link startSkyBake}).
  *
  * @remarks
- * A step is the stars' layout of {@link BAKE_STARS_A_STEP}; then a frame's, the uploads and the
- * scratch's making; then a tile's splat and peak, a tile's splat and levels, or a face's last
- * levels. The CPU bake, the fallback, lays its stars out, then bakes in a frame's step.
+ * A step is the stars' layout of {@link BAKE_STARS_A_STEP}; then a frame's, the kernels', the
+ * uploads' and the scratch's making, the solid angles formed there where the worker has not
+ * answered; then a tile's splat and peak, a tile's splat and levels, or a face's last levels. The
+ * CPU bake, the fallback, lays its stars out and packs its levels in tasks, then makes and writes
+ * its cube in a frame's step.
  */
 export interface SkyBakeJob {
   /**
-   * Runs the bake's next steps, at least one, until `now()` reaches `untilMs`, or until its next
-   * step is a frame's where `inFrame` is false ({@link BakeStepPlace}).
+   * Runs the bake's next steps, at least one, until `now()` reaches `untilMs`; none, or no more,
+   * once its next step is a frame's where `inFrame` is false ({@link BakeStepPlace}).
    *
    * @param inFrame - Whether the caller is a frame's, which may run a frame's step.
    * @returns The cube once its last step is run, and `null` until then; what it made is then the
@@ -884,20 +886,25 @@ function release(engine: RenderEngine, handle: BufferHandle | TextureHandle): vo
   }
 }
 
-/** The CPU bake, as steps: its stars laid out, then the rest as one, in a frame. */
+/**
+ * The CPU bake, as steps: its stars laid out, its levels splatted, summed and packed in a task,
+ * and its cube made and written in a frame.
+ */
 function* bakeOnCpu(
   engine: RenderEngine,
   source: SkyBakeSource,
 ): Generator<BakeStepPlace, BakedCube | null, void> {
   const points = takePoints(source.stars.count);
+  let packed: PackedCpuLevels;
   try {
     yield* layOutPoints(source, points);
-    // Its cube's levels are written whole, as the GPU bake's uploads are: in a frame.
-    yield "frame";
-    return bakePointsOnCpu(engine, points.subarray(BAKE_POINTS_HEADER), source);
+    packed = packedLevelsOnCpu(points.subarray(BAKE_POINTS_HEADER), source.faceSizePx);
   } finally {
     givePoints(points);
   }
+  // Its levels are written whole, as the GPU bake's uploads are: in a frame.
+  yield "frame";
+  return writtenCubeOnCpu(engine, packed, source);
 }
 
 /**
@@ -908,16 +915,21 @@ export function bakeSkyCubeOnCpu(engine: RenderEngine, input: BakeInput): BakedC
   const source = bakeSourceOf(input);
   const points = new Float32Array(BAKE_POINTS_HEADER + source.stars.count * SPLAT_POINT_FLOATS);
   source.stars.writeInto(points, 0, source.stars.count);
-  return bakePointsOnCpu(engine, points.subarray(BAKE_POINTS_HEADER), source);
+  return writtenCubeOnCpu(
+    engine,
+    packedLevelsOnCpu(points.subarray(BAKE_POINTS_HEADER), source.faceSizePx),
+    source,
+  );
 }
 
-/** The CPU bake of stars in the splat's layout, without its header. */
-function bakePointsOnCpu(
-  engine: RenderEngine,
-  points: Float32Array,
-  source: Pick<SkyBakeSource, "faceSizePx" | "name">,
-): BakedCube {
-  const size = source.faceSizePx;
+/** A CPU bake's packed levels, each the six faces' in turn, and the power of two they took. */
+interface PackedCpuLevels {
+  readonly levels: ReadonlyArray<Uint32Array>;
+  readonly exponent: number;
+}
+
+/** The CPU bake's levels of stars in the splat's layout, without its header. */
+function packedLevelsOnCpu(points: Float32Array, size: number): PackedCpuLevels {
   const sizes = mipSizes(size);
   const omegas = texelSolidAnglesSr(size);
   // The six faces at once: the fallback serves the low setting's 1,024² faces (some 100 MB here)
@@ -927,22 +939,32 @@ function bakePointsOnCpu(
     divideBySolidAngle(face, size, omegas);
   }
   const exponent = peakScaleExponent(faces);
-  const cube = engine.createPackedCube(size, sizes.length, "sky-cube", source.name);
+  const levels: Uint32Array[] = sizes.map(
+    (levelSize) => new Uint32Array(levelSize * levelSize * 6),
+  );
+  faces.forEach((face, faceIndex) => {
+    scaleByPowerOfTwo(face, exponent);
+    faceMipChain(face, size).forEach((level, index) => {
+      const levelSize = sizes[index] ?? 1;
+      levels[index]?.set(packRgb9e5Texels(level), faceIndex * levelSize * levelSize);
+    });
+  });
+  return { levels, exponent };
+}
+
+/** The CPU bake's cube, made and written from its packed levels, and its peak. */
+function writtenCubeOnCpu(
+  engine: RenderEngine,
+  packed: PackedCpuLevels,
+  source: Pick<SkyBakeSource, "faceSizePx" | "name">,
+): BakedCube {
+  const size = source.faceSizePx;
+  const cube = engine.createPackedCube(size, packed.levels.length, "sky-cube", source.name);
   let peak: BufferHandle | null = null;
   let made = false;
   try {
-    const levels: Uint32Array[] = sizes.map(
-      (levelSize) => new Uint32Array(levelSize * levelSize * 6),
-    );
-    faces.forEach((face, faceIndex) => {
-      scaleByPowerOfTwo(face, exponent);
-      faceMipChain(face, size).forEach((level, index) => {
-        const levelSize = sizes[index] ?? 1;
-        levels[index]?.set(packRgb9e5Texels(level), faceIndex * levelSize * levelSize);
-      });
-    });
-    levels.forEach((packed, level) => {
-      engine.writePackedCubeLevel(cube, level, packed);
+    packed.levels.forEach((level, index) => {
+      engine.writePackedCubeLevel(cube, index, level);
     });
     peak = engine.createBuffer({
       name: `${source.name} peak`,
@@ -951,7 +973,7 @@ function bakePointsOnCpu(
       category: "sky-cube",
     });
     // A peak whose `scaleExponent` is the exponent applied: 2^(15 − k).
-    engine.writeBuffer(peak, 0, f32Bits(2 ** (15 - exponent)));
+    engine.writeBuffer(peak, 0, f32Bits(2 ** (15 - packed.exponent)));
     made = true;
     return { cube, peak, faceSizePx: size, path: "cpu" };
   } finally {
