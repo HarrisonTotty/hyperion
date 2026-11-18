@@ -148,6 +148,12 @@ export interface PerfSceneSink {
    * with the frames told so far, its length and segments as they ran.
    */
   spanEnded(span: MeasuredSpan): void;
+  /**
+   * Leaves out of the repetition's figures every resolve numbered at or before `engineFrame`, told
+   * before its first frame: a mount's frames before its first in the scene's style (`VIEW`'s
+   * photorealistic stand-in) are not the span's, nor are their passes.
+   */
+  leaveOutResolves(engineFrame: number): void;
   /** One resolve's pass times, numbered on the run's count (`ResolveCounter.runFrame`). */
   passTimes(times: PassTimes): void;
   /** One of the engine's allocation events. */
@@ -585,6 +591,14 @@ export class PerfSceneRun implements PerfSceneSink {
     if (span.kind === "script" && sample.scriptTimeS >= span.spanS) {
       phase.flown = true;
       phase.end({ spanS: span.spanS, segments: span.segments });
+    }
+  }
+
+  /** Leaves out of a repetition not yet started every resolve through `engineFrame`. */
+  leaveOutResolves(engineFrame: number): void {
+    const phase = this.#phase;
+    if (phase.kind === "repetition" && !phase.started) {
+      phase.metrics.leaveOutThrough(engineFrame);
     }
   }
 

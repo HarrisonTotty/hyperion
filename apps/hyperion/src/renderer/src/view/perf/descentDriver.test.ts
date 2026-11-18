@@ -64,6 +64,7 @@ class RecordingSink implements PerfSceneSink {
   spanEnded(span: MeasuredSpan): void {
     this.spans.push(span);
   }
+  leaveOutResolves(): void {}
   passTimes(): void {}
   allocation(): void {}
   failed(failure: PerfFailure): void {
@@ -429,6 +430,23 @@ describe("arrival-memory's driver", () => {
           { name: "held", startS: settledMs / 1000, endS: (settledMs + 60_000) / 1000 },
         ],
       },
+    ]);
+  });
+
+  it("starts the held minute only once no patch has been made resident for the settle window", () => {
+    const sink = new RecordingSink();
+    const { stage } = arrivalRepetition(sink);
+    drawAt(stage, 0, session(4));
+    for (let ms = 1_000; ms <= 4_000; ms += 1_000) {
+      drawAt(stage, ms, session(30));
+      stage.listeners.onPatch?.("resident", { face: 0, level: 9, i: 3, j: 4 });
+    }
+    const quietMs = 4_000 + ARRIVAL_SETTLE_S * 1000;
+    for (let ms = 5_000; ms <= quietMs + 60_000; ms += 1_000) {
+      drawAt(stage, ms, session(30));
+    }
+    expect(sink.spans.map(({ segments }) => segments.at(-1))).toEqual([
+      { name: "held", startS: quietMs / 1000, endS: (quietMs + 60_000) / 1000 },
     ]);
   });
 

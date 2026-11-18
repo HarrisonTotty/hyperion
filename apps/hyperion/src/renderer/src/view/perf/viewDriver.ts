@@ -181,6 +181,8 @@ export class ViewDriver implements PerfSceneDriver {
         }
       };
       let placed: Placed | null = null;
+      // The run's resolve count as the frame now drawing began: the stand-in's resolves end there.
+      let frameStartEngine = 0;
       let firstMs: number | null = null;
       let tS = 0;
       let drawn = false;
@@ -203,6 +205,7 @@ export class ViewDriver implements PerfSceneDriver {
           fail({ reason: `${scene.id}: ${placed.reason}`, shown: placed.shown });
           return null;
         }
+        frameStartEngine = engine.gpu.resolves.value;
         // The warm-up holds the first pose, and so does a repetition until its first frame drawn in
         // the scene's style.
         tS = stage.phase === "warm-up" || firstMs === null ? 0 : (nowMs - firstMs) / 1000;
@@ -228,8 +231,10 @@ export class ViewDriver implements PerfSceneDriver {
         if (frame.drawnStyle !== main.style) {
           return;
         }
-        if (stage.phase === "repetition") {
-          firstMs ??= frame.rafTimestampMs;
+        if (stage.phase === "repetition" && firstMs === null) {
+          firstMs = frame.rafTimestampMs;
+          // The stand-in's frames before this one, and their passes, are not the span's.
+          sink.leaveOutResolves(frameStartEngine);
         }
         engine.scriptTimeS = tS;
         if (tS <= placed.script.durationS) {

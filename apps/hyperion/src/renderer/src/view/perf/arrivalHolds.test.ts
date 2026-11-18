@@ -1,11 +1,25 @@
 import { describe, expect, it } from "vitest";
 
-import { ARRIVAL_SETTLE_S, type ArrivalFrame, ArrivalHolds } from "./arrivalHolds";
+import {
+  ARRIVAL_SETTLE_LIMIT_S,
+  ARRIVAL_SETTLE_S,
+  type ArrivalFrame,
+  ArrivalHolds,
+} from "./arrivalHolds";
 import { ARRIVAL_HELD_S } from "./scripts";
 
-/** A frame at `spanS` with the field resident or not, streaming or not, holding `patches`. */
-function at(spanS: number, fieldResident: boolean, streaming = false, patches = 10): ArrivalFrame {
-  return { spanS, fieldResident, streaming, patches };
+/**
+ * A frame at `spanS` with the field resident or not, streaming or not, holding `patches`, its
+ * latest patch made resident at `lastResidentS`.
+ */
+function at(
+  spanS: number,
+  fieldResident: boolean,
+  streaming = false,
+  patches = 10,
+  lastResidentS: number | null = null,
+): ArrivalFrame {
+  return { spanS, fieldResident, streaming, patches, lastResidentS };
 }
 
 describe("arrival-memory's holds", () => {
@@ -25,6 +39,21 @@ describe("arrival-memory's holds", () => {
     holds.frame(at(12, true, false, 0));
     holds.frame(at(13, true));
     expect(holds.frame(at(13 + ARRIVAL_SETTLE_S, true))).toBe("held");
+  });
+
+  it("wait for the deepest pose's patches to stop being made resident, not streaming alone", () => {
+    const holds = new ArrivalHolds();
+    holds.frame(at(10, true));
+    holds.frame(at(11, true, false, 10, 11));
+    expect(holds.frame(at(11 + ARRIVAL_SETTLE_S, true, false, 10, 12.5))).toBe("deepest");
+    expect(holds.frame(at(12.5 + ARRIVAL_SETTLE_S, true, false, 10, 12.5))).toBe("held");
+  });
+
+  it("hold a deepest pose that has not settled by the limit, so that no run waits for ever", () => {
+    const holds = new ArrivalHolds();
+    holds.frame(at(10, true));
+    expect(holds.frame(at(10 + ARRIVAL_SETTLE_LIMIT_S - 1, true, true))).toBe("deepest");
+    expect(holds.frame(at(10 + ARRIVAL_SETTLE_LIMIT_S, true, true))).toBe("held");
   });
 
   it("fly once the deepest pose has been held its minute, with three stretches", () => {

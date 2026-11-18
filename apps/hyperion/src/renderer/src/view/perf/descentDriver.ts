@@ -51,7 +51,7 @@ import type {
 } from "./runPerfScene";
 import { PERF_LANDING_SEED, type PerfScene } from "./scenes";
 import { PerfStages } from "./stages";
-import { ARRIVAL_SETTLE_S, ArrivalHolds } from "./arrivalHolds";
+import { ARRIVAL_SETTLE_LIMIT_S, ARRIVAL_SETTLE_S, ArrivalHolds } from "./arrivalHolds";
 import { ARRIVAL_HELD_S, arrivalHold } from "./scripts";
 
 /** An instrument's rate where the scene names none, Hz: R07's instruments' (Design note 14). */
@@ -351,8 +351,11 @@ export class DescentDriver implements PerfSceneDriver {
       const current = (): boolean => this.#stage === made;
       let held: HeldSample | null = null;
       let drawn = false;
-      // The arrival's span is timed from its first frame, on the frames' clock.
+      // The arrival's span is timed from its first frame, on the frames' clock; the latest patch
+      // made resident is placed at the last frame's time on it.
       let firstRafMs: number | null = null;
+      let lastSpanS = 0;
+      let lastResidentS: number | null = null;
       const listeners: SpikeListeners = {
         onFrame: (sample) => {
           if (current()) {
@@ -361,12 +364,16 @@ export class DescentDriver implements PerfSceneDriver {
             if (holds !== null) {
               firstRafMs ??= sample.rafTimestampMs;
               scriptTimeS = (sample.rafTimestampMs - firstRafMs) / 1000;
+              lastSpanS = scriptTimeS;
             }
             held = { ...sample, scriptTimeS, engineFrame: engine.gpu.resolves.value };
           }
         },
         onPatch: (event) => {
           if (current()) {
+            if (event === "resident") {
+              lastResidentS = lastSpanS;
+            }
             sink.patch(event);
           }
         },
@@ -409,7 +416,7 @@ export class DescentDriver implements PerfSceneDriver {
           if (sample !== null) {
             sink.frame(sample);
             if (holds !== null) {
-              this.#holdArrival(holds, sample, frame.session, body, sink);
+              this.#holdArrival(holds, sample, frame.session, body, sink, lastResidentS);
             }
           }
           if (!drawn && this.#prepared !== null) {
@@ -455,6 +462,7 @@ export class DescentDriver implements PerfSceneDriver {
     session: SpikeDrawnSession | null,
     body: string,
     sink: PerfSceneSink,
+    lastResidentS: number | null,
   ): void {
     const status = session?.survey(body)?.status ?? null;
     const failure = status?.failure ?? null;
@@ -478,6 +486,7 @@ export class DescentDriver implements PerfSceneDriver {
       fieldResident: fieldResident(session, body),
       streaming: sample.streaming,
       patches: this.cachedPatches(),
+      lastResidentS,
     });
     if (before !== "flown" && after === "flown") {
       sink.spanEnded(holds.span());
@@ -569,7 +578,7 @@ export class DescentDriver implements PerfSceneDriver {
         `The renderer drew ${scene.id} with R05's descent spike over the served world: its main view (${main.style}) and its two wireframe instruments every frame, unscaled; kernel paths are not read (R12.T4.c).`,
         ...(arrival
           ? [
-              `arrival-memory held the descent's first pose until the world's field was whole in every height worker, then its deepest until its patches drew for ${String(ARRIVAL_SETTLE_S)} s without TERRAIN: STREAMING, then ${String(ARRIVAL_HELD_S)} s; the field's and the sky's transfer bytes and times are not read (R12.T4.c).`,
+              `arrival-memory held the descent's first pose until the world's field was whole in every height worker, then its deepest until its patches drew for ${String(ARRIVAL_SETTLE_S)} s without TERRAIN: STREAMING or a patch made resident (at most ${String(ARRIVAL_SETTLE_LIMIT_S)} s), then ${String(ARRIVAL_HELD_S)} s; the field's and the sky's transfer bytes and times are not read (R12.T4.c).`,
             ]
           : []),
         ...(main.role === "station"

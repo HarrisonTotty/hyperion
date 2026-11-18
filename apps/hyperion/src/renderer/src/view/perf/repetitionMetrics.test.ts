@@ -136,4 +136,34 @@ describe("a repetition's metrics", () => {
       { segment: "second", patchesPerS: 1, demandPerS: null, streamingSeconds: 0.5 },
     ]);
   });
+
+  it("leaves out the resolves it is told to before its first frame, a stand-in's", () => {
+    const m = metrics(0);
+    m.leaveOutThrough(4);
+    m.passTimes({
+      frame: 3,
+      timer: "full",
+      passes: [{ label: "view:wireframe", ns: 2e6, bracketed: false }],
+    });
+    m.frame(frame(6, 0));
+    m.passTimes({
+      frame: 4,
+      timer: "full",
+      passes: [{ label: "view:wireframe", ns: 2e6, bracketed: false }],
+    });
+    m.passTimes({
+      frame: 5,
+      timer: "full",
+      passes: [{ label: "bodies", ns: 1e6, bracketed: false }],
+    });
+    m.passTimes({
+      frame: 6,
+      timer: "full",
+      passes: [{ label: "bodies", ns: 1e6, bracketed: false }],
+    });
+    m.leaveOutThrough(5);
+    expect(m.result(EXTRAS).passes.map(({ key, frames }) => [key, frames])).toEqual([
+      ["primary:bodies", 1],
+    ]);
+  });
 });

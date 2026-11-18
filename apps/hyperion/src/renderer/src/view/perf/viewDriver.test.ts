@@ -25,8 +25,13 @@ const AU_M = 149_597_870_700;
 class RecordingSink implements PerfSceneSink {
   readonly frames: PerfFrameSample[] = [];
   readonly failures: PerfFailure[] = [];
+  /** Each `leaveOutResolves`' engine frame. */
+  readonly leftOut: number[] = [];
   frame(drawn: PerfFrameSample): void {
     this.frames.push(drawn);
+  }
+  leaveOutResolves(engineFrame: number): void {
+    this.leftOut.push(engineFrame);
   }
   patch(): void {}
   spanEnded(_span: MeasuredSpan): void {}
@@ -193,6 +198,8 @@ describe("VIEW's scripted camera driver", () => {
     stage.perf.onDrawn(frameAt(9_000));
     draw(stage, run, 10_000);
     expect(sink.frames.map(({ scriptTimeS }) => scriptTimeS)).toEqual([0, 1]);
+    // The stand-in's resolves are left out once, as the first frame in the scene's style begins.
+    expect(sink.leftOut).toEqual([0]);
   });
 
   it("fails a run whose photorealistic pipelines could not be made", async () => {

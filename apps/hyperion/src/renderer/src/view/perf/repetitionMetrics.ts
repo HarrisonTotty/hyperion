@@ -134,6 +134,8 @@ export class RepetitionMetrics {
   /** Each streaming interval between two frames, `[from, to)` in script time, s. */
   readonly #streamingIntervalsS: Array<readonly [number, number]> = [];
   #lastRafMs: number | null;
+  /** The run's resolve count before the span: every resolve numbered at or before it is left out. */
+  #firstEngineFrame: number;
   #lastScriptS = 0;
   #timer: PerfTimer | null = null;
   /** Whether every pass time so far is a whole multiple of the quantum. */
@@ -144,6 +146,17 @@ export class RepetitionMetrics {
   constructor(options: RepetitionMetricsOptions) {
     this.#options = options;
     this.#lastRafMs = options.previousRafMs;
+    this.#firstEngineFrame = options.firstEngineFrame;
+  }
+
+  /**
+   * Leaves out every resolve numbered at or before `engineFrame` as well, before the span's first
+   * frame: a mount's frames drawn before its first in the scene's style are not the span's.
+   */
+  leaveOutThrough(engineFrame: number): void {
+    if (this.#scriptTimesS.length === 0) {
+      this.#firstEngineFrame = Math.max(this.#firstEngineFrame, engineFrame);
+    }
   }
 
   /** The frames recorded so far. */
@@ -268,7 +281,7 @@ export class RepetitionMetrics {
   /** The indices of the frames whose every resolve reported its pass times. */
   #completeFrames(): ReadonlyArray<number> {
     const complete: number[] = [];
-    let before = this.#options.firstEngineFrame;
+    let before = this.#firstEngineFrame;
     this.#lastEngineFrame.forEach((last, i) => {
       const numbered = Math.max(0, last - before);
       before = Math.max(before, last);
@@ -282,7 +295,7 @@ export class RepetitionMetrics {
   /** The frame owning an engine frame number: the first whose last is at or after it. */
   #frameOfEngine(engineFrame: number): number | undefined {
     const lasts = this.#lastEngineFrame;
-    if (engineFrame <= this.#options.firstEngineFrame || lasts.length === 0) {
+    if (engineFrame <= this.#firstEngineFrame || lasts.length === 0) {
       return undefined;
     }
     let lo = 0;
