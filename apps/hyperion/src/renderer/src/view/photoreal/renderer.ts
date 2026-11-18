@@ -215,12 +215,14 @@ import type { MeasuredPass } from "../stills/batchController";
 import type {
   StillDevice,
   StillRenderer,
+  StillAsk,
   StillScene,
   StillSnapshot,
   StillSource,
 } from "../stills/stillJob";
 import { isStillSide, type StillRequest } from "../stills/stillLabel";
 import { planTiles, type StillTile, type StillTiling, tileProjection } from "../stills/stillPlan";
+import { stillSizeAt } from "../stills/stillSize";
 import {
   type StillCoverage,
   type StillTerrainCapture,
@@ -2784,6 +2786,16 @@ export class PhotorealRenderer {
   }
 }
 
+/** What a view's frame is made again at for a still (plan R11, R11.T10.e). */
+export interface StillFrameAsk {
+  /** The still's size, px: its scene target's, and the viewport R06's discs and the sprites take. */
+  readonly viewport: Viewport;
+  /** The setting whose passes the still draws. */
+  readonly setting: QualitySetting;
+  /** The terrain its bodies take their coverage masks from, or none, as the view's frame had. */
+  readonly terrain: FrameTerrain | undefined;
+}
+
 /**
  * The last photorealistic frame a view drew and its plan (plan R11, R11.T10.b): what a still
  * freezes at its request.
@@ -2791,6 +2803,14 @@ export class PhotorealRenderer {
 export interface DrawnPhotorealFrame {
   readonly frame: PhotorealFrame;
   readonly plan: BodyFramePlan;
+  /**
+   * The frame made again from the view's own inputs for a still (plan R11, R11.T10.e): at the
+   * still's size, R06's discs and the sprites prepared at it, its lit bodies' hand-over measured at
+   * the view's own presented size; at once, at the request, while the view's layers still hold
+   * that frame's state. Absent, a still draws {@link DrawnPhotorealFrame.frame} itself, at its own
+   * size.
+   */
+  readonly remake?: ((ask: StillFrameAsk) => PhotorealFrame) | undefined;
   /**
    * The symbology's slope term its terrain drew with (`LiveFrameTerrainInput.occluderSlopePx`),
    * which a still's own terrain view carries (plan R11, R11.T10.e); 0 where absent.
@@ -3437,6 +3457,34 @@ function handedOverOf(plan: BodyFramePlan): BodyIdHex[] {
   return [...plan.regimes].flatMap(([body, regime]) => (regime === "terrain" ? [body] : []));
 }
 
+/**
+ * A frame terrain that draws nothing and gives `coverage`'s masks: what a still's frame is made
+ * again with, its bodies taking the masks the view's frame took (R11.T10.e); its samples draw
+ * their own terrain view's.
+ */
+function coverageTerrain(coverage: StillCoverage): FrameTerrain {
+  return {
+    surveyCoverage: (body) => coverage(body)?.mask ?? null,
+    surveyedWhole: (body) => coverage(body)?.whole ?? false,
+    draws: () => [],
+    lateDraws: () => [],
+    symbologyDepth: () => [],
+    sceneDepth: () => false,
+    visibility: () => null,
+    opaqueDraws: () => [],
+  };
+}
+
+/**
+ * The size a still of `drawn` is a multiple of (R11.T10.e.1): its view's output size, its canvas's,
+ * where the frame can be made again; else the frame's own, the one size it offers.
+ */
+function baseSizeOf(drawn: DrawnPhotorealFrame): ViewSize {
+  const { presentedPx, viewport } = drawn.frame;
+  const base = drawn.remake === undefined ? viewport : presentedPx;
+  return { widthPx: base.widthPx, heightPx: base.heightPx };
+}
+
 /** The coverage masks `frame`'s bodies took, each body's as its figure gives way over it. */
 function coverageOf(frame: PhotorealFrame): StillCoverage {
   const masks = new Map(
@@ -3569,7 +3617,7 @@ function unavailableFor(
   if (!terrain && frame.terrain !== undefined && handedOverOf(plan).length > 0) {
     return STILL_UNAVAILABLE.terrain;
   }
-  const { widthPx, heightPx } = frame.viewport;
+  const { widthPx, heightPx } = baseSizeOf(drawn);
   return isStillSide(widthPx) && isStillSide(heightPx) ? null : STILL_UNAVAILABLE.oversized;
 }
 
@@ -3642,7 +3690,20 @@ export class PhotorealStills implements StillSource {
       : unavailableFor(view.drawn(), (view.terrain?.() ?? null) !== null);
   }
 
-  snapshot(): StillSnapshot {
+  /**
+   * The attached view's output size at scale 1, device px (R11.T10.e.1): its last photorealistic
+   * frame's presented size, or that frame's own where it cannot be made again; `null` before one.
+   */
+  outputSize(): ViewSize | null {
+    const drawn = this.#view?.drawn() ?? null;
+    return drawn === null ? null : baseSizeOf(drawn);
+  }
+
+  /**
+   * The attached view's last photorealistic frame and its label's inputs, frozen now, made again
+   * at `ask`'s multiple of its output size (R11.T10.e.1), or why it gives no still now.
+   */
+  snapshot(ask?: StillAsk): StillSnapshot {
     const view = this.#view;
     if (view === null) {
       return { kind: "unavailable", cause: STILL_UNAVAILABLE.noView };
@@ -3653,14 +3714,25 @@ export class PhotorealStills implements StillSource {
     if (drawn === null || cause !== null) {
       return { kind: "unavailable", cause: cause ?? STILL_UNAVAILABLE.noImage };
     }
-    const { frame, plan } = drawn;
-    const handedOver = frame.terrain === undefined ? [] : handedOverOf(plan);
+    const { plan } = drawn;
+    const viewFrame = drawn.frame;
+    const remake = drawn.remake;
+    const scale = ask === undefined || remake === undefined ? 1 : ask.scale;
+    const size = stillSizeAt(baseSizeOf(drawn), scale);
+    if (!isStillSide(size.widthPx) || !isStillSide(size.heightPx)) {
+      return { kind: "unavailable", cause: STILL_UNAVAILABLE.oversized };
+    }
+    const coverage = coverageOf(viewFrame);
+    // Made again at once, at the still's size, while the view's layers hold its frame's state.
+    const frame =
+      remake?.({
+        viewport: size,
+        setting: viewFrame.setting,
+        terrain: viewFrame.terrain === undefined ? undefined : coverageTerrain(coverage),
+      }) ?? viewFrame;
+    const handedOver = viewFrame.terrain === undefined ? [] : handedOverOf(plan);
     const scene: StillScene = {
-      request: {
-        ...view.request(),
-        setting: frame.setting,
-        size: { widthPx: frame.viewport.widthPx, heightPx: frame.viewport.heightPx },
-      },
+      request: { ...view.request(), setting: frame.setting, size },
     };
     this.#scenes.set(scene, {
       engine: view.engine,
@@ -3677,7 +3749,7 @@ export class PhotorealStills implements StillSource {
                   : { ...capture, occluderSlopePx: drawn.occluderSlopePx },
               bodies: handedOver,
               regimes: plan.regimes,
-              coverage: coverageOf(frame),
+              coverage,
             },
     });
     return { kind: "scene", scene };

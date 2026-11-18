@@ -37,6 +37,7 @@ import {
   type PhotorealFrame,
   type PhotorealStillView,
   PhotorealStillRenderer,
+  type StillFrameAsk,
   PhotorealStills,
   STILL_ACCUMULATE_MATERIAL,
   STILL_SAMPLES,
@@ -278,6 +279,47 @@ describe("the photorealistic still source (R11.T10.b)", () => {
     expect([await labels(false), await labels(true)]).toEqual([
       [...held, STILL_TERRAIN_STREAMING],
       held,
+    ]);
+  });
+
+  it("takes a still at a multiple of the view's output size, its frame made again there (R11.T10.e.1)", async () => {
+    const engine = await countingRenderEngine();
+    const stills = new PhotorealStills();
+    const presented = { widthPx: 160, heightPx: 112 };
+    const asked: StillFrameAsk[] = [];
+    const drawn: DrawnPhotorealFrame = {
+      ...drawnOf({ ...viewFrame(), presentedPx: presented }),
+      remake: (ask) => {
+        asked.push(ask);
+        return viewFrame(ask.viewport);
+      },
+    };
+    stills.attach(viewOver(engine, () => drawn));
+    const output = stills.outputSize();
+    const snapshot = stills.snapshot({ scale: 3 });
+    const scene = snapshot.kind === "scene" ? snapshot.scene : null;
+    const renderer = scene === null ? null : stills.renderer(scene);
+    const still = { widthPx: 480, heightPx: 336 };
+    expect([
+      output,
+      scene?.request.size,
+      renderer?.tiling.size,
+      asked.map((ask) => [ask.viewport, ask.setting, ask.terrain]),
+    ]).toEqual([presented, still, still, [[still, "high", undefined]]]);
+    renderer?.dispose();
+  });
+
+  it("gives no still past the largest still's side at the multiple asked (R11.T10.e.1)", async () => {
+    const engine = await countingRenderEngine();
+    const stills = new PhotorealStills();
+    const drawn: DrawnPhotorealFrame = {
+      ...drawnOf({ ...viewFrame(), presentedPx: { widthPx: 3000, heightPx: 2000 } }),
+      remake: (ask) => viewFrame(ask.viewport),
+    };
+    stills.attach(viewOver(engine, () => drawn));
+    expect([stills.unavailable(), stills.snapshot({ scale: 3 })]).toEqual([
+      null,
+      { kind: "unavailable", cause: STILL_UNAVAILABLE.oversized },
     ]);
   });
 

@@ -61,6 +61,7 @@ import {
 } from "../view/stills/stillLabel";
 import { planTiles, type StillTile, type StillTiling } from "../view/stills/stillPlan";
 import { StillStore } from "../view/stills/stillStore";
+import { checkLargerStill } from "./stillSize";
 import { checkTerrainStill } from "./stillTerrain";
 import {
   type Checks,
@@ -721,7 +722,7 @@ const STILL_WHOLE_LIMIT_PX = 8192;
 
 /**
  * Part 28's checks (R11.T10.c, T10.b and T10.e): the PNG round trip, then the mount and the job,
- * the hook's still, and a still of a body handed over to its terrain.
+ * the hook's still, a still of a body handed over to its terrain, and one larger than its view.
  */
 export async function checkStills(
   checks: Checks,
@@ -762,4 +763,5 @@ export async function checkStills(
   await checkMount(checks, stills, label, engine, device);
   await checkHookStill(checks, engine);
   await checkTerrainStill(checks, engine);
+  await checkLargerStill(checks, engine);
 }

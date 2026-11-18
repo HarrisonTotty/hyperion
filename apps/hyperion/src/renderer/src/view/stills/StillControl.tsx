@@ -2,7 +2,9 @@ import { useId } from "react";
 
 import { StatusText } from "../../components/StatusText";
 import { formatNumber } from "../../lib/format";
+import type { ViewSize } from "../engine/types";
 import { STILL_TERRAIN_STREAMING } from "./stillLabel";
+import type { StillSizeOption } from "./stillSize";
 
 /** What a still in progress is doing, with the job's whole passes done of all it has. */
 export interface StillStep {
@@ -31,6 +33,17 @@ export type StillActivity =
  */
 export type StillStanding = "available" | "suspended" | "disabled";
 
+/**
+ * The sizes the next still may be taken at, and the one chosen (plan R11, R11.T10.e.1): whole
+ * multiples of the view's output size (`stillSize.ts`).
+ */
+export interface StillSizeChoice {
+  /** The multiple chosen, one of the options'. */
+  readonly scale: number;
+  /** The sizes offered, the smallest first: the view's output size always among them. */
+  readonly options: ReadonlyArray<StillSizeOption>;
+}
+
 /** What {@link StillControl} shows. */
 export interface StillControlState {
   readonly standing: StillStanding;
@@ -40,6 +53,8 @@ export interface StillControlState {
    * `NOT AVAILABLE: <cause>` form, or `null`.
    */
   readonly heldBack: string | null;
+  /** The next still's size and those offered, or `null` while the view's output size is not known. */
+  readonly size: StillSizeChoice | null;
 }
 
 /** Props of {@link StillControl}. */
@@ -47,14 +62,22 @@ export interface StillControlProps {
   readonly state: StillControlState;
   /** Called by `TAKE STILL` where it is offered: the request for a still. */
   readonly onTake: () => void;
+  /** Called by a `SIZE` button: the next still's multiple of the view's output size. */
+  readonly onSize: (scale: number) => void;
 }
 
-/** The control before any still: offered, nothing in progress. */
+/** The control before any still: offered, nothing in progress, no size known yet. */
 export const STILL_CONTROL_IDLE: StillControlState = {
   standing: "available",
   activity: { kind: "idle", last: null },
   heldBack: null,
+  size: null,
 };
+
+/** A still's size as its `SIZE` button and the still's label state it: `3,840 × 2,160 px`. */
+export function stillSizeWords(size: ViewSize): string {
+  return `${formatNumber(size.widthPx, 0)} × ${formatNumber(size.heightPx, 0)} px`;
+}
 
 /**
  * The annunciation while stills are suspended for the session (Design note 17): each later still
@@ -158,6 +181,37 @@ export function takeStillHeldBack(state: StillControlState): string | null {
   return state.activity.kind === "running" ? IN_PROGRESS : state.heldBack;
 }
 
+interface StillSizeRowProps {
+  readonly choice: StillSizeChoice;
+  readonly onSize: (scale: number) => void;
+}
+
+/**
+ * The `SIZE` row (plan R11, R11.T10.e.1): its legend on the left of each size offered, in the style
+ * panel's row form, the chosen one pressed and underlined as a preset is; a display control, acting
+ * at once on the next still, with no key.
+ */
+function StillSizeRow({ choice, onSize }: StillSizeRowProps) {
+  return (
+    <fieldset className="preset-buttons view-style__baseline still-control__size">
+      <legend className="field__label view-style__baseline-label">SIZE</legend>
+      {choice.options.map((option) => (
+        <button
+          key={option.scale}
+          type="button"
+          className="control preset-buttons__button view-style__baseline-button"
+          aria-pressed={option.scale === choice.scale}
+          onClick={() => {
+            onSize(option.scale);
+          }}
+        >
+          {stillSizeWords(option.size)}
+        </button>
+      ))}
+    </fieldset>
+  );
+}
+
 interface StillProgressProps {
   readonly step: StillStep;
 }
@@ -194,7 +248,8 @@ function StillProgress({ step }: StillProgressProps) {
 
 /**
  * The view's still control (plan R11, R11.T10.c, Design note 17): `TAKE STILL`, the still's step
- * and its progress, and the session's standing, `STILLS LIMITED` or `STILLS DISABLED`.
+ * and its progress, and the session's standing, `STILLS LIMITED` or `STILLS DISABLED`; and the
+ * next still's `SIZE` (R11.T10.e.1), once the view's output size is known.
  *
  * @remarks
  * Keyboard-operable as a native button: held back rather than disabled, so that it keeps focus and
@@ -202,7 +257,7 @@ function StillProgress({ step }: StillProgressProps) {
  * suspension allows. The progress stands only while a still runs, never indeterminate, since the
  * guide has no spinners. The status line is a live region.
  */
-export function StillControl({ state, onTake }: StillControlProps) {
+export function StillControl({ state, onTake, onSize }: StillControlProps) {
   const reasonId = useId();
   const held = takeStillHeldBack(state);
   const line = stillStatusLine(state);
@@ -216,6 +271,7 @@ export function StillControl({ state, onTake }: StillControlProps) {
           </output>
         </p>
       )}
+      {state.size === null ? null : <StillSizeRow choice={state.size} onSize={onSize} />}
       <div className="still-control__command">
         <button
           type="button"

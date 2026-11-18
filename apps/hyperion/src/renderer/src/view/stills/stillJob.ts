@@ -48,9 +48,11 @@ import {
   STILL_CONTROL_IDLE,
   type StillControlState,
   type StillEnd,
+  type StillSizeChoice,
   type StillStanding,
   type StillStep,
 } from "./StillControl";
+import { stillSizeOptions } from "./stillSize";
 import { type StillRequest, stillLabel } from "./stillLabel";
 import type { StillTile, StillTiling } from "./stillPlan";
 
@@ -413,6 +415,12 @@ export interface StillScene {
   readonly request: StillRequest;
 }
 
+/** What a still is asked of its view at the request (plan R11, R11.T10.e.1). */
+export interface StillAsk {
+  /** The still's size as a multiple of the view's output size, a whole number from 1. */
+  readonly scale: number;
+}
+
 /**
  * What a view gives at a still's request ({@link StillSource.snapshot}): its scene, frozen, or why
  * it gives none now, its cause in the words `NOT AVAILABLE:` states it after its colon (`the view
@@ -435,8 +443,16 @@ export interface StillSource {
    * What the view holds now, frozen: the label's inputs and whatever the renderer needs, the cells
    * surveyed now among them, so that cells surveyed while the job runs are not used; or why it
    * gives no still now.
+   *
+   * @param ask - The still's size (R11.T10.e.1); absent, the view's output size.
    */
-  snapshot(): StillSnapshot;
+  snapshot(ask?: StillAsk): StillSnapshot;
+  /**
+   * The view's output size at scale 1, device px, which a still's size is a multiple of (plan R11,
+   * R11.T10.e.1), or `null` while the view gives no still; absent, a source that offers one size,
+   * its scene's.
+   */
+  outputSize?(): ViewSize | null;
   /**
    * Why the view gives no still now, a {@link StillSnapshot}'s cause, or `null` where it gives
    * one: what `TAKE STILL` is held back for, read as the session is made and at each
@@ -445,6 +461,39 @@ export interface StillSource {
   unavailable?(): string | null;
   /** A renderer of `scene`, which the job disposes. */
   renderer(scene: StillScene): StillRenderer;
+}
+
+/**
+ * The size choice over `output`'s offers at the operator's multiple `scale`: the largest offered at
+ * most it, the output size where none is; `null` with no output size.
+ */
+function sizeChoiceOf(output: ViewSize | null, scale: number): StillSizeChoice | null {
+  if (output === null) {
+    return null;
+  }
+  const options = stillSizeOptions(output);
+  const offered = options.findLast((option) => option.scale <= scale);
+  return { scale: offered?.scale ?? 1, options };
+}
+
+/** Whether two size choices offer the same sizes with the same one chosen. */
+function sameSizeChoice(a: StillSizeChoice | null, b: StillSizeChoice | null): boolean {
+  if (a === null || b === null) {
+    return a === b;
+  }
+  return (
+    a.scale === b.scale &&
+    a.options.length === b.options.length &&
+    a.options.every((option, n) => {
+      const other = b.options[n];
+      return (
+        other !== undefined &&
+        option.scale === other.scale &&
+        option.size.widthPx === other.size.widthPx &&
+        option.size.heightPx === other.size.heightPx
+      );
+    })
+  );
 }
 
 /** `TAKE STILL`'s held-back reason for a view's cause, or `null` where it gives a still. */
@@ -482,10 +531,16 @@ export class StillSession {
   /** The batch cap the next job takes after a suspension, or `undefined`. */
   #maxUnits: number | undefined = undefined;
   #lastStepMs = Number.NEGATIVE_INFINITY;
+  /** The operator's multiple of the view's output size for the next still (R11.T10.e.1): 1 at first. */
+  #scale = 1;
 
   constructor(options: StillSessionOptions) {
     this.#options = options;
-    this.#state = { ...STILL_CONTROL_IDLE, heldBack: heldBackOf(options.source.unavailable?.()) };
+    this.#state = {
+      ...STILL_CONTROL_IDLE,
+      heldBack: heldBackOf(options.source.unavailable?.()),
+      size: sizeChoiceOf(options.source.outputSize?.() ?? null, this.#scale),
+    };
   }
 
   /** Subscribes to the control's state; returns the unsubscription. */
@@ -506,6 +561,26 @@ export class StillSession {
    */
   refresh(): void {
     this.#hold(heldBackOf(this.#options.source.unavailable?.()));
+    this.#offerSizes();
+  }
+
+  /**
+   * Takes the next still at `scale` times the view's output size (R11.T10.e.1), or at the largest
+   * size offered below it; a still in progress keeps its own.
+   */
+  setScale(scale: number): void {
+    if (Number.isSafeInteger(scale) && scale >= 1) {
+      this.#scale = scale;
+      this.#offerSizes();
+    }
+  }
+
+  /** Offers the sizes of the view's output size as it stands, the operator's multiple chosen. */
+  #offerSizes(): void {
+    const size = sizeChoiceOf(this.#options.source.outputSize?.() ?? null, this.#scale);
+    if (!sameSizeChoice(size, this.#state.size)) {
+      this.#set({ ...this.#state, size });
+    }
   }
 
   #hold(heldBack: string | null): void {
@@ -533,7 +608,7 @@ export class StillSession {
     let outcome: StillJobOutcome;
     try {
       // Frozen now: what the view holds after this is not the still's.
-      const snapshot = source.snapshot();
+      const snapshot = source.snapshot({ scale: this.#state.size?.scale ?? 1 });
       if (snapshot.kind === "unavailable") {
         this.#hold(heldBackOf(snapshot.cause));
         return null;
@@ -603,7 +678,7 @@ export class StillSession {
         this.#maxUnits = Math.max(1, Math.floor(outcome.batchUnits / 2));
         break;
     }
-    this.#set({ standing, activity: { kind: "idle", last }, heldBack: this.#state.heldBack });
+    this.#set({ ...this.#state, standing, activity: { kind: "idle", last } });
   }
 
   #set(state: StillControlState): void {

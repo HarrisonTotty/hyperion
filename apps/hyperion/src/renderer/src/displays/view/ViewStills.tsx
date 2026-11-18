@@ -48,6 +48,9 @@ export function ViewStills({ id, hidden, designator, model }: ViewStillsProps) {
             console.error("a still could not be made:", error);
           });
         }}
+        onSize={(scale) => {
+          session.setScale(scale);
+        }}
       />
       <StillList state={listing} />
     </section>

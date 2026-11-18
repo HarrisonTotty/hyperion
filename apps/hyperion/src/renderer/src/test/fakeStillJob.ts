@@ -1,6 +1,8 @@
 import type { GpuTimer } from "../view/engine/status";
+import type { ViewSize } from "../view/engine/types";
 import type { MeasuredPass } from "../view/stills/batchController";
 import type {
+  StillAsk,
   StillDevice,
   StillRenderer,
   StillScene,
@@ -207,6 +209,10 @@ export class FakeStillSource implements StillSource {
   cause: string | null = null;
   readonly renderers: FakeStillRenderer[] = [];
   snapshots = 0;
+  /** The view's output size, which a test sets; `null`, none known. */
+  output: ViewSize | null = null;
+  /** Each snapshot's ask, in order (R11.T10.e.1). */
+  readonly asks: Array<StillAsk | undefined> = [];
 
   constructor(device: FakeStillDevice, request: StillRequest) {
     this.device = device;
@@ -217,8 +223,9 @@ export class FakeStillSource implements StillSource {
     return FAKE_FRAME_NS;
   }
 
-  snapshot(): StillSnapshot {
+  snapshot(ask?: StillAsk): StillSnapshot {
     this.snapshots += 1;
+    this.asks.push(ask);
     return this.cause === null
       ? { kind: "scene", scene: { request: this.current } }
       : { kind: "unavailable", cause: this.cause };
@@ -226,6 +233,10 @@ export class FakeStillSource implements StillSource {
 
   unavailable(): string | null {
     return this.cause;
+  }
+
+  outputSize(): ViewSize | null {
+    return this.output;
   }
 
   renderer(scene: StillScene): FakeStillRenderer {

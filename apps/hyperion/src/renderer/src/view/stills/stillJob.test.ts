@@ -312,6 +312,7 @@ describe("a client's stills for the session (R11.T10.b)", () => {
         standing: "available",
         activity: { kind: "idle", last: { kind: "saved" } },
         heldBack: null,
+        size: null,
       },
     ]);
   });
@@ -357,6 +358,7 @@ describe("a client's stills for the session (R11.T10.b)", () => {
         standing: "available",
         activity: { kind: "idle", last: null },
         heldBack: "NOT AVAILABLE: stills draw no terrain yet",
+        size: null,
       },
     ]);
   });
@@ -372,6 +374,40 @@ describe("a client's stills for the session (R11.T10.b)", () => {
       1,
       "NOT AVAILABLE: the view draws no photorealistic image",
     ]);
+  });
+
+  it("offers the sizes of the view's output size, the output size itself chosen at first (R11.T10.e.1)", () => {
+    const { stills, source } = session();
+    source.output = { widthPx: 1920, heightPx: 1080 };
+    stills.refresh();
+    expect(stills.getSnapshot().size).toEqual({
+      scale: 1,
+      options: [1, 2, 3, 4].map((scale) => ({
+        scale,
+        size: { widthPx: 1920 * scale, heightPx: 1080 * scale },
+      })),
+    });
+  });
+
+  it("asks the view for the chosen size, and the largest offered below it once that is too large (R11.T10.e.1)", async () => {
+    const { stills, source } = session();
+    source.output = { widthPx: 1920, heightPx: 1080 };
+    stills.refresh();
+    stills.setScale(4);
+    await stills.request();
+    // A wider view: four times 2,560 px is past the largest still's side, three times is not.
+    source.output = { widthPx: 2560, heightPx: 1440 };
+    stills.refresh();
+    const chosen = stills.getSnapshot().size?.scale;
+    await stills.request();
+    expect([source.asks, chosen]).toEqual([[{ scale: 4 }, { scale: 3 }], 3]);
+  });
+
+  it("takes a still at the view's output size where none is known (R11.T10.e.1)", async () => {
+    const { stills, source } = session();
+    stills.setScale(2);
+    await stills.request();
+    expect([stills.getSnapshot().size, source.asks]).toEqual([null, [{ scale: 1 }]]);
   });
 
   it("makes one still at a time: a request while one runs starts nothing", async () => {

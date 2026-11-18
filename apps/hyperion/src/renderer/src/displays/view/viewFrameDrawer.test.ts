@@ -13,6 +13,7 @@ import { relativeToCamera } from "../../view/coords/relative";
 import { IDENTITY_ROTATION, rotateToBodyFixed } from "../../view/coords/rotation";
 import { DEFAULT_EXPOSURE } from "../../view/photometry/exposure";
 import { PHOTOREAL_PASS_LABELS } from "../../view/photoreal/passes";
+import type { PhotorealFrame } from "../../view/photoreal/renderer";
 import { sceneOrigins, type ViewStar } from "../../view/scene/model";
 import { ATMOSPHERE_STARS } from "../../view/scenes/atmosphereScene";
 import { PHASE_GIANT, PHASE_PLANETS, phaseScene } from "../../view/scenes/phaseScene";
@@ -491,6 +492,11 @@ describe("a view's hand-over at its frame's internal scale (R10.T10.g)", () => {
   });
 });
 
+/** `frame`'s sprites' places, each times `k`, x then y. */
+function placed(frame: PhotorealFrame | undefined, k: number): number[] {
+  return (frame?.starSprites ?? []).flatMap((record) => [record[0] * k, record[1] * k]);
+}
+
 describe("what a view drew, for the terrain session (R10.T16.a)", () => {
   const LIT = [...PHASE_PLANETS, PHASE_GIANT];
 
@@ -566,6 +572,48 @@ describe("what a view drew, for the terrain session (R10.T16.a)", () => {
       true,
       { widthPx: 320, heightPx: 180 },
     ]);
+  });
+
+  it("makes its frame again for a still at twice its output size, its sprites there, its hand-over at its own (plan R11, R11.T10.e)", async () => {
+    // Stars all round, so that some stand in the view: a Fibonacci sphere of 400.
+    const stars = Array.from({ length: 400 }, (_, n): ViewStar => {
+      const z = 1 - (2 * (n + 0.5)) / 400;
+      const r = Math.sqrt(1 - z * z);
+      const phi = n * Math.PI * (3 - Math.sqrt(5));
+      return {
+        id: "0000000000000001",
+        direction: vec3(r * Math.cos(phi), r * Math.sin(phi), z),
+        distanceM: 1e17,
+        absoluteV: -2,
+        tEffK: 5_800,
+      };
+    });
+    const engine = await countingRenderEngine();
+    const drawer = new ViewFrameDrawer(engine, new RecordingView("view"), "view");
+    const inputs = { ...inputsOf("photorealistic"), stars };
+    drawer.draw(inputs);
+    await vi.waitFor(() => {
+      expect(drawer.photorealStatus).toBe("ready");
+    });
+    drawer.draw(inputs);
+    const last = drawer.lastPhotoreal;
+    const still = { widthPx: 640, heightPx: 360 };
+    const remade = last?.remake?.({ viewport: still, setting: "high", terrain: undefined });
+    drawer.dispose();
+    const viewed = placed(last?.frame, 2);
+    const there = placed(remade, 1);
+    // Each sprite at twice its place on the view, to rounding: the multiple keeps the aspect.
+    const offPx = Math.max(...there.map((px, n) => Math.abs(px - (viewed[n] ?? Number.NaN))));
+    expect([
+      remade?.viewport,
+      remade?.presentedPx,
+      remade?.setting,
+      remade?.overlay,
+      remade?.meter,
+      remade?.present,
+      viewed.length > 0 && there.length === viewed.length,
+      offPx < 1e-9,
+    ]).toEqual([still, last?.frame.presentedPx, "high", null, null, true, true, true]);
   });
 
   it("holds no frame for a still once it draws the wireframe (plan R11, R11.T10.b)", async () => {

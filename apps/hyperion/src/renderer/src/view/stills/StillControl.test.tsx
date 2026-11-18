@@ -15,12 +15,13 @@ function running(step: StillStep): StillControlState {
   return { ...STILL_CONTROL_IDLE, activity: { kind: "running", step } };
 }
 
-/** The control in `state`, and its `TAKE STILL`'s calls. */
+/** The control in `state`, and its `TAKE STILL`'s and `SIZE`'s calls. */
 function renderControl(state: StillControlState) {
   const onTake = vi.fn<() => void>();
+  const onSize = vi.fn<(scale: number) => void>();
   const user = userEvent.setup();
-  const view = render(<StillControl state={state} onTake={onTake} />);
-  return { onTake, user, view };
+  const view = render(<StillControl state={state} onTake={onTake} onSize={onSize} />);
+  return { onTake, onSize, user, view };
 }
 
 describe("the view's still control (R11.T10.c)", () => {
@@ -90,8 +91,10 @@ describe("the view's still control (R11.T10.c)", () => {
           standing: "suspended",
           activity: { kind: "idle", last: { kind: "abandoned" } },
           heldBack: null,
+          size: null,
         }}
         onTake={() => undefined}
+        onSize={() => undefined}
       />,
     );
     const statuses = screen.getAllByRole("status").map((status) => status.textContent);
@@ -115,6 +118,7 @@ describe("the view's still control (R11.T10.c)", () => {
       standing: "disabled",
       activity: { kind: "idle", last: { kind: "abandoned" } },
       heldBack: null,
+      size: null,
     });
     const take = screen.getByRole("button", { name: "TAKE STILL" });
     await user.click(take);
@@ -134,5 +138,40 @@ describe("the view's still control (R11.T10.c)", () => {
     expect(describedText(screen.getByRole("button", { name: "TAKE STILL" }))).toBe(
       "NOT AVAILABLE: no WebGPU",
     );
+  });
+});
+
+describe("the still control's SIZE (R11.T10.e.1)", () => {
+  const sized: StillControlState = {
+    ...STILL_CONTROL_IDLE,
+    size: {
+      scale: 2,
+      options: [
+        { scale: 1, size: { widthPx: 1920, heightPx: 1080 } },
+        { scale: 2, size: { widthPx: 3840, heightPx: 2160 } },
+        { scale: 4, size: { widthPx: 7680, heightPx: 4320 } },
+      ],
+    },
+  };
+
+  it("offers each size in its pixels, the chosen one pressed, in a group named SIZE", () => {
+    renderControl(sized);
+    const group = screen.getByRole("group", { name: "SIZE" });
+    const pressed = screen
+      .getAllByRole("button", { pressed: true })
+      .map((button) => button.textContent);
+    expect([group, pressed]).toEqual([expect.anything(), ["3840 × 2160 px"]]);
+  });
+
+  it("chooses the next still's size from the keyboard", async () => {
+    const { onSize, user } = renderControl(sized);
+    screen.getByRole("button", { name: "7680 × 4320 px" }).focus();
+    await user.keyboard("{Enter}");
+    expect(onSize.mock.calls).toEqual([[4]]);
+  });
+
+  it("offers no size while the view's output size is not known", () => {
+    renderControl(STILL_CONTROL_IDLE);
+    expect(screen.queryByRole("group", { name: "SIZE" })).toBeNull();
   });
 });

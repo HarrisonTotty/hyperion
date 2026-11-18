@@ -85,7 +85,7 @@ import {
   viewStrokesAt,
 } from "../../view/wireframe/drawList";
 import { NO_WIREFRAME_TERRAIN, WireframeRenderer } from "../../view/wireframe/submit";
-import { photorealFrame } from "./photorealFrame";
+import { type PhotorealInputs, photorealFrame } from "./photorealFrame";
 import {
   atmosphereFrameOf,
   cameraObservers,
@@ -831,7 +831,7 @@ export class ViewFrameDrawer {
         renderViewport(viewport, SETTINGS[inputs.setting].terrain.renderHeightPx),
         inputs.renderScale,
       );
-      const frame = photorealFrame({
+      const frameInputs: PhotorealInputs = {
         run,
         pose: camera.pose,
         viewport: internal,
@@ -890,13 +890,31 @@ export class ViewFrameDrawer {
         // A body's air that throws as it is drawn is the cache's to hold failed (R08.T10.b;
         // decision-r08-t10b-leans §2).
         atmosphereFailed: reportAirFailure,
-      });
+      };
+      const frame = photorealFrame(frameInputs);
       const plan = this.#photoreal.render(this.#view, frame);
       if (plan === null) {
         this.#lastPhotoreal = null;
         return { drawn: false, terrain: null, decorated: false };
       }
-      this.#lastPhotoreal = { frame, plan, occluderSlopePx: list.occluderSlopePx };
+      this.#lastPhotoreal = {
+        frame,
+        plan,
+        occluderSlopePx: list.occluderSlopePx,
+        // A still's frame (plan R11, R11.T10.e): the same inputs at its size and setting, its sprites
+        // carried to its viewport, with no symbology or meter, presented.
+        remake: ({ viewport: still, setting, terrain: stillTerrain }) =>
+          photorealFrame({
+            ...frameInputs,
+            viewport: still,
+            setting,
+            list: { ...list, sprites: spritesAtScale(list.sprites, viewport, still) },
+            terrain: stillTerrain,
+            overlay: null,
+            meter: null,
+            present: true,
+          }),
+      };
       this.#regimes = plan.regimes;
       const origins = sceneOrigins(run.scene);
       const fromCamera = new Map<BodyIdHex, Vec3>();
