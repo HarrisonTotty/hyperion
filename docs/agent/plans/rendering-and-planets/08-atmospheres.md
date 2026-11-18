@@ -24419,11 +24419,12 @@ belowDeckBinding?)`). Over such a deck the lookups take heights above the body's
     hold on it. The disc's and terrain's pinned digests are re-pinned for `belowDeck.wgsl`.
   - Then `venus-92bar` passes 237 of 360, `venus-58bar` 234, neither misses, the worst 0.77 and
     0.67 of the edge; the refusals are the twilight's suns.
-  - R08.T12.b's red shift (`references.test.ts`), main's ruling pending: on the re-traced reference
-    the surface flux's heavy tail reads the red past the blue at 3.2σ at flux-lsfr's 32,768 samples
-    (7.3σ before) and its green's mean above its red's. It is now held as the ranges are, no channel
-    below a bluer one by more than 4σ, its steps pinned in `sanityRanges.json`; a re-trace with
-    flux-lsfr's count raised re-keys every checkpoint (some 45 h).
+  - R08.T12.b's red shift (`references.test.ts`): on the re-traced reference the surface flux's
+    heavy tail reads the red past the blue at 3.2σ at flux-lsfr's 32,768 samples (7.3σ before) and
+    its green's mean above its red's. By research-leans-54's ruling 9 it is judged over the five
+    surface aggregates (flux-s0, -s30, -s60, -s80 and -lsfr) together: Z = Σ z_i ÷ √5 of their red
+    over blue z_i must pass 4 (18.3), and each aggregate keeps no channel below a bluer one by 4σ,
+    the steps and Z pinned in `sanityRanges.json`. No re-trace.
   - _By hand_: `just views-check --software --atmosphere`, high and low, pass with no fault line,
     engine fault or console error; the software tour's captures stand short of their range, so
     `TEST VENUS`'s look is not judged there. Pending, the owner's runs: the routed frame on the RTX

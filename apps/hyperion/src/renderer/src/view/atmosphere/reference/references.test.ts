@@ -333,18 +333,41 @@ function sanityReading(range: SanityCase): {
 }
 
 /**
- * The Venus-class surface's red shift: each channel's downwelling fraction over a bluer one's, in σ
- * of the two together (R08.T12.b's text: "with the surface sky red-shifted").
+ * The Venus-class surface's aggregates its red shift is judged over (research-leans-54, ruling 9):
+ * the ground's flux under each sun of the case's set and the Pioneer Venus large probe's LSFR's.
  */
-function redShift(): {
+const RED_SHIFT_AGGREGATES = ["flux-s0", "flux-s30", "flux-s60", "flux-s80", "flux-lsfr"] as const;
+
+/** One aggregate's channel steps: each channel's downwelling fraction over a bluer one's, in σ. */
+interface RedShiftSteps {
   readonly redOverGreen: number;
   readonly greenOverBlue: number;
   readonly redOverBlue: number;
-} {
-  const { fraction, sigma } = downwellingFractions(referenceOf("venus-92bar"), "flux-lsfr");
+}
+
+/** `aggregate`'s steps on `venus-92bar`, each in σ of the two channels together. */
+function redShiftSteps(aggregate: string): RedShiftSteps {
+  const { fraction, sigma } = downwellingFractions(referenceOf("venus-92bar"), aggregate);
   const step = (a: Channel, b: Channel): number =>
     (fraction[a] - fraction[b]) / Math.hypot(sigma[a], sigma[b]);
   return { redOverGreen: step(0, 1), greenOverBlue: step(1, 2), redOverBlue: step(0, 2) };
+}
+
+/**
+ * The Venus-class surface's red shift (R08.T12.b's text: "with the surface sky red-shifted";
+ * research-leans-54, ruling 9): each of {@link RED_SHIFT_AGGREGATES}' steps, and their combined
+ * red over blue Z = Σ z_i ÷ √5, z_i = (F_red − F_blue) ÷ √(σ_red² + σ_blue²) of aggregate i, Stouffer's
+ * sum of the five aggregates' z.
+ */
+function redShift(): {
+  readonly steps: Readonly<Record<string, RedShiftSteps>>;
+  readonly z: number;
+} {
+  const each = RED_SHIFT_AGGREGATES.map(
+    (aggregate) => [aggregate, redShiftSteps(aggregate)] as const,
+  );
+  const sum = each.reduce((total, [, steps]) => total + steps.redOverBlue, 0);
+  return { steps: Object.fromEntries(each), z: sum / Math.sqrt(each.length) };
 }
 
 describe("the sanity ranges", () => {
@@ -357,22 +380,30 @@ describe("the sanity ranges", () => {
     },
   );
 
-  // Held as the ranges are, a − 4σ ≤ F ≤ b + 4σ (Design note 10, _Statistics_): each channel's
-  // step to a bluer one not below 0 by more than 4σ, the steps pinned in sanityRanges.json
-  // (R08.T15.b.2's re-trace; main's ruling pending). The surface flux's heavy tail reads the red
-  // past the blue at 3.2σ at flux-lsfr's 32,768 samples, 7.3σ on the reference before it, and its
-  // green's mean above its red's (−0.6σ), where the plan's text asks that the sky be red-shifted.
-  it("red-shift the Venus-class surface's light, no channel below a bluer one by 4σ", () => {
-    const shift = redShift();
-    expect(
-      [shift.redOverGreen, shift.greenOverBlue, shift.redOverBlue].every((step) => step > -4),
-    ).toBe(true);
+  // Research-leans-54, ruling 9: the red past the blue judged over the five surface aggregates
+  // together, Z above 4, since one aggregate's heavy tail reads too few σ (flux-lsfr's 3.2σ at
+  // its 32,768 samples on R08.T15.b.2's re-trace, its green's mean above its red's at −0.6σ).
+  it("red-shift the Venus-class surface's light, the five aggregates' red over blue Z above 4", () => {
+    expect(redShift().z).toBeGreaterThan(4);
   });
+
+  // Held as the ranges are, a − 4σ ≤ F ≤ b + 4σ (Design note 10, _Statistics_): each channel's
+  // step to a bluer one not below 0 by more than 4σ, on each aggregate, the steps pinned in
+  // sanityRanges.json.
+  it.each(RED_SHIFT_AGGREGATES.map((aggregate) => [aggregate] as const))(
+    "hold %s's channels on the Venus-class surface none below a bluer one by 4σ",
+    (aggregate) => {
+      const steps = redShiftSteps(aggregate);
+      expect(
+        [steps.redOverGreen, steps.greenOverBlue, steps.redOverBlue].every((step) => step > -4),
+      ).toBe(true);
+    },
+  );
 
   it("are pinned in sanityRanges.json with their readings and verdicts", async () => {
     const table = {
       description:
-        "The references' sanity ranges, written by references.test.ts (plan R08, R08.T12.b.2): each probe's downwelling luminance over the top's, its σ, and gate.ts's verdict, and the Venus-class surface's red shift in σ. Do not edit by hand.",
+        "The references' sanity ranges, written by references.test.ts (plan R08, R08.T12.b.2): each probe's downwelling luminance over the top's, its σ, and gate.ts's verdict, and the Venus-class surface's red shift: each surface aggregate's channel steps in σ and their combined red over blue z (research-leans-54, ruling 9). Do not edit by hand.",
       ...Object.fromEntries(
         SANITY.map((range) => {
           const { fraction } = downwellingFractions(referenceOf(range.caseName), range.aggregate);

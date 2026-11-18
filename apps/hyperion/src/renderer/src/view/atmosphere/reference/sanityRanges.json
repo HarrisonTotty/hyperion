@@ -1,5 +1,5 @@
 {
-  "description": "The references' sanity ranges, written by references.test.ts (plan R08, R08.T12.b.2): each probe's downwelling luminance over the top's, its σ, and gate.ts's verdict, and the Venus-class surface's red shift in σ. Do not edit by hand.",
+  "description": "The references' sanity ranges, written by references.test.ts (plan R08, R08.T12.b.2): each probe's downwelling luminance over the top's, its σ, and gate.ts's verdict, and the Venus-class surface's red shift: each surface aggregate's channel steps in σ and their combined red over blue z (research-leans-54, ruling 9). Do not edit by hand.",
   "venus-92bar-surface": {
     "fraction": 0.10645055153694145,
     "sigma": 0.0587532883063767,
@@ -28,8 +28,33 @@
     "high": 0.15
   },
   "venus-92bar-red-shift": {
-    "redOverGreen": -0.5955906008442694,
-    "greenOverBlue": 1.5422626069401801,
-    "redOverBlue": 3.1788080651966157
+    "steps": {
+      "flux-s0": {
+        "redOverGreen": 3.896170649902986,
+        "greenOverBlue": 2.1396469113891627,
+        "redOverBlue": 6.953689141813372
+      },
+      "flux-s30": {
+        "redOverGreen": 4.731941385481015,
+        "greenOverBlue": 3.329085193178813,
+        "redOverBlue": 12.606919114526937
+      },
+      "flux-s60": {
+        "redOverGreen": 1.1708125279348591,
+        "greenOverBlue": 2.43126293403941,
+        "redOverBlue": 7.869663096831872
+      },
+      "flux-s80": {
+        "redOverGreen": 1.420265981022909,
+        "greenOverBlue": 2.4290465103920793,
+        "redOverBlue": 10.230068804893943
+      },
+      "flux-lsfr": {
+        "redOverGreen": -0.5955906008442694,
+        "greenOverBlue": 1.5422626069401801,
+        "redOverBlue": 3.1788080651966157
+      }
+    },
+    "z": 18.263822314081043
   }
 }
