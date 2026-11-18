@@ -1,4 +1,4 @@
-# generator_version = 32
+# generator_version = 33
 fast nova: 1 detections
 fc65bb27f0000010.0000:0300ffffffffff00 Nova arriving T-15244527495.789758035 s Onset in Photometric(V) = 0x3efca275d1378703  # 2.7308092354411648e-5
 burster: 36 detections
