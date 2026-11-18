@@ -15,9 +15,14 @@
 // sea's distance is culled: the sea is drawn over it with no water at its depth, the bed's, which
 // no precision orders; a bed nearer than that hides the sea, which is discarded there.
 //
-// Drawn into the scene target, premultiplied (its alpha 1, the depth fade's is the shoreline's,
-// R11.T8.d), keeping the meter class beneath, and writing its depth. Composed after frame.wgsl, R08's
-// surface lighting, shaders/cubeTexel.wgsl, oceanFar.wgsl and oceanShared.wgsl.
+// At the shore (R11.T8.d, shoreline.wgsl): every amplitude limited by the water's depth, at a
+// vertex's pixel as at a fragment's; the surf zone's foam by that depth and the bed's slope, which
+// the scene's depth gives at three pixels, with the whitecaps; and the depth fade to the bed over
+// the pixel's reach along that slope, the sea's alpha.
+//
+// Drawn into the scene target, premultiplied by that alpha, keeping the meter class beneath, and
+// writing its depth. Composed after frame.wgsl, R08's surface lighting, shaders/cubeTexel.wgsl,
+// oceanFar.wgsl, oceanShared.wgsl and shoreline.wgsl.
 
 struct Draw {
   offsetFromCameraM : vec3f,
@@ -57,8 +62,9 @@ struct Draw {
 }
 
 @group(1) @binding(0) var<uniform> draw : Draw;
-// The waves (`packOceanWaves`): a header (components, the set's total variances), then each
-// component's (k_x, k_y, A, φ − ω t) and (Q, λ, cos², 0) in the wind's frame.
+// The waves (`packOceanWaves`): a header (components, the set's H_rms, m, the peak's deep-water
+// wavelength L₀, m), then each component's (k_x, k_y, A, φ − ω t + k · ξ) and (Q, λ, cos², 0) in the
+// anchor's wind frame.
 @group(2) @binding(11) var<storage, read> ocean_waves : array<vec4f>;
 // The scene's depth before the pass, its reversed-Z f32 bits.
 @group(2) @binding(12) var ocean_scene_depth : texture_2d<u32>;
@@ -135,7 +141,7 @@ struct OceanNearSurface {
   resolved : vec2f,
 }
 
-fn ocean_near_surface(lagrangian : vec2f, footprint : f32) -> OceanNearSurface {
+fn ocean_near_surface(lagrangian : vec2f, footprint : f32, amplitude_scale : f32) -> OceanNearSurface {
   var displacement = vec3f(0.0);
   var xx = 0.0;
   var yy = 0.0;
@@ -151,7 +157,7 @@ fn ocean_near_surface(lagrangian : vec2f, footprint : f32) -> OceanNearSurface {
     if (fade == 0.0) {
       continue;
     }
-    let a = fade * wave.z;
+    let a = fade * amplitude_scale * wave.z;
     let k = length(wave.xy);
     let u = wave.xy / k;
     let theta = dot(wave.xy, lagrangian) + wave.w;
@@ -201,6 +207,7 @@ fn ocean_near_light(
   resolved : vec2f,
   footprint : f32,
   water : OceanNearWater,
+  shore_foam : f32,
 ) -> vec3f {
   let sun = far.sun.xyz;
   // A normal facing away from the camera reflected towards it (`facingNormal`).
@@ -246,9 +253,81 @@ fn ocean_near_light(
         / (index * index * OCEAN_UPWELLING_Q);
     }
   }
-  let whitecaps = ocean_whitecaps(wind10, far);
+  // The wind's whitecaps and the shore's foam, as independent shares of the surface, on the setting
+  // that draws whitecaps.
+  let shore = select(0.0, shore_foam, far.figure.w > 0.5);
+  let whitecaps = 1.0 - (1.0 - ocean_whitecaps(wind10, far)) * (1.0 - shore);
   let foam = OCEAN_WHITECAP_ALBEDO * down / OCEAN_PI;
   return (1.0 - whitecaps) * (min(glint, vec3f(far.sun.w)) + sky + water_light) + whitecaps * foam;
+}
+
+// The water's vertical depth along the ray at `pixel` (`oceanThickness`): from the scene's depth
+// within OCEAN_NEAR_DEPTH_MAX, else the bathymetry; x the depth, m, y 1 where the scene's depth gave
+// it, z 1 where the cull takes the bed, w 1 where the bed is nearer than the sea (the sea hidden).
+fn ocean_near_water_depth(
+  pixel : vec2i,
+  ray_length : f32,
+  sea_distance : f32,
+  view_cosine : f32,
+  bathymetry : f32,
+) -> vec4f {
+  let size = vec2i(textureDimensions(ocean_scene_depth));
+  let bed_depth = bitcast<f32>(textureLoad(ocean_scene_depth, clamp(pixel, vec2i(0), size - vec2i(1)), 0).x);
+  if (!(bed_depth > 0.0) || sea_distance > OCEAN_NEAR_DEPTH_MAX) {
+    return vec4f(max(bathymetry, 0.0), 0.0, 0.0, 0.0);
+  }
+  let bed_distance = frame.clipProjection[3][2] * ray_length / bed_depth;
+  let separation = bed_distance - sea_distance;
+  let cull = OCEAN_NEAR_CULL * sea_distance;
+  if (separation < -cull) {
+    return vec4f(0.0, 1.0, 0.0, 1.0);
+  }
+  if (separation <= cull) {
+    return vec4f(0.0, 1.0, 1.0, 0.0);
+  }
+  return vec4f(separation * view_cosine, 1.0, 0.0, 0.0);
+}
+
+// The bed's point at `pixel` from the camera, body-fixed, m, by the scene's depth; w 0 where none.
+fn ocean_near_bed_point(pixel : vec2i) -> vec4f {
+  let size = vec2i(textureDimensions(ocean_scene_depth));
+  let at = clamp(pixel, vec2i(0), size - vec2i(1));
+  let depth = bitcast<f32>(textureLoad(ocean_scene_depth, at, 0).x);
+  if (!(depth > 0.0)) {
+    return vec4f(0.0);
+  }
+  let ndc = vec2f(
+    (f32(at.x) + 0.5) / f32(size.x) * 2.0 - 1.0,
+    1.0 - (f32(at.y) + 0.5) / f32(size.y) * 2.0,
+  );
+  let ray = ocean_near_view_ray(ndc);
+  let d = normalize(ray.x * draw.viewX.xyz + ray.y * draw.viewY.xyz + ray.z * draw.viewZ.xyz);
+  return vec4f(d * (frame.clipProjection[3][2] * length(ray) / depth), 1.0);
+}
+
+// The bed's slope against `up`, from its points at `pixel` and the next across and down, or back
+// at the frame's last column and row: xyz the unit horizontal direction downhill, w tan β; 0 where
+// any is undrawn or the bed is level.
+fn ocean_near_bed_slope(pixel : vec2i, up : vec3f) -> vec4f {
+  let size = vec2i(textureDimensions(ocean_scene_depth));
+  let step = select(vec2i(1), vec2i(-1), pixel + vec2i(1) >= size);
+  let p0 = ocean_near_bed_point(pixel);
+  let px = ocean_near_bed_point(pixel + vec2i(step.x, 0));
+  let py = ocean_near_bed_point(pixel + vec2i(0, step.y));
+  if (p0.w * px.w * py.w < 0.5) {
+    return vec4f(0.0);
+  }
+  let n = cross(px.xyz - p0.xyz, py.xyz - p0.xyz);
+  if (!(length(n) > 0.0)) {
+    return vec4f(0.0);
+  }
+  let c = dot(normalize(n), up);
+  // The normal leans downhill; facing down, it is turned up first.
+  let tilt = normalize(n) * sign(c) - up * abs(c);
+  if (!(length(tilt) > 1e-6)) {
+    return vec4f(0.0);
+  }
+  return vec4f(normalize(tilt), sqrt(max(1.0 - c * c, 0.0)) / max(abs(c), 1e-3));
 }
 
 // The draw's `OceanFar`.
@@ -297,11 +376,21 @@ fn vertexMain(@location(0) position : vec3f) -> OceanNearVarying {
   let hit = ocean_near_hit(d);
   // The displacement filtered by a grid cell's footprint, which its vertices sample (Bruneton's eq. 2).
   let cell = hit.t * draw.nearGrid.x / sqrt(max(dot(-normalize(hit.point), hit.up), OCEAN_NEAR_MIN_COSINE));
-  let surface = ocean_near_surface(hit.lagrangian, cell);
+  // The shore's depth limit at the vertex's own pixel (`shoreAmplitudeScale`).
+  let size = vec2f(textureDimensions(ocean_scene_depth));
+  let pixel = vec2i(vec2f((position.x + 1.0) * 0.5, (1.0 - position.y) * 0.5) * size);
+  let world = draw.camera.xyz + hit.point;
+  let water = ocean_near_water_depth(
+    pixel, length(ray), hit.t, abs(dot(normalize(hit.point), hit.up)), ocean_texel(ocean_map, world).depth,
+  );
+  let scale = shore_amplitude_scale(water.x, ocean_waves[0].y);
+  let surface = ocean_near_surface(hit.lagrangian, cell, scale);
   let along = ocean_near_along(hit.up);
   let across = cross(hit.up, along);
-  let p = hit.point + along * surface.displacement.x + across * surface.displacement.y
-    + hit.up * surface.displacement.z;
+  // The border's vertices, z 1, are a skirt the waves leave on the mean surface outside the view,
+  // which the next ring's displaced vertices cannot pull inside it (`oceanGridMesh`).
+  let shift = select(surface.displacement, vec3f(0.0), position.z > 0.5);
+  let p = hit.point + along * shift.x + across * shift.y + hit.up * shift.z;
   var out : OceanNearVarying;
   out.position = ocean_near_clip(p);
   out.lagrangian = hit.lagrangian;
@@ -328,37 +417,40 @@ fn fragmentMain(v : OceanNearVarying) -> OceanNearOut {
   }
   let up = normalize(v.up);
   let footprint = sea_distance * draw.farFigure.z / sqrt(max(dot(view, up), OCEAN_NEAR_MIN_COSINE));
-  let surface = ocean_near_surface(v.lagrangian, footprint);
-  let along = ocean_near_along(up);
-  let across = cross(up, along);
-  let normal = normalize(along * surface.normal.x + across * surface.normal.y + up * surface.normal.z);
-  // The water: the bed's distance along this pixel's ray from the scene's depth before the pass.
+  // The water at this pixel, from the scene's depth before the pass.
   let pixel = vec2i(v.position.xy);
-  let bed_depth = bitcast<f32>(textureLoad(ocean_scene_depth, pixel, 0).x);
   let ndc = vec2f(
     v.position.x * frame.viewport.z * 2.0 - 1.0,
     1.0 - v.position.y * frame.viewport.w * 2.0,
   );
   let ray_length = length(ocean_near_view_ray(ndc));
-  let near_plane = frame.clipProjection[3][2];
+  let depth_here = ocean_near_water_depth(pixel, ray_length, sea_distance, abs(dot(view, up)), texel.depth);
+  if (depth_here.w > 0.5) {
+    discard;
+  }
   var out : OceanNearOut;
-  out.depth = v.position.z;
+  out.depth = select(v.position.z, bitcast<f32>(textureLoad(ocean_scene_depth, pixel, 0).x), depth_here.z > 0.5);
   var water : OceanNearWater;
-  water.depth = max(texel.depth, 0.0);
+  water.depth = depth_here.x;
   water.has_bed = false;
-  if (bed_depth > 0.0 && sea_distance <= OCEAN_NEAR_DEPTH_MAX) {
-    let bed_distance = near_plane * ray_length / bed_depth;
-    let separation = bed_distance - sea_distance;
-    let cull = OCEAN_NEAR_CULL * sea_distance;
-    if (separation < -cull) {
-      discard;
-    }
-    if (separation <= cull) {
-      water.depth = 0.0;
-      out.depth = bed_depth;
-    } else {
-      water.depth = separation * abs(dot(view, up));
-    }
+  // The shore: the waves limited by the depth, its foam by the depth and the bed's slope.
+  let rms_height = ocean_waves[0].y;
+  let slope = select(vec4f(0.0), ocean_near_bed_slope(pixel, up), depth_here.y > 0.5);
+  let scale = shore_amplitude_scale(water.depth, rms_height);
+  let shore_foam = shore_foam_share(water.depth, slope.w, rms_height, ocean_waves[0].z);
+  // The fade over the pixel's reach along the slope, from the view's horizontal direction.
+  let view_cosine = dot(view, up);
+  let view_flat = view - up * view_cosine;
+  let slope_along_view = select(0.0, abs(dot(normalize(view_flat), slope.xyz)), length(view_flat) > 1e-6);
+  let reach = shore_pixel_reach(
+    sea_distance, draw.farFigure.z, view_cosine, slope_along_view, OCEAN_NEAR_MIN_COSINE,
+  );
+  let fade = select(1.0, shore_fade(water.depth, reach, slope.w), depth_here.y > 0.5);
+  let surface = ocean_near_surface(v.lagrangian, footprint, scale);
+  let along = ocean_near_along(up);
+  let across = cross(up, along);
+  let normal = normalize(along * surface.normal.x + across * surface.normal.y + up * surface.normal.z);
+  if (depth_here.y > 0.5) {
     // Refraction, on the high setting: the bed where the ray refracted at the wave meets it.
     if (draw.camera.w > 0.5) {
       let refracted = refract(-view, normal, 1.0 / draw.farIndex.y);
@@ -406,9 +498,10 @@ fn fragmentMain(v : OceanNearVarying) -> OceanNearOut {
     }
     radiance = radiance + ocean_near_light(
       far, OceanLight(light * transmitted, light * sky), view, up, normal, texel, surface.resolved,
-      footprint, water_j,
+      footprint, water_j, shore_foam,
     );
   }
-  out.colour = vec4f(min(radiance, vec3f(OCEAN_HDR_MAX)), 1.0);
+  // Premultiplied by the depth fade: the bed shows through the thinnest water (`shoreFade`).
+  out.colour = vec4f(min(radiance, vec3f(OCEAN_HDR_MAX)) * fade, fade);
   return out;
 }

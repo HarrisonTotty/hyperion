@@ -1305,6 +1305,7 @@ _Re-validated 2026-11-02 (the names T8 calls, as built):_
   Records: [11-surface-detail-clouds-oceans-rings-stills/records/R11.T8.c.md](11-surface-detail-clouds-oceans-rings-stills/records/R11.T8.c.md).
 - **R11.T8.d The shoreline.** `shoreline.wgsl`: amplitude attenuated by depth, foam from depth and
   the terrain's slope, the depth fade. By hand, recorded: a coast from 1 km, 100 m and 2 m.
+  Records: [11-surface-detail-clouds-oceans-rings-stills/records/R11.T8.d.md](11-surface-detail-clouds-oceans-rings-stills/records/R11.T8.d.md).
 - **R11.T8.e Benches.** Both GPUs (the development machine's RTX 3080, and the UHD 620 by the
   owner), against 1–2 ms on the target and 2–3 ms on the UHD 620's low
   setting, and by eye: a world with oceans is recognisable from orbit by its glint alone, and a

@@ -596,10 +596,11 @@ export const MARCH_TABLE_ONLY_ENTRIES: ReadonlyArray<CatalogueEntry> = MARCH_TAB
 );
 
 /**
- * Plan R11's ocean (R11.T8.b and T8.c): `oceanFar.wgsl`, the far ocean's library, inside its probe
+ * Plan R11's ocean (R11.T8.b to T8.d): `oceanFar.wgsl`, the far ocean's library, inside its probe
  * kernel, as R07's lit-body library is held, the `ocean` pass's far sea (`oceanPass.wgsl`), which
- * draws it, its near sea (`oceanNear.wgsl`) and the scene's depth copy the near sea reads. The smoke page compiles them in part 27 with their checks (`smoke/ocean.ts`), not in part 1,
- * for that part's watchdog.
+ * draws it, its near sea (`oceanNear.wgsl`, with the shoreline's library, `shoreline.wgsl`) and the
+ * scene's depth copy the near sea reads. The smoke page compiles them in part 27 with their checks
+ * (`smoke/ocean.ts`), not in part 1, for that part's watchdog.
  */
 export const OCEAN_ENTRIES: ReadonlyArray<CatalogueEntry> = [
   { kind: "compute", spec: OCEAN_FAR_PROBE },

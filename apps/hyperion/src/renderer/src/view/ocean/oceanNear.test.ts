@@ -11,6 +11,7 @@ import {
   oceanLiquidOptics,
   oceanSeaConstants,
   raySpheroidHit,
+  WHITECAP_ALBEDO,
 } from "./oceanFar";
 import { type OceanTexel, packOceanTexels } from "./oceanMap";
 import { oceanMaskOf } from "./oceanMask";
@@ -35,6 +36,7 @@ import {
   oceanNearHit,
   oceanNearLight,
   oceanNearPatchRadiance,
+  oceanNearPeakWavelengthM,
   oceanNearSet,
   oceanNearSurface,
   oceanThickness,
@@ -43,7 +45,8 @@ import {
   spheroidNormalAt,
 } from "./oceanNear";
 import oceanNearWgsl from "./oceanNear.wgsl?raw";
-import { EARTH_SEA } from "./seaState";
+import { setRmsHeightM } from "./shoreline";
+import { CLIMATE_WIND_HEIGHT_M, EARTH_SEA, seaState } from "./seaState";
 
 /** Earth's mean radius, m, a sphere for the tests. */
 const R = 6_371_000;
@@ -80,7 +83,7 @@ function windySet(windMps = 12): ReturnType<typeof oceanNearSet> {
 }
 
 describe("the near sea's grid (R11.T8.c)", () => {
-  it("covers the view and its margin, a cell's two triangles counter-clockwise", () => {
+  it("covers the view and its margin, its border a skirt, a cell's two triangles counter-clockwise", () => {
     const size = oceanGridSize(1920, 1080, 4);
     expect(size).toEqual({
       columns: Math.ceil(((1 + OCEAN_GRID_MARGIN) * 1920) / 4),
@@ -92,6 +95,9 @@ describe("the near sea's grid (R11.T8.c)", () => {
     const reach = 1 + OCEAN_GRID_MARGIN;
     expect([mesh.positions[0], mesh.positions[1]]).toEqual([-reach, -reach].map(Math.fround));
     expect([mesh.positions.at(-3), mesh.positions.at(-2)]).toEqual([reach, reach].map(Math.fround));
+    // The border a skirt, z 1: of the 4 × 3 points only (1, 1) and (2, 1) lie within.
+    const skirt = Array.from({ length: 12 }, (_, k) => mesh.positions[3 * k + 2]);
+    expect(skirt).toEqual([1, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 1]);
     // The first cell: (0, 1, 5) and (0, 5, 4), each turning counter-clockwise in NDC.
     expect(Array.from(mesh.indices.subarray(0, 6))).toEqual([0, 1, 5, 0, 5, 4]);
   });
@@ -337,11 +343,49 @@ describe("the near sea's waves (R11.T8.c)", () => {
     expect(oceanNearSurface(waves, 10, 20, 1e6).displacementM).toEqual([0, 0, 0]);
   });
 
-  it("pack a header and two rows a component", () => {
+  it("lower every component by the shore's depth limit, the surface's height in proportion (R11.T8.d)", () => {
     const waves = oceanWavesAt(set, time, anchor, anchor.pointM);
-    const rows = packOceanWaves(waves, set);
+    const whole = oceanNearSurface(waves, 12.5, -40, 0);
+    const half = oceanNearSurface(waves, 12.5, -40, 0, 0.5);
+    for (let k = 0; k < 3; k += 1) {
+      expect(half.displacementM[k]).toBeCloseTo(0.5 * (whole.displacementM[k] ?? Number.NaN), 9);
+    }
+    expect(half.resolved.upwind).toBeLessThan(whole.resolved.upwind);
+    const dry = oceanNearSurface(waves, 12.5, -40, 0, 0);
+    expect(dry.displacementM).toEqual([0, 0, 0]);
+    expect(dry.normal).toEqual([0, 0, 1]);
+  });
+
+  it("take the peak's deep-water wavelength 2π ÷ k_p for the shore's L₀, none for a glassy sea (R11.T8.d)", () => {
+    const sea = { liquid: WATER, air: EARTH_SEA.air };
+    const state = seaState({
+      windMps: 12,
+      windHeightM: CLIMATE_WIND_HEIGHT_M,
+      gravityMps2: EARTH_SEA.gravityMps2,
+      liquid: WATER,
+      air: EARTH_SEA.air,
+      fetchM: null,
+    });
+    expect(oceanNearPeakWavelengthM(sea, EARTH_SEA.gravityMps2, 12)).toBeCloseTo(
+      (2 * Math.PI) / state.peakWavenumberRadPerM,
+      9,
+    );
+    // Its deep-water dispersion: L₀ = g T_p² ÷ 2π at the peak's frequency.
+    const period = (2 * Math.PI) / Math.sqrt(EARTH_SEA.gravityMps2 * state.peakWavenumberRadPerM);
+    expect(oceanNearPeakWavelengthM(sea, EARTH_SEA.gravityMps2, 12)).toBeCloseTo(
+      (EARTH_SEA.gravityMps2 * period * period) / (2 * Math.PI),
+      6,
+    );
+    expect(oceanNearPeakWavelengthM(sea, EARTH_SEA.gravityMps2, 0)).toBe(0);
+  });
+
+  it("pack a header (components, H_rms, L₀) and two rows a component", () => {
+    const waves = oceanWavesAt(set, time, anchor, anchor.pointM);
+    const rows = packOceanWaves(waves, set, 100);
     expect(rows).toHaveLength(4 * OCEAN_WAVE_ROWS);
-    expect(rows[0]).toBe(32);
+    expect(Array.from(rows.subarray(0, 4))).toEqual(
+      Array.from(new Float32Array([32, setRmsHeightM(set), 100, 0])),
+    );
     const [first] = waves;
     expect(Array.from(rows.subarray(4, 12))).toEqual(
       Array.from(
@@ -376,6 +420,7 @@ describe("the near sea's light (R11.T8.c)", () => {
       resolved: { upwind: 0, crosswind: 0 },
       footprintM: 1,
       thickness,
+      shoreFoam: 0,
     };
     // A bed of albedo R∞, lit in air by the sun alone: its radiance R∞ E μ_s ÷ π.
     const muS = dot(up, optics.sunDirection);
@@ -406,6 +451,7 @@ describe("the near sea's light (R11.T8.c)", () => {
       resolved: { upwind: 0, crosswind: 0 },
       footprintM: 1,
       thickness: { depthM: depth, from: "depth", layer: "sea" },
+      shoreFoam: 0,
       bedRadiance: bed,
     });
     const k = 1;
@@ -434,10 +480,54 @@ describe("the near sea's light (R11.T8.c)", () => {
       resolved: { upwind: 0, crosswind: 0 },
       footprintM: 1,
       thickness: { depthM: depth, from: "depth", layer: "sea" },
+      shoreFoam: 0,
       bedRadiance: bed,
     });
     expect(glintless.radiance[k]).toBeCloseTo(water, 9);
     expect(lit.radiance[k]).toBeGreaterThan(water);
+  });
+
+  it("lays the shore's foam over the surface as the whitecaps' light (R11.T8.d)", () => {
+    const high = { ...optics, whitecaps: true };
+    const point = {
+      view,
+      up,
+      normal: up,
+      texel,
+      resolved: { upwind: 0, crosswind: 0 },
+      footprintM: 1,
+      thickness: { depthM: 0.5, from: "depth" as const, layer: "sea" as const },
+      bedRadiance: [0.5, 0.6, 0.7] as const,
+    };
+    const light = { sunLux: optics.sunLux, skyLux: optics.skyLux };
+    const open = oceanNearLight(high, light, { ...point, shoreFoam: 0 });
+    const surf = oceanNearLight(high, light, { ...point, shoreFoam: 1 });
+    const half = oceanNearLight(high, light, { ...point, shoreFoam: 0.5 });
+    // Whole foam is the whitecaps' albedo under the light down, ÷ π.
+    const foamOf = (k: 0 | 1 | 2): number =>
+      (WHITECAP_ALBEDO * (optics.sunLux[k] * dot(up, optics.sunDirection) + optics.skyLux[k])) /
+      Math.PI;
+    for (const k of [0, 1, 2] as const) {
+      expect(surf.radiance[k]).toBeCloseTo(foamOf(k), 6);
+      expect(half.radiance[k]).toBeCloseTo(0.5 * (open.radiance[k] + foamOf(k)), 6);
+    }
+  });
+
+  it("draws no shore foam on the setting that draws no whitecaps (R11.T8.d)", () => {
+    const point = {
+      view,
+      up,
+      normal: up,
+      texel,
+      resolved: { upwind: 0, crosswind: 0 },
+      footprintM: 1,
+      thickness: { depthM: 0.5, from: "depth" as const, layer: "sea" as const },
+      bedRadiance: null,
+    };
+    const light = { sunLux: optics.sunLux, skyLux: optics.skyLux };
+    expect(oceanNearLight(optics, light, { ...point, shoreFoam: 1 }).radiance).toEqual(
+      oceanNearLight(optics, light, { ...point, shoreFoam: 0 }).radiance,
+    );
   });
 
   it("reflects a wave's normal facing away from the camera towards it", () => {

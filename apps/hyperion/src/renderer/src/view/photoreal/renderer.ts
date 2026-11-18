@@ -2079,7 +2079,11 @@ export class PhotorealRenderer {
       for (const { view, state, ocean, tables, eclipseRows } of nearSeas) {
         try {
           const waveRows = this.#oceanWaveRows(ocean.id);
-          this.#engine.writeBuffer(waveRows, 0, packOceanWaves(state.waves, state.set));
+          this.#engine.writeBuffer(
+            waveRows,
+            0,
+            packOceanWaves(state.waves, state.set, state.peakWavelengthM),
+          );
           draws.push(
             oceanNearDraw(
               grid,

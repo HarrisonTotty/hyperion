@@ -13,7 +13,8 @@
  *   light. Both are under `ocean`, made at the first near frame and let go at a frame with none.
  * - **The grid** is `oceanNear.ts`' mesh at the setting's cell (`OCEAN_GRID_CELL_PX`) over the
  *   frame's size, made again when either changes.
- * - **Its premultiplied alpha** is 1 here: the depth fade at the shoreline is R11.T8.d's.
+ * - **The shore** (R11.T8.d, `shoreline.ts`): its amplitudes limited by the water's depth, its
+ *   surf's foam, and its premultiplied alpha, the depth fade to the bed.
  */
 import type { UniverseTime } from "@hyperion/protocol";
 
@@ -34,9 +35,11 @@ import frameWgsl from "../shaders/frame.wgsl?raw";
 import oceanDepthCopyWgsl from "./oceanDepthCopy.wgsl?raw";
 import type { GerstnerSet } from "./gerstner";
 import oceanNearWgsl from "./oceanNear.wgsl?raw";
+import shorelineWgsl from "./shoreline.wgsl?raw";
 import {
   type OceanNearFrame,
   oceanNearFrame,
+  oceanNearPeakWavelengthM,
   oceanNearSet,
   type OceanWave,
   type OceanWaveAnchor,
@@ -55,8 +58,8 @@ import {
 /** The label of the pass's copies of the scene, before its draws (R12's `ocean` row). */
 export const OCEAN_COPY_PASS_LABEL = "ocean copies";
 
-/** The near sea's WGSL: the shared head and the near sea's grid. */
-export const OCEAN_NEAR_WGSL = `${OCEAN_SHARED_WGSL}\n${oceanNearWgsl}`;
+/** The near sea's WGSL: the shared head, the shoreline's library and the near sea's grid. */
+export const OCEAN_NEAR_WGSL = `${OCEAN_SHARED_WGSL}\n${shorelineWgsl}\n${oceanNearWgsl}`;
 
 /** The near sea's bindings in `@group(2)` past the shared ones (`oceanNear.wgsl`'s). */
 export const OCEAN_NEAR_BINDINGS = {
@@ -177,11 +180,12 @@ export interface OceanNearView extends OceanDrawView {
   readonly refraction: boolean;
 }
 
-/** A near sea's frame, set and waves this frame. */
+/** A near sea's frame, set and waves this frame, and its peak's deep-water wavelength. */
 export interface OceanNearState {
   readonly frame: OceanNearFrame;
   readonly set: GerstnerSet;
   readonly waves: ReadonlyArray<OceanWave>;
+  readonly peakWavelengthM: number;
 }
 
 /**
@@ -192,11 +196,13 @@ export function oceanNearState(view: OceanNearView): OceanNearState {
   const optics = oceanDrawOptics(view);
   const frame = oceanNearFrame(optics, view.camera.positionM);
   const [east, north] = view.anchor.windEastNorthMps;
-  const set = oceanNearSet(view.sea, view.gravityMps2, Math.hypot(east, north), view.components);
+  const wind = Math.hypot(east, north);
+  const set = oceanNearSet(view.sea, view.gravityMps2, wind, view.components);
   return {
     frame,
     set,
     waves: oceanWavesAt(set, view.time, view.anchor, view.camera.positionM),
+    peakWavelengthM: oceanNearPeakWavelengthM(view.sea, view.gravityMps2, wind),
   };
 }
 

@@ -12,7 +12,8 @@
  *   B = |o′| (Û′ · d′) and C₀ = |o′|² − a², the camera's stretched distance |o′| and C₀ formed in
  *   `f64`, so that no large quantity cancels in `f32`. A ray above the horizon is taken down onto it,
  *   the tangent from the camera at its own azimuth, so that the grid's rows above the horizon
- *   collapse there and draw nothing.
+ *   collapse there and draw nothing. Its border, beyond the view, is a skirt left undisplaced
+ *   ({@link OCEAN_GRID_MARGIN}).
  * - **The waves are the sea's.** The set ({@link oceanNearSet}) is `gerstner.ts`' at its wind texel's
  *   wind, a ladder fixed by the sea state alone, from twice the peak's wavelength down to
  *   {@link OCEAN_NEAR_SHORTEST_OVER_PEAK} of it, 32 components on the high setting and 8 on the low
@@ -76,6 +77,7 @@ import {
 } from "./oceanFar";
 import { type OceanTexel, oceanTexelAt, type OceanTexels } from "./oceanMap";
 import { CLIMATE_WIND_HEIGHT_M, seaState, SLOPE_VARIANCE_FLOOR } from "./seaState";
+import { setRmsHeightM } from "./shoreline";
 
 /** The camera's height above the sea below which the near sea is drawn, m: the far sea's switch. */
 export const OCEAN_NEAR_BELOW_M = OCEAN_FAR_SWITCH_M;
@@ -100,7 +102,12 @@ export const OCEAN_LAYER_CULL_SHARE = 1e-6;
  */
 export const OCEAN_GRID_CELL_PX: Readonly<Record<QualitySetting, number>> = { high: 4, low: 8 };
 
-/** The grid's reach beyond the view on each side, in NDC: 0.1, so that no wave pulls its edge in. */
+/**
+ * The grid's reach beyond the view on each side, in NDC: 0.1. Its border is a skirt the waves leave
+ * where it lies ({@link oceanGridMesh}), since near a low camera they pull the grid's edge in by
+ * more than any margin: a third of the view's height at the bottom of a frame from 2 m under a
+ * 7 m/s sea, which drew no sea there (R11.T8.d's coast from 2 m, 2026-11-18).
+ */
 export const OCEAN_GRID_MARGIN = 0.1;
 
 /** The grid's columns and rows of cells for a view of `widthPx` × `heightPx` at `cellPx`. */
@@ -117,8 +124,9 @@ export function oceanGridSize(
 }
 
 /**
- * The grid's mesh: (columns + 1) × (rows + 1) points in NDC over [−1 − m, 1 + m]², z 0, and two
- * triangles a cell, counter-clockwise, as 32-bit indices.
+ * The grid's mesh: (columns + 1) × (rows + 1) points in NDC over [−1 − m, 1 + m]², z 1 on the
+ * border, the skirt `oceanNear.wgsl` leaves undisplaced, and 0 within, and two triangles a cell,
+ * counter-clockwise, as 32-bit indices.
  */
 export function oceanGridMesh(
   columns: number,
@@ -131,6 +139,7 @@ export function oceanGridMesh(
       const at = 3 * (j * (columns + 1) + i);
       positions[at] = reach * ((2 * i) / columns - 1);
       positions[at + 1] = reach * ((2 * j) / rows - 1);
+      positions[at + 2] = i === 0 || i === columns || j === 0 || j === rows ? 1 : 0;
     }
   }
   const indices = new Uint32Array(6 * columns * rows);
@@ -398,7 +407,21 @@ export function oceanNearSet(
   wind10Mps: number,
   count: number,
 ): GerstnerSet {
-  const state = seaState({
+  const peakWavelengthM = oceanNearPeakWavelengthM(sea, gravityMps2, wind10Mps);
+  return gerstnerSet(
+    nearSeaState(sea, gravityMps2, wind10Mps),
+    count,
+    OCEAN_NEAR_SHORTEST_OVER_PEAK * peakWavelengthM,
+  );
+}
+
+/** The near sea's state at the 10 m wind `wind10Mps`, fully developed. */
+function nearSeaState(
+  sea: Pick<OceanSea, "liquid" | "air">,
+  gravityMps2: number,
+  wind10Mps: number,
+): ReturnType<typeof seaState> {
+  return seaState({
     windMps: wind10Mps,
     windHeightM: CLIMATE_WIND_HEIGHT_M,
     gravityMps2,
@@ -406,9 +429,19 @@ export function oceanNearSet(
     air: sea.air,
     fetchM: null,
   });
-  const peakWavelengthM =
-    state.peakWavenumberRadPerM > 0 ? (2 * Math.PI) / state.peakWavenumberRadPerM : 0;
-  return gerstnerSet(state, count, OCEAN_NEAR_SHORTEST_OVER_PEAK * peakWavelengthM);
+}
+
+/**
+ * The near sea's peak wavelength in deep water, m, 2π ÷ k_p of its sea state, which the shore's
+ * surf similarity takes for L₀ (`shoreline.ts`); 0 for a glassy sea.
+ */
+export function oceanNearPeakWavelengthM(
+  sea: Pick<OceanSea, "liquid" | "air">,
+  gravityMps2: number,
+  wind10Mps: number,
+): number {
+  const state = nearSeaState(sea, gravityMps2, wind10Mps);
+  return state.peakWavenumberRadPerM > 0 ? (2 * Math.PI) / state.peakWavenumberRadPerM : 0;
 }
 
 /** The waves' rows: a header, then two `vec4f` a component. */
@@ -473,16 +506,17 @@ export function oceanWavesAt(
 
 /**
  * The waves' rows as `oceanNear.wgsl` reads them, {@link OCEAN_WAVE_ROWS} `vec4f`s: a header of
- * (components, the set's total upwind and crosswind variance, 0), then each component's (k_x, k_y,
- * A, φ − ω t + k · ξ) and (Q, λ, cos², 0).
+ * (components, the set's H_rms, the peak's deep-water wavelength L₀, 0), the shore's
+ * (`shoreline.ts`), then each component's (k_x, k_y, A, φ − ω t + k · ξ) and (Q, λ, cos², 0).
  */
 export function packOceanWaves(
   waves: ReadonlyArray<OceanWave>,
   set: GerstnerSet,
+  peakWavelengthM: number,
 ): Float32Array<ArrayBuffer> {
   const out = new Float32Array(4 * OCEAN_WAVE_ROWS);
   const drawn = waves.slice(0, OCEAN_MAX_COMPONENTS);
-  out.set([drawn.length, set.totalSlopeVariance.upwind, set.totalSlopeVariance.crosswind, 0]);
+  out.set([drawn.length, setRmsHeightM(set), peakWavelengthM, 0]);
   drawn.forEach((w, i) => {
     const at = 4 * (OCEAN_WAVE_HEADER_ROWS + 2 * i);
     out.set([w.kxRadPerM, w.kyRadPerM, w.amplitudeM, w.phaseRad], at);
@@ -505,15 +539,18 @@ export interface OceanNearSurface {
 
 /**
  * The surface at the Lagrangian point (x₀, y₀) with each component faded by `footprintM`
- * ({@link componentFade}): its displacement, x₀ − Σ Q f A k̂ sin θ along and Σ f A cos θ up, θ = k ·
- * (x₀, y₀) + φ − ω t + k · ξ, (x₀, y₀) camera-relative; its normal, ∂P ÷ ∂x₀ × ∂P ÷ ∂y₀; and the
- * variance its drawn components resolve. The twin of `oceanNear.wgsl`'s `ocean_near_surface`.
+ * ({@link componentFade}) and its amplitude scaled by `amplitudeScale`, the shore's depth limit s
+ * (`shoreline.ts`' `shoreAmplitudeScale`): its displacement, x₀ − Σ Q f s A k̂ sin θ along and
+ * Σ f s A cos θ up, θ = k · (x₀, y₀) + φ − ω t + k · ξ, (x₀, y₀) camera-relative; its normal,
+ * ∂P ÷ ∂x₀ × ∂P ÷ ∂y₀; and the variance its drawn components resolve. The twin of
+ * `oceanNear.wgsl`'s `ocean_near_surface`.
  */
 export function oceanNearSurface(
   waves: ReadonlyArray<OceanWave>,
   x0M: number,
   y0M: number,
   footprintM: number,
+  amplitudeScale = 1,
 ): OceanNearSurface {
   let dx = 0;
   let dy = 0;
@@ -531,7 +568,7 @@ export function oceanNearSurface(
     if (fade === 0) {
       continue;
     }
-    const a = fade * w.amplitudeM;
+    const a = fade * amplitudeScale * w.amplitudeM;
     const k = Math.hypot(w.kxRadPerM, w.kyRadPerM);
     const ux = w.kxRadPerM / k;
     const uy = w.kyRadPerM / k;
@@ -598,6 +635,11 @@ export interface OceanNearPoint {
   /** The water's thickness there ({@link oceanThickness}). */
   readonly thickness: OceanThickness;
   /**
+   * The shore's foam share there (`shoreline.ts`' `shoreFoamShare`), 0 off the shore; drawn, as the
+   * whitecaps are, on the setting that draws them (`whitecaps`).
+   */
+  readonly shoreFoam: number;
+  /**
    * The bed's light in air where the refracted ray meets it, cd/m² per channel, from the scene's
    * colour (refraction on); `null` on the low setting, or beyond the depth's range, where the bed is
    * the far sea's albedo.
@@ -654,7 +696,11 @@ export function oceanNearLight(
   const factor = oceanGlintFactor(view, sun, normal, upwind, variance, optics.refractiveIndex);
   const muV = Math.max(dot(normal, view), 0);
   const muS = Math.max(dot(normal, sun), 0);
-  const whitecaps = optics.whitecaps ? oceanWhitecapFraction(wind10, optics.sea) : 0;
+  // The wind's whitecaps and the shore's foam, as independent shares of the surface, on the setting
+  // that draws whitecaps.
+  const caps = optics.whitecaps ? oceanWhitecapFraction(wind10, optics.sea) : 0;
+  const shore = optics.whitecaps ? point.shoreFoam : 0;
+  const whitecaps = 1 - (1 - caps) * (1 - shore);
   const depth = point.thickness.depthM;
   const channel = (k: 0 | 1 | 2): { radiance: number; glint: number } => {
     const n = optics.refractiveIndex[k];
@@ -760,6 +806,7 @@ export function oceanNearPatchRadiance(
         resolved: surface.resolved,
         footprintM: footprint,
         thickness: { depthM: patch.texel.depthM, from: "bathymetry", layer: "sea" },
+        shoreFoam: 0,
         bedRadiance: null,
       });
       const w =

@@ -178,7 +178,13 @@ import { addCanvas, checkClearAndTriangle, checkDepthCullBias, checkThreeCanvase
 import { Checks } from "./harness";
 import { checkHeightWorker } from "./heightWorker";
 import { checkHistogram } from "./histogram";
-import { checkOceanFar, checkOceanNear, checkOceanPass } from "./ocean";
+import {
+  captureCoast,
+  checkOceanFar,
+  checkOceanNear,
+  checkOceanPass,
+  checkOceanShore,
+} from "./ocean";
 import { checkClassCurveSeam, checkLitBody } from "./litBody";
 import { checkLitTerrain } from "./litTerrain";
 import { checkClusterCull } from "./clusterCull";
@@ -625,6 +631,7 @@ async function run(
   await group(27, "R11.T8.b the far ocean against its twin", () => checkOceanFar(engine, checks));
   await group(27, "R11.T8.b the ocean pass against its twin", () => checkOceanPass(engine, checks));
   await group(27, "R11.T8.c the near sea against its twin", () => checkOceanNear(engine, checks));
+  await group(27, "R11.T8.d the shoreline against its twin", () => checkOceanShore(engine, checks));
   // R08.T15.a.2's deck's marches, in part 14 with its twins, first.
   await group(14, "T9.b catalogue: the deck's marches", () =>
     checkCatalogue(engine, status, ATMOSPHERE_DECK_ENTRIES, checks),
@@ -1148,6 +1155,13 @@ async function run(
         frames.length > 0,
         `${String(frames.length)} frames`,
       );
+    });
+  }
+  // R11.T8.d's coast from 1 km, 100 m and 2 m, in part 27 with the ocean's groups, so that
+  // `--part=27` takes it without part 1's captures.
+  if (captures) {
+    await group(27, "R11.T8.d the coast captures", async () => {
+      images = [...images, ...(await captureCoast(engine, checks))];
     });
   }
   // R10.T10.g's planetshine on slopes and R10.T10.c's limb over the survey, in part 7 with the
