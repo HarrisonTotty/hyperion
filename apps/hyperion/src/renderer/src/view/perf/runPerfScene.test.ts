@@ -493,12 +493,13 @@ describe("a perf run in the renderer", () => {
   });
 
   it("fails the run on a pass with no row, naming it", async () => {
-    const { main } = await ran({ label: "rings" });
+    // A label no plan's pass takes (R11's rings, the last unmapped, have their row since R11.T9.c).
+    const { main } = await ran({ label: "no plan's pass" });
     expect(main.calls).not.toContain("endRepetition 1");
     expect(main.ends).toEqual([
       {
         status: "failed",
-        reason: "the timed pass primary:rings has no row in PASS_ROWS (Design note 4)",
+        reason: "the timed pass primary:no plan's pass has no row in PASS_ROWS (Design note 4)",
       },
     ]);
   });

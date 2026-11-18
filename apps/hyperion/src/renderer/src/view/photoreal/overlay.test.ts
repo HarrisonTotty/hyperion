@@ -144,9 +144,14 @@ describe("the photorealistic overlay's draw list (R07.T16.a)", () => {
 });
 
 describe("the photorealistic overlay with the view's GRID at OFF (the owner's request, 2026-11-05)", () => {
-  it("keeps only the stand-ins, each hull and the ring's two edges, which the image does not draw yet", () => {
+  it("keeps only the stand-ins, each hull and a ring's two edges, which the image does not draw", () => {
     const off = overlayDrawList(wireframeList(), TOKENS, false);
     expect(off.lines.map((line) => line.id)).toEqual([`ring:${FIXTURE_PLANET}`, "hull:other"]);
+  });
+
+  it("leaves out a ring's two edges where the image drew the ring (R11.T9.c)", () => {
+    const off = overlayDrawList(wireframeList(), TOKENS, false, new Set([FIXTURE_PLANET]));
+    expect(off.lines.map((line) => line.id)).toEqual(["hull:other"]);
   });
 
   it("leaves out every limb and graticule, orbit, ring tick, predicted path and mark", () => {
@@ -185,6 +190,15 @@ describe("whether the overlay's pass is drawn (the owner's request, 2026-11-05)"
   /** The scene's list with only the batches `GRID OFF` leaves out: no hull, ring or survey edge. */
   function bareList(): WireframeDrawList {
     const list = wireframeList();
+    return {
+      ...list,
+      lines: list.lines.filter((line) => line.keptAtGridOff !== true && line.ringOf === undefined),
+    };
+  }
+
+  /** The bare list with the ring's two edges back, its one stand-in. */
+  function ringOnlyList(): WireframeDrawList {
+    const list = wireframeList();
     return { ...list, lines: list.lines.filter((line) => line.keptAtGridOff !== true) };
   }
 
@@ -200,6 +214,13 @@ describe("whether the overlay's pass is drawn (the owner's request, 2026-11-05)"
       true,
       false,
     ]);
+  });
+
+  it("is drawn at OFF for a ring's edges only where the image did not draw the ring (R11.T9.c)", () => {
+    expect([
+      overlayDrawsAt(ringOnlyList(), false),
+      overlayDrawsAt(ringOnlyList(), false, new Set([FIXTURE_PLANET])),
+    ]).toEqual([true, false]);
   });
 });
 

@@ -14,13 +14,15 @@
  * ground with its depth, so that the air is laid over it (R11.T8.b); host discs, disc bodies and
  * point bodies in one painter order (Design note 2);
  * R08's atmosphere, each body's composite over everything drawn before it (R08.T10.b); R11's
- * rings and clouds; the histogram; bloom of the light above the
- * display's range; the tone-mapping pass; the symbology cased over the result. A style owns no
- * scene, camera or projection, so switching style is a change of pass list. The slots of R06, R08,
- * R10 and R11 are listed with the labels their plans give or (for R11's passes not yet built) the
- * lane's provisional names, marked `built: false` until those plans fill them (R06's sky, drawn
- * by R07.T8.a's frame, is; R08's atmosphere since R08.T10.b, its slot carrying its passes' labels;
- * R11's clouds since R11.T7.b, each body's after its composite; R11's ocean since R11.T8.b); the
+ * rings (R11.T9.c), each body's among its air's composites, the fragments beyond its air before
+ * the composite and the others after it (`rings/ringSlab.ts`' `transparentSteps`); R11's clouds;
+ * the histogram; bloom of the light above the display's range; the tone-mapping pass; the
+ * symbology cased over the result. A style owns no scene, camera or projection, so switching style
+ * is a change of pass list. The slots of R06, R08, R10 and R11 are listed with the labels their
+ * plans give or (for R11's passes not yet built) the lane's provisional names, marked
+ * `built: false` until those plans fill them (R06's sky, drawn by R07.T8.a's frame, is; R08's
+ * atmosphere since R08.T10.b, its slot carrying its passes' labels; R11's clouds since R11.T7.b,
+ * each body's after its composite; R11's ocean since R11.T8.b; R11's rings since R11.T9.c); the
  * settings share one order today, their differences being
  * each pass's parameters (Design note 18): on the high setting the terrain's cascade passes are
  * submitted before the bodies pass, while the low setting, which has no cascades, submits none in
@@ -43,6 +45,7 @@ import {
   VISIBILITY_RESOLVE_LABEL,
 } from "../clusters/visibility";
 import type { QualitySetting } from "../quality/qualitySetting";
+import { RINGS_PASS_LABEL } from "../rings/ringSlab";
 import { TERRAIN_PASS_LABEL, TERRAIN_SHADOW_PASS_LABEL } from "../terrain/gpu/material";
 import { BLOOM_PASS } from "../post/bloomChain";
 import { HISTOGRAM_PASS } from "../post/histogram";
@@ -192,7 +195,8 @@ export function photorealisticPasses(setting: QualitySetting): PassList {
       own(PHOTOREAL_PASS_LABELS.discs),
       // Each body's air over everything opaque drawn before it (R08.T10.b).
       slot("atmosphere", "R08", true, ATMOSPHERE_PASS_LABELS),
-      slot("rings", "R11", false),
+      // Each ring among its body's air's composites (R11.T9.c), a pass a step.
+      slot(RINGS_PASS_LABEL, "R11", true),
       // Each body's clouds after its composite, into the target it drew (plan R11, R11.T7.b): the
       // volume's march and resolve where a body draws it (R11.T7.c), then the layer or its composite.
       slot(CLOUD_LAYER_PASS, "R11", true, CLOUD_PASS_LABELS),

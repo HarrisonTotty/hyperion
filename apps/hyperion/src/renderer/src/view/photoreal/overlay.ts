@@ -35,10 +35,12 @@
  *
  * A view's `GRID` (the owner's requests, 2026-10-31 and 2026-11-05), `OFF` as its photorealistic
  * style opens, leaves the image as the picture alone: the overlay keeps only the batches marked
- * {@link LineBatch.keptAtGridOff}, each craft's hull edges on its silhouette and a ring's two
- * edges, which stand for what the image does not draw yet (Design note 17), and the survey edge,
- * which tells unsurveyed ground from surveyed; every body's datum lines, orbit, ring tick,
- * predicted path, the line-of-sight mark and every symbol, reticle and chevron are left out, and
+ * {@link LineBatch.keptAtGridOff}, each craft's hull edges on its silhouette, and a ring's two edges
+ * on a frame whose image does not draw the ring ({@link LineBatch.ringOf}; plan R11, R11.T9.c), which
+ * stand for what the image does not draw (Design note 17), and the survey edge, which tells
+ * unsurveyed ground from surveyed; every body's datum lines, orbit, ring tick, a ring the image
+ * draws, predicted path, the line-of-sight mark and every symbol, reticle and chevron are left out,
+ * and
  * the occluders stay, so that a stand-in behind a body stays hidden (the UX ruling, 2026-11-05).
  * Where none of them is in the list, the view draws no symbology pass at all
  * ({@link overlayDrawsAt}).
@@ -73,6 +75,9 @@ import {
 import type { SurveyedDatumFrame, WireframeRenderer } from "../wireframe/submit";
 import { PHOTOREAL_PASS_LABELS } from "./passes";
 
+/** No ring drawn by the image. */
+const NO_RINGS: ReadonlySet<BodyIdHex> = new Set();
+
 /**
  * A batch as the photorealistic style strokes it: cased by at least `casingPx`, device px.
  */
@@ -96,11 +101,14 @@ function cased(line: LineBatch, casingPx: number): LineBatch {
  *   silhouette is one surface with them (decision-r07-t16a, item 3).
  * @param grid - The view's `GRID`: `true` (`ON`) draws every batch over the image; `false`
  *   (`OFF`, as a view's photorealistic style opens) only the stand-ins and survey edges.
+ * @param ringsDrawn - The bodies whose rings the image drew this frame (plan R11, R11.T9.c), whose
+ *   edges `GRID OFF` leaves out; none unless given, when every ring's edges stand in for it.
  */
 export function overlayDrawList(
   list: WireframeDrawList,
   tokens: Pick<ColourTokens, "surface0">,
   grid = true,
+  ringsDrawn: ReadonlySet<BodyIdHex> = NO_RINGS,
 ): WireframeDrawList {
   const casingPx = casingDevicePx(list.strokeScale);
   const silhouette = (mesh: OccluderMesh): OccluderMesh => ({ ...mesh, fill: tokens.surface0 });
@@ -108,20 +116,35 @@ export function overlayDrawList(
     ...list,
     occluderMeshes: list.occluderMeshes.map(silhouette),
     lines: list.lines
-      .filter((line) => grid || line.keptAtGridOff === true)
+      .filter((line) => grid || keptAtGridOff(line, ringsDrawn))
       .map((line) => cased(line, casingPx)),
     sprites: [],
   };
 }
 
 /**
+ * Whether `GRID OFF` keeps a batch: a stand-in or a survey edge ({@link LineBatch.keptAtGridOff}),
+ * or a ring's edges where the image did not draw the ring ({@link LineBatch.ringOf}).
+ */
+function keptAtGridOff(line: LineBatch, ringsDrawn: ReadonlySet<BodyIdHex>): boolean {
+  return line.keptAtGridOff === true || (line.ringOf !== undefined && !ringsDrawn.has(line.ringOf));
+}
+
+/**
  * Whether a view's overlay draws anything over its photorealistic image, and so its symbology's
  * pass is drawn: at `GRID` `ON` always, as R07 built it; at `OFF` only where the list holds a batch
- * kept there ({@link LineBatch.keptAtGridOff}), so that the picture alone costs no pass (the
- * owner's request, 2026-11-05).
+ * kept there ({@link LineBatch.keptAtGridOff}), or a ring's edges where the image does not draw the
+ * ring, so that the picture alone costs no pass (the owner's request, 2026-11-05).
+ *
+ * @param ringsDrawn - The bodies whose rings the image drew ({@link overlayDrawList}); none unless
+ *   given, so that before a frame is drawn every ring's edges may be kept.
  */
-export function overlayDrawsAt(list: Pick<WireframeDrawList, "lines">, grid: boolean): boolean {
-  return grid || list.lines.some((line) => line.keptAtGridOff === true);
+export function overlayDrawsAt(
+  list: Pick<WireframeDrawList, "lines">,
+  grid: boolean,
+  ringsDrawn: ReadonlySet<BodyIdHex> = NO_RINGS,
+): boolean {
+  return grid || list.lines.some((line) => keptAtGridOff(line, ringsDrawn));
 }
 
 /**
@@ -432,6 +455,7 @@ export function depthObserved(
  * @param hiders - The bodies whose ground hides the marks behind it (`GeometrySettings`'
  *   `hiddenMarks` `culled`; {@link hiddenMarksCulled}), none unless given; of them, those whose
  *   datum gives way in `surveyed` alone.
+ * @param ringsDrawn - The bodies whose rings the image drew ({@link overlayDrawList}).
  */
 export function overlaySubmission(
   renderer: Pick<WireframeRenderer, "frame">,
@@ -442,8 +466,9 @@ export function overlaySubmission(
   surveyed: ReadonlyMap<string, SurveyedDatumFrame>,
   grid = true,
   hiders: ReadonlyArray<OverlayHider> = [],
+  ringsDrawn: ReadonlySet<BodyIdHex> = NO_RINGS,
 ): OverlaySubmission {
-  const drawn = overlayDrawList(list, tokens, grid);
+  const drawn = overlayDrawList(list, tokens, grid, ringsDrawn);
   // Only a body whose datum gives way over its mask in this pass hides its marks.
   const hiding = hiders.filter((hider) => surveyed.has(hider.body));
   const shown = hiding.length === 0 ? drawn : hiddenMarksCulled(drawn, camera, viewport, hiding);

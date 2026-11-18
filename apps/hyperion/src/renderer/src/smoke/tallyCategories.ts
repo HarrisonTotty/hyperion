@@ -22,6 +22,7 @@ export const CATEGORIES: ReadonlyArray<MemoryCategory> = [
   "geometry-pages",
   "height-cache",
   "ocean",
+  "rings",
   "shadows",
   "sky-cube",
   "sky-scratch",

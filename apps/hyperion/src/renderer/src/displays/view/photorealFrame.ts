@@ -631,6 +631,8 @@ export function photorealFrame(inputs: PhotorealInputs): PhotorealFrame {
     present: inputs.present,
     atmospheres,
     oceans,
+    // Each drawn as its slab where its planet is larger than a point (plan R11, R11.T9.c).
+    rings: scene.rings,
     onAtmosphereFailed: inputs.atmosphereFailed,
   };
 }

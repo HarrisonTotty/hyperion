@@ -868,17 +868,21 @@ export class ViewFrameDrawer {
         // the stand-ins and survey edges alone, and no pass where there are none (the owner's
         // request, 2026-11-05).
         overlay: overlayDrawsAt(list, grid)
-          ? (surveyed, hiders) =>
-              overlaySubmission(
-                this.#wireframe,
-                list,
-                tokens,
-                camera,
-                viewport,
-                surveyed,
-                grid,
-                hiders,
-              )
+          ? (surveyed, hiders, ringsDrawn) =>
+              // No pass at all where every batch `GRID OFF` keeps is a ring the image drew.
+              overlayDrawsAt(list, grid, ringsDrawn)
+                ? overlaySubmission(
+                    this.#wireframe,
+                    list,
+                    tokens,
+                    camera,
+                    viewport,
+                    surveyed,
+                    grid,
+                    hiders,
+                    ringsDrawn,
+                  )
+                : null
           : null,
         atmospheres: inputs.atmosphere?.tablesOf,
         // Each body's clouds over its air, from its record (plan R11, R11.T7.b).

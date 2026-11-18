@@ -186,6 +186,16 @@ export function ringProfile(ring: RingShape): RingProfile {
 }
 
 /**
+ * Whether a ring's profile is the provisional one of {@link ringProfile} (Design note 13), which
+ * the view labels as not modelled (`RING PROFILE: NOT YET MODELLED`; plan R11, R11.T9.c): every
+ * ring's, since plan 14's `RingDto` sends no radial profile; plan 14's profile, when it is sent,
+ * makes it `false` for the rings that carry one.
+ */
+export function ringProfileProvisional(ring: RingShape): boolean {
+  return ring.innerRadiusM > 0;
+}
+
+/**
  * The band of `profile` at radius `rM`, or `null` off the annulus. A radius on a boundary takes the
  * outer band, and the outer edge itself none.
  */

@@ -209,6 +209,9 @@ import {
   VisibilityBuffer,
 } from "../clusters/visibility";
 import { createSceneTarget } from "./sceneTarget";
+import { RINGS_PASS_LABEL, type TransparentStep, transparentSteps } from "../rings/ringSlab";
+import { type RingSlabFrame, RingSlabs } from "../rings/ringSlabs";
+import type { ViewRing } from "../scene/model";
 import { log } from "../../lib/pinnedMath";
 import type { MeasuredPass } from "../stills/batchController";
 import type {
@@ -408,11 +411,16 @@ export interface FrameOcean {
  * there (`hiddenMarksCulled`); a submission that says no draw of it tests depth (`depthTested`
  * `false`) is drawn with none of the terrain's depth before it, and one that does not say is drawn
  * with it.
+ *
+ * It is given the bodies whose rings the frame drew (plan R11, R11.T9.c), so that a ring the image
+ * did not draw (its planet a point, or its slabs not yet made) keeps its two edges as its stand-in
+ * at `GRID OFF`; it gives `null` where it would draw nothing, and the view draws no pass.
  */
 export type PhotorealOverlay = (
   surveyed: ReadonlyMap<string, SurveyedDatumFrame>,
   hiders: ReadonlyArray<OverlayHider>,
-) => FrameSubmission & { readonly depthTested?: boolean };
+  ringsDrawn: ReadonlySet<BodyIdHex>,
+) => (FrameSubmission & { readonly depthTested?: boolean }) | null;
 
 /** What one photorealistic frame draws. */
 export interface PhotorealFrame {
@@ -559,6 +567,12 @@ export interface PhotorealFrame {
    * draws no sea.
    */
   readonly oceans?: ReadonlyArray<FrameOcean> | undefined;
+  /**
+   * The scene's rings (plan R11, R11.T9.c; `ViewScene.rings`), each drawn as its slab where its
+   * planet is drawn larger than a point, among the airs' composites (`transparentSteps`); none, or
+   * absent, draws no ring.
+   */
+  readonly rings?: ReadonlyArray<ViewRing> | undefined;
   /**
    * Takes a throw from the drawing of a body's atmosphere, other than a lost device's
    * (`decision-r08-t10b-leans.md` §2), with the view's name: the view's handle on the cache, which
@@ -968,6 +982,8 @@ export class PhotorealRenderer {
   readonly #engine: RenderEngine;
   readonly #name: string;
   readonly #bodies: LitBodyRenderer;
+  /** The rings' slabs (R11.T9.c), made at the first frame with a ring, as long-lived as this. */
+  readonly #rings: RingSlabs;
   #resources: Resources | null = null;
   #making: Promise<void> | null = null;
   #status: PhotorealStatus = "idle";
@@ -1051,7 +1067,10 @@ export class PhotorealRenderer {
     this.#bodies = new LitBodyRenderer(engine, SKY_SPRITE_HDR_MATERIAL);
     this.#clouds = new CloudLayers(engine, viewName);
     this.#volumes = new CloudVolumes(engine, viewName);
+    this.#rings = new RingSlabs(engine, viewName);
     this.#unsubscribe = engine.onRestored(() => {
+      // The rings' handles died with the device; the next frame with a ring makes them again.
+      this.#rings.restored();
       // The handles died with the device; a making in flight is abandoned, and the next frame
       // makes them again.
       this.#generation += 1;
@@ -1262,6 +1281,11 @@ export class PhotorealRenderer {
             );
             return null;
           }),
+        // The rings' slabs' materials, mesh and tables (plan R11, R11.T9.c), made with the rest
+        // rather than at a ring's first frame; `RingSlabs` holds them, releases them at a dispose,
+        // and lets a making a restore or a dispose abandoned go as it ends. A refusal leaves the
+        // view without rings, never its frame.
+        this.#rings.prepare(),
       ]);
     } catch (error: unknown) {
       // A chain made before the refusal is released with it, and the meshes made for it.
@@ -1715,8 +1739,18 @@ export class PhotorealRenderer {
       postProcesses: [],
       colourLoad: "load",
     });
+    // The rings' slabs on this frame (R11.T9.c): those whose planets are drawn larger than a point.
+    const rings = this.#rings.frame({
+      rings: frame.rings ?? [],
+      bodies,
+      plan,
+      camera,
+      viewport,
+      exposureScale: frame.exposureScale,
+      annuli: settings.discAnnuli,
+    });
     // Each body's air over everything drawn before it, farthest first (R08.T10.b), into the air
-    // targets in turn; the passes after read the last.
+    // targets in turn, and its rings among them (R11.T9.c); the passes after read the last.
     const hdrColour = this.#drawAtmospheres(
       resources,
       frame,
@@ -1725,7 +1759,11 @@ export class PhotorealRenderer {
       {
         viewRotation,
         projection,
+        // The rings' pass takes a still's tile's origin (R11.T10.e.2); R08's and the clouds'
+        // passes rebuild their rays from their own camera and read none.
+        ...tiled,
       },
+      rings,
     );
     this.#drawnColour = hdrColour;
     // The glare sources are written before the histogram is dispatched, which weighs their veil
@@ -1804,7 +1842,15 @@ export class PhotorealRenderer {
         radiusOf !== undefined && geometry.hiddenMarks === "culled"
           ? overlayHidersOf(plan, radiusOf)
           : [];
-      const { depthTested, ...overlay } = frame.overlay(surveyed, hiders);
+      const submission = frame.overlay(
+        surveyed,
+        hiders,
+        new Set((rings?.rings ?? []).map((ring) => ring.body)),
+      );
+      if (submission === null) {
+        return plan;
+      }
+      const { depthTested, ...overlay } = submission;
       const sceneDepth = resources.target.depth;
       let depth: ReadonlyArray<DrawItem> = [];
       if (terrain !== undefined && depthTested !== false) {
@@ -2348,7 +2394,8 @@ export class PhotorealRenderer {
       readonly shellRadiiM: ReadonlyMap<BodyIdHex, number>;
       readonly clouds: ReadonlyMap<BodyIdHex, FrameClouds>;
     },
-    pass: { readonly viewRotation: Float32Array; readonly projection: Float32Array },
+    pass: Pick<FrameSubmission, "viewRotation" | "projection" | "tileOriginPx">,
+    rings: RingSlabFrame | null,
   ): TextureHandle {
     const recorded = new Set(plan.discs.map((record) => record.body));
     const byId = new Map(lit.bodies.map((body) => [body.id, body]));
@@ -2370,16 +2417,43 @@ export class PhotorealRenderer {
         drawn.push({ air, sources });
       }
     }
-    const order = drawn.toSorted(
-      (a, b) => norm(b.air.camera.positionM) - norm(a.air.camera.positionM),
+    // The airs and rings back to front by their bodies (R02's order), each body's rings' fragments
+    // beyond its air before its composite and the others after it (R11.T9.c, `transparentSteps`).
+    const distanceOf = new Map<BodyIdHex, number>([
+      ...drawn.map(({ air }): [BodyIdHex, number] => [air.id, norm(air.camera.positionM)]),
+      ...lit.bodies.map((body): [BodyIdHex, number] => [body.id, norm(body.centreM)]),
+    ]);
+    const steps = transparentSteps(
+      drawn.map((each) => ({
+        body: each.air.id,
+        radiusM: lit.shellRadiiM.get(each.air.id) ?? 0,
+        air: each,
+      })),
+      rings?.rings ?? [],
+      (body) => distanceOf.get(body) ?? Number.POSITIVE_INFINITY,
     );
     const depth = resources.target.depth;
     let colour = resources.target.colour;
     const kept = new Set<BodyIdHex>();
-    for (const { air, sources } of order) {
+    for (const [at, step] of steps.entries()) {
+      if (step.kind === "ring") {
+        // A run of ring draws, one pass between two composites, its first step's.
+        if (rings !== null && steps[at - 1]?.kind !== "ring") {
+          colour = this.#drawRings(
+            resources,
+            rings,
+            steps.slice(at),
+            lit.shellRadiiM,
+            colour,
+            pass,
+          );
+        }
+        continue;
+      }
+      const { air, sources } = step.air;
       kept.add(air.id);
       if (depth === null) {
-        break;
+        continue;
       }
       const tables = air.tables;
       const lightSlots = absorberCount(tables.medium) > 0 ? tables.curves.length : Infinity;
@@ -2590,6 +2664,59 @@ export class PhotorealRenderer {
   }
 
   /**
+   * The run of ring draws that starts `steps`, into the target that holds `colour`, as one pass:
+   * the scene target's, testing its depth, or an air target's after a composite, reading the scene's
+   * depth (`RING_SLAB_MATERIALS`); returns the colour, which the draws blend into in place.
+   */
+  #drawRings(
+    resources: Resources,
+    rings: RingSlabFrame,
+    steps: ReadonlyArray<TransparentStep<unknown>>,
+    shellRadiiM: ReadonlyMap<BodyIdHex, number>,
+    colour: TextureHandle,
+    pass: Pick<FrameSubmission, "viewRotation" | "projection" | "tileOriginPx">,
+  ): TextureHandle {
+    const intoScene = colour === resources.target.colour;
+    const target = intoScene
+      ? resources.target
+      : resources.airTargets.find((each) => each.colour === colour);
+    const depth = resources.target.depth;
+    if (target === undefined || (!intoScene && depth === null)) {
+      return colour;
+    }
+    const draws: DrawItem[] = [];
+    for (const step of steps) {
+      if (step.kind !== "ring") {
+        break;
+      }
+      const ring = rings.rings[step.ring];
+      if (ring === undefined) {
+        continue;
+      }
+      const shellOverA = (shellRadiiM.get(ring.body) ?? 0) / ring.radiusM;
+      draws.push(rings.draw(step.ring, step.part, shellOverA, intoScene ? null : depth));
+    }
+    target.render({
+      label: RINGS_PASS_LABEL,
+      // A still's tile's M · P and origin with them (plan R11, R11.T10.e.2).
+      ...pass,
+      draws,
+      postProcesses: [],
+      colourLoad: "load",
+    });
+    return colour;
+  }
+
+  /**
+   * Makes the rings' slabs' materials, mesh and tables (R11.T9.c) ahead of a ring's first frame,
+   * as a still and the smoke page need them made before their frames; resolves once they are made,
+   * or could not be.
+   */
+  prepareRings(): Promise<void> {
+    return this.#rings.prepare();
+  }
+
+  /**
    * A body's atmosphere on this view over `air`'s tables, made at the setting's sizes the first
    * time, or again on a new setting or levers, with `levers` over the setting's (R08.T8.d), and
    * following the cache's tables as they are remade.
@@ -2776,6 +2903,7 @@ export class PhotorealRenderer {
     this.#disposed = true;
     this.#unsubscribe();
     this.#bodies.dispose();
+    this.#rings.dispose();
     this.#releaseAtmospheres();
     this.#clouds.dispose();
     this.#volumes.dispose();
@@ -3245,6 +3373,8 @@ export class PhotorealStillRenderer implements StillRenderer {
           frame.bodies.some((body) => body.air !== undefined) ||
           (frame.atmospheres ?? []).some((each) => discAirOf(each.tables) !== null),
       }),
+      // Its rings' slabs (R11.T9.c), which a view's frame makes at its first ring.
+      ...((frame.rings ?? []).length > 0 ? [this.#scene.prepareRings()] : []),
     ]);
     if (this.#scene.status !== "ready") {
       throw new Error("the still's photorealistic pipelines could not be made");

@@ -86,9 +86,9 @@ describe("photorealisticPasses", () => {
     },
   );
 
-  it("leaves the slots of plans not yet built empty, R06's sky built (R07.T8.a)", () => {
+  it("has every plan's slot built, R11's rings the last (R07.T8.a, R11.T9.c)", () => {
     const empty = photorealisticPasses("high").passes.filter((pass) => !pass.built);
-    expect(new Set(empty.map((pass) => pass.owner))).toEqual(new Set(["R11"]));
+    expect(empty.map((pass) => pass.owner)).toEqual([]);
   });
 
   it.each(QUALITY_SETTINGS)(

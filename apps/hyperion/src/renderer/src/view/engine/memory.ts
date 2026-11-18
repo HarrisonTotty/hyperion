@@ -33,6 +33,8 @@
  * - `height-cache`: the terrain's patch cache, its slot buffers and normals atlas (R05.T11.a).
  * - `ocean`: plan R11's ocean (its Design note 18): each body's ocean map, a texel a coarse cell of
  *   its depth, level and month-blended wind (R11.T8.b, `ocean/oceanMap.ts`).
+ * - `rings`: plan R11's rings (its Design note 18): the shadowing table's two textures, each
+ *   ring's radial profile and the slabs' records (R11.T9.c, `rings/ringSlabs.ts`).
  * - `shadows`: the terrain's shadow cascades, one set of four 2,048² `depth32float` layers for the
  *   engine, 64 MiB (R10.T9.b; R12's name, plan 12's `MemoryItem`).
  * - `sky-cube`: R06's baked star cube and the buffer of its scale (R06.T13.g).
@@ -50,6 +52,7 @@ export type MemoryCategory =
   | "geometry-pages"
   | "height-cache"
   | "ocean"
+  | "rings"
   | "shadows"
   | "sky-cube"
   | "sky-scratch";

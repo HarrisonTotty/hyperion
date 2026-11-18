@@ -646,11 +646,15 @@ describe("buildWireframeDrawList's datum lines (R10.T11)", () => {
 });
 
 describe("buildWireframeDrawList's batches kept at GRID OFF (the owner's request, 2026-11-05)", () => {
-  it("marks the hull's edges, the ring's two edges and the survey edge alone, its ticks not", () => {
+  it("marks the hull's edges and the survey edge alone, and the ring's two edges as its ring's, its ticks not", () => {
     const list = withSurveyEdge(ringedScene());
-    expect(list.lines.filter((line) => line.keptAtGridOff === true).map((line) => line.id)).toEqual(
-      [`ring:${FIXTURE_PLANET}`, "hull:other", `survey-edge:${FIXTURE_PLANET}`],
-    );
+    expect([
+      list.lines.filter((line) => line.keptAtGridOff === true).map((line) => line.id),
+      list.lines.flatMap((line) => (line.ringOf === undefined ? [] : [[line.id, line.ringOf]])),
+    ]).toEqual([
+      ["hull:other", `survey-edge:${FIXTURE_PLANET}`],
+      [[`ring:${FIXTURE_PLANET}`, FIXTURE_PLANET]],
+    ]);
   });
 });
 

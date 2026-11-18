@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import { aViewRing } from "../../test/ringFixtures";
+
 import { DEFAULT_EXPOSURE } from "../../view/photometry/exposure";
 import { dot, normalise, scale, vec3 } from "../../geometry/vec3";
 import { differenceM } from "../../view/coords/position";
@@ -55,6 +57,7 @@ import {
   framedRun,
   lookReading,
   photorealStatements,
+  RING_PROFILE_STATEMENT,
   PHOTOREAL_PREPARING,
   POSITIONS_FROM_SHIP,
   frameBody,
@@ -874,6 +877,34 @@ describe("the style", () => {
       "ATMOSPHERE: APPROXIMATE",
       ...reasons.map((text) => ({ text, standing: "sentence" })),
     ]);
+  });
+
+  it("states the ring's provisional profile after the bodies' labels and before the atmosphere's notes (R11.T9.c)", () => {
+    const wireframe = startRun(phaseScene());
+    const ringed: ViewRun = {
+      ...wireframe,
+      scene: {
+        ...wireframe.scene,
+        rings: [aViewRing(wireframe.scene.bodies[0]?.id ?? "", 7e7, 1.4e8, vec3(0, 0, 1))],
+      },
+    };
+    const photoreal = done(commandRun(ringed, { kind: "style", style: "toggle" }, CUT, BOTH));
+    const albedo = ["BODY PHOTOMETRY: NOT YET MODELLED"] as const;
+    expect([
+      photorealStatements(photoreal, "lit", "photorealistic", albedo, {
+        labels: ["atmosphereNotResolved"],
+        plate: [],
+        approximate: [],
+        fault: [],
+      }),
+      photorealStatements(ringed, "lit", "wireframe", albedo),
+      photorealStatements(
+        done(commandRun(wireframe, { kind: "style", style: "toggle" }, CUT, BOTH)),
+        "lit",
+        "photorealistic",
+        albedo,
+      ),
+    ]).toEqual([[...albedo, RING_PROFILE_STATEMENT, "ATMOSPHERE: NOT RESOLVED"], [], albedo]);
   });
 
   it("states no atmosphere note in the wireframe", () => {

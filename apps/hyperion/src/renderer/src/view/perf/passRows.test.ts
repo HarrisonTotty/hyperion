@@ -25,6 +25,7 @@ import {
 import { BLOOM_PASS } from "../post/bloomChain";
 import { HISTOGRAM_PASS } from "../post/histogram";
 import { TONEMAP_PASS } from "../post/tonemap";
+import { RINGS_PASS_LABEL } from "../rings/ringSlab";
 import { BAKE_SPLAT } from "../sky/bake";
 import { LIT_VIEW_DISPLAY_LABEL } from "../spike/litView";
 import { SPIKE_MAIN_VIEW_ID } from "../spike/spikeRun";
@@ -51,8 +52,14 @@ import { PERF_SCENES } from "./scenes";
 const SKY_BAKE_PASS = "sky bake";
 
 /**
+ * A label no plan's pass takes, so that it has no row: R11's rings, clouds and ocean, the unmapped
+ * passes these tests once named, have theirs (R11.T7, R11.T8, R11.T9.c).
+ */
+const UNROWED_PASS = "no plan's pass";
+
+/**
  * Every pass label R12.T0's record lists as timed, with R11's that have landed (`decoration`,
- * `clouds`), each with the style that submits it, from their modules' constants.
+ * `clouds`, `rings`), each with the style that submits it, from their modules' constants.
  */
 const TIMED_PASSES: ReadonlyArray<readonly [string, PassStyle]> = [
   [SKY_PASS_LABEL, "photorealistic"],
@@ -79,6 +86,7 @@ const TIMED_PASSES: ReadonlyArray<readonly [string, PassStyle]> = [
   [LIT_VIEW_DISPLAY_LABEL, "photorealistic"],
   [DETAIL_PASS_LABEL, "photorealistic"],
   [CLOUD_LAYER_PASS, "photorealistic"],
+  [RINGS_PASS_LABEL, "photorealistic"],
   [WIREFRAME_PASS_LABEL, "wireframe"],
   // A photorealistic view's symbology culls its hulls and mesh occluders too (R12.T4.c).
   [HULL_CLUSTER_CULL_LABEL, "both"],
@@ -165,7 +173,7 @@ describe("PASS_ROWS", () => {
     expect(TIMED_PASSES.map(([label]) => [label, passStyleOf(label)])).toEqual(
       TIMED_PASSES.map(([label, style]) => [label, style]),
     );
-    expect(passStyleOf("rings")).toBeNull();
+    expect(passStyleOf(UNROWED_PASS)).toBeNull();
   });
 
   it("holds keys of known roles only", () => {
@@ -177,7 +185,7 @@ describe("PASS_ROWS", () => {
 
 describe("an unmapped pass", () => {
   it("throws, naming its role and label", () => {
-    expect(() => passRowOf("primary", "rings")).toThrow(UnmappedPass);
+    expect(() => passRowOf("primary", UNROWED_PASS)).toThrow(UnmappedPass);
     expect(() => passRowOf("station", PHOTOREAL_PASS_LABELS.bodies)).toThrow(
       "station:bodies has no row",
     );
@@ -185,8 +193,8 @@ describe("an unmapped pass", () => {
 
   it("throws from a resolve that holds it", () => {
     const roles = passRolesOf(PERF_SCENES["cockpit-descent"].views.low);
-    expect(() => attributePasses({ passes: [timedPass("rings", 1)] }, roles)).toThrow(
-      "primary:rings",
+    expect(() => attributePasses({ passes: [timedPass(UNROWED_PASS, 1)] }, roles)).toThrow(
+      `primary:${UNROWED_PASS}`,
     );
   });
 });

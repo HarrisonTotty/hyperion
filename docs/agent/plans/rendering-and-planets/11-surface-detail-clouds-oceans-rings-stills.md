@@ -1349,7 +1349,8 @@ Files: `ocean/*`, R01's `WGSL_CATALOGUE`, tests. Acceptance: `pnpm test`, `just 
   settings, R02's transparent-layer order and no depth bias; and the same photometry for R07's far
   annulus. Tests: the smoke harness;
   the ring projects to the same pixels in both styles as R02's wireframe ellipse to half a pixel.
-  Bench against 0.5–1 ms and under 0.5 ms.
+  Bench against 0.5–1 ms and under 0.5 ms. _Built 2026-11-18._
+  Records: [11-surface-detail-clouds-oceans-rings-stills/records/R11.T9.c.md](11-surface-detail-clouds-oceans-rings-stills/records/R11.T9.c.md).
 - **R11.T9.d Close to.** `ringSplit.ts` and `ringParticles.wgsl` (Design note 16): the hand-over by
   angle, the instanced share ln(s_max ÷ s_pix) ÷ ln(s_max ÷ s_min) with s radii and s_pix half the
   pixel footprint, clamped to [0, 1], removed from the slab, the shearing cells, the local particle

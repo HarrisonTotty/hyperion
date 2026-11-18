@@ -421,6 +421,17 @@ describe("the ring's shadow on its planet in a frame (R11.T9.a)", () => {
   });
 });
 
+describe("the scene's rings in a frame (R11.T9.c)", () => {
+  it("carries the scene's rings, for the renderer to draw as slabs, on both settings", async () => {
+    for (const setting of ["high", "low"] as const) {
+      // One frame at a time, as a view draws them.
+      // oxlint-disable-next-line no-await-in-loop
+      const frame = await frameOfPhaseScene({ setting }, false, VIEWPORT, [giantRing()]);
+      expect(frame.rings?.map((ring) => ring.body)).toEqual([PHASE_GIANT]);
+    }
+  });
+});
+
 describe("a server scene's lit bodies (R07.T2.b)", () => {
   it("shade a body with its sections' figure and photometry, and pass its rotation", () => {
     const { scene, pose } = sliceScene();

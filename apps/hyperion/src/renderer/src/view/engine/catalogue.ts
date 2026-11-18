@@ -67,6 +67,7 @@ import { TERRAIN_LIT_CLOUD_MATERIALS } from "../terrain/cloudLight";
 import { OCEAN_FAR_PROBE } from "../ocean/oceanFarProbe";
 import { OCEAN_FAR_PASS_MATERIAL } from "../ocean/oceanPass";
 import { OCEAN_DEPTH_COPY_MATERIAL, OCEAN_NEAR_PASS_MATERIAL } from "../ocean/oceanNearPass";
+import { RING_SLAB_MATERIALS } from "../rings/ringSlab";
 import {
   BODY_DISC_AIR_MATERIALS,
   BODY_DISC_CELLS_AIR_KERNEL,
@@ -458,6 +459,16 @@ export const CLOUD_ENTRIES: ReadonlyArray<CatalogueEntry> = [
   ...CLOUD_VOLUME_MATERIALS.map((spec): CatalogueEntry => ({ kind: "material", spec })),
 ];
 
+/**
+ * Plan R11's rings (R11.T9.c): the slab drawn into the scene target, testing its depth, and over an
+ * air's composite, reading the scene's depth (`rings/ringSlab.ts`). The smoke harness compiles
+ * them in part 32, beside its ring slab's group.
+ */
+export const RING_ENTRIES: ReadonlyArray<CatalogueEntry> = [
+  { kind: "material", spec: RING_SLAB_MATERIALS.attached },
+  { kind: "material", spec: RING_SLAB_MATERIALS.sampled },
+];
+
 /** The point splats (R06.T13.h). */
 const SPLAT_ENTRIES: ReadonlyArray<CatalogueEntry> = [
   { kind: "point-splat", spec: ENGINE_CHECK_SPLAT },
@@ -673,6 +684,7 @@ export const WGSL_CATALOGUE: ReadonlyArray<CatalogueEntry> = [
   ...TABLE_ONLY_ENTRIES,
   ...MARCH_TABLE_ONLY_ENTRIES,
   ...CLOUD_ENTRIES,
+  ...RING_ENTRIES,
   ...OCEAN_ENTRIES,
   ...INSTANCE_ENTRIES,
 ];

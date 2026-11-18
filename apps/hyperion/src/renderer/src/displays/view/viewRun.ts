@@ -113,6 +113,7 @@ import {
   contourLengthReading,
 } from "../../view/terrain/terrainWire";
 import { type LightingState, lightingStatement } from "../../view/lighting/hostLights";
+import { ringProfileProvisional } from "../../view/rings/ringProfile";
 import type { DrawnSurveyEdge } from "../../view/wireframe/drawList";
 import { closureRateMPerS } from "../../view/wireframe/symbology";
 import type { TerrainFixture } from "./useTerrainSession";
@@ -1190,6 +1191,14 @@ export const PHOTOREAL_PREPARING = "PHOTOREALISTIC: PREPARING";
 export const CRAFT_PHOTOMETRY_STATEMENT = "CRAFT PHOTOMETRY: NOT YET MODELLED";
 
 /**
+ * The note while the photorealistic frame is drawn and its scene has a ring whose profile is the
+ * provisional one (plan R11, R11.T9.c; Design note 13; the UX ruling, 2026-11-18): the gaps' widths
+ * and depths, and the even optical depth across the rest, are the console's, drawn in the ring and
+ * in its shadow, never read as the ring's own. Scene-level, as the bodies' photometry note is.
+ */
+export const RING_PROFILE_STATEMENT = "RING PROFILE: NOT YET MODELLED";
+
+/**
  * {@link CRAFT_PHOTOMETRY_STATEMENT} composed with `BODY PHOTOMETRY: NOT YET MODELLED` into one
  * note, in that note's place, while both hold, as the guide composes its pairs of notes.
  */
@@ -1205,7 +1214,8 @@ const BODY_PHOTOMETRY_LABEL: AppearanceLabel = "BODY PHOTOMETRY: NOT YET MODELLE
  * (decision-r07-t8a, item 1) and each label the drawn bodies carry (`BODY PHOTOMETRY: NOT YET
  * MODELLED` for the provisional photometry, Design note 5); and, while the scene has a craft,
  * {@link CRAFT_PHOTOMETRY_STATEMENT}, composed with the body note into
- * {@link BODY_AND_CRAFT_PHOTOMETRY_STATEMENT} where both hold (R07.T16.e).
+ * {@link BODY_AND_CRAFT_PHOTOMETRY_STATEMENT} where both hold (R07.T16.e); then, while the scene has
+ * a ring of the provisional profile, {@link RING_PROFILE_STATEMENT} (R11.T9.c).
  *
  * @remarks
  * Scene-level, as the bodies' labels are (`litLabelsOf`): a craft's note stands with the scene's
@@ -1255,7 +1265,9 @@ export function photorealStatements(
     atmosphere.plate,
     atmosphere.approximate,
   ).map(atmosphereNoteStatement);
-  return [...(line === null ? [] : [line]), ...notes, ...air];
+  // On its own line after the photometry notes and before every atmosphere note (R11.T9.c).
+  const rings = run.scene.rings.some(ringProfileProvisional) ? [RING_PROFILE_STATEMENT] : [];
+  return [...(line === null ? [] : [line]), ...notes, ...rings, ...air];
 }
 
 /**

@@ -8,7 +8,7 @@
  * `no-subgroups` requests it with subgroups and `depth-clip-control` withheld (T9.c; R10.T9.b's
  * pulled-back cascades). A fixture adds a broken shader to the
  * catalogue or makes external requests, either of which must fail the run. The part does too: the
- * groups are in thirty-one parts, 1 to 31, each a run of its own under the harness's
+ * groups are in thirty-two parts, 1 to 32, each a run of its own under the harness's
  * watchdog (perf-smoke, 2026-10-13), parts 2 to 6, 8 to 14 and 30 the atmosphere's CPU-twin groups
  * (R08.T6, R08.T7,
  * R08.T9.b, R08.T8.a, R08.T8.b, R08.T8.c, R08.T8.e, R08.T11, R08.T14.c, R08.T14.f, R08.T15.a.2),
@@ -16,8 +16,9 @@
  * and 21 R10's terrain groups and part 16 R14.T3.c's ground under a grounded craft, part 17 R08.T8.d's
  * packed far limb's kernels and their general forms' check, part 13 R08.T14.c's thick read and R08.T14.f's correction, part 14
  * R08.T15.a.2's deck, part 25 R11.T2.a's decoration library, part 26 R11.T7.b's clouds, part 30
- * R08.T18.b's thermal forms and R08.T11's (T) row, and part 1 every other; with no part given the
- * page runs them all, in its order.
+ * R08.T18.b's thermal forms and R08.T11's (T) row, part 32 R11.T9.c's ring slab (its materials'
+ * catalogue and its frames against their twin; its captures stay with part 1's), and part 1 every
+ * other; with no part given the page runs them all, in its order.
  * Each part checks its path (T9.c) itself. R08.T6.f's slices and bands run in two groups: the
  * Saturn-class figure's in part 5, with R08.T6.i's layer edges, and Earth's, which took R08.T6.g's
  * Earth, in part 8, with R07.T8.e–f's cell pass for every record (`cellPass.ts`) after it;
@@ -78,6 +79,7 @@ import {
   TABLE_ONLY_ENTRIES,
   MARCH_TABLE_ONLY_ENTRIES,
   OCEAN_ENTRIES,
+  RING_ENTRIES,
   PACKED_CELL_ENTRIES,
   CLOUD_ENTRIES,
   DECORATION_ENTRIES,
@@ -176,6 +178,7 @@ import {
 import { BROKEN_ENTRY, checkCatalogue, makeExternalRequests, type SmokeFixture } from "./catalogue";
 import { checkIdTarget } from "./idTarget";
 import { checkInstanceCull, checkInstancesAboveClusters, checkParticleFaces } from "./instances";
+import { captureRings, checkRingSlab } from "./rings";
 import { checkDepthLayers } from "./depthLayers";
 import { captureEclipse, checkEclipse } from "./eclipse";
 import { captureViewLight } from "./viewLight";
@@ -405,6 +408,7 @@ type PagePart =
   | 29
   | 30
   | 31
+  | 32
   // Plan R12's ladder (R12.T7.a): a run per setting, which its query names (`ladder.ts`).
   | "ladder";
 
@@ -476,6 +480,8 @@ function partOf(value: string | null): PagePart | "all" | null {
       return 30;
     case "31":
       return 31;
+    case "32":
+      return 32;
     case "ladder":
       return "ladder";
     default:
@@ -540,7 +546,7 @@ async function run(
     setupError,
   });
   if (part === null) {
-    return failed("the part asked for is not 1 to 31, ladder or all");
+    return failed("the part asked for is not 1 to 32, ladder or all");
   }
   if (part === "ladder" && ladderSetting === null) {
     return failed("the ladder's part runs at a setting, high or low, and none was given");
@@ -630,6 +636,7 @@ async function run(
       !DECORATION_ENTRIES.includes(entry) &&
       !INSTANCE_ENTRIES.includes(entry) &&
       !ATMOSPHERE_THICK_LEVER_ENTRIES.includes(entry) &&
+      !RING_ENTRIES.includes(entry) &&
       !OCEAN_ENTRIES.includes(entry),
   );
   const entries = fixture === "broken-wgsl" ? [...thin, BROKEN_ENTRY] : thin;
@@ -648,6 +655,12 @@ async function run(
   await group(16, "T9.b catalogue: the march's table-only twins", () =>
     checkCatalogue(engine, status, MARCH_TABLE_ONLY_ENTRIES, checks),
   );
+  // R11.T9.c's ring slab, in part 32 with its frames' checks (plan R11's own part, as part 1 stood
+  // near its watchdog).
+  await group(32, "T9.b catalogue: the rings' slabs", () =>
+    checkCatalogue(engine, status, RING_ENTRIES, checks),
+  );
+  await group(32, "R11.T9.c the ring slab", () => checkRingSlab(engine, checks));
   // R11.T8.b's far ocean, in part 27 with its twin's check (plan R11's own part).
   await group(27, "T9.b catalogue: the ocean's kernels", () =>
     checkCatalogue(engine, status, OCEAN_ENTRIES, checks),
@@ -716,6 +729,7 @@ async function run(
   await group(1, "R07.T9 mesh bodies", () => checkMeshBodies(engine, checks));
   await group(1, "R07.T10.c the eclipse scene", () => checkEclipse(engine, checks));
   await group(1, "R07.T8.a the photorealistic frame", () => checkPhotorealFrame(engine, checks));
+
   await group(6, "R05.T12.c the atmosphere's frames", () => checkAtmosphereFrames(engine, checks));
   await group(4, "R05.T12.e the marches' steps", () => checkAtmosphereSteps(engine, checks));
   await group(2, "R08.T6.b the kernels over N terms", () =>
@@ -1153,6 +1167,18 @@ async function run(
       checks.check(
         "R07.T10.c the eclipse captures",
         frames.length > 0,
+        `${String(frames.length)} frames`,
+      );
+    });
+  }
+
+  if (captures) {
+    await group(1, "R11.T9.c the ring captures", async () => {
+      const frames = await captureRings(engine);
+      images = [...images, ...frames];
+      checks.check(
+        "R11.T9.c the ring captures",
+        frames.length === 4,
         `${String(frames.length)} frames`,
       );
     });

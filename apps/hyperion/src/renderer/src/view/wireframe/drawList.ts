@@ -1,3 +1,5 @@
+import type { BodyIdHex } from "@hyperion/protocol";
+
 import { norm, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
 import {
   CASING_PX,
@@ -239,12 +241,19 @@ export interface LineBatch {
   readonly body?: string;
   /**
    * Whether the photorealistic overlay keeps the batch with the view's `GRID` at `OFF`, the picture
-   * otherwise bare (the owner's request and its UX ruling, 2026-11-05): a craft's hull edges and a
-   * ring's two edges, which stand for what the image does not draw yet (Design note 17), and a
-   * survey edge, which tells unsurveyed ground from surveyed; absent for every other batch, which
-   * `GRID OFF` leaves out.
+   * otherwise bare (the owner's request and its UX ruling, 2026-11-05): a craft's hull edges, which
+   * stand for what the image does not draw yet (Design note 17), and a survey edge, which tells
+   * unsurveyed ground from surveyed; absent for every other batch, which `GRID OFF` leaves out but
+   * for a ring's two edges where the image does not draw the ring ({@link LineBatch.ringOf}).
    */
   readonly keptAtGridOff?: true;
+  /**
+   * The ringed body whose ring's two edges the batch is (plan R11, R11.T9.c): kept at `GRID OFF`,
+   * as the stand-in for the ring, on a frame whose image does not draw that ring (its planet drawn
+   * as a point, or its slabs not yet made), and left out on one that does; absent for every other
+   * batch, its ticks among them.
+   */
+  readonly ringOf?: BodyIdHex;
   /**
    * The centre, from the camera, `f32` m along the camera frame's axes, of the body whose ground
    * the batch is drawn on (plan R10, R10.T16.c): the survey edge's, each of whose fragments is
@@ -868,10 +877,11 @@ export function buildWireframeDrawList(
     const token = selected ? "text" : "textMuted";
     const widthPx = drawnPx(selected ? STROKE_PX.selected : STROKE_PX.thin);
     const { edges, ticks } = ringEllipse({ ...ring, centreM }, projection, viewport);
-    // Its two edges stand for it over the image until R11 draws it, whatever the view's `GRID`.
+    // Its two edges: over the image at `GRID OFF` only where the image does not draw the ring
+    // (plan R11, R11.T9.c), whose stand-in they are then.
     lines.push({
       ...batch(`ring:${ring.body}`, "view", packPolylines(edges), token, widthPx),
-      keptAtGridOff: true,
+      ringOf: ring.body,
     });
     // Its ticks a batch of their own, which the overlay's `GRID` at `OFF` leaves out (R08.T17).
     if (ticks.length > 0) {

@@ -13,6 +13,9 @@ import {
 } from "../clusters/hzb";
 import { describe, expect, it, vi } from "vitest";
 
+import { aViewRing } from "../../test/ringFixtures";
+import { RING_SCENE_DEPTH_TEXTURE, RING_SLAB_MATERIALS, RINGS_PASS_LABEL } from "../rings/ringSlab";
+
 import { vec3 } from "../../geometry/vec3";
 import { untilNextTask } from "../../lib/nextTask";
 import { sphereFootprint } from "../bodies/regime";
@@ -273,6 +276,12 @@ describe("the photorealistic renderer", () => {
       step: "the bloom chain's compile",
       tasks: 2,
       held: [BLOOM_DOWN_MATERIAL.name, BLOOM_UP_MATERIAL.name],
+    },
+    // The rings' slabs, made with the rest since R11.T9.c landed (their own making's release).
+    {
+      step: "the rings' slabs' compile",
+      tasks: 2,
+      held: [RING_SLAB_MATERIALS.attached.name, RING_SLAB_MATERIALS.sampled.name],
     },
   ] as const;
   it.each(makingSteps)(
@@ -2247,6 +2256,153 @@ describe("the device's kernels over a session's bodies (R01.T15)", () => {
   });
 });
 
+describe("the photorealistic renderer's rings (R11.T9.c)", () => {
+  const planet = bodyAt("0200080020000000.0300", vec3(0, 0, -3e7));
+  const ring = aViewRing(
+    planet.id,
+    1.24 * EARTH_RADIUS_M,
+    2.27 * EARTH_RADIUS_M,
+    vec3(0, 0.96, 0.28),
+  );
+
+  it("makes its rings' slabs with its pipelines, so that its first frame with a ring draws it (R10.T14.f)", async () => {
+    const { engine, view, renderer } = await preparedRenderer();
+    const compiled = new Set(engine.compiles.map((each) => each.name));
+    renderer.render(view, { ...frameWith([]), bodies: [planet], rings: [ring] });
+    expect([
+      [RING_SLAB_MATERIALS.attached.name, RING_SLAB_MATERIALS.sampled.name].every((name) =>
+        compiled.has(name),
+      ),
+      engine.targetFrames.map((f) => f.label).includes(RINGS_PASS_LABEL),
+    ]).toEqual([true, true]);
+    renderer.dispose();
+  });
+
+  it("draws no ring where its slabs' materials are refused, its frame drawn on", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const engine = await countingRenderEngine();
+    const create = engine.createMaterialAsync.bind(engine);
+    const refused = new Set([RING_SLAB_MATERIALS.attached.name, RING_SLAB_MATERIALS.sampled.name]);
+    vi.spyOn(engine, "createMaterialAsync").mockImplementation((spec, targets, meshes) =>
+      refused.has(spec.name) ? Promise.reject(new Error("refused")) : create(spec, targets, meshes),
+    );
+    const renderer = new PhotorealRenderer(engine, "test view");
+    await renderer.prepare(VIEWPORT, "high", "eye", {
+      orientation: IDENTITY_QUATERNION,
+      fovXRad: Math.PI / 3,
+    });
+    const plan = renderer.render(new RecordingView(), {
+      ...frameWith([]),
+      bodies: [planet],
+      rings: [ring],
+    });
+    expect([
+      renderer.status,
+      plan === null,
+      engine.targetFrames.map((f) => f.label).includes(RINGS_PASS_LABEL),
+    ]).toEqual(["ready", false, false]);
+    renderer.dispose();
+  });
+
+  it("draws each ring after the discs into the scene target once its slabs are made", async () => {
+    const { engine, view, renderer } = await preparedRenderer();
+    await renderer.prepareRings();
+    renderer.render(view, { ...frameWith([]), bodies: [planet], rings: [ring] });
+    const labels = engine.targetFrames.map((f) => f.label);
+    const at = labels.indexOf(RINGS_PASS_LABEL);
+    expect(labels.slice(at - 1, at + 1)).toEqual([PHOTOREAL_PASS_LABELS.discs, RINGS_PASS_LABEL]);
+    const draws = engine.targetFrames[at]?.draws ?? [];
+    expect(draws.map((draw) => [draw.material.name, draw.uniforms["part"]?.[0]])).toEqual([
+      ["rings:slab", 0],
+    ]);
+    expect(engine.targetFrames[at]?.colourLoad).toBe("load");
+    renderer.dispose();
+  });
+
+  it("gives its overlay the bodies whose rings it drew", async () => {
+    const { view, renderer } = await preparedRenderer();
+    const given: Array<ReadonlyArray<string>> = [];
+    const frame = {
+      ...frameWith([]),
+      bodies: [planet],
+      rings: [ring],
+      overlay: (
+        _surveyed: ReadonlyMap<string, SurveyedDatumFrame>,
+        _hiders: ReadonlyArray<OverlayHider>,
+        ringsDrawn: ReadonlySet<string>,
+      ) => {
+        given.push([...ringsDrawn]);
+        return null;
+      },
+    };
+    renderer.render(view, frame);
+    expect(given).toEqual([[planet.id]]);
+    renderer.dispose();
+  });
+
+  it("draws a ring beyond its planet's air before the composite and the rest over it, reading the scene's depth", async () => {
+    const { engine, view, renderer } = await preparedRenderer();
+    await renderer.prepareRings();
+    const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, EARTH_RADIUS_M);
+    renderer.render(view, {
+      ...frameWith([]),
+      bodies: [planet],
+      atmospheres: [airOf(planet, tables)],
+      rings: [ring],
+    });
+    const frames = engine.targetFrames.filter(
+      (f) => f.label === RINGS_PASS_LABEL || f.label === ATMOSPHERE_COMPOSITE_PASS,
+    );
+    expect(frames.map((f) => f.label)).toEqual([
+      RINGS_PASS_LABEL,
+      ATMOSPHERE_COMPOSITE_PASS,
+      RINGS_PASS_LABEL,
+    ]);
+    const [beyond, , before] = frames;
+    expect(beyond?.draws.map((draw) => [draw.material.name, draw.uniforms["part"]?.[0]])).toEqual([
+      ["rings:slab", 1],
+    ]);
+    expect(before?.draws.map((draw) => [draw.material.name, draw.uniforms["part"]?.[0]])).toEqual([
+      ["rings:slabOverAir", 2],
+    ]);
+    expect(before?.draws[0]?.textures[RING_SCENE_DEPTH_TEXTURE]).toBeDefined();
+    // The shell's radius over the planet's: past its surface.
+    expect(before?.draws[0]?.uniforms["shellOverA"]?.[0]).toBeGreaterThan(1);
+    renderer.dispose();
+    tables.dispose();
+  });
+
+  it("draws no ring of a planet drawn as a point", async () => {
+    const { engine, view, renderer } = await preparedRenderer();
+    await renderer.prepareRings();
+    const far = bodyAt(planet.id, vec3(0, 0, -3e11));
+    renderer.render(view, { ...frameWith([]), bodies: [far], rings: [ring] });
+    expect(engine.targetFrames.map((f) => f.label)).not.toContain(RINGS_PASS_LABEL);
+    renderer.dispose();
+  });
+
+  it("releases its rings' slabs with the view", async () => {
+    const { engine, view, renderer } = await preparedRenderer();
+    const released: string[] = [];
+    engine.onAllocation((event) => {
+      if (event.kind === "destroyed") {
+        released.push(event.name);
+      }
+    });
+    await renderer.prepareRings();
+    renderer.render(view, { ...frameWith([]), bodies: [planet], rings: [ring] });
+    renderer.dispose();
+    expect(released).toEqual(
+      expect.arrayContaining([
+        "test view:ring shadowing",
+        "test view:ring ratios",
+        "test view:ring records",
+        "test view:ring profile",
+      ]),
+    );
+  });
+});
+
 describe("the photorealistic renderer's overlay", () => {
   it("loads the tone-mapped image for the symbology", async () => {
     const engine = await countingRenderEngine();
@@ -2446,10 +2602,13 @@ describe("the photorealistic renderer when a pipeline is refused", () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     const engine = await countingRenderEngine();
     const chainDisposed = vi.spyOn(BloomChain.prototype, "dispose");
-    vi.spyOn(engine, "createMaterialAsync").mockImplementation((spec) =>
+    const create = engine.createMaterialAsync.bind(engine);
+    // The engine's own materials but the refused one, so that the rings' slabs, made with the
+    // rest (R11.T9.c), are released as the engine made them.
+    vi.spyOn(engine, "createMaterialAsync").mockImplementation((spec, targets, meshes) =>
       spec.name === "tone mapping"
         ? Promise.reject(new Error("refused"))
-        : Promise.resolve({ kind: "material", name: spec.name }),
+        : create(spec, targets, meshes),
     );
     const renderer = new PhotorealRenderer(engine, "test view");
     const camera = { orientation: IDENTITY_QUATERNION, fovXRad: Math.PI / 3 };
