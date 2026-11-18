@@ -4766,6 +4766,11 @@ select.form-field__input:not([aria-disabled="true"]):hover {
   height: 13rem;
 }
 
+/* A perf run's station draws its wireframe alone (plan R12): the instruments' canvases stay, hidden. */
+.spike__instruments[hidden] {
+  display: none;
+}
+
 .spike-instrument {
   display: flex;
   flex-direction: column;

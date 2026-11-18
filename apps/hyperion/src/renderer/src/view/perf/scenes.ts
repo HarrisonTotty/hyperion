@@ -257,7 +257,8 @@ export const PERF_SCENES: Readonly<Record<PerfSceneId, PerfScene>> = {
   },
   "station-wireframe-descent": {
     id: "station-wireframe-descent",
-    version: 1,
+    // 2: the station's wireframe drawn alone at 1920 × 1080 (research-leans-54, ruling 7).
+    version: 2,
     universe: UNIVERSE,
     system: PERF_PINS.system,
     body: PERF_PINS.world,

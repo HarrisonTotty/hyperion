@@ -224,7 +224,21 @@ export interface DescentSpikePerf {
   readonly scriptNowMs?: ((nowMs: number) => number) | undefined;
   /** Called after each frame the run drew, with what it drew on. */
   readonly onDrawn?: ((drawn: SpikeDrawnFrame) => void) | undefined;
+  /**
+   * Whether the two instruments draw (research-leans-54, ruling 7): `off` for a station's
+   * wireframe, which stands alone, its instruments' canvases hidden; drawn where absent.
+   */
+  readonly instruments?: "drawn" | "off" | undefined;
+  /**
+   * The main view's drawing size, device px, where the scene gives it a canvas of its own (a
+   * station's 1920 × 1080, Design note 8), its stage scaling the picture to fit; its stage's own
+   * where absent.
+   */
+  readonly mainSizePx?: ViewSize | undefined;
 }
+
+/** What a hidden instrument's canvas is taken to measure, device px: it draws nothing. */
+const HIDDEN_INSTRUMENT_PX: ViewSize = { widthPx: 1, heightPx: 1 };
 
 type Preparation =
   | { readonly kind: "measuring" }
@@ -822,14 +836,25 @@ export function DescentSpike({
         return;
       }
       const inputs = inputsRef.current;
+      const instrumentsOff = inputs.perf?.instruments === "off";
+      const fixedMain = inputs.perf?.mainSizePx;
+      // A main view of a canvas of its own presents at that size, its stage scaling it to fit.
+      const mainStage =
+        fixedMain === undefined || inputs.main === null
+          ? inputs.main
+          : {
+              ...inputs.main,
+              widthPx: fixedMain.widthPx / inputs.main.devicePixelRatio,
+              heightPx: fixedMain.heightPx / inputs.main.devicePixelRatio,
+            };
       const sizes = {
-        main: deviceSize(inputs.main),
-        orbit: deviceSize(inputs.orbit),
-        craft: deviceSize(inputs.craft),
+        main: deviceSize(mainStage),
+        orbit: instrumentsOff ? HIDDEN_INSTRUMENT_PX : deviceSize(inputs.orbit),
+        craft: instrumentsOff ? HIDDEN_INSTRUMENT_PX : deviceSize(inputs.craft),
       };
       if (
         inputs.tokens !== null &&
-        inputs.main !== null &&
+        mainStage !== null &&
         sizes.main !== null &&
         sizes.orbit !== null &&
         sizes.craft !== null
@@ -842,10 +867,11 @@ export function DescentSpike({
             ...(scriptNowMs === undefined ? {} : { scriptNowMs: scriptNowMs(nowMs) }),
             sizes: { main: sizes.main, orbit: sizes.orbit, craft: sizes.craft },
             tokens: inputs.tokens,
-            remPx: inputs.main.remPx * inputs.main.devicePixelRatio,
-            strokes: viewStrokesAt(inputs.main.devicePixelRatio),
+            remPx: mainStage.remPx * mainStage.devicePixelRatio,
+            strokes: viewStrokesAt(mainStage.devicePixelRatio),
             selection: inputs.selection,
-            mainStage: inputs.main,
+            mainStage,
+            ...(instrumentsOff ? { instruments: false } : {}),
             ...(measured === undefined || inputs.craft === null
               ? {}
               : { craftStage: inputs.craft }),
@@ -1059,7 +1085,7 @@ export function DescentSpike({
               )}
             </div>
           </div>
-          <div className="spike__instruments">
+          <div className="spike__instruments" hidden={perf?.instruments === "off"}>
             <Instrument
               title="Orbit"
               canvasRef={setOrbitCanvas}

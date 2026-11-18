@@ -444,6 +444,11 @@ export interface SpikeFrameInput {
    * second view draws nothing.
    */
   readonly craftStage?: ElementSize;
+  /**
+   * Whether R02's two instruments draw this frame (plan R12, research-leans-54 ruling 7): `false`
+   * for a perf run's station, whose wireframe stands alone; drawn where absent.
+   */
+  readonly instruments?: boolean;
 }
 
 /**
@@ -1003,7 +1008,9 @@ export class SpikeRun {
     this.#startMs = startMs;
     const { profile } = this.#prepared;
     const tS = Math.min(Math.max((scriptNowMs - startMs) / 1000, 0), profile.durationS);
-    this.#resize(input.sizes);
+    const instrumentKeys: ReadonlyArray<"orbit" | "craft"> =
+      input.instruments === false ? [] : ["orbit", "craft"];
+    this.#resize(input.sizes, ["main", ...instrumentKeys]);
     const rotation = testPlanetRotationAt(tS);
     const pose = profile.poseAt(tS);
     this.#segmentSpan(tS < profile.durationS ? pose.segment : null, input.nowMs);
@@ -1054,7 +1061,7 @@ export class SpikeRun {
     const scene = this.#kept.sceneAt(tS);
     const cameras = this.#instrumentCameras(scene, camera, tS);
     const ev100 = controlEv100(lit.exposure);
-    this.#drawInstruments(input, scene, cameras, ev100);
+    this.#drawInstruments(input, scene, cameras, ev100, instrumentKeys);
     const { drawSet, selection } = frame;
     const terrain: SpikeTerrainReading = {
       selected: selection.patches.size,
@@ -1118,8 +1125,11 @@ export class SpikeRun {
     const { profile } = this.#prepared;
     const { world, session, second } = main;
     const tS = Math.min(Math.max((scriptNowMs - startMs) / 1000, 0), profile.durationS);
+    // R02's instruments, both unless the second view draws on the craft's canvas, or none.
+    const instrumentKeys: ReadonlyArray<"orbit" | "craft"> =
+      input.instruments === false ? [] : second === null ? ["orbit", "craft"] : ["orbit"];
     // The drawers size their views themselves, from their stages.
-    this.#resize(input.sizes, second === null ? ["orbit", "craft"] : ["orbit"]);
+    this.#resize(input.sizes, instrumentKeys);
     const pose = profile.poseAt(tS);
     this.#segmentSpan(tS < profile.durationS ? pose.segment : null, input.nowMs);
     const camera = spikeCameraAt(profile, tS, world);
@@ -1208,13 +1218,7 @@ export class SpikeRun {
     if (second !== null && secondInputs !== null) {
       second.view.draw(secondInputs);
     }
-    this.#drawInstruments(
-      input,
-      scene,
-      cameras,
-      main.ev100,
-      second === null ? ["orbit", "craft"] : ["orbit"],
-    );
+    this.#drawInstruments(input, scene, cameras, main.ev100, instrumentKeys);
     // Under `--sizes on` the main view's asked style's pass: on low's photorealistic run the main
     // view draws the wireframe while its pipelines compile, and that pass is then the second view's.
     const followed = second === null ? drawnStyle : main.style;

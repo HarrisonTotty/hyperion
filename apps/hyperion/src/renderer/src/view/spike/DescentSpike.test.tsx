@@ -399,6 +399,34 @@ describe("DescentSpike", () => {
     expect(new Set(scriptTimesS)).toEqual(new Set([0]));
   }, 30_000);
 
+  it("draws a perf station's main view alone at its canvas's size, its instruments hidden", async () => {
+    fakeFramesAndTimeouts();
+    stubLayout();
+    const made = readyEngine({ refuseFrames: false });
+    const drawn: SpikeDrawnFrame[] = [];
+    renderSpike({
+      engine: made.source,
+      perf: {
+        instruments: "off",
+        mainSizePx: { widthPx: 1920, heightPx: 1080 },
+        onDrawn: (frame) => drawn.push(frame),
+      },
+    });
+    await screen.findByText(/SELECTED/, undefined, { timeout: 20_000 });
+    await act(async () => {
+      vi.advanceTimersByTime(500);
+      await Promise.resolve();
+    });
+    const hidden = { widthPx: 1, heightPx: 1 };
+    expect(drawn.at(-1)?.sizes).toEqual({
+      main: { widthPx: 1920, heightPx: 1080 },
+      orbit: hidden,
+      craft: hidden,
+    });
+    expect(screen.queryByRole("img", { name: /ORBIT/ })).toBeNull();
+    expect(screen.getByRole("img", { name: /^VIEW, SPIKE LIT, SCRIPTED$/ })).toBeDefined();
+  }, 30_000);
+
   it("refuses to fly when the script cannot clear the measured terrain", async () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     // A measurement the script cannot fly, as T13.a's lift limit refuses it.

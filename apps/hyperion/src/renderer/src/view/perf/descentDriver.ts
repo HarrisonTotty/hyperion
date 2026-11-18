@@ -288,6 +288,11 @@ export interface DescentDriverOptions {
   readonly measure?: MeasureDescent;
 }
 
+/** Whether `scene` draws the spike's two instruments on `setting`: every scene but a station's. */
+function drawsInstruments(scene: PerfScene, setting: QualitySetting): boolean {
+  return scene.views[setting].some(({ role }) => role === "instrument");
+}
+
 /** A frame's sample, told to the run once the frame is drawn. */
 type HeldSample = Parameters<PerfSceneSink["frame"]>[0];
 
@@ -391,6 +396,12 @@ export class DescentDriver implements PerfSceneDriver {
         },
       };
       const perf: DescentSpikePerf = {
+        // A scene without instruments, a station's, draws its main view alone, at its own canvas's
+        // size where it names one (research-leans-54, ruling 7).
+        ...(drawsInstruments(scene, setting) ? {} : { instruments: "off" }),
+        ...(main.size.kind === "canvas"
+          ? { mainSizePx: { widthPx: main.size.widthPx, heightPx: main.size.heightPx } }
+          : {}),
         ...(stage.phase === "warm-up"
           ? { scriptNowMs: () => 0 }
           : holds === null
@@ -558,8 +569,9 @@ export class DescentDriver implements PerfSceneDriver {
           lineAntialiasing: main.lineAntialiasing,
           exposure: null,
         },
-        instrument(frame.sizes.orbit),
-        instrument(frame.sizes.craft),
+        ...(drawsInstruments(scene, setting)
+          ? [instrument(frame.sizes.orbit), instrument(frame.sizes.craft)]
+          : []),
       ],
       adapter: engine.adapter,
       capabilities: capabilities === null ? null : capabilityFlags(capabilities),
@@ -575,15 +587,12 @@ export class DescentDriver implements PerfSceneDriver {
             demandPerS: (segment) => demand.get(segment) ?? null,
           },
       notes: [
-        `The renderer drew ${scene.id} with R05's descent spike over the served world: its main view (${main.style}) and its two wireframe instruments every frame, unscaled; kernel paths are not read (R12.T4.c).`,
+        drawsInstruments(scene, setting)
+          ? `The renderer drew ${scene.id} with R05's descent spike over the served world: its main view (${main.style}) and its two wireframe instruments every frame, unscaled; kernel paths are not read (R12.T4.c).`
+          : `The renderer drew ${scene.id} with R05's descent spike over the served world: its main view (${main.style}) alone every frame, unscaled, at its canvas's size; kernel paths are not read (R12.T4.c).`,
         ...(arrival
           ? [
               `arrival-memory held the descent's first pose until the world's field was whole in every height worker, then its deepest until its patches drew for ${String(ARRIVAL_SETTLE_S)} s without TERRAIN: STREAMING or a patch made resident (at most ${String(ARRIVAL_SETTLE_LIMIT_S)} s), then ${String(ARRIVAL_HELD_S)} s; the field's and the sky's transfer bytes and times are not read (R12.T4.c).`,
-            ]
-          : []),
-        ...(main.role === "station"
-          ? [
-              "The spike's two instruments draw beside the station's view, and their wireframe passes are counted in station-wireframe, since a resolve names no view (lean, R12.T4.c).",
             ]
           : []),
       ],

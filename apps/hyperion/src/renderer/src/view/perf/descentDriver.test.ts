@@ -24,6 +24,7 @@ import {
   PerfEngine,
   undisposable,
 } from "./descentDriver";
+import { attributePasses, passRolesOf } from "./passRows";
 import type { MeasuredSpan, PerfFailure, PerfFrameSample, PerfSceneSink } from "./runPerfScene";
 import { PERF_SCENES } from "./scenes";
 
@@ -301,6 +302,51 @@ describe("the descent driver", () => {
       )
       .catch(() => undefined);
     expect(current(stages).style).toBe("wireframe");
+  });
+
+  it("draws the station's wireframe alone at 1920 x 1080, no instrument among its views or rows", async () => {
+    const { driver, stages } = driven("station-wireframe-descent");
+    const mounted = driver.mount(
+      {
+        phase: "warm-up",
+        n: 0,
+        serverUrl: "ws://a/bridge",
+        arrival: config("cockpit-descent").arrival,
+      },
+      new RecordingSink(),
+    );
+    const stage = current(stages);
+    expect([stage.perf.instruments, stage.perf.mainSizePx]).toEqual([
+      "off",
+      { widthPx: 1920, heightPx: 1080 },
+    ]);
+    stage.listeners.onPrepared?.(PREPARED);
+    stage.listeners.onFrame?.(sample(0));
+    stage.perf.onDrawn?.({
+      session: session(0),
+      sizes: { ...SIZES, main: { widthPx: 1920, heightPx: 1080 } },
+    });
+    const drawn = await mounted;
+    expect(drawn.views).toEqual([
+      {
+        role: "station",
+        style: "wireframe",
+        widthPx: 1920,
+        heightPx: 1080,
+        rateHz: 60,
+        lineAntialiasing: "analytic",
+        exposure: null,
+      },
+    ]);
+    const roles = passRolesOf(drawn.views);
+    const keys = attributePasses(
+      { passes: [{ label: "view:wireframe", ns: 65_536, bracketed: false }] },
+      roles,
+    ).map(({ key, row }) => `${key} ${row}`);
+    expect([roles, keys]).toEqual([
+      { first: "station", wireframe: "station" },
+      ["station:view:wireframe station-wireframe"],
+    ]);
   });
 
   it("fails a mount whose arrival names no body", async () => {
