@@ -22,7 +22,7 @@
  * assembled, cropped to the still, encoded as a PNG and saved with the label.
  *
  * A device or GPU-process loss while the job's GPU work is in flight abandons it at once. The
- * session ({@link StillSession}) then suspends stills (`STILLS SUSPENDED`): only an explicit request
+ * session ({@link StillSession}) then suspends stills (`STILLS LIMITED`): only an explicit request
  * makes the next, starting from one unit, its growth capped at half the batch that was in flight; a
  * second loss in flight disables them for the session, since three losses disable WebGPU.
  *

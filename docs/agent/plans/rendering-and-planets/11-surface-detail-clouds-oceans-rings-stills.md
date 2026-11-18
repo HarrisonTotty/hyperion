@@ -225,7 +225,7 @@ pure module as its reference.
 - The `DECORATION ON` annunciation, whose nomenclature R02 drafts, after the survey line's middle
   dot (`view/terrain/readouts.ts`' `surveyLines`, on R10.T12's lower plate, where the guide places
   it), or among `displays/view/viewRun.ts`' `labelStatements` where no survey line stands
-  (re-validated 2026-11-02); `STILLS SUSPENDED` in the still control; in R05's `ViewSettings` and
+  (re-validated 2026-11-02); `STILLS LIMITED` in the still control; in R05's `ViewSettings` and
   `SETTINGS`: the entries of Design note 18.
 - For R12: the pass labels of Design note 18, each for one of R12's `BudgetRow`s; R01
   `MemoryCategory` names on every allocation (`clouds`, `ocean`, `rings`, `scatter`, `stills`); and
@@ -779,7 +779,7 @@ ambiguous, the design note that reads it is named.
     single dispatch or draw may exceed about 50 ms, by construction from the measured cost per
     workgroup; i915's 640 ms preemption timeout and 2,500 ms heartbeat are confirmed on the UHD 620
     laptop. The first device or GPU-process loss while a still is in flight suspends stills for the
-    session on that client (`STILLS SUSPENDED` in the control), allowing only an explicit re-request
+    session on that client (`STILLS LIMITED` in the control), allowing only an explicit re-request
     at the smallest batch with growth capped at half the batch that was in flight; a second disables
     them, since three losses disable WebGPU. The still asks the server for nothing the view could
     not, and uses only cells surveyed at the request: its patches stream at bulk priority through
@@ -1392,7 +1392,7 @@ on it.
   preload's `saveStill`, `listStills` and `readStill`, their handlers in `src/main/stills.ts` (the
   sender frame validated, arguments `unknown` until the size and the label's schema are checked, the
   write atomic by temporary file and rename), `StillControl` on the view (keyboard-operable, its
-  progress a `progress` element, `STILLS SUSPENDED` when suspended) and `StillList` (the saved
+  progress a `progress` element, `STILLS LIMITED` when suspended) and `StillList` (the saved
   stills with their labels in B612 Mono). Tests: the label carries every field of Design note 17;
   the PNG's `iTXt` label parses back equal to the sidecar; a still whose frustum had not streamed is
   labelled `TERRAIN: STREAMING`; the handlers refuse a foreign sender, an oversized image and a

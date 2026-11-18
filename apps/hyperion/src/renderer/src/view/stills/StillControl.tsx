@@ -56,8 +56,12 @@ export const STILL_CONTROL_IDLE: StillControlState = {
   heldBack: null,
 };
 
-/** The annunciation while stills are suspended for the session (Design note 17). */
-export const STILLS_SUSPENDED = "STILLS SUSPENDED";
+/**
+ * The annunciation while stills are suspended for the session (Design note 17): each later still
+ * made at a reduced GPU load, `TAKE STILL` still offered, `LIMITED` as the guide's own drawing held
+ * below normal is (the UX ruling, 2026-11-18).
+ */
+export const STILLS_LIMITED = "STILLS LIMITED";
 
 /** The annunciation once stills are disabled for the session (Design note 17). */
 export const STILLS_DISABLED = "STILLS DISABLED";
@@ -97,7 +101,8 @@ function endLine(last: StillEnd, standing: StillStanding): string {
       line = `STILL NOT SAVED: ${last.reason}`;
       break;
     case "abandoned":
-      line = `STILL ABANDONED: the graphics device was lost, ${retry}`;
+      // One name for every still not saved, its cause after it (the UX ruling, 2026-11-18).
+      line = `STILL NOT SAVED: the graphics device was lost, ${retry}`;
       break;
   }
   return line;
@@ -125,7 +130,7 @@ export function stillStatusLine(state: StillControlState): string | null {
 export type StandingPlace = "panel" | "away";
 
 /**
- * The session's standing as its line states it, `STILLS SUSPENDED` or `STILLS DISABLED`, or
+ * The session's standing as its line states it, `STILLS LIMITED` or `STILLS DISABLED`, or
  * `null`; away from the panel, `STILLS DISABLED` says its cause and remedy, as the guide's
  * `GRAPHICS DISABLED` does, since `TAKE STILL`'s reason is not on show there.
  */
@@ -136,7 +141,7 @@ export function stillsStandingLine(standing: StillStanding, place: StandingPlace
       line = null;
       break;
     case "suspended":
-      line = STILLS_SUSPENDED;
+      line = STILLS_LIMITED;
       break;
     case "disabled":
       line = place === "panel" ? STILLS_DISABLED : `${STILLS_DISABLED}: ${DISABLED_CAUSE}`;
@@ -189,7 +194,7 @@ function StillProgress({ step }: StillProgressProps) {
 
 /**
  * The view's still control (plan R11, R11.T10.c, Design note 17): `TAKE STILL`, the still's step
- * and its progress, and the session's standing, `STILLS SUSPENDED` or `STILLS DISABLED`.
+ * and its progress, and the session's standing, `STILLS LIMITED` or `STILLS DISABLED`.
  *
  * @remarks
  * Keyboard-operable as a native button: held back rather than disabled, so that it keeps focus and

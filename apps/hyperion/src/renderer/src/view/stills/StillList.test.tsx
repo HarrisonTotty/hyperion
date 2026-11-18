@@ -32,8 +32,8 @@ describe("the saved stills (R11.T10.c)", () => {
 
   it("says the folder could not be read where the listing failed, and how to retry", () => {
     render(<StillList state={{ kind: "failed", reason: "EACCES" }} />);
-    expect(screen.getByText(/NOT LISTED/u).closest("p")?.textContent).toBe(
-      "NOT LISTED: the stills folder could not be read, reopen VIEW to retry",
+    expect(screen.getByText(/the stills folder could not be read/u).closest("p")?.textContent).toBe(
+      "NOT AVAILABLE: the stills folder could not be read, reopen VIEW to retry",
     );
   });
 

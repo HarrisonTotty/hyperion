@@ -79,14 +79,14 @@ describe("VIEW's stills (R11.T10.c, R11.T10.b)", () => {
     ]);
   });
 
-  it("says STILLS SUSPENDED after a loss in flight, and offers TAKE STILL again", async () => {
+  it("says STILLS LIMITED after a loss in flight, and offers TAKE STILL again", async () => {
     const user = userEvent.setup();
     const device = new FakeStillDevice("absent");
     device.loseAtBatch = 0;
     render(<ViewStills designator="PRIMARY" model={model(new FakeStillsApi(), device)} />);
     await user.click(screen.getByRole("button", { name: "TAKE STILL" }));
     expect([
-      await screen.findByText("STILLS SUSPENDED"),
+      await screen.findByText("STILLS LIMITED"),
       screen.getByRole("button", { name: "TAKE STILL" }).getAttribute("aria-disabled"),
     ]).toEqual([expect.anything(), null]);
   });

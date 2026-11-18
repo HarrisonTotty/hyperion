@@ -97,14 +97,14 @@ describe("the view's still control (R11.T10.c)", () => {
     const statuses = screen.getAllByRole("status").map((status) => status.textContent);
     expect([first, statuses]).toEqual([
       "STILL NOT SAVED: the disk is full",
-      ["STILLS SUSPENDED", "STILL ABANDONED: the graphics device was lost, TAKE STILL to retry"],
+      ["STILLS LIMITED", "STILL NOT SAVED: the graphics device was lost, TAKE STILL to retry"],
     ]);
   });
 
-  it("says STILLS SUSPENDED and still offers TAKE STILL, the explicit request", async () => {
+  it("says STILLS LIMITED and still offers TAKE STILL, the explicit request", async () => {
     const { onTake, user } = renderControl({ ...STILL_CONTROL_IDLE, standing: "suspended" });
     await user.click(screen.getByRole("button", { name: "TAKE STILL" }));
-    expect([screen.getByText("STILLS SUSPENDED"), onTake.mock.calls.length]).toEqual([
+    expect([screen.getByText("STILLS LIMITED"), onTake.mock.calls.length]).toEqual([
       expect.anything(),
       1,
     ]);
@@ -123,7 +123,7 @@ describe("the view's still control (R11.T10.c)", () => {
       onTake.mock.calls.length,
       describedText(take),
     ]).toEqual([
-      ["STILLS DISABLED", "STILL ABANDONED: the graphics device was lost, relaunch to retry"],
+      ["STILLS DISABLED", "STILL NOT SAVED: the graphics device was lost, relaunch to retry"],
       0,
       "NOT AVAILABLE: stills disabled by a second device loss, relaunch to retry",
     ]);

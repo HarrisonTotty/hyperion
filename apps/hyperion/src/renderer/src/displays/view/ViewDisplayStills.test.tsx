@@ -195,7 +195,7 @@ describe("VIEW's stills (R11.T10.b)", () => {
     ]).toEqual([null, true, null]);
   });
 
-  it("states STILLS SUSPENDED and how the still ended under the fold row while folded", async () => {
+  it("states STILLS LIMITED and how the still ended under the fold row while folded", async () => {
     const device = new FakeStillDevice("absent");
     device.loseAtBatch = 0;
     const view = await setup(source(device), COMPACT_VIEW_PX);
@@ -204,7 +204,7 @@ describe("VIEW's stills (R11.T10.b)", () => {
     // Folding STILLS opens CAMERA again: the stills' lines go under the row, as one.
     await view.user.click(screen.getByRole("button", { name: "STILLS" }));
     expect(awayLines()).toEqual([
-      "STILLS SUSPENDED · STILL ABANDONED: the graphics device was lost, TAKE STILL to retry",
+      "STILLS LIMITED · STILL NOT SAVED: the graphics device was lost, TAKE STILL to retry",
     ]);
   });
 

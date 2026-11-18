@@ -19,8 +19,12 @@ export const STILLS_PENDING = "STILLS: PENDING";
 /** What the list says where no still is saved. */
 export const NO_STILLS = "NO STILLS SAVED";
 
-/** What the list says where the folder could not be listed; a new mount lists it again. */
-const NOT_LISTED = "NOT LISTED: the stills folder could not be read, reopen VIEW to retry";
+/**
+ * What the list says where the folder could not be listed; a new mount lists it again. `LISTED` is
+ * the guide's word for named on a register, so the list is `NOT AVAILABLE` (the UX ruling,
+ * 2026-11-18).
+ */
+const LIST_NOT_READ = "NOT AVAILABLE: the stills folder could not be read, reopen VIEW to retry";
 
 /** A still's size: `3,840 × 2,160 px`. */
 function sizeText(label: StillLabel): string {
@@ -235,7 +239,7 @@ export function StillList({ state }: StillListProps) {
     case "failed":
       return (
         <p className="panel__empty still-list__empty">
-          <StatusText text={NOT_LISTED} />
+          <StatusText text={LIST_NOT_READ} />
         </p>
       );
     case "listed":
