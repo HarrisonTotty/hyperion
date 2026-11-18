@@ -28,6 +28,7 @@
 import type { BodyIdHex, DetailSeedHex } from "@hyperion/protocol";
 
 import type { TerrainNormals, TerrainVertexPath } from "../../quality/terrainKinds";
+import type { RockLayer } from "../../surface/scatter/rockLayer";
 import type { Face, PatchKey } from "../patchKey";
 import type { BodyFixedVec3 } from "../planet";
 
@@ -180,6 +181,12 @@ export interface TerrainLayers {
    * whose header carries no maturity, or a bake without weights.
    */
   readonly maturity?: TerrainMaturity;
+  /**
+   * The patch's authoritative rocks (plan R11, T4.a; `surface/scatter/rockLayer.ts`): every rock
+   * whose axis it holds that the field can make, a rock it cannot make left out and the bake then
+   * not {@link TerrainLayers.complete}; present on a finest-level patch alone.
+   */
+  readonly rocks?: RockLayer;
 }
 
 /**
@@ -822,6 +829,10 @@ export function bakeTransferables(bake: BakedPatch): Transferable[] {
     const { maturity } = bake.layers;
     if (maturity !== undefined) {
       buffers.push(maturity.codes.buffer, maturity.nodes.buffer);
+    }
+    const { rocks } = bake.layers;
+    if (rocks !== undefined) {
+      buffers.push(rocks.words.buffer);
     }
   }
   return buffers;

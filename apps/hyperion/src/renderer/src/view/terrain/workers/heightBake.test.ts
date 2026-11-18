@@ -178,6 +178,7 @@ function fakeBaked(codes: Uint16Array): WasmBakedTerrain {
     horizonFar: () => new Uint32Array(),
     horizonRefusedCells: () => new Uint32Array(),
     maturity: () => codes,
+    rocks: () => undefined,
     boundM: 1,
     sigmaM: 0,
     complete: true,
@@ -235,6 +236,8 @@ function fakeModule(
     },
     fieldChunk: (system, body, block) => take(system, body, block, false),
     fieldRelease: (system, body) => held.delete(key(system, body)),
+    rocksNear: () => undefined,
+    surfaceHeightWithRocksM: () => undefined,
     // A held body's datum: the Moon's sphere.
     figureM: (system, body) =>
       held.has(key(system, body)) ? Float64Array.of(1_737_400, 1_737_400) : undefined,

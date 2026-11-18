@@ -814,33 +814,46 @@ fn bake_a_draft_s_normals_between_the_vertices_are_the_mean_of_theirs() {
     }
 }
 
-/// A hook that records what it is handed.
+/// A hook's record of a call: the patch, R05's heights' bits, the level's own heights' bits
+/// (`None` at a vertex that took the reference surface), and the layers already in `out`.
+type HookCall = (PatchKey, Vec<u32>, Vec<Option<u64>>, usize);
+
+/// A hook that records what it is handed, and answers `complete`.
 struct Recording {
-    calls: RefCell<Vec<(PatchKey, Vec<u32>, usize)>>,
+    calls: RefCell<Vec<HookCall>>,
+    complete: bool,
+}
+
+impl Recording {
+    const fn new(complete: bool) -> Self {
+        Self {
+            calls: RefCell::new(Vec::new()),
+            complete,
+        }
+    }
 }
 
 impl BakeHook for Recording {
-    fn bake(&self, key: PatchKey, heights: &[f32], out: &mut Vec<ExtraLayer>) {
-        let heights = heights.iter().map(|&h| bits_f32(h)).collect();
-        self.calls.borrow_mut().push((key, heights, out.len()));
+    fn bake(&self, patch: &BakedHeights<'_>, out: &mut Vec<ExtraLayer>) -> bool {
+        let heights = patch.heights().iter().map(|&h| bits_f32(h)).collect();
+        let quads = u8::try_from(PATCH_QUADS).unwrap();
+        let own = (0..=quads)
+            .flat_map(|y| (0..=quads).map(move |x| (x, y)))
+            .map(|(x, y)| patch.own_sample(x, y).map(|s| bits(s.height_m)))
+            .collect();
+        self.calls
+            .borrow_mut()
+            .push((patch.key(), heights, own, out.len()));
+        self.complete
     }
 }
 
 #[test]
 fn bake_hands_each_hook_the_patch_and_its_heights_in_turn() {
-    let (w, _, surveyed) = straddling();
-    let coarse = world(w).header().level().get();
-    let key = patch_in(*surveyed.first().unwrap(), coarse + 2);
+    let (w, key, surveyed) = straddling();
     let view = client(w, &surveyed, |_| code(50.0));
     let synth = Synthesiser::new(&view, SEED);
-    let (first, second) = (
-        Recording {
-            calls: RefCell::new(Vec::new()),
-        },
-        Recording {
-            calls: RefCell::new(Vec::new()),
-        },
-    );
+    let (first, second) = (Recording::new(true), Recording::new(true));
     let bake = bake_terrain(
         &synth,
         &mut SynthCache::new(),
@@ -850,8 +863,25 @@ fn bake_hands_each_hook_the_patch_and_its_heights_in_turn() {
     )
     .unwrap();
     let heights: Vec<u32> = bake.patch().heights.iter().map(|&h| bits_f32(h)).collect();
+    // The level's own heights where the view made them: the synthesis's at each vertex, and
+    // none where a vertex took the reference surface.
+    let mut cache = SynthCache::new();
+    let quads = u8::try_from(PATCH_QUADS).unwrap();
+    let own: Vec<Option<u64>> = (0..=quads)
+        .flat_map(|y| (0..=quads).map(move |x| (x, y)))
+        .map(|(x, y)| {
+            synth
+                .height_at(&mut cache, key.vertex_dir(x, y), band(key.level()))
+                .ok()
+                .map(|s| bits(s.height_m))
+        })
+        .collect();
+    assert!(own.iter().any(Option::is_some) && own.iter().any(Option::is_none));
     for hook in [&first, &second] {
-        assert_eq!(*hook.calls.borrow(), vec![(key, heights.clone(), 0)]);
+        assert_eq!(
+            *hook.calls.borrow(),
+            vec![(key, heights.clone(), own.clone(), 0)]
+        );
     }
     assert_eq!(bake.layers().extra(), []);
     assert!(
@@ -860,6 +890,22 @@ fn bake_hands_each_hook_the_patch_and_its_heights_in_turn() {
     );
     let without = bake_terrain(&synth, &mut SynthCache::new(), key, &MESH, &[]).unwrap();
     assert_eq!(bake_bits(&without), bake_bits(&bake));
+}
+
+/// A hook that answers its layer incomplete makes the bake not complete, and changes nothing
+/// else of it.
+#[test]
+fn bake_a_hooks_incomplete_layer_leaves_the_bake_incomplete() {
+    let (w, _, surveyed) = straddling();
+    let coarse = world(w).header().level().get();
+    let held = client(w, &surveyed, |_| code(50.0));
+    let synth = Synthesiser::new(&held, SEED);
+    let whole = patch_in(*surveyed.first().unwrap(), coarse + 2);
+    let complete = bake_terrain(&synth, &mut SynthCache::new(), whole, &MESH, &[]).unwrap();
+    let refusing = Recording::new(false);
+    let bake = bake_terrain(&synth, &mut SynthCache::new(), whole, &MESH, &[&refusing]).unwrap();
+    assert!(complete.layers().is_complete() && !bake.layers().is_complete());
+    assert_eq!(bake.patch(), complete.patch());
 }
 
 #[test]

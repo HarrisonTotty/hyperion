@@ -261,6 +261,7 @@ import {
 import { joinDemand } from "./priority";
 import { RESELECT_MOVE_FRACTION, selectionTolerancePx } from "./selectionTolerance";
 import { PATCH_VERTICES_PER_SIDE, TERRAIN_SHADING_TRAITS, type TerrainShading } from "./slotLayout";
+import { ResidentRocks, type ResidentRocksView } from "../surface/scatter/residentRocks";
 import { ResidentHeights, type ResidentHeightsView } from "./residentHeights";
 import { DrawnGround, type DrawnGroundView } from "./drawnGround";
 import {
@@ -2164,6 +2165,7 @@ export class TerrainPass {
   readonly #margins = new Map<TerrainViewId, HeldFrustumMargin>();
   /** What the render thread keeps of the resident bakes' heights (R10.T16.c), on the current device. */
   readonly #heights = new ResidentHeights();
+  readonly #rocks = new ResidentRocks();
   /** The planet as selection reads it: its figure and the field's level table, which grows. */
   #planet: PlanetGeometry;
   #rangesVersion = 0;
@@ -2550,6 +2552,14 @@ export class TerrainPass {
    */
   get heights(): ResidentHeightsView {
     return this.#heights;
+  }
+
+  /**
+   * The resident finest bakes' rocks (plan R11, T4.a; `surface/scatter/residentRocks.ts`): held
+   * with each bake, on the current device, forgotten as it leaves the cache and at a restore.
+   */
+  get rocks(): ResidentRocksView {
+    return this.#rocks;
   }
 
   /**
@@ -3679,6 +3689,7 @@ export class TerrainPass {
       this.#nearestGround.clear();
       this.#margins.clear();
       this.#heights.clear();
+      this.#rocks.clear();
       this.#detailSets?.dispose();
       this.#detailSets = null;
       try {
@@ -3885,6 +3896,7 @@ export class TerrainPass {
     // The lost device's handles went with it: `ResilientEngine` drops their release.
     this.#releaseDevice(old);
     this.#heights.clear();
+    this.#rocks.clear();
     // The lost device's sets went with it; the patches that land again name their materials again.
     this.#detailSets?.dispose();
     this.#detailSets = this.#makeDetailSets();
@@ -3987,6 +3999,7 @@ export class TerrainPass {
     device.slotVersions[stored.slot] = ((device.slotVersions[stored.slot] ?? 0) + 1) >>> 0;
     // A rebake replaces its old bake in its slot (`PatchCache.insert` of a resident key).
     this.#heights.take(bake);
+    this.#rocks.take(keyString, bake);
     const layers = bake.layers;
     if (layers !== null) {
       // The materials its layers name wait for their detail sets (plan R11, R11.T2.c).
@@ -4122,6 +4135,7 @@ export class TerrainPass {
     device.givenUp.delete(keyString);
     device.graticules.delete(keyString);
     this.#heights.forget(keyString);
+    this.#rocks.forget(keyString);
     // A rebake fading from the older bake ends with its patch: a bake of the key stored again takes
     // no stale older slot.
     device.morph.forget(keyString);

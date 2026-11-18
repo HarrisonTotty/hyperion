@@ -75,12 +75,89 @@ use crate::synth::bake::PairedQueries;
 use crate::synth::{BandLevel, PatchHeights, QueryHeightError, SynthCache, Synthesiser};
 
 /// What R11 adds to a patch's bake: its layers, made in the same bake and kept in the same cache
-/// (plan R10, Provides). R11's `RockBakeHook` owns its own [`SynthCache`], so a hook takes the
-/// patch and its heights alone.
+/// (plan R10, Provides). R11's [`RockBakeHook`](crate::scatter::RockBakeHook) owns its own
+/// [`SynthCache`], so a hook takes the patch and its heights alone ([`BakedHeights`]).
 pub trait BakeHook {
-    /// Appends `key`'s layers to `out`, from the patch's heights as R05's bake lays them out
-    /// ([`PatchBake::heights`]: each vertex's own height and morph target, metres, row by row).
-    fn bake(&self, key: PatchKey, heights: &[f32], out: &mut Vec<ExtraLayer>);
+    /// Appends `patch`'s layers to `out`, from its heights, and answers whether every query the
+    /// layers read was answered by the view: `false` makes the bake not
+    /// [complete](TerrainLayers::is_complete), so that a later block bakes it again.
+    fn bake(&self, patch: &BakedHeights<'_>, out: &mut Vec<ExtraLayer>) -> bool;
+}
+
+/// What a [`BakeHook`] reads of a patch's bake: its key, R05's heights, and each vertex's height at
+/// the patch's level in `f64` where the view made it.
+#[derive(Debug, Clone, Copy)]
+pub struct BakedHeights<'b> {
+    key: PatchKey,
+    heights: &'b [f32],
+    samples: &'b [HeightSample],
+    reference: &'b [bool],
+}
+
+impl<'b> BakedHeights<'b> {
+    /// The heights of `key`: R05's `heights`, the level's `samples` row by row and, row by row,
+    /// whether each took the [reference surface](self#the-survey) for want of a cell.
+    ///
+    /// # Panics
+    ///
+    /// If `samples` or `reference` does not hold one entry a vertex, or `heights` two.
+    #[must_use]
+    pub fn new(
+        key: PatchKey,
+        heights: &'b [f32],
+        samples: &'b [HeightSample],
+        reference: &'b [bool],
+    ) -> Self {
+        let vertices = PATCH_VERTICES * PATCH_VERTICES;
+        assert!(
+            samples.len() == vertices && reference.len() == vertices,
+            "a patch has {vertices} vertices, not {} samples and {} references",
+            samples.len(),
+            reference.len()
+        );
+        assert_eq!(
+            heights.len(),
+            2 * vertices,
+            "R05's heights are two a vertex"
+        );
+        Self {
+            key,
+            heights,
+            samples,
+            reference,
+        }
+    }
+
+    /// The patch.
+    #[must_use]
+    pub const fn key(&self) -> PatchKey {
+        self.key
+    }
+
+    /// R05's heights ([`PatchBake::heights`]): each vertex's own height and morph target, metres,
+    /// row by row.
+    #[must_use]
+    pub const fn heights(&self) -> &'b [f32] {
+        self.heights
+    }
+
+    /// Vertex (`x`, `y`)'s height and gradient at the patch's level in `f64`, the view's own:
+    /// R09's [`Synthesiser::height_at`] at [`PatchKey::vertex_dir`], bit for bit; `None` where the
+    /// vertex took the reference surface, the view not holding a cell it reads.
+    ///
+    /// # Panics
+    ///
+    /// If `x` or `y` is above 64.
+    #[must_use]
+    pub fn own_sample(&self, x: u8, y: u8) -> Option<HeightSample> {
+        let (x, y) = (usize::from(x), usize::from(y));
+        assert!(
+            x < PATCH_VERTICES && y < PATCH_VERTICES,
+            "vertex ({x}, {y}) is outside the patch"
+        );
+        let n = y * PATCH_VERTICES + x;
+        (!self.reference[n]).then(|| self.samples[n])
+    }
 }
 
 /// Whether a bake makes the class weights.
@@ -242,8 +319,9 @@ pub fn bake_terrain<F: SurveyView>(
         HorizonLayer::Skipped => HorizonMap::default(),
     };
     let mut extra = Vec::new();
+    let baked = BakedHeights::new(key, &patch.heights, heights.samples(), &reference);
     for hook in hooks {
-        hook.bake(key, &patch.heights, &mut extra);
+        complete &= hook.bake(&baked, &mut extra);
     }
     let layers = TerrainLayers {
         palette,

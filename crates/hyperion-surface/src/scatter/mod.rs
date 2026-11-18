@@ -22,10 +22,14 @@
 //!
 //! # The layers
 //!
-//! R10.T6.a declares the layer's type and nothing more, so that the bake can carry R11's layers in
-//! the same bake and cache before R11 lands; R11 owns the module and gives the type its variants
-//! (its `Rocks(Vec<Rock>)`, R11.T4.a) and the hook its implementation (`RockBakeHook`).
+//! R10.T6.a declares the layer's type, so that the bake carries R11's layers in the same bake and
+//! cache; R11 owns the module and gives the type its variant, a finest patch's rocks
+//! ([`ExtraLayer::Rocks`], R11.T4.a), and the hook its implementation ([`RockBakeHook`]).
+//!
+//! - [`bake`]: the hook, which bakes a finest patch's rocks with their ground from the patch's own
+//!   vertex heights.
 
+pub mod bake;
 pub mod contact;
 #[cfg(test)]
 mod golden;
@@ -36,6 +40,9 @@ pub mod site;
 
 use hyperion_base::units::Metres;
 
+#[cfg(any(test, feature = "testing"))]
+pub use bake::patch_rocks_at;
+pub use bake::{ROCK_WORDS, RockBakeHook, rock_words};
 pub use contact::{RockCache, rocks_near, surface_height_with_rocks};
 pub use law::{MAX_ROCK_ABUNDANCE, RockAbundance, exponential_integral_e1};
 #[cfg(any(test, feature = "testing"))]
@@ -72,14 +79,17 @@ pub const AUTHORITATIVE_ROCK_DIAMETER: Metres =
 /// A per-patch layer R11 adds to a patch's bake ([`TerrainLayers::extra`]), through a
 /// [`BakeHook`](crate::bake::BakeHook).
 ///
-/// Empty until R11 gives it its variants: no layer exists yet, so every bake's list is empty. It
-/// derives only what a bake needs and R11's rock list, of `f64` positions, can keep: `Eq`, `Hash`
-/// and `Ord` would have to be withdrawn when its first variant lands.
+/// It derives only what a bake needs and a rock list, of `f64` positions, can keep.
 ///
 /// [`TerrainLayers::extra`]: crate::bake::TerrainLayers::extra
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
-pub enum ExtraLayer {}
+pub enum ExtraLayer {
+    /// A finest patch's authoritative rocks, every one whose axis the patch holds that the view
+    /// can make, octave by octave, each octave's cells in key order and each cell's rocks in draw
+    /// order ([`RockBakeHook`]).
+    Rocks(Vec<Rock>),
+}
 
 #[cfg(test)]
 mod tests {

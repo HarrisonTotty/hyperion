@@ -32,6 +32,7 @@ import { patchKeyString, type Face, type PatchKey, unreachable } from "../patchK
 import { type BodyFigure, planetGeometry } from "../planet";
 import { vec3 } from "../../../geometry/vec3";
 import { clusterErrors, packClusterErrors } from "../../clusters/errors";
+import { rockLayerOf } from "../../surface/scatter/rockLayer";
 import type {
   BakedPatch,
   BakeSettings,
@@ -159,6 +160,11 @@ export interface WasmBakedTerrain extends WasmBakedPatch {
    * client half; `TerrainMaturity.codes`); empty without a maturity layer.
    */
   maturity(): Uint16Array;
+  /**
+   * A finest patch's rocks, `rockWords()` a rock (plan R11, T4.a; `TerrainLayers.rocks`);
+   * `undefined` at any other level.
+   */
+  rocks(): Float64Array | undefined;
   readonly boundM: number;
   readonly sigmaM: number;
   readonly complete: boolean;
@@ -442,6 +448,36 @@ export interface WasmSurfaceFields {
    * The body's sea for R11's ocean (R11.T8.b); `undefined` where no field of the body is held.
    */
   oceanMap(system: bigint, body: number): WasmOceanMap | undefined;
+  /**
+   * The authoritative rocks within `radiusM` (0 to 1,000 m) of the body-fixed point (`x`, `y`,
+   * `z`), m, laid out as a bake's `rocks()` (R11.T3.c's `rocks_near`); `undefined` where no field
+   * is held or a read reaches past the cells held, never "no rocks there".
+   *
+   * @throws Error for a point not between 1 m and 10¹² m from the centre, or a radius out of range.
+   */
+  rocksNear(
+    system: bigint,
+    body: number,
+    seed: bigint,
+    x: number,
+    y: number,
+    z: number,
+    radiusM: number,
+  ): Float64Array | undefined;
+  /**
+   * The ground with its rocks at the body-fixed point (`x`, `y`, `z`), m above the datum
+   * (R11.T3.c's `surface_height_with_rocks`); `undefined` as {@link rocksNear}'s.
+   *
+   * @throws Error for a point not between 1 m and 10¹² m from the centre.
+   */
+  surfaceHeightWithRocksM(
+    system: bigint,
+    body: number,
+    seed: bigint,
+    x: number,
+    y: number,
+    z: number,
+  ): number | undefined;
   free(): void;
 }
 
@@ -778,6 +814,7 @@ export class WorkerFields {
       // The maturity layer's codes, and only with them its palette's nodes at the patch's level
       // and its parent's (R10.T1.c's client half), from the same field.
       const codes = baked.maturity();
+      const rocks = baked.rocks();
       let maturity: TerrainMaturity | null = null;
       if (codes.length > 0) {
         const nodes = this.#module.maturityNodes(...bodyArgs(source.body), palette, key.level);
@@ -802,6 +839,7 @@ export class WorkerFields {
         horizonComplete: baked.horizonComplete,
         horizonRefusedCells: baked.horizonRefusedCells(),
         ...(maturity === null ? {} : { maturity }),
+        ...(rocks === undefined ? {} : { rocks: rockLayerOf(rocks) }),
       });
       return drafted ? { ...patch, drafted: true } : patch;
     } finally {

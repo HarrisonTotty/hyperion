@@ -88,6 +88,28 @@ pub trait HeightSource {
             .collect()
     }
 
+    /// Vertex (`x`, `y`) of `key`'s mesh, whose unit direction `dir` is
+    /// [`PatchKey::vertex_dir`]'s: its height and gradient at the patch's level,
+    /// [`height`](Self::height)'s there, bit for bit, its error included. The default asks
+    /// [`height`](Self::height); a source that holds a patch's vertex heights already answers from
+    /// them, as R11's rock bake does with the patch's own (plan R11, T4.a). The collision
+    /// interpolant reads its vertices through it ([`collision`]).
+    ///
+    /// # Errors
+    ///
+    /// The source's own.
+    fn vertex_height(
+        &self,
+        cache: &mut Self::Cache,
+        key: PatchKey,
+        x: u8,
+        y: u8,
+        dir: [f64; 3],
+    ) -> Result<HeightSample, Self::Error> {
+        let _ = (x, y);
+        self.height(cache, dir, key.level())
+    }
+
     /// The level's stated error bound against the finest level's mesh, metres (Design note 15): a
     /// bound on how far the level's height at a point lies from any finer level's.
     ///

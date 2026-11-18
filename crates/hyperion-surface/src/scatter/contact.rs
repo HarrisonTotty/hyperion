@@ -156,7 +156,7 @@ impl RockCache {
                     }
                 };
                 let mut rocks = Vec::new();
-                rocks_of(synth, synth_cache, cell, octave, k, &mut rocks)?;
+                rocks_of(synth, synth, synth_cache, cell, octave, k, &mut rocks)?;
                 Ok(slot.insert(rocks))
             }
         }

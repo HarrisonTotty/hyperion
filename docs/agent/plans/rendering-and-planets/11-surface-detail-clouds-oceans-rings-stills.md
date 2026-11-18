@@ -1084,6 +1084,8 @@ Acceptance: `cargo test -p hyperion-surface scatter`, `just ci` (both wasm targe
   patch vertex is. Tests: a patch's list equals `rocks_near` over its footprint (the wasm build in a
   worker against the same build on the main thread, in Vitest); every tessellated vertex lies on its
   analytic surface to the `f32` step; the chordal bound holds for 10³ random rocks.
+  _Built 2026-11-18._
+  Records: [11-surface-detail-clouds-oceans-rings-stills/records/R11.T4.a.md](11-surface-detail-clouds-oceans-rings-stills/records/R11.T4.a.md).
 - **R11.T4.b Draw rules.** `rockSelection.ts`: `couldTouch` (Design note 7) from the scene's
   grounded and descending bodies, their footprints and a given path; which rocks are drawn for a
   camera, a setting and a style; and when `TERRAIN: DETAIL LIMITED` is raised for them. The

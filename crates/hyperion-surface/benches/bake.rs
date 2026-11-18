@@ -45,6 +45,17 @@
 //! pass filled, as a worker's bake of the patch would have; the Earth-like world's finest patch and
 //! the Moon-like world's at the direction (0.3, 1, 0.2), against the budget's 40 ms patch bake, of
 //! which more than a tenth, 4 ms, is a finding (plan R11, T3.d). `just bench -- scatter/rocks`.
+//!
+//! `scatter/rock_bake_hook/<world>` is R11.T4.a's: the rock hook's layer of the same finest
+//! patches (`hyperion_surface::scatter::RockBakeHook` through `BakeHook::bake`), every rock at its
+//! site's own k, its ground from the patch's own vertex heights, which a bake of the patch made
+//! first, from a cache the first pass filled: the Earth-like and Moon-like worlds' patches above,
+//! and the Moon-like world's finest patch on its first crater's rim, `moon-rim`, in its ejecta;
+//! the same 4 ms finding line, a finest patch's. Beside them, `<world>-k0.18` is the hook's draw at
+//! `rocks_per_finest_patch`'s k = 0.18 (`hyperion_surface::scatter::patch_rocks_at`), the same
+//! rocks with their ground from the patch: the lever's saving is the difference between the two
+//! groups.
+//! `just bench -- scatter/rock_bake`.
 
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 mod bench {
@@ -523,6 +534,67 @@ mod bench {
         }
         group.finish();
     }
+
+    /// The rock hook's layer of one finest patch (see the module documentation).
+    pub fn rock_bake_hook(c: &mut Criterion) {
+        use hyperion_surface::bake::{BakeHook, BakedHeights};
+        use hyperion_surface::geometry::finest_level;
+        use hyperion_surface::scatter::{ExtraLayer, RockAbundance, RockBakeHook, patch_rocks_at};
+        let mut group = c.benchmark_group("scatter/rock_bake_hook");
+        group.measurement_time(Duration::from_secs(10));
+        for (name, world, rim) in [
+            ("earth", SyntheticWorld::EarthLike, false),
+            ("moon", SyntheticWorld::MoonLike, false),
+            ("moon-rim", SyntheticWorld::MoonLike, true),
+        ] {
+            let field = synthetic_field(world);
+            let figure = field.header().figure();
+            let dir = if rim {
+                on_a_rim(&field)
+            } else {
+                [0.3, 1.0, 0.2]
+            };
+            let synth = Synthesiser::new(&field, SEED);
+            let patch =
+                PatchKey::containing(finest_level(figure.equatorial_radius_m), unit_dir(dir))
+                    .expect("the finest level is a level");
+            let heights = synth
+                .bake_patch(&mut SynthCache::new(), patch)
+                .expect("a whole field holds every cell");
+            let vertices = heights.samples().len();
+            let (narrowed, own) = (vec![0.0_f32; 2 * vertices], vec![false; vertices]);
+            let baked = BakedHeights::new(patch, &narrowed, heights.samples(), &own);
+            let hook = RockBakeHook::new(&synth, SynthCache::new());
+            let mut layers = Vec::new();
+            assert!(
+                hook.bake(&baked, &mut layers),
+                "a whole field makes every rock"
+            );
+            let count = match layers.as_slice() {
+                [ExtraLayer::Rocks(rocks)] => rocks.len(),
+                _ => 0,
+            };
+            eprintln!("{name}: level {} patch, {count} rocks", patch.level());
+            group.bench_function(name, |bench| {
+                bench.iter(|| {
+                    layers.clear();
+                    black_box(hook.bake(&baked, &mut layers));
+                });
+            });
+            if rim {
+                continue;
+            }
+            let k = RockAbundance::new(0.18);
+            let mut warm = SynthCache::new();
+            let at_k = patch_rocks_at(&synth, &mut warm, &baked, k)
+                .expect("a whole field makes every rock");
+            eprintln!("{name}-k0.18: {} rocks", at_k.len());
+            group.bench_function(format!("{name}-k0.18"), |bench| {
+                bench.iter(|| black_box(patch_rocks_at(&synth, &mut warm, &baked, k)));
+            });
+        }
+        group.finish();
+    }
 }
 
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
@@ -530,7 +602,8 @@ criterion::criterion_group!(
     benches,
     bench::patch_65,
     bench::horizon,
-    bench::rocks_per_finest_patch
+    bench::rocks_per_finest_patch,
+    bench::rock_bake_hook
 );
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 criterion::criterion_main!(benches);

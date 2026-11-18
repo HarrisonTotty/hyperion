@@ -324,11 +324,12 @@ impl Located {
             u32::try_from(j).expect("a patch index fits a u32"),
         )
         .expect("the patch is on the level's face");
-        let dir = key.vertex_dir(
+        let (x, y) = (
             u8::try_from(ga - i * per).expect("a vertex index is at most 64"),
             u8::try_from(gb - j * per).expect("a vertex index is at most 64"),
         );
-        Ok((dir, source.height(cache, dir, self.level)?.height_m))
+        let dir = key.vertex_dir(x, y);
+        Ok((dir, source.vertex_height(cache, key, x, y, dir)?.height_m))
     }
 }
 

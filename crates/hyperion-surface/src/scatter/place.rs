@@ -41,6 +41,7 @@ use super::shape::{MAX_REACH_SHARE, Rock, RockShape};
 use super::site::{rock_abundance, site_at};
 use crate::cube::PatchKey;
 use crate::field::FieldView;
+use crate::patch::HeightSource;
 use crate::patch::collision::finest_surface_height;
 use crate::spheroid::Spheroid;
 use crate::synth::craters::{
@@ -269,20 +270,27 @@ pub(crate) fn draw_cell(
 }
 
 /// The rocks of `cell` of octave `octave` at the abundance `k`, appended to `out` in draw order:
-/// each draw's shape from `surface.scatter.shape` and its ground from R10's.
+/// each draw's shape from `surface.scatter.shape` and its ground from R10's, the finest level's
+/// collision surface over `ground`'s vertices, which are `synth`'s own, bit for bit (`synth`
+/// itself, or the patch's heights a bake has made, R11.T4.a's).
 ///
 /// # Errors
 ///
 /// [`QueryHeightError::NotSurveyed`] naming the first cell a rock's ground reads that the view does
 /// not hold; `out` then holds the rocks made before it.
-pub(crate) fn rocks_of<F: FieldView>(
+pub(crate) fn rocks_of<F, G>(
     synth: &Synthesiser<'_, F>,
+    ground: &G,
     synth_cache: &mut SynthCache,
     cell: PatchKey,
     octave: usize,
     k: RockAbundance,
     out: &mut Vec<Rock>,
-) -> Result<(), QueryHeightError> {
+) -> Result<(), QueryHeightError>
+where
+    F: FieldView,
+    G: HeightSource<Cache = SynthCache, Error = QueryHeightError>,
+{
     let figure = synth.field().header().figure();
     let seed = synth.seed();
     for (index, draw) in (0_u32..).zip(draw_cell(seed, cell, octave, k, &figure)) {
@@ -299,8 +307,8 @@ pub(crate) fn rocks_of<F: FieldView>(
             .expect("a patch key is a surface cell"),
         );
         let shape = RockShape::draw(&mut stream);
-        let ground = finest_surface_height(synth, draw.dir, synth_cache)?;
-        out.push(Rock::new(&figure, draw.dir, ground, draw.diameter, shape));
+        let ground_m = finest_surface_height(ground, draw.dir, synth_cache)?;
+        out.push(Rock::new(&figure, draw.dir, ground_m, draw.diameter, shape));
     }
     Ok(())
 }
@@ -334,7 +342,15 @@ pub fn rocks_in_cell<F: FieldView>(
     });
     let site = site_cell(cell.cell(), levels[ROCK_OCTAVE_COUNT - 1]);
     let k = site_abundance(synth, synth_cache, site)?;
-    Ok(rocks_of(synth, synth_cache, cell.cell(), octave, k, out)?)
+    Ok(rocks_of(
+        synth,
+        synth,
+        synth_cache,
+        cell.cell(),
+        octave,
+        k,
+        out,
+    )?)
 }
 
 /// The rocks of `cell` at the abundance `k`, whatever its site's, appended to `out` in draw order.
@@ -364,7 +380,15 @@ pub fn rocks_in_cell_at<F: FieldView>(
             cell.level()
         )
     });
-    Ok(rocks_of(synth, synth_cache, cell.cell(), octave, k, out)?)
+    Ok(rocks_of(
+        synth,
+        synth,
+        synth_cache,
+        cell.cell(),
+        octave,
+        k,
+        out,
+    )?)
 }
 
 #[cfg(test)]

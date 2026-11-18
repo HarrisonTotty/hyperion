@@ -108,7 +108,15 @@
 //!   `4 (9 b + a)`, both empty when skipped; `horizonComplete`
 //!   ([`HorizonMap::is_complete`](crate::bake::HorizonMap::is_complete)); and
 //!   `horizonRefusedCells()`, a `Uint32Array` of the cell indices its far field was refused for,
-//!   rising ([`HorizonMap::refused_cells`](crate::bake::HorizonMap::refused_cells)).
+//!   rising ([`HorizonMap::refused_cells`](crate::bake::HorizonMap::refused_cells)). A finest
+//!   patch's bake carries its authoritative rocks (plan R11, T4.a; [`RockBakeHook`]): `rocks()`, a
+//!   `Float64Array` of `rockWords()` (20) a rock, rock r at `20 r`, its base centre, body-fixed
+//!   metres, its frame's a, b and c axes, its semi-axes a, b and c, metres, its superquadric
+//!   exponent, the ground's height at its axis, metres above the datum, and its axis's unit
+//!   direction ([`rock_words`]), in the layer's order; `undefined` at any other level. A rock the field cannot make yet is left out,
+//!   and the bake is then not `complete`.
+//!
+//!   [`RockBakeHook`]: crate::scatter::RockBakeHook
 //! - `refineNormals(system, body, seed, face, level, i, j, normals)` makes the normals a `Drafted`
 //!   bake of the patch at `normals`, a `NormalScale`, left between its vertices
 //!   ([`WorkerFields::refine_normals`]) and returns a `RefinedNormals`: `normals()`, a
@@ -123,6 +131,13 @@
 //!   whose `kind` is a `LineOfSightKind` (`Ground`, `NoGround`, `NotSurveyed`), with the range's
 //!   getters on `Ground`. Where no field is held, or the march reads past the cells held, it is
 //!   `NotSurveyed`.
+//! - `rocksNear(system, body, seed, x, y, z, radiusM)` returns the authoritative rocks within
+//!   `radiusM` (0 to 1,000 m) of the body-fixed point (x, y, z), metres, as a bake's `rocks()` lays
+//!   them out ([`WorkerFields::rocks_near`], plan R11, T3.c), and
+//!   `surfaceHeightWithRocksM(system, body, seed, x, y, z)` the ground with its rocks there, metres
+//!   above the datum ([`WorkerFields::surface_height_with_rocks`]); each `undefined` where no field
+//!   is held or a read reaches past the cells held, never "no rocks there". The point must lie
+//!   between 1 m and 10¹² m from the centre.
 //! - `material(system, body, seed, face, u, v)` returns a `GroundAnswer`, the class's code, its
 //!   entry and, where the palette names the entry, its properties, or `undefined` where the cell
 //!   is not surveyed or no field is held.
@@ -221,6 +236,7 @@ use crate::material::{MATURITY_NODES, MAX_CLASSES, Material, MaterialClass, Mate
 use crate::noise::LatticeCache;
 use crate::patch::{BakeOptions, NormalScale, PatchBake, VertexPath};
 use crate::reading::{LineOfSight, SlantRange, SurveyedReading};
+use crate::scatter::{ExtraLayer, ROCK_WORDS, Rock, rock_words};
 use crate::synth::BandLevel;
 use crate::test_planet::{Ridges, TEST_PLANET};
 use crate::worker::{
@@ -277,6 +293,14 @@ pub fn test_planet_version() -> u32 {
 #[must_use]
 pub fn maturity_node_count() -> u32 {
     u32::try_from(MATURITY_NODES).expect("K is a small count")
+}
+
+/// The words a rock is handed over in ([`ROCK_WORDS`]; see the module documentation's
+/// `rocks()`), which the client's rock layer pins.
+#[wasm_bindgen(js_name = rockWords)]
+#[must_use]
+pub fn rock_word_count() -> u32 {
+    u32::try_from(ROCK_WORDS).expect("a rock's words are a small count")
 }
 
 /// R09's blend of the two months nearest a time ([`month_blend_of`]; see the module
@@ -648,6 +672,29 @@ const MIN_SIGHT_ORIGIN_M: f64 = 1.0;
 /// datum foot would overflow (about 10¹⁵⁴ m).
 const MAX_SIGHT_M: f64 = 1e12;
 
+/// The widest search [`JsSurfaceFields::rocks_near`] takes, metres: 1 km, some hundreds of finest
+/// patches, past any could-touch region R11 sweeps (plan R11, Design note 7).
+const MAX_ROCK_SEARCH_M: f64 = 1000.0;
+
+/// The body-fixed point (`x`, `y`, `z`), metres, once checked to lie between
+/// [`MIN_SIGHT_ORIGIN_M`] and [`MAX_SIGHT_M`] from the centre.
+///
+/// # Errors
+///
+/// A `JsError` naming the point otherwise.
+fn point_of(at: [f64; 3]) -> Result<[f64; 3], JsError> {
+    let distance_m = norm(at);
+    if (MIN_SIGHT_ORIGIN_M..=MAX_SIGHT_M).contains(&distance_m) {
+        Ok(at)
+    } else {
+        let [x, y, z] = at;
+        Err(JsError::new(&format!(
+            "point ({x}, {y}, {z}) m is not between {MIN_SIGHT_ORIGIN_M} m and {MAX_SIGHT_M} m \
+             from the centre"
+        )))
+    }
+}
+
 /// The Euclidean length of `v`, as [`crate::cube::unit_dir`] takes it: infinite or zero where the
 /// squares overflow or underflow.
 #[must_use]
@@ -942,6 +989,26 @@ impl BakedTerrain {
     pub fn horizon_refused_cells(&self) -> Vec<u32> {
         self.layers.horizon().refused_cells().to_vec()
     }
+
+    /// A finest patch's rocks, [`ROCK_WORDS`] a rock ([`rock_words`]), or none where the bake has
+    /// no rock layer (a patch at another level).
+    #[must_use]
+    pub fn rocks(&self) -> Option<Vec<f64>> {
+        // Its one variant: a layer of another kind would be passed over here.
+        self.layers
+            .extra()
+            .iter()
+            .map(|layer| match layer {
+                ExtraLayer::Rocks(rocks) => rocks_to_words(rocks),
+            })
+            .next()
+    }
+}
+
+/// `rocks`, [`ROCK_WORDS`] a rock, in their order.
+#[must_use]
+fn rocks_to_words(rocks: &[Rock]) -> Vec<f64> {
+    rocks.iter().flat_map(rock_words).collect()
 }
 
 impl From<BodyBake> for BakedTerrain {
@@ -1663,6 +1730,70 @@ impl JsSurfaceFields {
         Ok(LineOfSightAnswer::from(
             unless_unsurveyed(answer).unwrap_or(LineOfSight::NotSurveyed),
         ))
+    }
+
+    /// The authoritative rocks within `radius_m` of the body-fixed point (`x`, `y`, `z`), metres,
+    /// [`ROCK_WORDS`] a rock (see the module documentation; [`WorkerFields::rocks_near`]).
+    ///
+    /// # Errors
+    ///
+    /// A `JsError` if the point is not between [`MIN_SIGHT_ORIGIN_M`] and [`MAX_SIGHT_M`] from the
+    /// centre, the radius is not between 0 and [`MAX_ROCK_SEARCH_M`], or the body's index is above
+    /// 65,535.
+    #[wasm_bindgen(js_name = rocksNear)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "a flat call is the binding's cheapest shape; the TypeScript side wraps it"
+    )]
+    pub fn rocks_near(
+        &mut self,
+        system: u64,
+        body: u32,
+        seed: u64,
+        x: f64,
+        y: f64,
+        z: f64,
+        radius_m: f64,
+    ) -> Result<Option<Vec<f64>>, JsError> {
+        let at = point_of([x, y, z])?;
+        if !(0.0..=MAX_ROCK_SEARCH_M).contains(&radius_m) {
+            return Err(JsError::new(&format!(
+                "search radius {radius_m} m is not between 0 and {MAX_ROCK_SEARCH_M} m"
+            )));
+        }
+        let answer = self.fields.rocks_near(
+            body_ref(system, body)?,
+            DetailSeed::new(seed),
+            &at,
+            Metres::new(radius_m),
+        );
+        Ok(unless_unsurveyed(answer).map(|rocks| rocks_to_words(&rocks)))
+    }
+
+    /// The authoritative ground with its rocks at the body-fixed point (`x`, `y`, `z`), metres
+    /// above the datum (see the module documentation; [`WorkerFields::surface_height_with_rocks`]).
+    ///
+    /// # Errors
+    ///
+    /// A `JsError` if the point is not between [`MIN_SIGHT_ORIGIN_M`] and [`MAX_SIGHT_M`] from the
+    /// centre, or the body's index is above 65,535.
+    #[wasm_bindgen(js_name = surfaceHeightWithRocksM)]
+    pub fn surface_height_with_rocks_m(
+        &mut self,
+        system: u64,
+        body: u32,
+        seed: u64,
+        x: f64,
+        y: f64,
+        z: f64,
+    ) -> Result<Option<f64>, JsError> {
+        let at = point_of([x, y, z])?;
+        let answer = self.fields.surface_height_with_rocks(
+            body_ref(system, body)?,
+            DetailSeed::new(seed),
+            &at,
+        );
+        Ok(unless_unsurveyed(answer).map(Metres::value))
     }
 
     /// The material at (`face`, `u`, `v`) on the body (see the module documentation).

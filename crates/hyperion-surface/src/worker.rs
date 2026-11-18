@@ -8,7 +8,10 @@
 //! ([`WorkerFields::maturity_nodes`], R10.T1.c's client half), and the whole of a
 //! view's terrain readout where its line of sight meets the ground ([`WorkerFields::ground_readout`],
 //! R10.T12: the slant range, the reading, the material and the ground's two properties, the bearing
-//! capacity and the pad friction, with the month's temperature the friction is taken at).
+//! capacity and the pad friction, with the month's temperature the friction is taken at). A finest
+//! patch's bake carries its authoritative rocks (R11.T4.a, [`RockBakeHook`]), and the contact
+//! queries answer the rocks near a point and the ground with its rocks there
+//! ([`WorkerFields::rocks_near`], [`WorkerFields::surface_height_with_rocks`], R11.T3.c's).
 //!
 //! The client's WebAssembly module wraps [`WorkerFields`] in its `SurfaceFields` export
 //! (`src/wasm.rs`) thinly: the decoding, the merge, the survey's change, the level table, σ by
@@ -69,8 +72,13 @@
 //! argument, the client's from the body's record (R09.T1.b); the field carries none. No answer
 //! depends on the order of queries or on what the cache holds.
 //!
-//! Nothing here draws from a stream, so the module opens no domain tag; the answers are
-//! presentation, under no generator version but R09's and R10's functions'.
+//! The rocks keep caches of their own beside it by the same rule: the rock hook's synthesis cache,
+//! since the bake holds the body's while its hooks run, and the contact queries' cells' rocks
+//! ([`RockCache`]).
+//!
+//! Nothing here draws from a stream but the rocks, whose streams are R11's (`surface.scatter`,
+//! `surface.scatter.shape`); the other answers are presentation, under no generator version but
+//! R09's and R10's functions'.
 //!
 //! # The disc's class map (plan R10, T10.d)
 //!
@@ -138,6 +146,9 @@ use crate::reading::{
     LineOfSight, SLOPE_BASELINES, SlantRange, SurveyedGround, SurveyedReading, slant_range_under,
     surveyed_reading,
 };
+use crate::scatter::{
+    FindRocksError, Rock, RockBakeHook, RockCache, rocks_near, surface_height_with_rocks,
+};
 use crate::synth::craters::CraterOctaves;
 use crate::synth::levels::HeldChannels;
 use crate::synth::{
@@ -180,6 +191,12 @@ struct BodyField {
     /// because the field never drops a cell ([`SynthCache`]'s rule): a change that evicts cells
     /// must start it afresh with them.
     cache: SynthCache,
+    /// The rock hook's synthesis cache ([`RockBakeHook`]), kept beside the body's by the same
+    /// rule: the bake holds the body's while the hook runs.
+    rock_cache: SynthCache,
+    /// The contact queries' cells' rocks ([`rocks_near`], [`surface_height_with_rocks`]), kept by
+    /// the same rule.
+    rocks: RockCache,
     /// What the body's albedo nodes are made from, kept from the field's start to its release: a
     /// function of the header alone, which a block never changes.
     nodes: NodeCache,
@@ -205,6 +222,42 @@ impl BodyField {
         self.keep_parts(seed);
         let parts = self.parts.as_ref().expect("the parts are kept above");
         (Synthesiser::with_parts(&self.field, parts), &mut self.cache)
+    }
+
+    /// [`synthesiser`](Self::synthesiser), with the rock hook's own cache.
+    fn rock_baker(
+        &mut self,
+        seed: DetailSeed,
+    ) -> (
+        Synthesiser<'_, PartialField>,
+        &mut SynthCache,
+        &mut SynthCache,
+    ) {
+        self.keep_parts(seed);
+        let parts = self.parts.as_ref().expect("the parts are kept above");
+        (
+            Synthesiser::with_parts(&self.field, parts),
+            &mut self.cache,
+            &mut self.rock_cache,
+        )
+    }
+
+    /// [`synthesiser`](Self::synthesiser), with the contact queries' cells' rocks.
+    fn rock_finder(
+        &mut self,
+        seed: DetailSeed,
+    ) -> (
+        Synthesiser<'_, PartialField>,
+        &mut SynthCache,
+        &mut RockCache,
+    ) {
+        self.keep_parts(seed);
+        let parts = self.parts.as_ref().expect("the parts are kept above");
+        (
+            Synthesiser::with_parts(&self.field, parts),
+            &mut self.cache,
+            &mut self.rocks,
+        )
     }
 
     /// [`synthesiser`](Self::synthesiser), with the slant range's ceiling over the cells held,
@@ -607,6 +660,14 @@ impl From<QueryHeightError> for QueryBodyError {
     fn from(e: QueryHeightError) -> Self {
         match e {
             QueryHeightError::NotSurveyed(cell) => Self::NotSurveyed(cell),
+        }
+    }
+}
+
+impl From<FindRocksError> for QueryBodyError {
+    fn from(e: FindRocksError) -> Self {
+        match e {
+            FindRocksError::Query(e) => e.into(),
         }
     }
 }
@@ -2232,6 +2293,8 @@ impl WorkerFields {
             elevation_mm: None,
             channels: HeldChannels::new(header),
             cache: SynthCache::new(),
+            rock_cache: SynthCache::new(),
+            rocks: RockCache::new(),
             nodes: NodeCache::default(),
             parts: None,
             ceiling_m: None,
@@ -2392,8 +2455,10 @@ impl WorkerFields {
         Some(charge)
     }
 
-    /// Bakes `key` over `body`'s field with the body's detail seed `seed` ([`bake_terrain`], no
-    /// hooks), with the cells its survey mask holds unsurveyed.
+    /// Bakes `key` over `body`'s field with the body's detail seed `seed` ([`bake_terrain`] with
+    /// R11's [`RockBakeHook`], so that a finest patch carries its rocks,
+    /// [`ExtraLayer::Rocks`](crate::scatter::ExtraLayer::Rocks)), with the cells its survey mask
+    /// holds unsurveyed.
     ///
     /// # Errors
     ///
@@ -2411,8 +2476,11 @@ impl WorkerFields {
         key: PatchKey,
         opts: &TerrainBakeOptions,
     ) -> Result<BodyBake, QueryBodyError> {
-        let (synth, cache) = self.held(body)?.synthesiser(seed);
-        let terrain = bake_terrain(&synth, cache, key, opts, &[])?;
+        let (synth, cache, rock_cache) = self.held(body)?.rock_baker(seed);
+        let hook = RockBakeHook::new(&synth, std::mem::take(rock_cache));
+        let baked = bake_terrain(&synth, cache, key, opts, &[&hook]);
+        *rock_cache = hook.into_cache();
+        let terrain = baked?;
         let coarse = synth.field().header().level().get();
         let quads = u8::try_from(PATCH_QUADS).expect("64 quads fit a u8");
         let mask = terrain.layers().survey_mask();
@@ -2431,6 +2499,52 @@ impl WorkerFields {
             terrain,
             unsurveyed_cells: cells.into_iter().collect(),
         })
+    }
+
+    /// The authoritative rocks within `radius` of the body-fixed point `at` on `body`, with the
+    /// body's detail seed `seed` ([`rocks_near`]).
+    ///
+    /// # Errors
+    ///
+    /// [`QueryBodyError::NotStarted`] if no field of `body` is held, and
+    /// [`QueryBodyError::NotSurveyed`] where a cell searched, its site or a rock's ground reads a
+    /// cell the field does not hold: never "no rocks there".
+    ///
+    /// # Panics
+    ///
+    /// As [`rocks_near`]: if `radius` is negative or not finite, or `at` is not finite or is the
+    /// body's centre.
+    pub fn rocks_near(
+        &mut self,
+        body: BodyRef,
+        seed: DetailSeed,
+        at: &[f64; 3],
+        radius: Metres,
+    ) -> Result<Vec<Rock>, QueryBodyError> {
+        let (synth, cache, rocks) = self.held(body)?.rock_finder(seed);
+        let mut out = Vec::new();
+        rocks_near(&synth, cache, rocks, at, radius, &mut out)?;
+        Ok(out)
+    }
+
+    /// The authoritative ground with its rocks at the body-fixed point `at` on `body`, metres above
+    /// the datum, with the body's detail seed `seed` ([`surface_height_with_rocks`]).
+    ///
+    /// # Errors
+    ///
+    /// As [`rocks_near`](Self::rocks_near): no field of `body`, or a read past the cells held.
+    ///
+    /// # Panics
+    ///
+    /// As [`surface_height_with_rocks`]: if `at` is not finite or is the body's centre.
+    pub fn surface_height_with_rocks(
+        &mut self,
+        body: BodyRef,
+        seed: DetailSeed,
+        at: &[f64; 3],
+    ) -> Result<Metres, QueryBodyError> {
+        let (synth, cache, rocks) = self.held(body)?.rock_finder(seed);
+        Ok(surface_height_with_rocks(&synth, cache, rocks, at)?)
     }
 
     /// The normals between `key`'s vertices at `scale` that a bake of it with

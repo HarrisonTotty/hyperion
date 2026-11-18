@@ -107,11 +107,12 @@ impl TerrainLayers {
         self.sigma
     }
 
-    /// Whether the view answered every query of the bake's heights, normals, weights and σ. It is
-    /// false where a vertex outside the survey took the reference surface, for want of a cell its
-    /// reads reach (Design note 12): such a patch can bake otherwise once a block brings that
-    /// cell, though its survey mask stays as it was, so a client rebakes it on any new block, and
-    /// every other patch only where a block changes its mask (Design note 16). The horizon map's
+    /// Whether the view answered every query of the bake's heights, normals, weights, σ and R11's
+    /// layers. It is false where a vertex outside the survey took the reference surface, or a
+    /// layer's query read a cell the view lacks (Design note 12): such a patch can bake otherwise
+    /// once a block brings that cell, though its survey mask stays as it was, so a client rebakes
+    /// it on any new block, and every other patch only where a block changes its mask (Design
+    /// note 16). The horizon map's
     /// far field, which reads ground far beyond the patch, states its own
     /// ([`HorizonMap::is_complete`]).
     #[must_use]
@@ -119,7 +120,8 @@ impl TerrainLayers {
         self.complete
     }
 
-    /// R11's layers, each [`BakeHook`](super::BakeHook)'s in turn: none until R11 lands.
+    /// R11's layers, each [`BakeHook`](super::BakeHook)'s in turn: a finest patch's rocks
+    /// ([`ExtraLayer::Rocks`]) where the worker's rock hook baked it, none otherwise.
     #[must_use]
     pub fn extra(&self) -> &[ExtraLayer] {
         &self.extra

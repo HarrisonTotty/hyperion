@@ -248,6 +248,15 @@ impl Rock {
         &self.shape
     }
 
+    /// Its frame, body-fixed unit vectors: the a axis, along its yaw from east towards north; the b
+    /// axis, a quarter turn on; and the c axis, the datum's normal at its axis, a right-handed set.
+    /// East is ẑ × ν, except where `|ν_z| ≥ 0.9` near a pole, where x̂ × ν stands in (see
+    /// [`Rock::new`]); the drawn mesh is placed in it (plan R11, T4.a).
+    #[must_use]
+    pub const fn frame(&self) -> [[f64; 3]; 3] {
+        [self.axes[0], self.axes[1], self.up]
+    }
+
     /// Its semi-axes a, b and c, metres: a and b horizontal, c vertical.
     #[must_use]
     pub fn semi_axes(&self) -> [Metres; 3] {
