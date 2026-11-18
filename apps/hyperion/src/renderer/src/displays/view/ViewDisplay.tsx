@@ -271,10 +271,16 @@ import {
   DEFAULT_FOLD,
   FOLD_BUTTONS,
   type FoldPanel,
+  inSecondColumnFold,
+  SECOND_COLUMN_FOLD,
+  type SecondColumnFold,
+  secondColumnFolds,
   type SideFolds,
   toggledFold,
+  toggledSecondFold,
   viewLayout,
 } from "./viewLayout";
+import { WhiteBalancePanel } from "./WhiteBalancePanel";
 import {
   commandCutsImage,
   commandRun,
@@ -382,9 +388,32 @@ const FOLD_PANELS: ReadonlyArray<FoldPanel> = [
   "camera",
   "style",
   "exposure",
+  "balance",
   "meter",
   "stills",
 ];
+
+/**
+ * The folded panels' standing lines under a row of disclosure buttons, `null` among them left out,
+ * run on as one line where they fit, each part after a middle dot that leads it, wrapping between
+ * parts, as `MAXIMIZE VIEW`'s foot sets them, each keeping its own live region (the UX ruling,
+ * 2026-11-18); `null` where none stands.
+ */
+function foldLines(lines: ReadonlyArray<readonly [string, ReactNode]>): ReactNode {
+  const standing = lines.filter(([, line]) => line !== null);
+  return standing.length === 0 ? null : (
+    <div className="view-folds__lines">
+      {standing.map(([key, line]) => (
+        <div className="view-folds__part" key={key}>
+          <span className="view-folds__dot" aria-hidden="true">
+            ·
+          </span>
+          {line}
+        </div>
+      ))}
+    </div>
+  );
+}
 
 /** No statement of a scene's opening. */
 const NO_SCENE_STATEMENTS: ReadonlyArray<LabelStatement> = [];
@@ -2263,11 +2292,31 @@ function ViewStage({
   const [focusedFold, setFocusedFold] = useState<FoldPanel | null>(null);
   const [foldLayout, setFoldLayout] = useState(layout);
   // The panels that stand: every one but the meter's, which stands beside a drawn photorealistic
-  // image only; the style's stands in every engine state (decision-r07-t19b-exposure-fit, item 2).
-  // One that goes gives its place to CAMERA; on a switch to the compact layout, the panel holding
-  // the focus is the one open.
-  const stands = (panel: FoldPanel): boolean =>
-    panel === "meter" ? meterStands : panel !== "stills" || stills !== null;
+  // image only, and the white balance's, a part of its own in the compact layout alone, beside any
+  // view's photorealistic image; the style's stands in every engine state
+  // (decision-r07-t19b-exposure-fit, item 2). One that goes gives its place to CAMERA; on a switch
+  // to the compact layout, the panel holding the focus is the one open.
+  const stands = (panel: FoldPanel): boolean => {
+    let standing: boolean;
+    switch (panel) {
+      case "meter":
+        standing = meterStands;
+        break;
+      case "balance":
+        standing = compact && balanceStands;
+        break;
+      case "stills":
+        standing = stills !== null;
+        break;
+      case "instruments":
+      case "camera":
+      case "style":
+      case "exposure":
+        standing = true;
+        break;
+    }
+    return standing;
+  };
   const focusOpens =
     foldLayout !== layout && layout === "compact" && focusedFold !== null && stands(focusedFold)
       ? focusedFold
@@ -2279,6 +2328,29 @@ function ViewStage({
   if (foldLayout !== layout) {
     setFoldLayout(layout);
   }
+  // Below its whole height the full layout's second column folds EXPOSURE and EXPOSURE METER behind
+  // a row of their own, EXPOSURE open by default, by a fold of its own, so that a press in one column
+  // never folds the other; each time the column starts to fold, EXPOSURE is open, or the one holding
+  // the focus (plan R11, R11.T10.b's follow-up; the UX ruling, 2026-11-18).
+  const secondFolds = secondColumnFolds(viewBox);
+  const [secondFold, setSecondFold] = useState<SecondColumnFold>(SECOND_COLUMN_FOLD);
+  const [secondFoldsBefore, setSecondFoldsBefore] = useState(secondFolds);
+  // The white balance's control stands in the exposure panel in the full layout.
+  const focusedSecond = focusedFold === "balance" ? "exposure" : focusedFold;
+  const startsToFold = secondFolds && !secondFoldsBefore;
+  const secondOpened: SecondColumnFold = startsToFold
+    ? inSecondColumnFold(focusedSecond) && stands(focusedSecond)
+      ? focusedSecond
+      : SECOND_COLUMN_FOLD
+    : stands(secondFold)
+      ? secondFold
+      : SECOND_COLUMN_FOLD;
+  if (secondOpened !== secondFold) {
+    setSecondFold(secondOpened);
+  }
+  if (secondFoldsBefore !== secondFolds) {
+    setSecondFoldsBefore(secondFolds);
+  }
   // In the full layout CAMERA and STILLS share the first column's last place, behind the same row of
   // disclosure buttons, CAMERA open unless STILLS is the fold, so that the place is the taller of the
   // two, never their sum (plan R11, R11.T10.b; the UX ruling, 2026-11-18).
@@ -2288,6 +2360,9 @@ function ViewStage({
     if (compact) {
       return opened !== panel;
     }
+    if (secondFolds && inSecondColumnFold(panel)) {
+      return secondOpened !== panel;
+    }
     return sharesPlace(panel) && (panel === "stills") !== (opened === "stills");
   };
   const foldIds: Readonly<Record<FoldPanel, string>> = {
@@ -2295,6 +2370,7 @@ function ViewStage({
     camera: `${legendId}-camera`,
     style: `${legendId}-style`,
     exposure: `${legendId}-exposure`,
+    balance: `${legendId}-balance`,
     meter: `${legendId}-meter`,
     stills: `${legendId}-stills`,
   };
@@ -2327,6 +2403,11 @@ function ViewStage({
           };
   }, [pagedSlot, pageHasPoint, pageRangeM]);
   const foldOf = (target: EventTarget | null): FoldPanel | null => {
+    // The white balance's control, in the exposure panel in the full layout and in a panel of its
+    // own in the compact one, is the white balance's wherever it stands.
+    if (target instanceof Element && target.closest(".view-exposure__balance") !== null) {
+      return "balance";
+    }
     const section = target instanceof Element ? target.closest("section") : null;
     return FOLD_PANELS.find((panel) => section !== null && section.id === foldIds[panel]) ?? null;
   };
@@ -2383,13 +2464,25 @@ function ViewStage({
   // goes away (the meter, on a style switch, a fault or the stand-in while the pipelines compile)
   // gives its focus to CAMERA's in the compact layout, and in the full layout to INHIBIT, the
   // control before it in the second column (the orchestrator's ruling on R07.T16.b).
+  // In the full layout's folding second column the same holds for its row: a panel that folds gives
+  // its focus to its button, and the white balance, whose control moves between the exposure panel
+  // and its own on a switch of layout, to its own button in the compact layout and to INHIBIT in the
+  // full one (the UX ruling, 2026-11-18).
   useLayoutEffect(() => {
     if (focusedFold === null) {
       return;
     }
-    const folding = compact && focusedFold !== opened;
-    const meterGone = !compact && focusedFold === "meter" && !meterStands;
-    if (!folding && !meterGone) {
+    const focusedInSecond = focusedFold === "balance" ? "exposure" : focusedFold;
+    const folding = compact
+      ? focusedFold !== opened
+      : secondFolds && inSecondColumnFold(focusedInSecond) && focusedInSecond !== secondOpened;
+    // The white balance goes from the full layout's exposure panel when no view draws a
+    // photorealistic image any more, as the meter goes with the primary's.
+    const meterGone =
+      !compact &&
+      ((focusedFold === "meter" && !meterStands) || (focusedFold === "balance" && !balanceStands));
+    const balanceMoved = focusedFold === "balance";
+    if (!folding && !meterGone && !balanceMoved) {
       return;
     }
     const active = document.activeElement;
@@ -2401,13 +2494,29 @@ function ViewStage({
     if (!lost) {
       return;
     }
-    if (folding) {
-      const buttons = foldButtonsRef.current;
-      (buttons.get(focusedFold) ?? buttons.get(DEFAULT_FOLD))?.focus();
+    const buttons = foldButtonsRef.current;
+    if (meterGone) {
+      inhibitButtonRef.current?.focus();
+    } else if (folding) {
+      (compact
+        ? (buttons.get(focusedFold) ?? buttons.get(DEFAULT_FOLD))
+        : (buttons.get(focusedInSecond) ?? buttons.get(SECOND_COLUMN_FOLD))
+      )?.focus();
+    } else if (compact) {
+      buttons.get("balance")?.focus();
     } else {
       inhibitButtonRef.current?.focus();
     }
-  }, [compact, focusedFold, opened, meterStands, foldButtonsRef]);
+  }, [
+    compact,
+    focusedFold,
+    opened,
+    meterStands,
+    balanceStands,
+    foldButtonsRef,
+    secondFolds,
+    secondOpened,
+  ]);
   // The focus in a panel that MAXIMIZE VIEW hides goes to the CONTROLS view's canvas, so that the
   // keys go on acting on that view, or where none stands to MAXIMIZE VIEW's button, never to the
   // page (the owner's request, 2026-11-01).
@@ -2439,11 +2548,12 @@ function ViewStage({
   const orbitOffered = offeredPresets(controlledCamera).includes("orbit");
   // The exposure's status, `AUTO NOT AVAILABLE: …`, which stands under the row while it is folded.
   const exposureStanding = autoNotAvailable(meterShown);
-  // The stills' standing, `STILLS SUSPENDED` or `STILLS DISABLED`, which lasts the session, and a
+  // The stills' standing, `STILLS LIMITED` or `STILLS DISABLED`, which lasts the session, and a
   // still's status, its step or how it ended: they stand under the row while their panel is folded,
   // and under MAXIMIZE VIEW, live regions as in the panel (plan R11, R11.T10.b).
-  // Their standing and status run on as one line, the status left out while STILLS DISABLED says
-  // its cause, so that the line takes two at most (the UX ruling, 2026-11-18).
+  // Their standing and status run on as one part, the status left out while STILLS DISABLED says
+  // its cause, so that the part takes two lines at most (the UX ruling, 2026-11-18): as two parts
+  // the status would take a line of its own, past the full layout's least height.
   const stillsLines = [
     stillsAway.standing,
     stillsAway.standing?.startsWith(STILLS_DISABLED) === true ? null : stillsAway.status,
@@ -2510,9 +2620,35 @@ function ViewStage({
         </output>
       </p>
     );
+  // One maker for both columns' rows and the compact one, since their buttons share the fold IDs and
+  // the button refs the focus goes back to.
+  const foldButtonsOf = (
+    buttons: ReadonlyArray<{ readonly panel: FoldPanel; readonly label: string }>,
+    open: FoldPanel,
+    onFold: (panel: FoldPanel) => void,
+  ): ReactNode => (
+    <div className="view-folds">
+      {buttons.map(({ panel, label }) => (
+        <button
+          key={panel}
+          ref={foldButtonRef(panel)}
+          type="button"
+          className="control disclosure view-folds__button"
+          aria-expanded={open === panel}
+          aria-controls={foldIds[panel]}
+          onClick={() => {
+            onFold(panel);
+          }}
+        >
+          <DisclosureGlyph expanded={open === panel} />
+          {label}
+        </button>
+      ))}
+    </div>
+  );
   // The row of disclosure buttons, and under it the standing lines of the panels folded: the compact
-  // layout's, of every folding panel, and the full layout's, of CAMERA and STILLS, where STILLS
-  // stands.
+  // layout's, of every folding panel, and the full layout's first column's, of CAMERA and STILLS,
+  // where STILLS stands.
   const rowButtons = FOLD_BUTTONS.filter(
     ({ panel }) => stands(panel) && (compact || sharesPlace(panel)),
   );
@@ -2520,31 +2656,43 @@ function ViewStage({
   const foldRow =
     compact || stills !== null ? (
       <>
-        <div className="view-folds">
-          {rowButtons.map(({ panel, label }) => (
-            <button
-              key={panel}
-              ref={foldButtonRef(panel)}
-              type="button"
-              className="control disclosure view-folds__button"
-              aria-expanded={rowOpen === panel}
-              aria-controls={foldIds[panel]}
-              onClick={() => {
-                setFold(toggledFold(rowOpen, panel));
-              }}
-            >
-              <DisclosureGlyph expanded={rowOpen === panel} />
-              {label}
-            </button>
-          ))}
-        </div>
-        {folded("camera") ? cameraStanding : null}
-        {folded("style") ? styleStanding : null}
-        {folded("exposure") ? exposureStandingLine : null}
-        {folded("exposure") ? keyedLine : null}
-        {folded("stills") ? stillsStanding : null}
+        {foldButtonsOf(rowButtons, rowOpen, (panel) => {
+          setFold(toggledFold(rowOpen, panel));
+        })}
+        {foldLines([
+          ["camera", folded("camera") ? cameraStanding : null],
+          ["style", folded("style") ? styleStanding : null],
+          ["exposure", compact && folded("exposure") ? exposureStandingLine : null],
+          ["keyed", compact && folded("exposure") ? keyedLine : null],
+          ["stills", folded("stills") ? stillsStanding : null],
+        ])}
       </>
     ) : null;
+  // The full layout's second column's row below its whole height, after STYLE: EXPOSURE, and
+  // EXPOSURE METER while the meter stands, with the exposure's standing lines under it while it is
+  // folded; EXPOSURE stands alone while the meter does not, so that nothing moves when it comes.
+  const secondRow = secondFolds ? (
+    <>
+      {foldButtonsOf(
+        FOLD_BUTTONS.filter(({ panel }) => inSecondColumnFold(panel) && stands(panel)),
+        secondOpened,
+        (panel) => {
+          if (inSecondColumnFold(panel)) {
+            setSecondFold(toggledSecondFold(secondOpened, panel));
+          }
+        },
+      )}
+      {foldLines([
+        ["exposure", folded("exposure") ? exposureStandingLine : null],
+        ["keyed", folded("exposure") ? keyedLine : null],
+      ])}
+    </>
+  ) : null;
+  const balanceControl = {
+    balance: whiteBalance,
+    balancedTeffK: shown.balancedTeffK,
+    onBalance: onWhiteBalanceChange,
+  };
   // Under MAXIMIZE VIEW, after the key legend on its row, what the hidden panels would show (the
   // owner's request, 2026-11-01): the line naming its key, the hidden controls' keys, the CONTROLS
   // view where it is an instrument and that view's selection; then the slots held whole for want of room, as the
@@ -2945,6 +3093,7 @@ function ViewStage({
                   }
             }
           />
+          {secondRow}
           <ExposurePanel
             exposure={exposure}
             metering={meterShown}
@@ -2953,16 +3102,18 @@ function ViewStage({
             id={foldIds.exposure}
             hidden={folded("exposure")}
             inhibitRef={inhibitButtonRef}
-            whiteBalance={
-              balanceStands
-                ? {
-                    balance: whiteBalance,
-                    balancedTeffK: shown.balancedTeffK,
-                    onBalance: onWhiteBalanceChange,
-                  }
-                : undefined
-            }
+            // In the compact layout the white balance folds as a part of its own, after the
+            // exposure (the UX ruling, 2026-11-18).
+            whiteBalance={balanceStands && !compact ? balanceControl : undefined}
           />
+          {stands("balance") ? (
+            <WhiteBalancePanel
+              id={foldIds.balance}
+              hidden={folded("balance")}
+              designator={PRIMARY_NAME}
+              balance={balanceControl}
+            />
+          ) : null}
           {meterStands ? (
             <MeterControl
               meter={meter}

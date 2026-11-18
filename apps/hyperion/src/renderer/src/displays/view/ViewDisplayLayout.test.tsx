@@ -11,6 +11,7 @@ import { fakeViewEngineSource } from "../../test/fakeViewEngine";
 import { stubMatchMedia } from "../../test/stubMatchMedia";
 import {
   COMPACT_VIEW_PX,
+  FULL_VIEW_PX,
   type LaidOutBoxPx,
   type LaidOutPx,
   nominalStore,
@@ -286,6 +287,184 @@ describe("VIEW's full layout (R07.T19.b)", () => {
   });
 });
 
+/** A maximised 1920 × 1080 window's `.view` box, under the second column's whole height. */
+const MAXIMISED_VIEW_PX = { widthPx: 1888, heightPx: 853 } as const;
+
+/** Whether `later` follows `earlier` in the document, and so in the tab order. */
+function follows(later: Element, earlier: Element): boolean {
+  return (earlier.compareDocumentPosition(later) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+}
+
+/** The second column's own disclosure buttons and whether each is expanded. */
+function secondRow(): Array<[string, string | null]> {
+  const column = document.querySelector<HTMLElement>(".view__column--b");
+  if (column === null) {
+    throw new Error("VIEW has no second column");
+  }
+  return within(column)
+    .queryAllByRole("button")
+    .filter((button) => button.hasAttribute("aria-expanded"))
+    .map((button) => [button.textContent, button.getAttribute("aria-expanded")]);
+}
+
+describe("VIEW's full layout's second column below its whole height (R11.T10.b's follow-up)", () => {
+  it("stands whole in a 1920 × 1080 window's box, with no row of its own", async () => {
+    const view = await setup({ store: await nominalStore() });
+    await chooseScene(view, "PHASE TEST");
+    await toggleStyle(view);
+    expect([
+      secondRow(),
+      region("Exposure PRIMARY") !== null,
+      region("Exposure meter PRIMARY") !== null,
+    ]).toEqual([[], true, true]);
+  });
+
+  it("folds EXPOSURE and EXPOSURE METER behind a row of their own after STYLE, EXPOSURE open", async () => {
+    const view = await setup({ store: await nominalStore(), viewPx: MAXIMISED_VIEW_PX });
+    const wireframe = secondRow();
+    await chooseScene(view, "PHASE TEST");
+    await toggleStyle(view);
+    expect([
+      wireframe,
+      secondRow(),
+      region("Style PRIMARY") !== null,
+      region("Exposure PRIMARY") !== null,
+      region("Exposure meter PRIMARY"),
+      // After STYLE's buttons and before the exposure's, in the tab order between them.
+      follows(disclosure("EXPOSURE"), screen.getByRole("button", { name: "PHOTOREALISTIC" })) &&
+        follows(screen.getByRole("button", { name: "8 INHIBIT" }), disclosure("EXPOSURE")),
+    ]).toEqual([
+      [["EXPOSURE", "true"]],
+      [
+        ["EXPOSURE", "true"],
+        ["EXPOSURE METER", "false"],
+      ],
+      true,
+      true,
+      null,
+      true,
+    ]);
+  });
+
+  it("opens the meter alone, the exposure's status standing under the row, the first column as it was", async () => {
+    const view = await setup({ store: await nominalStore(), viewPx: MAXIMISED_VIEW_PX });
+    await chooseScene(view, "PHASE TEST");
+    await toggleStyle(view);
+    await view.user.click(disclosure("EXPOSURE METER"));
+    // The fake image holds no body's lit side: LIT weighs nothing in it.
+    await view.user.click(
+      within(screen.getByRole("region", { name: "Exposure meter PRIMARY" })).getByRole("button", {
+        name: "LIT",
+      }),
+    );
+    await advanceReading(view, 1000);
+    const column = document.querySelector<HTMLElement>(".view__column--b");
+    expect([
+      region("Exposure PRIMARY"),
+      region("Exposure meter PRIMARY") !== null,
+      column?.querySelector(".view-folds__lines .view-folds__standing")?.textContent,
+      region("Camera PRIMARY") !== null,
+    ]).toEqual([null, true, "AUTO NOT AVAILABLE: NO LIT SIDE", true]);
+  });
+
+  it("opens EXPOSURE again when the meter's panel folds", async () => {
+    const view = await setup({ store: await nominalStore(), viewPx: MAXIMISED_VIEW_PX });
+    await chooseScene(view, "PHASE TEST");
+    await toggleStyle(view);
+    await view.user.click(disclosure("EXPOSURE METER"));
+    await view.user.click(disclosure("EXPOSURE METER"));
+    expect([region("Exposure PRIMARY") !== null, region("Exposure meter PRIMARY")]).toEqual([
+      true,
+      null,
+    ]);
+  });
+
+  it("opens EXPOSURE again, alone in the row, when the meter goes", async () => {
+    const view = await setup({ store: await nominalStore(), viewPx: MAXIMISED_VIEW_PX });
+    await chooseScene(view, "PHASE TEST");
+    await toggleStyle(view);
+    await view.user.click(disclosure("EXPOSURE METER"));
+    await toggleStyle(view);
+    expect([region("Exposure PRIMARY") !== null, secondRow()]).toEqual([
+      true,
+      [["EXPOSURE", "true"]],
+    ]);
+  });
+
+  it("opens EXPOSURE each time the column starts to fold again", async () => {
+    const view = await setup({ store: await nominalStore(), viewPx: MAXIMISED_VIEW_PX });
+    await chooseScene(view, "PHASE TEST");
+    await toggleStyle(view);
+    await view.user.click(disclosure("EXPOSURE METER"));
+    view.resizeView(FULL_VIEW_PX);
+    view.resizeView(MAXIMISED_VIEW_PX);
+    expect([region("Exposure PRIMARY") !== null, region("Exposure meter PRIMARY")]).toEqual([
+      true,
+      null,
+    ]);
+  });
+
+  it("gives the focus to INHIBIT when the white balance goes from under it", async () => {
+    // An instrument's photorealistic image alone stands the white balance beside a wireframe primary.
+    const view = await setup({ store: await nominalStore() });
+    await chooseScene(view, "PHASE TEST");
+    await openInstrument(view, "INSTRUMENT 1");
+    await controlsAt(view, "INSTRUMENT 1");
+    await toggleStyle(view);
+    within(screen.getByRole("region", { name: "Exposure PRIMARY" }))
+      .getByRole("button", { name: "HOST" })
+      .focus();
+    await toggleStyle(view);
+    expect([
+      within(screen.getByRole("region", { name: "Exposure PRIMARY" })).queryByRole("button", {
+        name: "HOST",
+      }),
+      document.activeElement ===
+        within(screen.getByRole("region", { name: "Exposure PRIMARY" })).getByRole("button", {
+          name: "8 INHIBIT",
+        }),
+    ]).toEqual([null, true]);
+  });
+
+  it("opens the panel holding the focus on a resize into its folding range", async () => {
+    const view = await setup({ store: await nominalStore() });
+    await chooseScene(view, "PHASE TEST");
+    await toggleStyle(view);
+    const lit = within(screen.getByRole("region", { name: "Exposure meter PRIMARY" })).getByRole(
+      "button",
+      { name: "LIT" },
+    );
+    await view.user.click(lit);
+    view.resizeView(MAXIMISED_VIEW_PX);
+    expect([
+      region("Exposure meter PRIMARY") !== null,
+      region("Exposure PRIMARY"),
+      document.activeElement === lit,
+    ]).toEqual([true, null, true]);
+  });
+
+  it("gives the focus to INHIBIT when the open meter goes, EXPOSURE opening again", async () => {
+    const view = await setup({ store: await nominalStore(), viewPx: MAXIMISED_VIEW_PX });
+    await chooseScene(view, "PHASE TEST");
+    await toggleStyle(view);
+    await view.user.click(disclosure("EXPOSURE METER"));
+    await view.user.click(
+      within(screen.getByRole("region", { name: "Exposure meter PRIMARY" })).getByRole("button", {
+        name: "LIT",
+      }),
+    );
+    // Back to the wireframe: the meter's control, and its panel, go.
+    await toggleStyle(view);
+    expect([
+      region("Exposure meter PRIMARY"),
+      document.activeElement ===
+        within(screen.getByRole("region", { name: "Exposure PRIMARY" })).getByRole("button", {
+          name: "8 INHIBIT",
+        }),
+    ]).toEqual([null, true]);
+  });
+});
+
 describe("VIEW's compact layout (R07.T19.b)", () => {
   it("folds INSTRUMENTS to its title row and opens CAMERA alone when it mounts", async () => {
     await compact();
@@ -340,15 +519,74 @@ describe("VIEW's compact layout (R07.T19.b)", () => {
     ]).toEqual([[true, null], null, true]);
   });
 
-  it("offers EXPOSURE METER, last, only beside a drawn photorealistic image", async () => {
+  it("offers WHITE BALANCE and EXPOSURE METER, last, only beside a drawn photorealistic image", async () => {
     const view = await compact(await nominalStore());
     const wireframe = disclosures().map(([name]) => name);
     await chooseScene(view, "PHASE TEST");
     await toggleStyle(view);
     expect([wireframe, disclosures().map(([name]) => name)]).toEqual([
       ["Instruments", "CAMERA", "STYLE", "EXPOSURE"],
-      ["Instruments", "CAMERA", "STYLE", "EXPOSURE", "EXPOSURE METER"],
+      ["Instruments", "CAMERA", "STYLE", "EXPOSURE", "WHITE BALANCE", "EXPOSURE METER"],
     ]);
+  });
+
+  it("folds the white balance as a part of its own, out of the exposure panel (the UX ruling, 2026-11-18)", async () => {
+    const view = await compact(await nominalStore());
+    await chooseScene(view, "PHASE TEST");
+    await toggleStyle(view);
+    await view.user.click(disclosure("EXPOSURE"));
+    const inExposure = within(region("Exposure PRIMARY") ?? document.body).queryByText(
+      "WHITE BALANCE",
+    );
+    await view.user.click(disclosure("WHITE BALANCE"));
+    const balance = screen.getByRole("region", { name: "White balance PRIMARY" });
+    expect([
+      inExposure,
+      region("Exposure PRIMARY"),
+      within(balance).getByRole("button", { name: "HOST" }).getAttribute("aria-pressed"),
+      // Its button between EXPOSURE's and EXPOSURE METER's, as its panel stands between theirs.
+      follows(disclosure("WHITE BALANCE"), disclosure("EXPOSURE")) &&
+        follows(disclosure("EXPOSURE METER"), disclosure("WHITE BALANCE")),
+    ]).toEqual([null, null, "true", true]);
+  });
+
+  it("keeps the white balance in the exposure panel in the full layout", async () => {
+    const view = await setup({ store: await nominalStore() });
+    await chooseScene(view, "PHASE TEST");
+    await toggleStyle(view);
+    expect([
+      within(screen.getByRole("region", { name: "Exposure PRIMARY" }))
+        .getByRole("button", { name: "HOST" })
+        .getAttribute("aria-pressed"),
+      region("White balance PRIMARY"),
+    ]).toEqual(["true", null]);
+  });
+
+  it("runs the folded panels' standing lines on as one line, each part after a middle dot (the UX ruling, 2026-11-18)", async () => {
+    // PHASE TEST in its wireframe: no own ship, and no image to meter.
+    const view = await compact(await nominalStore());
+    await chooseScene(view, "PHASE TEST");
+    await view.user.click(disclosure("STYLE"));
+    const noShip = screen.getByText(statusLine("NO OWN SHIP: SEAT and CHASE need one"), {
+      selector: ".view-folds__standing",
+    });
+    const noImage = screen.getByText(
+      (_, element) =>
+        element?.classList.contains("view-folds__standing") === true &&
+        element.textContent === "AUTO NOT AVAILABLE: NO IMAGE TO METER",
+    );
+    const side = document.querySelector<HTMLElement>(".view__side");
+    expect([
+      // One run of lines, the second after the first.
+      noShip.parentElement?.parentElement === noImage.parentElement?.parentElement,
+      follows(noImage, noShip),
+      // Each dot is seen, not read.
+      side === null
+        ? null
+        : within(side)
+            .getAllByText("·")
+            .map((dot) => dot.getAttribute("aria-hidden")),
+    ]).toEqual([true, true, ["true", "true"]]);
   });
 
   it("gives the focus and the place of the meter's panel to CAMERA when the meter goes", async () => {
@@ -368,6 +606,36 @@ describe("VIEW's compact layout (R07.T19.b)", () => {
       region("Camera PRIMARY") !== null,
       document.activeElement === disclosure("CAMERA"),
     ]).toEqual([null, true, true]);
+  });
+
+  it("opens WHITE BALANCE, its button taking the focus, on a switch from the full layout with the focus in it", async () => {
+    const view = await setup({ store: await nominalStore() });
+    await chooseScene(view, "PHASE TEST");
+    await toggleStyle(view);
+    within(screen.getByRole("region", { name: "Exposure PRIMARY" }))
+      .getByRole("button", { name: "HOST" })
+      .focus();
+    view.resizeView(COMPACT_VIEW_PX);
+    expect([
+      region("White balance PRIMARY") !== null,
+      document.activeElement === disclosure("WHITE BALANCE"),
+    ]).toEqual([true, true]);
+  });
+
+  it("gives INHIBIT the focus on a switch to the full layout from the white balance's own panel", async () => {
+    const view = await compact(await nominalStore());
+    await chooseScene(view, "PHASE TEST");
+    await toggleStyle(view);
+    await view.user.click(disclosure("WHITE BALANCE"));
+    within(screen.getByRole("region", { name: "White balance PRIMARY" }))
+      .getByRole("button", { name: "HOST" })
+      .focus();
+    view.resizeView(FULL_VIEW_PX);
+    expect(document.activeElement).toBe(
+      within(screen.getByRole("region", { name: "Exposure PRIMARY" })).getByRole("button", {
+        name: "8 INHIBIT",
+      }),
+    );
   });
 
   it("opens the panel that holds the focus on a switch from the full layout", async () => {

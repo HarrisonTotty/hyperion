@@ -1532,3 +1532,6 @@ Task records as built: [11-surface-detail-clouds-oceans-rings-stills/records/](1
   the forward pass); T2.c's decoration sets are one `texture_2d_array`, a layer a material; T7.c's
   cloud shadow is its own texture, the room made by moving `phase_factor_table` (`rgba32float`)
   into the resolve frame as the lights were, which is bit for bit.
+- **VIEW's compact column at 1280 × 720 still cuts compound states** (2026-11-18; must fix, the
+  guide's Accessibility): up to 614.6 px in its 559 px box (`CAMERA`'s worst with a two-line stills
+  line). The owner's guide change: a give-way order at the floor, or shorter away stills lines.

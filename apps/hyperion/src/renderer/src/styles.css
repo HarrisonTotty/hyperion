@@ -5523,8 +5523,10 @@ select.form-field__input:not([aria-disabled="true"]):hover {
 /*
  * The compact layout's row of disclosure buttons under the list (decision-r07-t19-layout, item 1b):
  * display controls, each naming its panel, the open one's chevron pointing down. Set a little
- * tighter than other controls, at the guide's least letter spacing, so that the four names stand
- * on one line in the 26rem column, `EXPOSURE METER` included (about 407 px of 416, measured).
+ * tighter than other controls, at the guide's least letter spacing, so that four names stand on
+ * one line in the 26rem column, `EXPOSURE METER` included (about 407 px of 416, measured); with
+ * `STILLS` and `WHITE BALANCE` beside a photorealistic image it wraps to a second line, which the
+ * measured heights hold (R11.T10.b's follow-up, 2026-11-18). The full layout's rows use it too.
  */
 .view-folds {
   display: flex;
@@ -5542,6 +5544,46 @@ select.form-field__input:not([aria-disabled="true"]):hover {
 /* A folded panel's fault or status, standing under the row while its panel is folded. */
 .view__side .view-folds__standing {
   flex: none;
+  margin: 0;
+}
+
+/*
+ * The folded panels' standing lines under a row, run on as one line where they fit, each part after
+ * a middle dot that leads it, wrapping between parts, as MAXIMIZE VIEW's foot sets them (the UX
+ * ruling, 2026-11-18), so that no dot ends a line.
+ */
+.view-folds__lines {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 0.5rem;
+  min-width: 0;
+  font-size: 0.875rem;
+}
+
+.view-folds__part {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+/* A part longer than the column wraps within itself, after its dot. */
+.view__side .view-folds__part > .view-folds__standing {
+  flex: 0 1 auto;
+}
+
+.view-folds__dot {
+  color: var(--text-muted);
+}
+
+.view-folds__lines > .view-folds__part:first-child > .view-folds__dot {
+  display: none;
+}
+
+/* The compact layout's white balance in a panel of its own, its reading under the title. */
+.view-balance > .view-exposure__balance {
   margin: 0;
 }
 

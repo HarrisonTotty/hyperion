@@ -11,8 +11,9 @@ import type { ElementSize } from "../../lib/useElementSize";
  * `full`, the stage beside two side columns (`Instruments`, `Targets` and `Camera`, with `Stills`
  * folding in `Camera`'s place behind a row of two disclosure buttons where it stands; then the
  * `CONTROLS` view's `Style`, `Exposure` and `Exposure meter`, decision-r07-t19b-exposure-fit item
- * 2); or `compact`, one column whose `Camera`, `Stills`, `Style`, `Exposure` and `Exposure meter`
- * panels fold behind a row of disclosure buttons, one open at a time.
+ * 2, the last two folding behind a row of their own below {@link FULL_WHOLE_MIN_HEIGHT_REM}); or
+ * `compact`, one column whose `Camera`, `Stills`, `Style`, `Exposure`, `White balance` and
+ * `Exposure meter` panels fold behind a row of disclosure buttons, one open at a time.
  */
 export type ViewLayout = "full" | "compact";
 
@@ -32,10 +33,10 @@ export const FULL_MIN_WIDTH_REM = 99;
 
 /**
  * The least height of the `.view` box for the full layout, rem: the taller column's tallest state
- * with the list at two rows, rounded up to the next 0.25 rem, as measured at 1920 × 1080
- * (P05.T13's hidden runs, after R07.T19.d's, 16 px to the rem, the side column's line box 1.25),
- * with the `STYLE` panel's `BASELINE` row added by arithmetic (plan R10, R10.T12.a;
- * decision-r10-t12a-scope §3.3).
+ * with the list at two rows, the second column folded as it folds below
+ * {@link FULL_WHOLE_MIN_HEIGHT_REM}, rounded up to the next 0.25 rem, as measured hidden and
+ * offscreen (plan R11, R11.T10.b's follow-up, 2026-11-18: B612 as shipped, 16 px to the rem, the
+ * side column's line box 1.25): the first column's, 813.5 px.
  *
  * @remarks
  * The first column's tallest, 730.5 px: `Instruments` 202.5 px with both closed, `Targets` 173 px
@@ -74,9 +75,15 @@ export const FULL_MIN_WIDTH_REM = 99;
  *   two-line reason, and a panel of its own would have stood at it, 839.5 px.
  * - **`STILLS`** (plan R11, R11.T10.b; the UX ruling, 2026-11-18) shares the first column's last
  *   place with `Camera` behind a row of two disclosure buttons, so the place is the taller of the
- *   two: by estimate from the CSS and B612's metrics, not measured, the first column's tallest is
- *   then 813.5 px, `Camera` at its tallest under the row and a two-line stills line, so 51 rem.
- *   Laid out last in the second column, the panel would have taken it to 905 to 1,049 px.
+ *   two. Laid out last in the second column, the panel would have taken it to 905 to 1,049 px.
+ * - **Measured** (R11.T10.b's follow-up, 2026-11-18; the parts above are from earlier runs). The
+ *   first column's tallest is 813.5 px: `Instruments` 202.5 px, `Targets` at two rows under its
+ *   two-line head 173 px, the `CAMERA` `STILLS` row 32 px, the stills' two-line line 35 px and
+ *   `Camera` at its worst 339 px, with four 0.5 rem gaps; at its 10 rem floor the list held less
+ *   than two rows at 800.5 px. The second column whole is 899 px, so it folds below
+ *   {@link FULL_WHOLE_MIN_HEIGHT_REM}, where its tallest is 763 px: `Style` 182.5 px, its row of
+ *   `EXPOSURE` and `EXPOSURE METER` 32 px and the exposure at its worst 532.5 px, two gaps. The
+ *   51 rem estimate holds.
  */
 export const FULL_MIN_HEIGHT_REM = 51;
 
@@ -86,6 +93,37 @@ export const FULL_MIN_HEIGHT_REM = 51;
  * item 2).
  */
 export const FULL_MIN_HEIGHT_BOUND_REM = 52.5;
+
+/**
+ * The least height of the `.view` box at which the full layout's second column stands whole, rem;
+ * below it, from {@link FULL_MIN_HEIGHT_REM}, its `Exposure` and `Exposure meter` panels share the
+ * column's last place behind a row of their two disclosure buttons, one open (plan R11,
+ * R11.T10.b's follow-up; the UX ruling, 2026-11-18, after R15.T6's fold).
+ *
+ * @remarks
+ * The second column's tallest state whole, rounded up to the next 0.25 rem, as measured hidden and
+ * offscreen (2026-11-18; B612 as shipped, 16 px to the rem): 899 px, `Style` 182.5 px with an
+ * instrument's two-line `QUALITY LOW` refusal and the `BASELINE` row, the exposure 532.5 px at
+ * `INHIBITED · OPERATOR` with `LIT` weighing nothing and a refused entry, its `WHITE BALANCE`
+ * 95 px under its 0.75 rem margin, the meter with its status in the reading's place 168 px, and two
+ * 0.5 rem gaps. A 1920 × 1080 window's box, 919 px in the client (57.4 rem), stands whole,
+ * unchanged; a maximised one's, 853 px, folds. Chosen from the box's size alone, as
+ * {@link viewLayout} is, so that nothing moves when the style or a reason changes; a task that
+ * would take the whole column past 57.25 rem asks for a ruling first.
+ */
+export const FULL_WHOLE_MIN_HEIGHT_REM = 56.25;
+
+/**
+ * Whether the full layout's second column folds its `Exposure` and `Exposure meter`, one open: in
+ * the full layout of a `.view` box under {@link FULL_WHOLE_MIN_HEIGHT_REM} tall, never before the
+ * box is measured.
+ */
+export function secondColumnFolds(size: ElementSize | null): boolean {
+  if (size === null || !(size.remPx > 0) || viewLayout(size) !== "full") {
+    return false;
+  }
+  return size.heightPx < FULL_WHOLE_MIN_HEIGHT_REM * size.remPx;
+}
 
 /**
  * The layout of a `.view` box of `size`: `full` where it is at least {@link FULL_MIN_WIDTH_REM}
@@ -106,11 +144,30 @@ export function viewLayout(size: ElementSize | null): ViewLayout {
     : "compact";
 }
 
-/** A side panel that folds in the compact layout. */
-export type FoldPanel = "instruments" | "camera" | "style" | "exposure" | "meter" | "stills";
+/**
+ * A side panel that folds in the compact layout: `balance` is the exposure's `WHITE BALANCE`, a
+ * part of its own there alone, which the full layout keeps in the exposure panel (the UX ruling,
+ * 2026-11-18).
+ */
+export type FoldPanel =
+  "instruments" | "camera" | "style" | "exposure" | "balance" | "meter" | "stills";
 
 /** The panel open when the display mounts, and again when the one open folds. */
 export const DEFAULT_FOLD: FoldPanel = "camera";
+
+/** A panel of the full layout's second column that folds below {@link FULL_WHOLE_MIN_HEIGHT_REM}. */
+export type SecondColumnFold = "exposure" | "meter";
+
+/**
+ * The full layout's second column's panel open each time it starts to fold, but the one holding the
+ * focus, and again when the one open folds ({@link secondColumnFolds}).
+ */
+export const SECOND_COLUMN_FOLD: SecondColumnFold = "exposure";
+
+/** Whether `panel` folds in the full layout's second column. */
+export function inSecondColumnFold(panel: FoldPanel | null): panel is SecondColumnFold {
+  return panel === "exposure" || panel === "meter";
+}
 
 /**
  * The panel open once `panel`'s disclosure button is pressed while `open` is: opening another folds
@@ -121,17 +178,31 @@ export function toggledFold(open: FoldPanel, panel: FoldPanel): FoldPanel {
 }
 
 /**
+ * The second column's panel open once `panel`'s disclosure button is pressed while `open` is, as
+ * {@link toggledFold} has it, `EXPOSURE` opening again when the open one folds.
+ */
+export function toggledSecondFold(
+  open: SecondColumnFold,
+  panel: SecondColumnFold,
+): SecondColumnFold {
+  return panel === open ? SECOND_COLUMN_FOLD : panel;
+}
+
+/**
  * The row of disclosure buttons under the list, by the panels' own names, in the panels' order:
- * `STILLS` (plan R11, R11.T10.c) after `CAMERA`, whose place it shares, and `EXPOSURE METER`, which
- * stands only while its panel would, last, so that nothing moves. In the full layout the row holds
- * `CAMERA` and `STILLS` alone, where `STILLS` stands (plan R11, R11.T10.b; the UX ruling,
- * 2026-11-18).
+ * `STILLS` (plan R11, R11.T10.c) after `CAMERA`, whose place it shares; `WHITE BALANCE` after
+ * `EXPOSURE` and `EXPOSURE METER` last, which stand only beside a photorealistic image, the white
+ * balance whenever the meter does, so that nothing moves (the UX ruling, 2026-11-18). In the full
+ * layout the first column's row holds `CAMERA` and `STILLS` alone, where `STILLS` stands (plan R11,
+ * R11.T10.b; the UX ruling, 2026-11-18), and the second column's, below
+ * {@link FULL_WHOLE_MIN_HEIGHT_REM}, `EXPOSURE` and `EXPOSURE METER`.
  */
 export const FOLD_BUTTONS: ReadonlyArray<{ readonly panel: FoldPanel; readonly label: string }> = [
   { panel: "camera", label: "CAMERA" },
   { panel: "stills", label: "STILLS" },
   { panel: "style", label: "STYLE" },
   { panel: "exposure", label: "EXPOSURE" },
+  { panel: "balance", label: "WHITE BALANCE" },
   { panel: "meter", label: "EXPOSURE METER" },
 ];
 

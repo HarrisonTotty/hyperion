@@ -6,7 +6,12 @@ import {
   FULL_MIN_HEIGHT_BOUND_REM,
   FULL_MIN_HEIGHT_REM,
   FULL_MIN_WIDTH_REM,
+  FULL_WHOLE_MIN_HEIGHT_REM,
+  inSecondColumnFold,
+  SECOND_COLUMN_FOLD,
+  secondColumnFolds,
   toggledFold,
+  toggledSecondFold,
   viewLayout,
 } from "./viewLayout";
 
@@ -85,8 +90,21 @@ describe("VIEW's full layout's least height (R07.T19.b's follow-up)", () => {
     ]);
   });
 
-  it("takes the first column with STILLS sharing CAMERA's place, 813.5 px by estimate, to 51 rem (plan R11, R11.T10.b)", () => {
-    expect([FULL_MIN_HEIGHT_REM, Math.ceil(813.5 / 16 / 0.25) * 0.25]).toEqual([51, 51]);
+  it("takes the first column with STILLS sharing CAMERA's place, 813.5 px measured, to 51 rem (plan R11, R11.T10.b)", () => {
+    // Hidden and offscreen, 2026-11-18: Instruments 202.5, Targets at two rows 173, the CAMERA
+    // STILLS row 32, the stills' two-line line 35 and Camera at its worst 339 px, four gaps.
+    expect([
+      202.5 + 173 + 32 + 35 + 339 + 4 * 8,
+      FULL_MIN_HEIGHT_REM,
+      Math.ceil(813.5 / 16 / 0.25) * 0.25,
+    ]).toEqual([813.5, 51, 51]);
+  });
+
+  it("holds the second column folded within it, 763 px measured (R11.T10.b's follow-up)", () => {
+    // Style 182.5, the EXPOSURE row 32 and the exposure at its worst 532.5 px, two gaps.
+    const foldedPx = 182.5 + 32 + 532.5 + 2 * 8;
+    expect(foldedPx).toBe(763);
+    expect(foldedPx).toBeLessThanOrEqual(FULL_MIN_HEIGHT_REM * 16);
   });
 
   it("keeps every named box's layout at 51 rem: 1920 × 1080 at 100% and maximised full, 1600 × 900 and 1280 × 720 compact", () => {
@@ -96,6 +114,47 @@ describe("VIEW's full layout's least height (R07.T19.b's follow-up)", () => {
       viewLayout(box(1568, 742)),
       viewLayout(box(1248, 563)),
     ]).toEqual(["full", "full", "compact", "compact"]);
+  });
+});
+
+describe("VIEW's second column's whole height (R11.T10.b's follow-up; the UX ruling, 2026-11-18)", () => {
+  it("is the column's tallest state whole, 899 px measured, rounded up to 56.25 rem", () => {
+    // Style 182.5, the exposure at its worst with its white balance 532.5 and the meter 168 px, two
+    // gaps; measured 899.05 px.
+    expect([
+      182.5 + 532.5 + 168 + 2 * 8,
+      FULL_WHOLE_MIN_HEIGHT_REM,
+      Math.ceil(899.05 / 16 / 0.25) * 0.25,
+    ]).toEqual([899, 56.25, 56.25]);
+  });
+
+  it("stays under 57.25 rem, so that a 1920 × 1080 window's 919 px box stands whole", () => {
+    expect(FULL_WHOLE_MIN_HEIGHT_REM).toBeLessThanOrEqual(57.25);
+    expect(secondColumnFolds(box(1888, 919))).toBe(false);
+  });
+
+  it("folds in a maximised 1920 × 1080 window's 853 px box and down to the full layout's least height", () => {
+    expect([
+      secondColumnFolds(box(1888, 853)),
+      secondColumnFolds(box(1888, FULL_MIN_HEIGHT_REM * 16)),
+      secondColumnFolds(box(1888, FULL_WHOLE_MIN_HEIGHT_REM * 16 - 1)),
+      secondColumnFolds(box(1888, FULL_WHOLE_MIN_HEIGHT_REM * 16)),
+    ]).toEqual([true, true, true, false]);
+  });
+
+  it("never folds before the box is measured, nor in the compact layout, whose own fold holds", () => {
+    expect([
+      secondColumnFolds(null),
+      secondColumnFolds(box(1568, 739)),
+      secondColumnFolds(box(1248, 559)),
+    ]).toEqual([false, false, false]);
+  });
+
+  it("follows the interface scale, reckoned in rem", () => {
+    expect([
+      secondColumnFolds(box(2360, 1149, 20)),
+      secondColumnFolds(box(2360, 1100, 20)),
+    ]).toEqual([false, true]);
   });
 });
 
@@ -112,5 +171,22 @@ describe("VIEW's folding panels (R07.T19.b)", () => {
       toggledFold("camera", "camera"),
       toggledFold("meter", "instruments"),
     ]).toEqual(["style", "exposure", "camera", "camera", "instruments"]);
+  });
+
+  it("opens the second column's EXPOSURE again when its open panel folds", () => {
+    expect([
+      SECOND_COLUMN_FOLD,
+      toggledSecondFold("exposure", "meter"),
+      toggledSecondFold("meter", "meter"),
+      toggledSecondFold("exposure", "exposure"),
+    ]).toEqual(["exposure", "meter", "exposure", "exposure"]);
+  });
+
+  it("folds EXPOSURE and EXPOSURE METER alone in the second column", () => {
+    expect(
+      (["camera", "stills", "style", "exposure", "balance", "meter", null] as const).map((panel) =>
+        inSecondColumnFold(panel),
+      ),
+    ).toEqual([false, false, false, true, false, true, false]);
   });
 });
