@@ -328,7 +328,10 @@ export interface GpuMemoryFigures {
    */
   readonly residentPeakBytes: number;
   readonly totalPeakBytes: number | null;
-  /** Σ resident − ½ Σ `drm-shared-<region>`, at its peak: a lower bound on the peak resident. */
+  /**
+   * Over each region, Σ resident less Σ `drm-shared-<region>` plus the largest client's shared, at
+   * its peak: a lower bound on the peak resident, which counts a buffer every client holds once.
+   */
   readonly residentLowerBoundBytes: number | null;
 }
 

@@ -40,6 +40,7 @@ import type {
   PerfDescribedView,
   PerfEnd,
   PerfRunDescription,
+  PerfTallyRelease,
   SpikeSegmentSpan,
 } from "../../../../preload/api";
 import type { AllocationEvent } from "../engine/memory";
@@ -367,6 +368,12 @@ export class PerfSceneRun implements PerfSceneSink {
   readonly #failed: Promise<never>;
   #rejectFailed: (error: Error) => void = () => undefined;
   #finished = false;
+  /**
+   * The repetition's frees since its last frame: one frame's frees are one release, so that several
+   * smaller ones that together reach {@link RELEASE_MIN_BYTES} open the kernel's settle window
+   * (research-leans-54, ruling 3's finding).
+   */
+  #frees: PerfTallyRelease | null = null;
 
   constructor(deps: PerfSceneRunDeps) {
     this.#deps = deps;
@@ -479,6 +486,7 @@ export class PerfSceneRun implements PerfSceneSink {
       firstEngineFrame: driver.resolveCount(),
       previousRafMs: this.#lastRafMs,
     });
+    this.#frees = null;
     const flown = new Promise<MeasuredSpan>((resolve) => {
       this.#phase = {
         kind: "repetition",
@@ -575,6 +583,7 @@ export class PerfSceneRun implements PerfSceneSink {
     if (phase.flown) {
       return;
     }
+    this.#releaseFrees(phase.metrics);
     if (!phase.started) {
       phase.started = true;
       const cached = this.#driver?.cachedPatches() ?? 0;
@@ -643,19 +652,30 @@ export class PerfSceneRun implements PerfSceneSink {
     }
   }
 
-  /** An allocation event: a release of {@link RELEASE_MIN_BYTES} or more within a repetition. */
+  /**
+   * An allocation event: a free within a repetition, summed with the others since its last frame
+   * and told at its next as one release, at the first's time, where they reach
+   * {@link RELEASE_MIN_BYTES}.
+   */
   allocation(event: AllocationEvent): void {
     const phase = this.#phase;
-    if (
-      phase.kind === "repetition" &&
-      event.kind === "destroyed" &&
-      event.bytes >= RELEASE_MIN_BYTES
-    ) {
-      const { clock } = this.#deps;
-      phase.metrics.release({
-        atEpochMs: clock.timeOriginMs() + clock.nowMs(),
-        bytes: event.bytes,
-      });
+    if (phase.kind !== "repetition" || phase.flown || event.kind !== "destroyed") {
+      return;
+    }
+    const { clock } = this.#deps;
+    const frees = this.#frees;
+    this.#frees =
+      frees === null
+        ? { atEpochMs: clock.timeOriginMs() + clock.nowMs(), bytes: event.bytes }
+        : { atEpochMs: frees.atEpochMs, bytes: frees.bytes + event.bytes };
+  }
+
+  /** The frees since the last frame, told as one release where they reach the least one. */
+  #releaseFrees(metrics: RepetitionMetrics): void {
+    const frees = this.#frees;
+    this.#frees = null;
+    if (frees !== null && frees.bytes >= RELEASE_MIN_BYTES) {
+      metrics.release(frees);
     }
   }
 

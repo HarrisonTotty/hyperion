@@ -36,7 +36,7 @@
  *
  * The memory samplers (R12.T3.b; Design note 6), read at 1 Hz by the runner: the GPU process's
  * DRM fdinfo ({@link sampleGpuMemory}, over R05's `fdinfo.ts`), summed per distinct client with
- * the lower bound Σresident − ½·Σshared beside it; the display server's ({@link
+ * the lower bound beside it ({@link residentLowerBoundOf}); the display server's ({@link
  * sampleDisplayServer}, Xorg's fdinfo where it is readable); `nvidia-smi -q -x`'s `process_info`
  * of the GPU process and the device's `memory.used` less a baseline taken before launch
  * ({@link sampleNvidia}), the headline on NVIDIA, whose driver writes no DRM keys, where the
@@ -1083,7 +1083,10 @@ export interface DrmMemorySample {
   readonly totalBytes: number | null;
   /** Σ `drm-shared-<region>`; `null` where no client gives one. */
   readonly sharedBytes: number | null;
-  /** Σresident − ½·Σshared: Design note 6's lower bound, the resident figure where none is shared. */
+  /**
+   * Design note 6's lower bound ({@link residentLowerBoundOf}): the resident figure where none is
+   * shared.
+   */
   readonly residentLowerBoundBytes: number;
   /**
    * Σ of each client's render engine time, ns, cumulative (`drm-engine-render`, amdgpu's
@@ -1100,6 +1103,46 @@ function sumOf(record: Readonly<Record<string, number>>): number {
     sum += value;
   }
   return sum;
+}
+
+/**
+ * Design note 6's lower bound on what `clients` hold resident, bytes (research-leans-54, ruling 3):
+ * over each region, Σ resident less Σ `drm-shared` plus the largest client's shared.
+ *
+ * @remarks
+ * A buffer the clients share is in each holder's resident and shared bytes, so Σ resident counts it
+ * once a holder: less Σ shared and plus the most any one client shares, a buffer every client holds
+ * counts once, and one shared only outside the set (with Xorg) counts in full. Where they share
+ * different buffers the largest stands for their union, so the bound stays low. The earlier
+ * Σ resident − ½·Σ shared read a buffer of k ≥ 3 holders as k/2 copies, and one shared outside the
+ * set as half of one.
+ */
+export function residentLowerBoundOf(
+  clients: ReadonlyArray<Pick<DrmClient, "residentBytes" | "sharedBytes">>,
+): number {
+  const regions = new Set<string>();
+  for (const client of clients) {
+    for (const region of Object.keys(client.residentBytes)) {
+      regions.add(region);
+    }
+    for (const region of Object.keys(client.sharedBytes)) {
+      regions.add(region);
+    }
+  }
+  let bound = 0;
+  for (const region of regions) {
+    let resident = 0;
+    let shared = 0;
+    let mostShared = 0;
+    for (const client of clients) {
+      const sharedHere = client.sharedBytes[region] ?? 0;
+      resident += client.residentBytes[region] ?? 0;
+      shared += sharedHere;
+      mostShared = Math.max(mostShared, sharedHere);
+    }
+    bound += resident - shared + mostShared;
+  }
+  return bound;
 }
 
 /**
@@ -1147,7 +1190,7 @@ export function drmSampleOf(
     residentBytes,
     totalBytes,
     sharedBytes,
-    residentLowerBoundBytes: residentBytes - (sharedBytes ?? 0) / 2,
+    residentLowerBoundBytes: residentLowerBoundOf(withMemory),
     busyNs: busy.length === 0 ? null : busy.reduce((sum, ns) => sum + ns, 0),
     clients: withMemory.length,
     drivers: [...new Set(withMemory.map(({ driver }) => driver ?? "unknown"))].toSorted(),

@@ -595,13 +595,17 @@ describe("a perf run in the renderer", () => {
     expect(outcomes).toEqual([]);
   });
 
-  it("tells of each release of 16 MiB or more within a repetition, at the page's epoch time", async () => {
-    const { main } = await ran({ releases: [RELEASE_MIN_BYTES, RELEASE_MIN_BYTES - 1] }, [
-      "steady",
-    ]);
+  it("tells one frame's frees as one release where together they reach 16 MiB, at the first's time", async () => {
+    const half = RELEASE_MIN_BYTES / 2;
+    const { main } = await ran({ releases: [half, half] }, ["steady"]);
     expect(main.results[0]?.releases).toEqual([
       { atEpochMs: 1_763_400_000_000 + 1000, bytes: RELEASE_MIN_BYTES },
     ]);
+  });
+
+  it("tells no release of a frame whose frees stay below 16 MiB", async () => {
+    const { main } = await ran({ releases: [RELEASE_MIN_BYTES - 1] }, ["steady"]);
+    expect(main.results[0]?.releases).toEqual([]);
   });
 
   it("hands over the itemised tally's peaks and each height worker's memory", async () => {

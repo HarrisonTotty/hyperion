@@ -450,8 +450,9 @@ throttling in 35,900 s of uptime.
    need not exist; `drm-resident` counts pages that do (the probe: 256 MiB of textures showed 293.6
    MB total but 28.9 MB resident until cleared). So Σ`drm-resident-system0` is the headline against
    the ceiling, an upper bound because swapchain images shared between the GPU process's clients are
-   counted in each; the lower bound Σresident − ½·Σ`drm-shared-system0` is stated beside it (about 6
-   MB apart in the probe). A peak resident above the ceiling fails; a peak total above it is a
+   counted in each; the lower bound, over each region Σresident less Σ`drm-shared` plus the largest
+   client's shared (research-leans-54, ruling 3), so that a buffer every client holds counts once, is
+   stated beside it (about 6 MB apart in the probe). A peak resident above the ceiling fails; a peak total above it is a
    finding, since an untouched allocation can become resident at any time. Dawn frees a destroyed
    resource on a later device tick, so the kernel peak ignores the 2 s after a large release in the
    tally, and tally and kernel peaks are stated apart. Under X11 with no compositor, Xorg's fdinfo
