@@ -177,6 +177,7 @@ function reportOf(overrides: Partial<DescentSpikeReport> = {}): DescentSpikeRepo
     latePipelines: [{ label: "terrain.normals", kind: "compute", async: true, scriptTimeS: 21 }],
     adapterPeakBytes: 300 * MIB,
     canvas: { widthPx: 1280, heightPx: 720 },
+    deviceLosses: [],
     ...overrides,
   };
 }
@@ -385,6 +386,13 @@ function memoryFiles(): ResultsFiles & { readonly written: Map<string, string> }
   };
 }
 
+/** The summary's line of the run's device losses (plan R07, perf-bodies-pass), if it has one. */
+function deviceLossLine(results: DescentResults): string | undefined {
+  return summaryMarkdown(results)
+    .split("\n")
+    .find((text) => text.startsWith("- **Device losses:**"));
+}
+
 function rowOf(results: DescentResults, id: string): DescentResults["criteria"]["whole"][number] {
   const found = results.criteria.whole.find((entry) => entry.id === id);
   if (found === undefined) {
@@ -575,6 +583,56 @@ describe("a results file", () => {
       ["run.pacing.framePacing is neither rate nor display"],
       [],
     ]);
+  });
+
+  it("marks each device loss of the run at its script time in gpu.deviceLosses and the summary, and none as none (plan R07, perf-bodies-pass)", () => {
+    const losses: DescentSpikeReport["deviceLosses"] = [
+      {
+        scriptTimeS: 1163.2,
+        kind: "device-lost",
+        reason: "unknown",
+        message: "VK_ERROR_DEVICE_LOST",
+      },
+      { scriptTimeS: 1402, kind: "device-lost", reason: "unknown", message: "lost\n  again" },
+    ];
+    const lost = buildResults({
+      run: runOf(),
+      report: reportOf({ deviceLosses: losses }),
+      trace: traceOf(),
+      memory: MEMORY,
+    });
+    const held = buildResults({
+      run: runOf(),
+      report: reportOf(),
+      trace: traceOf(),
+      memory: MEMORY,
+    });
+    expect([lost.gpu.deviceLosses, deviceLossLine(lost), deviceLossLine(held)]).toEqual([
+      losses,
+      "- **Device losses:** 2, at 1,163.2 s (unknown: VK_ERROR_DEVICE_LOST) and 1,402.0 s (unknown: lost again)",
+      "- **Device losses:** none",
+    ]);
+  });
+
+  it("reads a version 10 file's device losses and a version 9 file without them, and refuses a malformed loss or a version 10 file without them (plan R07, perf-bodies-pass)", () => {
+    const loss = { scriptTimeS: -0.4, kind: "device-lost", reason: "unknown", message: "lost" };
+    const results = twoWindowResults();
+    const { deviceLosses: _losses, ...unmarked } = results.gpu;
+    const file = (version: number, gpu: object): unknown =>
+      JSON.parse(JSON.stringify({ ...results, version, gpu }));
+    const malformed = [
+      "gpu.deviceLosses[0] is not a device loss: a script time, device-lost, its reason and its message",
+    ];
+    expect([
+      validateResults(file(10, { ...unmarked, deviceLosses: [loss] })),
+      validateResults(file(9, unmarked)),
+      validateResults(file(10, unmarked)),
+      validateResults(file(10, { ...unmarked, deviceLosses: [{ ...loss, scriptTimeS: null }] })),
+      validateResults(
+        file(10, { ...unmarked, deviceLosses: [{ ...loss, kind: "gpu-process-gone" }] }),
+      ),
+      validateResults(file(10, { ...unmarked, deviceLosses: [{ ...loss, message: undefined }] })),
+    ]).toEqual([[], [], ["gpu.deviceLosses is not a list"], malformed, malformed, malformed]);
   });
 
   it("states a hidden run's missing presentation times and period, not a verdict on them", () => {
@@ -2455,7 +2513,7 @@ describe("the schema check", () => {
       JSON.stringify({ ...results, version: 1, memory: { samples: MEMORY, ...peaks } }),
     );
     expect(validateResults(v1)).toEqual([
-      "version is not 6 or 7 or 8 or 9",
+      "version is not 6 or 7 or 8 or 9 or 10",
       "memory.series is missing",
     ]);
   });
@@ -2794,9 +2852,9 @@ describe("the schema check", () => {
 
   it("refuses version 5", () => {
     const results = twoWindowResults();
-    expect(RESULTS_VERSION).toBe(9);
+    expect(RESULTS_VERSION).toBe(10);
     expect(validateResults(JSON.parse(JSON.stringify({ ...results, version: 5 })))).toEqual([
-      "version is not 6 or 7 or 8 or 9",
+      "version is not 6 or 7 or 8 or 9 or 10",
     ]);
   });
 
@@ -2866,11 +2924,11 @@ describe("the schema check", () => {
         ),
       ),
     ]).toEqual([
-      9,
+      10,
       geometry,
       [],
       [],
-      ["geometry is a version 7, 8 or 9 file's, not this version's"],
+      ["geometry is a version 7, 8, 9 or 10 file's, not this version's"],
       ["geometry is not the settings and each segment's counts, every figure of its kind"],
     ]);
     const markdown = summaryMarkdown(results);

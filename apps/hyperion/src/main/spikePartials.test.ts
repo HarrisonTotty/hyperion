@@ -80,6 +80,7 @@ function report(fromS: number, toS: number, labels = ["terrain"]): DescentSpikeR
     latePipelines: [],
     adapterPeakBytes: 0,
     canvas: { widthPx: 1920, heightPx: 1080 },
+    deviceLosses: [],
   };
 }
 

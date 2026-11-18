@@ -49,5 +49,6 @@ export function smallReport(): DescentSpikeReport {
     latePipelines: [{ label: "x", kind: "render", async: false, scriptTimeS: 12 }],
     adapterPeakBytes: 2048,
     canvas: { widthPx: 1280, heightPx: 720 },
+    deviceLosses: [],
   };
 }

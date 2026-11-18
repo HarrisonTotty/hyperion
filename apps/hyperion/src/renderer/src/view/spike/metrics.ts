@@ -108,12 +108,12 @@ export interface SpikeReportExtras {
 }
 
 /**
- * The report as the metrics give it: all of it but where script time starts, the trace's windows
- * and their boundary guard, which the run's control adds (`SpikeController`).
+ * The report as the metrics give it: all of it but where script time starts, the trace's windows,
+ * their boundary guard and the device losses, which the run's control adds (`SpikeController`).
  */
 export type SpikeMetricsReport = Omit<
   DescentSpikeReport,
-  "scriptStartMs" | "traceWindows" | "traceGuardS"
+  "scriptStartMs" | "traceWindows" | "traceGuardS" | "deviceLosses"
 >;
 
 /** The timer states from best to worst; a run reports the worst it saw. */

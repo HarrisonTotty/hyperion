@@ -297,15 +297,16 @@ export function readGeometryReport(value: unknown, version: 7 | 8 = 8): SpikeGeo
 
 /**
  * The problems of a results file's `geometry` block at `version` (`validateResults`): none where a
- * version 7, 8 or 9 file holds a well-formed one of its version or none (version 9's block is
- * version 8's; R07.T19 added the run's pacing), or a version 6 file none.
+ * version 7, 8, 9 or 10 file holds a well-formed one of its version or none (version 9's and 10's
+ * block is version 8's; R07.T19 added the run's pacing, plan R07's perf-bodies-pass its device
+ * losses), or a version 6 file none.
  */
 export function geometryResultsProblems(value: unknown, version: unknown): string[] {
   if (value === undefined) {
     return [];
   }
-  if (version !== 7 && version !== 8 && version !== 9) {
-    return ["geometry is a version 7, 8 or 9 file's, not this version's"];
+  if (version !== 7 && version !== 8 && version !== 9 && version !== 10) {
+    return ["geometry is a version 7, 8, 9 or 10 file's, not this version's"];
   }
   return readGeometryReport(value, version === 7 ? 7 : 8) === null
     ? ["geometry is not the settings and each segment's counts, every figure of its kind"]

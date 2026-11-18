@@ -126,15 +126,18 @@ export const RESULTS_SCHEMA = "hyperion.descent-spike.results";
  * R07.T19) adds `run.pacing`: the launch's `--frame-pacing` and the vsync period the run's
  * animation frames measure (`lib/vsyncPacing.ts`); and takes T as the vsyncs the pacing draws the
  * setting's rate on times the display's period. A version 8 file, and the native replay's, holds
- * none, and its T is the period, doubled on `low`.
+ * none, and its T is the period, doubled on `low`. Version 10 (plan R07, perf-bodies-pass) adds
+ * `gpu.deviceLosses`, every device the run lost, at its script time; a version 9 file, and every
+ * earlier one, holds none, its losses unrecorded.
  */
-export const RESULTS_VERSION = 9;
+export const RESULTS_VERSION = 10;
 
 /**
- * The versions {@link validateResults} reads: version 9's, version 8's without its pacing, version
- * 7's with its geometry's four settings, and version 6's without its geometry.
+ * The versions {@link validateResults} reads: version 10's, version 9's without its device losses,
+ * version 8's without its pacing, version 7's with its geometry's four settings, and version 6's
+ * without its geometry.
  */
-export const RESULTS_VERSIONS_READ: ReadonlyArray<number> = [6, 7, 8, RESULTS_VERSION];
+export const RESULTS_VERSIONS_READ: ReadonlyArray<number> = [6, 7, 8, 9, RESULTS_VERSION];
 
 /**
  * The largest file the repository accepts as added, bytes: pre-commit's `check-added-large-files`
@@ -899,7 +902,7 @@ export interface PassFigures {
 /** The results file of one run. */
 export interface DescentResults {
   readonly schema: typeof RESULTS_SCHEMA;
-  readonly version: 6 | 7 | 8 | typeof RESULTS_VERSION;
+  readonly version: 6 | 7 | 8 | 9 | typeof RESULTS_VERSION;
   readonly run: {
     readonly startedAt: string;
     readonly machine: RecordedMachine;
@@ -996,6 +999,12 @@ export interface DescentResults {
     readonly gpuProcess: Measured<GpuProcessFigures>;
     /** The GPU's clocks beside the memory series, or why they are missing. */
     readonly clocks: Measured<GpuClocks>;
+    /**
+     * Every device the run lost, in order, each at its script time (plan R07, perf-bodies-pass):
+     * none where the device held; absent from a file before version 10 and from the native
+     * replay's, which recorded no loss.
+     */
+    readonly deviceLosses?: DescentSpikeReport["deviceLosses"];
   };
   readonly mainThread: {
     /** Our code's time a frame (`performance.measure`), at the 95th percentile, ms. */
@@ -1751,6 +1760,7 @@ export function buildResults(input: ResultsInput): DescentResults {
       incompleteFrames,
       gpuProcess: pooled.value === null ? missing(pooled.reason) : pooled.value.gpuProcess,
       clocks,
+      deviceLosses: report.deviceLosses,
     },
     mainThread: {
       ourCodeP95Ms,
@@ -1950,7 +1960,7 @@ export function validateResults(value: unknown): string[] {
     checkLoadAverage(run, problems);
     const pacing = run["pacing"];
     if (
-      value["version"] === RESULTS_VERSION &&
+      (value["version"] === 9 || value["version"] === RESULTS_VERSION) &&
       (!isRecord(pacing) ||
         (pacing["framePacing"] !== "rate" && pacing["framePacing"] !== "display"))
     ) {
@@ -1988,13 +1998,14 @@ export function validateResults(value: unknown): string[] {
   checkGpuSlices(value, trace, problems);
   checkIncompleteFrames(value, problems);
   checkClocks(value, problems);
+  checkDeviceLosses(value, problems);
   checkUntimedPasses(value, problems);
   checkRestOfFrame(value, problems);
   // The measured sizes (R10.T14.b), where a `--sizes on` run wrote them: every other file has none.
   if (value["sizes"] !== undefined) {
     problems.push(...sizesResultsProblems(value["sizes"]));
   }
-  // A generated world's geometry (plan R14), in a version 7, 8 or 9 file alone.
+  // A generated world's geometry (plan R14), in a version 7, 8, 9 or 10 file alone.
   problems.push(...geometryResultsProblems(value["geometry"], value["version"]));
   // A whole-run null column without a reason is found by both checks.
   return [...new Set(problems)];
@@ -2023,6 +2034,36 @@ export function worldOfRun(run: Readonly<Record<string, unknown>>): {
     (style === "photorealistic" || style === "wireframe")
     ? { world, style }
     : null;
+}
+
+/**
+ * `gpu.deviceLosses` (plan R07, perf-bodies-pass): in a version 10 file, a list of losses, each at
+ * a finite script time, of kind `device-lost`, with its reason and message; a file of an earlier
+ * version, written before it, holds none.
+ */
+function checkDeviceLosses(value: Readonly<Record<string, unknown>>, problems: string[]): void {
+  const losses = childAt(value, ["gpu", "deviceLosses"]);
+  if (!isRecord(value["gpu"]) || (losses === undefined && value["version"] !== RESULTS_VERSION)) {
+    return;
+  }
+  if (!Array.isArray(losses)) {
+    problems.push("gpu.deviceLosses is not a list");
+    return;
+  }
+  losses.forEach((loss: unknown, i) => {
+    if (
+      !isRecord(loss) ||
+      typeof loss["scriptTimeS"] !== "number" ||
+      !Number.isFinite(loss["scriptTimeS"]) ||
+      loss["kind"] !== "device-lost" ||
+      typeof loss["reason"] !== "string" ||
+      typeof loss["message"] !== "string"
+    ) {
+      problems.push(
+        `gpu.deviceLosses[${i}] is not a device loss: a script time, device-lost, its reason and its message`,
+      );
+    }
+  });
 }
 
 /**
@@ -2895,6 +2936,22 @@ function describeTrace(trace: TraceRun): string {
   ].join("; ");
 }
 
+/**
+ * The run's device losses in words: `none`, or their count and each one's script time, reason and
+ * message, as `2, at 1,163.2 s (unknown: …) and 1,402.0 s (unknown: …)`, each message on one line.
+ */
+function describeDeviceLosses(losses: DescentSpikeReport["deviceLosses"]): string {
+  if (losses.length === 0) {
+    return "none";
+  }
+  const each = losses.map(
+    ({ scriptTimeS, reason, message }) =>
+      `${scriptTimeS.toLocaleString("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} s (${reason}: ${message.replace(/\s+/g, " ").trim()})`,
+  );
+  const last = each.at(-1) ?? "";
+  return `${losses.length}, at ${each.length === 1 ? last : `${each.slice(0, -1).join(", ")} and ${last}`}`;
+}
+
 /** The frames whose pass times are incomplete, in words. */
 function describeIncomplete({ dropped, partial, frames }: IncompleteFrames): string {
   return dropped + partial === 0
@@ -3022,6 +3079,9 @@ export function summaryMarkdown(results: DescentResults): string {
     `- **Trace:** ${textOr(run.trace, describeTrace)}`,
     `- **Incomplete pass times:** ${textOr(results.gpu.incompleteFrames, describeIncomplete)}`,
     `- **GPU clocks:** ${textOr(results.gpu.clocks, (clocks) => describeClocks(clocks, memory.series.tMs, run.warmupS))}`,
+    ...(results.gpu.deviceLosses === undefined
+      ? []
+      : [`- **Device losses:** ${describeDeviceLosses(results.gpu.deviceLosses)}`]),
     `- **Options:** ${Object.entries(run.options)
       .map(([key, value]) => `\`--${key} ${String(value)}\``)
       .join(" ")}`,

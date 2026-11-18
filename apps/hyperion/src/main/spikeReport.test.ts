@@ -44,6 +44,17 @@ describe("the spike report's check", () => {
     expect(readDescentSpikeReport(inFlight)?.frames.inFlightResolves).toEqual([0, 2, 1]);
   });
 
+  it("passes the device losses through, one before the script's first frame among them (plan R07, perf-bodies-pass)", () => {
+    const lost: DescentSpikeReport = {
+      ...smallReport(),
+      deviceLosses: [
+        { scriptTimeS: -0.4, kind: "device-lost", reason: "unknown", message: "before" },
+        { scriptTimeS: 1163.2, kind: "device-lost", reason: "unknown", message: "VK_ERROR" },
+      ],
+    };
+    expect(readDescentSpikeReport(lost)).toEqual(lost);
+  });
+
   it.each<[string, (r: DescentSpikeReport) => unknown]>([
     ["a non-object", () => "report"],
     ["a series of another length", (r) => ({ ...r, frames: { ...r.frames, ourCodeMs: [4] } })],
@@ -155,6 +166,20 @@ describe("the spike report's check", () => {
     [
       "a trace window with no failure field",
       (r) => ({ ...r, traceWindows: [{ startedMs: 0, stopRequestedMs: 100 }] }),
+    ],
+    ["no device losses", (r) => ({ ...r, deviceLosses: undefined })],
+    [
+      "a device loss with no script time",
+      (r) => ({ ...r, deviceLosses: [{ kind: "device-lost", reason: "unknown", message: "x" }] }),
+    ],
+    [
+      "a fault of another kind among the device losses",
+      (r) => ({
+        ...r,
+        deviceLosses: [
+          { scriptTimeS: 1, kind: "gpu-process-gone", reason: "unknown", message: "x" },
+        ],
+      }),
     ],
     ["no guard", (r) => ({ ...r, traceGuardS: undefined })],
     ["a negative guard", (r) => ({ ...r, traceGuardS: -1 })],

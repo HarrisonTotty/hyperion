@@ -20,12 +20,20 @@
  * A smoke hands its report to the same results call as a run: the main process checks the trace's
  * windows against it, frame by frame, writes no file, and answers the first failed window's
  * reason, which fails the smoke (decision-r05-trace-windows-2.md, addendum A).
+ *
+ * Every device loss the engine reports (`RenderEngine.onFault`) is kept at the clock's time, and
+ * each report and each part carries every one so far at its script time (plan R07,
+ * perf-bodies-pass): the engine recovers on a new device, so the run goes on, and the report is
+ * what marks the loss. A loss before the run's first frame is at a negative script time. A GPU
+ * process's crash reaches the graphics status store, not `onFault`; the losses of the devices it
+ * held, as the engine reports them, are the ones recorded.
  */
 
 import type {
   DescentSpikeReport,
   GraphicsLaunchMode,
   SpikeApi,
+  SpikeDeviceLoss,
   SpikeLaunch,
   SpikeTraceWindow,
 } from "../../../../preload/api";
@@ -170,6 +178,13 @@ interface WindowTimes {
   readonly failure: string | null;
 }
 
+/** A device loss the engine reported, at the controller's clock, `performance.now()` ms. */
+interface HeardLoss {
+  readonly atMs: number;
+  readonly reason: string;
+  readonly message: string;
+}
+
 /** The trace operation in flight: its start, or its cycle at a boundary, script seconds. */
 interface PendingTrace {
   readonly atBoundaryS: number | null;
@@ -221,6 +236,8 @@ export class SpikeController {
   #segmentEndsS: ReadonlyArray<number> = [];
   #nextSegment = 0;
   #partRefused = false;
+  /** The device losses the engine has reported, in order. */
+  readonly #deviceLosses: HeardLoss[] = [];
 
   constructor(deps: SpikeControllerDeps) {
     this.#deps = deps;
@@ -235,9 +252,12 @@ export class SpikeController {
 
   /**
    * The engine the run draws on: its pass times and allocations go to the recorder once the descent
-   * is prepared, and under `--sizes on` its allocations go to the measured sizes from now on.
+   * is prepared, under `--sizes on` its allocations go to the measured sizes from now on, and its
+   * device losses are kept for the report from now on, before the descent is prepared too.
+   *
+   * @returns The listeners' removal; disposing the engine removes them as well.
    */
-  engine(engine: Pick<RenderEngine, "onPassTimes" | "onAllocation">): () => void {
+  engine(engine: Pick<RenderEngine, "onPassTimes" | "onAllocation" | "onFault">): () => void {
     const offTimes = engine.onPassTimes((times: PassTimes) => {
       this.#recorder?.passTimes(times);
     });
@@ -246,10 +266,31 @@ export class SpikeController {
       this.#recorder?.allocation(event);
       sizes?.noteAllocation(event);
     });
+    const offFault = engine.onFault((fault) => {
+      // A refused shader or view is no loss; a GPU process's crash comes to the status store.
+      if (fault.kind === "device-lost") {
+        this.#deviceLosses.push({
+          atMs: this.#deps.nowMs(),
+          reason: fault.reason,
+          message: fault.message,
+        });
+      }
+    });
     return () => {
       offTimes();
       offAllocation();
+      offFault();
     };
+  }
+
+  /** The device losses so far, at their script times from `scriptStartMs`, ms. */
+  #deviceLossesFrom(scriptStartMs: number): SpikeDeviceLoss[] {
+    return this.#deviceLosses.map(({ atMs, reason, message }) => ({
+      scriptTimeS: (atMs - scriptStartMs) / 1000,
+      kind: "device-lost",
+      reason,
+      message,
+    }));
   }
 
   /**
@@ -435,6 +476,7 @@ export class SpikeController {
           scriptStartMs: sample.scriptStartMs,
           traceWindows: [],
           traceGuardS: TRACE_BOUNDARY_GUARD_S,
+          deviceLosses: this.#deviceLossesFrom(sample.scriptStartMs),
           ...(terrain === null
             ? {}
             : { terrain: { vertexPath: terrain.vertexPath, normals: terrain.normals } }),
@@ -548,6 +590,7 @@ export class SpikeController {
         scriptStartMs,
         traceWindows,
         traceGuardS: TRACE_BOUNDARY_GUARD_S,
+        deviceLosses: this.#deviceLossesFrom(scriptStartMs),
         ...(terrain === null
           ? {}
           : { terrain: { vertexPath: terrain.vertexPath, normals: terrain.normals } }),

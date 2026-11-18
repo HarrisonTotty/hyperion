@@ -112,6 +112,17 @@ describe("foldSpikeResult", () => {
     ]);
   });
 
+  it("reads version 10, whose device losses no record field holds", () => {
+    const file = fixture();
+    const gpu = file["gpu"];
+    if (typeof gpu !== "object" || gpu === null) throw new Error("no gpu");
+    const deviceLosses = [
+      { scriptTimeS: 1163.2, kind: "device-lost", reason: "unknown", message: "lost" },
+    ];
+    const record = foldSpikeResult({ ...file, version: 10, gpu: { ...gpu, deviceLosses } });
+    expect(record.source).toBe("descent-spike");
+  });
+
   it("keys the wireframe second view's pass to the instrument", () => {
     const record = foldSpikeResult({
       ...fixture(),

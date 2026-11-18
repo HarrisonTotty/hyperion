@@ -9,6 +9,7 @@ import type {
 } from "../../../../preload/api";
 import { TEST_SPIKE_LAUNCH } from "../../test/stubHyperionApi";
 import { goldenLevelTable } from "../../test/terrainFixtures";
+import type { GraphicsFault } from "../engine/status";
 import type { PassTimes } from "../engine/types";
 import { planetGeometry } from "../terrain/planet";
 import { timedPass } from "../../test/passTimes";
@@ -239,6 +240,7 @@ async function readRun(): Promise<
       return () => undefined;
     },
     onAllocation: () => () => undefined,
+    onFault: () => () => undefined,
   });
   run.controller.prepared(DESCENT);
   await vi.advanceTimersByTimeAsync(0);
@@ -310,6 +312,7 @@ describe("the spike's run control", () => {
         return () => undefined;
       },
       onAllocation: () => () => undefined,
+      onFault: () => () => undefined,
     });
     controller.prepared(DESCENT);
     // The trace's start resolves before the first frame, as it does in a run.
@@ -385,6 +388,58 @@ describe("the spike's run control", () => {
       frames: reports[0]?.frames.scriptTimesS.filter((t) => t < (through.at(-1) ?? 0)),
       geometry: false,
     });
+  });
+
+  it("marks every device loss the engine reports at its script time, in each part and in the results (plan R07, perf-bodies-pass)", async () => {
+    const { controller, parts, reports, clock } = controllerOf(LAUNCH);
+    const listeners: Array<(fault: GraphicsFault) => void> = [];
+    controller.engine({
+      onPassTimes: () => () => undefined,
+      onAllocation: () => () => undefined,
+      onFault: (listener) => {
+        listeners.push(listener);
+        return () => undefined;
+      },
+    });
+    const report = (fault: GraphicsFault): void => {
+      for (const listener of listeners) {
+        listener(fault);
+      }
+    };
+    // The first device lost as the engine was made, 0.5 s before the script's first frame.
+    clock.ms = 500;
+    report({ kind: "device-lost", reason: "unknown", message: "lost at the start" });
+    // A shader refused is no loss.
+    report({ kind: "shader-refused", effectName: "terrain" });
+    controller.prepared(DESCENT);
+    await settle();
+    const fly = (t: number): void => {
+      clock.ms = 1000 + t * 1000;
+      controller.frame(frame(t, 1000));
+    };
+    fly(0);
+    fly(12);
+    clock.ms = 31_200;
+    report({ kind: "device-lost", reason: "unknown", message: "VK_ERROR_DEVICE_LOST" });
+    fly(30.5);
+    fly(DESCENT.profile.durationS);
+    await settle();
+    const first = {
+      scriptTimeS: -0.5,
+      kind: "device-lost",
+      reason: "unknown",
+      message: "lost at the start",
+    };
+    const second = {
+      scriptTimeS: 30.2,
+      kind: "device-lost",
+      reason: "unknown",
+      message: "VK_ERROR_DEVICE_LOST",
+    };
+    expect([
+      parts.map((part) => part.report.deviceLosses),
+      reports.map((r) => r.deviceLosses),
+    ]).toEqual([[[first], [first, second]], [[first, second]]]);
   });
 
   it("hands over no part after one the main process refused, since none could follow it", async () => {

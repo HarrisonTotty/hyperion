@@ -805,6 +805,27 @@ export interface SpikeLatePipeline {
 }
 
 /**
+ * A GPU device the run lost (plan R07, perf-bodies-pass): the engine's `device-lost` fault
+ * (`GraphicsFault`), which the engine recovers from by making a new device, so that the run goes on
+ * and only this marks the loss.
+ */
+export interface SpikeDeviceLoss {
+  /**
+   * When the engine reported the loss, s of script time, counted from `scriptStartMs` as
+   * `SpikeFrameSeries.scriptTimesS` is: negative for a loss before the run's first frame.
+   */
+  readonly scriptTimeS: number;
+  readonly kind: "device-lost";
+  /**
+   * `GPUDeviceLostInfo.reason` as the browser gave it: `unknown` for a reset by the driver or the
+   * kernel, `destroyed` for a device destroyed on purpose.
+   */
+  readonly reason: string;
+  /** `GPUDeviceLostInfo.message` as the browser gave it, the driver's error among its words. */
+  readonly message: string;
+}
+
+/**
  * One window of the run's trace, in `performance.now()` ms (R05.T14.d, T14.e): Chromium keeps one
  * trace session at a time, so the trace is stopped and started again between windows, which never
  * overlap (decision-r05-trace-windows.md).
@@ -1467,6 +1488,11 @@ export interface DescentSpikeReport {
   readonly adapterPeakBytes: number;
   /** The view canvas's size in device pixels. */
   readonly canvas: { readonly widthPx: number; readonly heightPx: number };
+  /**
+   * Every device the run lost so far, in order (plan R07, perf-bodies-pass; results version 10):
+   * none on a run whose device held. A part of the report carries every loss up to it.
+   */
+  readonly deviceLosses: ReadonlyArray<SpikeDeviceLoss>;
   /**
    * The terrain's vertex path and normals the run drew with: the setting's own, or the variant
    * `--vertex-path` and `--normals` chose (T13.c).

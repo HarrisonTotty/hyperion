@@ -4,8 +4,8 @@
  *
  * @remarks
  * R05's files (`docs/measurements/descent-spike/<date>-<machine>-<setting>.json`, schema
- * `hyperion.descent-spike.results`, versions 6 to 9) stay where they are; a fold is one repetition of
- * R05's own descent over R05's own world, so it takes scene version 0, which no catalogue scene
+ * `hyperion.descent-spike.results`, versions 6 to 10) stay where they are; a fold is one repetition
+ * of R05's own descent over R05's own world, so it takes scene version 0, which no catalogue scene
  * has, and never compares with a perf run. What R05 does not record is `null`: the commit, the
  * generator version, the kernel, the display, the power profile beyond the governor, the GPU's busy
  * time (R05 times the GPU process's CPU side, not the engine's), throttling. A hidden run's frames
@@ -37,7 +37,7 @@ import { median } from "./stats.ts";
 export const SPIKE_RESULTS_SCHEMA = "hyperion.descent-spike.results";
 
 /** The versions of R05's results files the fold reads (R05's `RESULTS_VERSIONS_READ`). */
-export const SPIKE_RESULTS_VERSIONS: ReadonlyArray<number> = [6, 7, 8, 9];
+export const SPIKE_RESULTS_VERSIONS: ReadonlyArray<number> = [6, 7, 8, 9, 10];
 
 /** R05's wireframe view's one pass label (`WIREFRAME_PASS_LABEL`). */
 const WIREFRAME_PASS = "view:wireframe";

@@ -6,6 +6,7 @@
 
 import type {
   DescentSpikeReport,
+  SpikeDeviceLoss,
   SpikeLatePipeline,
   SpikePassSeries,
   SpikeReportPart,
@@ -168,6 +169,19 @@ function latePipeline(value: unknown): SpikeLatePipeline | null {
     : null;
 }
 
+function deviceLoss(value: unknown): SpikeDeviceLoss | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const { scriptTimeS, kind, reason, message } = value;
+  return isFinite(scriptTimeS) &&
+    kind === "device-lost" &&
+    typeof reason === "string" &&
+    typeof message === "string"
+    ? { scriptTimeS, kind, reason, message }
+    : null;
+}
+
 /** A `sizes` block the check refused (R10.T14.b): as the renderer sent it, and its problems. */
 export interface RejectedSizes {
   readonly block: unknown;
@@ -226,7 +240,8 @@ export function readSpikeReportPart(value: unknown): SpikeReportPart | null {
 /**
  * `value` as the renderer's report, or `null` if any part of it is missing or of the wrong type:
  * every series as long as the frames', every figure finite, each frame's missing resolves a whole
- * count and those still being read at the report no more than them, the trace's windows in order.
+ * count and those still being read at the report no more than them, the trace's windows in order,
+ * each device loss at a script time with its reason and message.
  * The measured sizes, where given (R10.T14.b), are kept only well formed to the last field
  * (`sizesReportProblems`): a malformed block is left out, and refuses nothing else
  * ({@link readSpikeReport} gives it with its problems).
@@ -273,6 +288,7 @@ export function readDescentSpikeReport(value: unknown): DescentSpikeReport | nul
   const levels = listOf(value["levels"], level);
   const streamingList = listOf(value["streaming"], streaming);
   const late = listOf(value["latePipelines"], latePipeline);
+  const deviceLosses = listOf(value["deviceLosses"], deviceLoss);
   const windows = traceWindows(value["traceWindows"]);
   const canvas = value["canvas"];
   const terrain = value["terrain"];
@@ -308,6 +324,7 @@ export function readDescentSpikeReport(value: unknown): DescentSpikeReport | nul
     levels === null ||
     streamingList === null ||
     late === null ||
+    deviceLosses === null ||
     !isFinite(warmupS) ||
     (timer !== "full" && timer !== "quantized" && timer !== "absent") ||
     !isCount(untimedPasses) ||
@@ -344,6 +361,7 @@ export function readDescentSpikeReport(value: unknown): DescentSpikeReport | nul
     latePipelines: late,
     adapterPeakBytes,
     canvas: { widthPx: canvas["widthPx"], heightPx: canvas["heightPx"] },
+    deviceLosses,
     ...(isRecord(terrain) &&
     (terrain["vertexPath"] === "baked-offsets" || terrain["vertexPath"] === "face-differences") &&
     (terrain["normals"] === "double" || terrain["normals"] === "mesh")

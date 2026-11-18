@@ -108,12 +108,13 @@ const CASCADE_EVENT: AllocationEvent = {
 };
 
 /** An engine whose allocations a test raises, its pass times never reported. */
-function fakeEngine(): Pick<RenderEngine, "onPassTimes" | "onAllocation"> & {
+function fakeEngine(): Pick<RenderEngine, "onPassTimes" | "onAllocation" | "onFault"> & {
   allocate(event: AllocationEvent): void;
 } {
   const listeners = new Set<(event: AllocationEvent) => void>();
   return {
     onPassTimes: () => () => undefined,
+    onFault: () => () => undefined,
     onAllocation: (listener) => {
       listeners.add(listener);
       return () => {
