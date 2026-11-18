@@ -1302,6 +1302,7 @@ _Re-validated 2026-11-02 (the names T8 calls, as built):_
   BRDF, the water's thickness from depth within 10⁵ m and from the bathymetry beyond. Tests: the
   glint's integrated radiance over a patch of sea is continuous across the 20 km switch to 2% in the
   reference; the lower-layer cull at 10⁻⁶ of the camera distance.
+  Records: [11-surface-detail-clouds-oceans-rings-stills/records/R11.T8.c.md](11-surface-detail-clouds-oceans-rings-stills/records/R11.T8.c.md).
 - **R11.T8.d The shoreline.** `shoreline.wgsl`: amplitude attenuated by depth, foam from depth and
   the terrain's slope, the depth fade. By hand, recorded: a coast from 1 km, 100 m and 2 m.
 - **R11.T8.e Benches.** Both GPUs (the development machine's RTX 3080, and the UHD 620 by the

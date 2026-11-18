@@ -34,7 +34,16 @@ import { aHostDisc } from "../test/litFixtures";
 import { lookAlong } from "../view/camera/quaternion";
 import { OCEAN_FIXTURE_LEVEL, oceanCellCentre, waterWorldAnswer } from "../test/oceanFixtures";
 import { BUFFER_USAGE, TEXTURE_USAGE } from "../view/engine/gpuFlags";
-import type { ComputeHandle, RenderEngine, TextureHandle } from "../view/engine/types";
+import type {
+  BufferHandle,
+  ColourTargetFormat,
+  ComputeHandle,
+  MaterialHandle,
+  MeshHandle,
+  RenderEngine,
+  RenderTarget,
+  TextureHandle,
+} from "../view/engine/types";
 import { specularPoint } from "../view/ocean/glint";
 import type { OceanLiquid } from "../view/ocean/liquids";
 import {
@@ -53,9 +62,29 @@ import {
 import {
   type HeldOceanMap,
   OCEAN_MAP_FORMAT,
+  oceanTexelAt,
   type OceanTexels,
   packOceanTexels,
 } from "../view/ocean/oceanMap";
+import {
+  nearSeaAnchor,
+  OCEAN_WAVE_ROWS,
+  oceanGridMesh,
+  oceanGridSize,
+  oceanNearHit,
+  oceanNearLight,
+  packOceanWaves,
+  spheroidNormalAt,
+} from "../view/ocean/oceanNear";
+import {
+  OCEAN_DEPTH_COPY_MATERIAL,
+  OCEAN_NEAR_PASS_MATERIAL,
+  oceanDepthCopyDraw,
+  oceanNearDraw,
+  oceanNearState,
+  oceanNearUniforms,
+  type OceanNearView,
+} from "../view/ocean/oceanNearPass";
 import { type OceanMask, oceanMaskOf } from "../view/ocean/oceanMask";
 import { type OceanSea, STANDARD_GRAVITY_MPS2 } from "../view/ocean/oceanBody";
 import {
@@ -663,5 +692,364 @@ export async function checkOceanPass(engine: RenderEngine, checks: Checks): Prom
     engine.releaseMesh(triangle);
     engine.releaseTexture(airless.body);
     engine.releaseTexture(oceanMap);
+  }
+}
+
+/** The near check's target's side, px. */
+const NEAR_SIDE_PX = 48;
+
+/** The near check's camera's height above the sea, m. */
+const NEAR_HEIGHT_M = 600;
+
+/** The near check's wall's tint: a blue no sea draws, its alpha a meter class no pass writes. */
+const NEAR_WALL_TINT: readonly [number, number, number, number] = [0, 0, 3, WALL_ALPHA];
+
+/** A water world of one wind speed code every month and cell (0 calm), its map's texels. */
+function nearWorld(speedCode: number): {
+  readonly answer: OceanMapAnswer;
+  readonly mask: OceanMask;
+  readonly texels: OceanTexels;
+} {
+  const answer = waterWorldAnswer(30, 64, speedCode);
+  const mask = oceanMaskOf(answer);
+  return { answer, mask, texels: packOceanTexels(answer, mask, { from: 0, to: 0, weight: 0 }) };
+}
+
+/** The near check's view: 600 m over the sea of `map`, looking 30° below the horizon to the east. */
+function nearView(map: HeldOceanMap, refraction: boolean): OceanNearView {
+  const up = vec3(1, 0, 0);
+  const east = vec3(0, 1, 0);
+  const pitch = Math.PI / 6;
+  const forward = add(scale(east, Math.cos(pitch)), scale(up, -Math.sin(pitch)));
+  const camera = { positionM: scale(up, R + NEAR_HEIGHT_M), orientation: lookAlong(forward, up) };
+  const view = passView(map);
+  return {
+    ...view,
+    camera,
+    eclipse: null,
+    // The sun high in the east, over the sea ahead.
+    suns: [{ ...(view.suns[0] ?? passSun()), directionBodyFixed: normalise(vec3(1, 0.5, 0.1)) }],
+    pixelAngleRad: 2 / NEAR_SIDE_PX,
+    time: { seconds: 1_000, nanos: 0 },
+    components: 32,
+    cellRad: 4 * (2 / NEAR_SIDE_PX),
+    anchor: nearSeaAnchor(oceanDrawOptics(view), map.texels, camera.positionM, camera.orientation),
+    refraction,
+  };
+}
+
+/** A source for a view that has none, which `passView`'s always has. */
+function passSun(): OceanDrawView["suns"][number] {
+  return {
+    directionBodyFixed: PASS_SUN,
+    illuminanceLx: [1.1e5, 1.2e5, 1.25e5],
+    angularRadiusRad: 4.65e-3,
+    curveSlot: 0,
+  };
+}
+
+/** What a near draw takes on the run's engine, made for one check and released after it. */
+interface NearKit {
+  readonly scene: RenderTarget;
+  readonly depthBits: RenderTarget;
+  readonly colour: RenderTarget;
+  readonly material: MaterialHandle;
+  readonly copy: MaterialHandle;
+  readonly wall: MaterialHandle;
+  readonly triangle: MeshHandle;
+  readonly grid: MeshHandle;
+  readonly airless: ReturnType<typeof createAirlessTables>;
+  readonly eclipseRows: BufferHandle;
+  readonly waveRows: BufferHandle;
+  readonly release: () => void;
+}
+
+/** The near check's GPU objects. */
+function nearKit(engine: RenderEngine): NearKit {
+  const size = { widthPx: NEAR_SIDE_PX, heightPx: NEAR_SIDE_PX };
+  const target = (name: string, format: ColourTargetFormat, depth: boolean): RenderTarget =>
+    engine.createRenderTarget({ name, size, format, mips: 1, depth, category: "ocean" });
+  const scene = target("smoke ocean near scene", "rgba16float", true);
+  const depthBits = target("smoke ocean near depth copy", "r32uint", false);
+  const colour = target("smoke ocean near colour copy", "rgba16float", false);
+  const { columns, rows } = oceanGridSize(NEAR_SIDE_PX, NEAR_SIDE_PX, 4);
+  const { positions, indices } = oceanGridMesh(columns, rows);
+  const grid = engine.createMesh({
+    name: "smoke ocean near grid",
+    positions,
+    indices,
+    topology: "triangle-list",
+    attributes: {},
+  });
+  const buffer = (name: string, bytes: number): BufferHandle =>
+    engine.createBuffer({
+      name,
+      bytes,
+      usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST,
+      category: "ocean",
+    });
+  const kit = {
+    scene,
+    depthBits,
+    colour,
+    material: engine.createMaterial(OCEAN_NEAR_PASS_MATERIAL),
+    copy: engine.createMaterial(OCEAN_DEPTH_COPY_MATERIAL),
+    wall: engine.createMaterial(flatSpec("smoke ocean near wall")),
+    triangle: fullScreenMesh(engine, "smoke ocean near triangle"),
+    grid,
+    airless: createAirlessTables(engine, "smoke ocean near: no air"),
+    eclipseRows: buffer("smoke ocean near eclipse", 16 * OCEAN_ECLIPSE_ROWS),
+    waveRows: buffer("smoke ocean near waves", 16 * OCEAN_WAVE_ROWS),
+  };
+  engine.writeBuffer(kit.eclipseRows, 0, packOceanEclipse(null));
+  return {
+    ...kit,
+    release: () => {
+      for (const each of [kit.scene, kit.depthBits, kit.colour]) {
+        each.dispose();
+      }
+      for (const each of [kit.material, kit.copy, kit.wall]) {
+        engine.releaseMaterial(each);
+      }
+      engine.releaseMesh(kit.triangle);
+      engine.releaseMesh(kit.grid);
+      engine.releaseTexture(kit.airless.body);
+      engine.releaseBuffer(kit.eclipseRows);
+      engine.releaseBuffer(kit.waveRows);
+    },
+  };
+}
+
+/**
+ * Draws the near sea of `view` over the scene as it stands: its depth copied, its colour copied, the
+ * waves written, the grid drawn loading the scene; then reads the scene's colour back.
+ */
+async function drawNear(
+  engine: RenderEngine,
+  kit: NearKit,
+  view: OceanNearView,
+  oceanMap: TextureHandle,
+): Promise<Float32Array> {
+  const state = oceanNearState(view);
+  engine.writeBuffer(kit.waveRows, 0, packOceanWaves(state.waves, state.set));
+  const sceneDepth = kit.scene.depth;
+  if (sceneDepth === null) {
+    throw new Error("the near check's scene has no depth");
+  }
+  kit.depthBits.render(
+    frameOf("smoke ocean near depth copy", [
+      oceanDepthCopyDraw(kit.triangle, kit.copy, sceneDepth),
+    ]),
+  );
+  kit.colour.render({
+    ...frameOf("smoke ocean near colour copy", []),
+    colourFrom: kit.scene.colour,
+  });
+  kit.scene.render({
+    ...frameOf("smoke ocean near", [
+      oceanNearDraw(
+        kit.grid,
+        kit.material,
+        {
+          oceanMap,
+          tables: kit.airless,
+          eclipseRows: kit.eclipseRows,
+          waveRows: kit.waveRows,
+          sceneDepthBits: kit.depthBits.colour,
+          sceneColour: kit.colour.colour,
+        },
+        oceanNearUniforms(view, state.frame),
+      ),
+    ]),
+    colourLoad: "load",
+  });
+  return halfTexels(await engine.readTexture(kit.scene.colour));
+}
+
+/** Each pixel's ray and what the near twin makes of a calm sea there, lit as the pass lights it. */
+function calmTwins(view: OceanNearView): ReadonlyArray<{
+  readonly radiance: readonly [number, number, number] | null;
+  readonly viewDistanceM: number;
+}> {
+  const size = { widthPx: NEAR_SIDE_PX, heightPx: NEAR_SIDE_PX };
+  const state = oceanNearState(view);
+  const e = view.exposureScale;
+  const sun = view.suns[0];
+  const lux = sun?.illuminanceLx ?? [0, 0, 0];
+  const optics = onProbeInputs({
+    ...oceanDrawOptics(view),
+    glintCapCdM2: view.thresholdPreExposed,
+    sunLux: [lux[0] * e, lux[1] * e, lux[2] * e],
+    skyLux: [0, 0, 0],
+  });
+  const twins = [];
+  for (let y = 0; y < NEAR_SIDE_PX; y += 1) {
+    for (let x = 0; x < NEAR_SIDE_PX; x += 1) {
+      const ray = oceanPassRay(x, y, size, projection(1), view.camera.orientation);
+      const hit = oceanNearHit(state.frame, ray.direction);
+      const world = add(view.camera.positionM, hit.pointM);
+      const texel = oceanTexelAt(view.sea.map.texels, [world.x, world.y, world.z]);
+      if (hit.clamped || texel === null) {
+        twins.push({ radiance: null, viewDistanceM: Number.POSITIVE_INFINITY });
+        continue;
+      }
+      const toCamera = scale(hit.pointM, -1 / hit.tM);
+      const up = spheroidNormalAt(state.frame, world);
+      const footprint =
+        (hit.tM * view.pixelAngleRad) / Math.sqrt(Math.max(dot(toCamera, up), 0.01));
+      const light = oceanNearLight(optics, optics, {
+        view: toCamera,
+        up,
+        normal: up,
+        texel,
+        resolved: { upwind: 0, crosswind: 0 },
+        footprintM: footprint,
+        thickness: { depthM: texel.depthM, from: "bathymetry", layer: "sea" },
+        bedRadiance: null,
+      });
+      twins.push({ radiance: light.radiance, viewDistanceM: hit.tM / ray.viewLength });
+    }
+  }
+  return twins;
+}
+
+/**
+ * R11.T8.c: the `ocean` pass's near sea on the run's adapter. A calm sea 600 m below the camera,
+ * drawn through its grid over a cleared scene, equals its twin at each pixel's ray to 2 × 10⁻³ of
+ * the frame's brightest, the sky above the horizon left as it was, 2% of the pixels let off at the
+ * horizon and the grid's cells; then under a 12 m/s wind its waves move the light. A wall drawn
+ * first at the calm sea's median view depth, its depth copied for the sea to read: every pixel of
+ * sea nearer than the wall is drawn over it, every one farther left to the wall, as the lower-layer
+ * cull orders them; and with refraction the wall's blue shows through the water in front of it.
+ */
+export async function checkOceanNear(engine: RenderEngine, checks: Checks): Promise<void> {
+  const calmWorld = nearWorld(0);
+  const windyWorld = nearWorld(165);
+  const side = calmWorld.texels.faceTexels;
+  const upload = (texels: OceanTexels, name: string): TextureHandle => {
+    const texture = engine.createTexture({
+      name,
+      size: { width: side, height: side, depthOrArrayLayers: 6 },
+      dimension: "2d",
+      format: OCEAN_MAP_FORMAT,
+      mips: 1,
+      usage: TEXTURE_USAGE.TEXTURE_BINDING | TEXTURE_USAGE.COPY_DST,
+      category: "ocean",
+    });
+    engine.writeTexture(
+      texture,
+      { x: 0, y: 0, z: 0 },
+      { width: side, height: side, depthOrArrayLayers: 6 },
+      texels.data,
+    );
+    return texture;
+  };
+  const calmMap = upload(calmWorld.texels, "smoke ocean near calm map");
+  const windyMap = upload(windyWorld.texels, "smoke ocean near windy map");
+  const kit = nearKit(engine);
+  try {
+    const pixels = NEAR_SIDE_PX * NEAR_SIDE_PX;
+    const calm = nearView({ ...calmWorld, texture: calmMap }, false);
+    kit.scene.render(frameOf("smoke ocean near clear", []));
+    const calmSea = await drawNear(engine, kit, calm, calmMap);
+    const twins = calmTwins(calm);
+    const brightest = Math.max(1e-30, ...twins.flatMap(({ radiance }) => radiance ?? []));
+    let met = 0;
+    let parted = 0;
+    let first: string | null = null;
+    for (const [p, { radiance }] of twins.entries()) {
+      const gpu = [0, 1, 2].map((k) => calmSea[4 * p + k] ?? Number.NaN);
+      if (radiance === null) {
+        // Above the horizon the scene is left as it was cleared.
+        parted += gpu.every((value) => value === 0) ? 0 : 1;
+        continue;
+      }
+      met += 1;
+      const off = [0, 1, 2].some(
+        (k) =>
+          !(
+            Math.abs((gpu[k] ?? Number.NaN) - (radiance[k] ?? 0)) <=
+            2e-3 * brightest + 2e-3 * (radiance[k] ?? 0)
+          ),
+      );
+      if (off) {
+        parted += 1;
+        first ??= `pixel ${p}: (${gpu.join(", ")}) against (${radiance.join(", ")})`;
+      }
+    }
+    checks.check(
+      "R11.T8.c the near sea draws a calm sea as its twin does, through its grid",
+      met > pixels / 10 && parted <= PASS_EDGE_SHARE * pixels,
+      `${met} pixels met the sea, ${parted} parted from the twin${first === null ? "" : `; first ${first}`}`,
+    );
+    // Waves: the same view under a 12 m/s wind spreads the light the calm sea draws evenly.
+    const windy = nearView({ ...windyWorld, texture: windyMap }, false);
+    kit.scene.render(frameOf("smoke ocean near clear", []));
+    const windySea = await drawNear(engine, kit, windy, windyMap);
+    let finite = true;
+    let moved = 0;
+    for (const [p, { radiance }] of twins.entries()) {
+      const g = windySea[4 * p + 1] ?? Number.NaN;
+      finite &&= Number.isFinite(g);
+      const before = calmSea[4 * p + 1] ?? 0;
+      if (radiance !== null && Math.abs(g - before) > 0.02 * Math.max(before, 1e-30)) {
+        moved += 1;
+      }
+    }
+    const components = oceanNearState(windy).waves.length;
+    checks.check(
+      "R11.T8.c the near sea's waves move its light, every pixel finite",
+      finite && components > 0 && moved > met / 10,
+      `${components} components; ${moved} of ${met} pixels moved by over 2% of their own light`,
+    );
+    // A wall at the calm sea's median view depth, drawn first: the lower layer, read by its copy.
+    const depths = twins
+      .flatMap(({ viewDistanceM }) => (Number.isFinite(viewDistanceM) ? [viewDistanceM] : []))
+      .toSorted((a, b) => a - b);
+    const wallM = depths[Math.floor(depths.length / 2)] ?? NEAR_HEIGHT_M;
+    const wallMesh = fullScreenMesh(engine, "smoke ocean near wall mesh", -wallM);
+    try {
+      const walled = async (refraction: boolean): Promise<Float32Array> => {
+        kit.scene.render(
+          frameOf("smoke ocean near wall", [drawOf(wallMesh, kit.wall, NEAR_WALL_TINT)]),
+        );
+        return drawNear(engine, kit, { ...calm, refraction }, calmMap);
+      };
+      const plain = await walled(false);
+      let wrong = 0;
+      let nearer = 0;
+      for (const [p, { viewDistanceM }] of twins.entries()) {
+        const isWall = (plain[4 * p + 2] ?? 0) === NEAR_WALL_TINT[2] && (plain[4 * p] ?? 1) === 0;
+        if (viewDistanceM < wallM * (1 - 1e-3)) {
+          nearer += 1;
+          wrong += isWall ? 1 : 0;
+        } else if (viewDistanceM > wallM * (1 + 1e-3)) {
+          wrong += isWall ? 0 : 1;
+        }
+      }
+      checks.check(
+        "R11.T8.c the near sea reads the bed's depth: drawn over a nearer sea, left to a nearer bed",
+        nearer > 0 && wrong <= PASS_EDGE_SHARE * pixels,
+        `the wall at ${wallM.toFixed(1)} m: ${nearer} pixels of sea nearer, ${wrong} wrong`,
+      );
+      const refracted = await walled(true);
+      let bluer = 0;
+      for (const [p, { viewDistanceM }] of twins.entries()) {
+        if (viewDistanceM < wallM * 0.99) {
+          bluer += (refracted[4 * p + 2] ?? 0) > (plain[4 * p + 2] ?? 0) ? 1 : 0;
+        }
+      }
+      checks.check(
+        "R11.T8.c the near sea refracts the bed through its water on the high setting",
+        bluer > nearer / 2,
+        `${bluer} of ${nearer} pixels over the wall bluer with refraction`,
+      );
+    } finally {
+      engine.releaseMesh(wallMesh);
+    }
+  } finally {
+    kit.release();
+    engine.releaseTexture(calmMap);
+    engine.releaseTexture(windyMap);
   }
 }

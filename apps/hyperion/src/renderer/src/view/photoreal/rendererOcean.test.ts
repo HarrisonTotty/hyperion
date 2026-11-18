@@ -106,6 +106,7 @@ function seaOf(engine: Engine, planet: LitBodyInput): FrameOcean {
       viewport: VIEWPORT,
     },
     toBodyFixed: IDENTITY_QUATERNION,
+    time: { seconds: 1_000, nanos: 0 },
   };
 }
 
@@ -311,5 +312,182 @@ describe("the photorealistic renderer's ocean (R11.T8.b)", () => {
     expect(
       textures.mock.calls.filter(([texture]) => texture.name === "test view ocean: no air").length,
     ).toBe(1);
+  });
+});
+
+/** The names of the handles a spy's calls released. */
+function names(calls: ReadonlyArray<ReadonlyArray<{ readonly name: string }>>): string[] {
+  return calls.map(([handle]) => handle?.name ?? "");
+}
+
+describe("the photorealistic renderer's near sea (R11.T8.c)", () => {
+  /** The planet with its camera `heightM` above its sea level, looking down its −z. */
+  function lowOver(heightM: number): LitBodyInput {
+    // The sea level 120 m below the datum (`waterWorldHeader`).
+    return planetAt(vec3(0, 0, -(6.371e6 - 120 + heightM)));
+  }
+
+  it("copies the scene's depth and colour first, then draws the grid beside the far draw's basins alone", async () => {
+    const { engine, view, renderer } = await preparedRenderer();
+    const planet = lowOver(600);
+    const ocean = seaOf(engine, planet);
+    renderer.render(view, frameOf(planet, ocean));
+    const labels = labelsOf(engine);
+    const at = labels.indexOf(OCEAN_PASS_LABEL);
+    // The high setting refracts: its depth's bits and its colour, then the pass.
+    expect(labels.slice(at - 2, at + 1)).toEqual([
+      "ocean copies",
+      "ocean copies",
+      OCEAN_PASS_LABEL,
+    ]);
+    const pass = engine.targetFrames[at];
+    expect(pass?.draws.map((draw) => draw.material.name)).toEqual([
+      "ocean far pass",
+      "ocean near pass",
+    ]);
+    const [far, near] = pass?.draws ?? [];
+    expect(far?.uniforms["farBed"]?.[3]).toBe(1);
+    expect(near?.mesh.name).toBe("test view ocean grid");
+    expect(near?.textures["oceanSceneDepth"]?.name).toBe("test view:ocean depth copy colour");
+    expect(near?.textures["oceanSceneColour"]?.name).toBe("test view:ocean colour copy colour");
+    expect(near?.storageBuffers?.["oceanWaves"]?.name).toBe(`test view ocean waves ${EARTH}`);
+    // The camera's height over the sea, refraction on.
+    expect(near?.uniforms["nearUpwind"]?.[3]).toBeCloseTo(600, 0);
+    expect(near?.uniforms["camera"]?.[3]).toBe(1);
+    const copy = engine.targetFrames[at - 1];
+    expect(copy?.colourFrom).toBeDefined();
+    renderer.dispose();
+  });
+
+  it("binds the colour's stand-in on the low setting, which copies no colour and refracts nothing", async () => {
+    const { engine, view, renderer } = await preparedRenderer();
+    const planet = lowOver(600);
+    renderer.render(view, { ...frameOf(planet, seaOf(engine, planet)), setting: "low" });
+    const near = engine.targetFrames.find((f) => f.label === OCEAN_PASS_LABEL)?.draws[1];
+    expect(near?.textures["oceanSceneColour"]?.name).toBe("test view ocean: no colour");
+    expect(near?.uniforms["camera"]?.[3]).toBe(0);
+    expect(labelsOf(engine).filter((label) => label === "ocean copies")).toHaveLength(1);
+    renderer.dispose();
+  });
+
+  it("draws no near sea from 20 km up: the far draw alone, no copy", async () => {
+    const { engine, view, renderer } = await preparedRenderer();
+    const high = lowOver(25_000);
+    renderer.render(view, frameOf(high, seaOf(engine, high)));
+    expect(labelsOf(engine)).not.toContain("ocean copies");
+    expect(
+      engine.targetFrames
+        .find((f) => f.label === OCEAN_PASS_LABEL)
+        ?.draws.map((draw) => draw.material.name),
+    ).toEqual(["ocean far pass"]);
+    renderer.dispose();
+  });
+
+  it("lets its grid and its waves go at a frame with no near sea", async () => {
+    const { engine, view, renderer } = await preparedRenderer();
+    const released: string[] = [];
+    engine.onAllocation((event) => {
+      if (event.kind === "destroyed") {
+        released.push(event.name);
+      }
+    });
+    const low = lowOver(600);
+    renderer.render(view, frameOf(low, seaOf(engine, low)));
+    const high = lowOver(25_000);
+    renderer.render(view, frameOf(high, seaOf(engine, high)));
+    expect(released).toEqual(
+      expect.arrayContaining([`test view ocean waves ${EARTH}`, "test view ocean grid:position"]),
+    );
+    renderer.dispose();
+  });
+
+  it("makes its copies again at the next near frame after one with none", async () => {
+    const { engine, view, renderer } = await preparedRenderer();
+    const made = (name: string): number =>
+      engine.textureSpecs.filter((spec) => spec.name === name).length;
+    const low = lowOver(600);
+    const high = lowOver(25_000);
+    renderer.render(view, frameOf(low, seaOf(engine, low)));
+    renderer.render(view, frameOf(high, seaOf(engine, high)));
+    renderer.render(view, frameOf(low, seaOf(engine, low)));
+    expect([
+      made("test view:ocean depth copy colour"),
+      made("test view:ocean colour copy colour"),
+    ]).toEqual([2, 2]);
+    renderer.dispose();
+  });
+
+  it("lets the colour's copy go when the setting stops refracting, the depth's kept", async () => {
+    const { engine, view, renderer } = await preparedRenderer();
+    const planet = lowOver(600);
+    renderer.render(view, frameOf(planet, seaOf(engine, planet)));
+    const copy = engine.targetFrames.find(
+      (f) => f.colourFrom !== undefined && f.label === "ocean copies",
+    );
+    expect(copy).toBeDefined();
+    const before = engine.targetFrames.length;
+    renderer.render(view, { ...frameOf(planet, seaOf(engine, planet)), setting: "low" });
+    const later = engine.targetFrames.slice(before);
+    expect(later.filter((f) => f.label === "ocean copies")).toHaveLength(1);
+    expect(later.some((f) => f.colourFrom !== undefined && f.label === "ocean copies")).toBe(false);
+    renderer.dispose();
+  });
+
+  it("makes its grid again at a new size", async () => {
+    const { engine, view, renderer } = await preparedRenderer();
+    const meshes = vi.spyOn(engine, "createMesh");
+    const planet = lowOver(600);
+    renderer.render(view, frameOf(planet, seaOf(engine, planet)));
+    renderer.render(view, frameOf(planet, seaOf(engine, planet)));
+    const wider = { widthPx: 96, heightPx: 36 };
+    renderer.render(view, {
+      ...frameOf(planet, seaOf(engine, planet)),
+      viewport: wider,
+      presentedPx: wider,
+    });
+    const grids = meshes.mock.calls.filter(([spec]) => spec.name === "test view ocean grid");
+    expect(grids.map(([spec]) => spec.positions.length)).toHaveLength(2);
+    expect(grids[1]?.[0].positions.length).toBeGreaterThan(grids[0]?.[0].positions.length ?? 0);
+    renderer.dispose();
+  });
+
+  it("forgets its waves' rows at a device restore, and makes them on the restored device", async () => {
+    const { engine, view, renderer } = await preparedRenderer();
+    const made: string[] = [];
+    engine.onAllocation((event) => {
+      if (event.kind === "created") {
+        made.push(event.name);
+      }
+    });
+    const waves = (): number =>
+      made.filter((name) => name === `test view ocean waves ${EARTH}`).length;
+    const planet = lowOver(600);
+    renderer.render(view, frameOf(planet, seaOf(engine, planet)));
+    const first = waves();
+    engine.restore();
+    await renderer.prepare(VIEWPORT, "high", "eye", {
+      orientation: IDENTITY_QUATERNION,
+      fovXRad: Math.PI / 3,
+    });
+    renderer.render(view, frameOf(planet, seaOf(engine, planet)));
+    expect([first, waves()]).toEqual([1, 2]);
+    renderer.dispose();
+  });
+
+  it("releases its near sea's materials, copies, grid, waves and colour stand-in with the view", async () => {
+    const { engine, view, renderer } = await preparedRenderer();
+    const materials = vi.spyOn(engine, "releaseMaterial");
+    const meshes = vi.spyOn(engine, "releaseMesh");
+    const buffers = vi.spyOn(engine, "releaseBuffer");
+    const textures = vi.spyOn(engine, "releaseTexture");
+    const planet = lowOver(600);
+    renderer.render(view, { ...frameOf(planet, seaOf(engine, planet)), setting: "low" });
+    renderer.dispose();
+    expect(names(materials.mock.calls)).toEqual(
+      expect.arrayContaining(["ocean near pass", "ocean depth copy"]),
+    );
+    expect(names(meshes.mock.calls)).toContain("test view ocean grid");
+    expect(names(buffers.mock.calls)).toContain(`test view ocean waves ${EARTH}`);
+    expect(names(textures.mock.calls)).toContain("test view ocean: no colour");
   });
 });

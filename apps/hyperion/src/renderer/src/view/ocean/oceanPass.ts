@@ -62,12 +62,19 @@ import { oceanFarOpticsOf, type OceanSea } from "./oceanBody";
 import type { OceanFarOptics } from "./oceanFar";
 import { OCEAN_FAR_WGSL, packOceanFar } from "./oceanFarProbe";
 import oceanPassWgsl from "./oceanPass.wgsl?raw";
+import oceanSharedWgsl from "./oceanShared.wgsl?raw";
 
 /** The pass's label in `PassTimes` and R12's `PASS_ROWS` (Design note 18's `ocean`). */
 export const OCEAN_PASS_LABEL = "ocean";
 
-/** The pass's WGSL: `frame.wgsl`, R08's surface lighting, the far ocean's library and the pass. */
-export const OCEAN_PASS_WGSL = `${frameWgsl}\n${SURFACE_LIGHTING_WGSL}\n${OCEAN_FAR_WGSL}\n${oceanPassWgsl}`;
+/**
+ * The pass's shared head: `frame.wgsl`, R08's surface lighting, the far ocean's library and the
+ * bindings and helpers both seas share (`oceanShared.wgsl`).
+ */
+export const OCEAN_SHARED_WGSL = `${frameWgsl}\n${SURFACE_LIGHTING_WGSL}\n${OCEAN_FAR_WGSL}\n${oceanSharedWgsl}`;
+
+/** The far sea's WGSL: the shared head and the far sea's draw. */
+export const OCEAN_PASS_WGSL = `${OCEAN_SHARED_WGSL}\n${oceanPassWgsl}`;
 
 /** The material's bindings in `@group(2)` (`oceanPass.wgsl`'s). */
 export const OCEAN_PASS_BINDINGS = {
@@ -324,8 +331,14 @@ export function oceanDrawOptics(view: OceanDrawView): OceanFarOptics {
  * A sea's draw's uniforms, formed in `f64` and narrowed once: its camera and the view's axes in the
  * body-fixed ones, the datum and sea level, its two brightest sources pre-exposed, and its
  * `OceanFar` with its light and cap pre-exposed too (`oceanPass.wgsl`'s `Draw`).
+ *
+ * @param basinsOnly - Whether the far sea draws its closed basins alone, the near sea drawing the
+ *   sea (plan R11, R11.T8.c): `farBed`'s w.
  */
-export function oceanPassUniforms(view: OceanDrawView): Readonly<Record<string, Float32Array>> {
+export function oceanPassUniforms(
+  view: OceanDrawView,
+  basinsOnly = false,
+): Readonly<Record<string, Float32Array>> {
   const { camera, sea, exposureScale: e } = view;
   const o = camera.positionM;
   const axis = (v: Vec3): Float32Array => {
@@ -378,7 +391,7 @@ export function oceanPassUniforms(view: OceanDrawView): Readonly<Record<string, 
     farIndex: row(4),
     farAttenuation: row(5),
     farDeep: row(6),
-    farBed: row(7),
+    farBed: new Float32Array([far[28] ?? 0, far[29] ?? 0, far[30] ?? 0, basinsOnly ? 1 : 0]),
   };
 }
 

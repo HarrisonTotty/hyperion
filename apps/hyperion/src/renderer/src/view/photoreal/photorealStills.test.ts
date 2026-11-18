@@ -358,6 +358,7 @@ describe("the photorealistic still renderer (R11.T10.b)", () => {
             viewport: SIZE,
           },
           toBodyFixed: IDENTITY_QUATERNION,
+          time: { seconds: 0, nanos: 0 },
         },
       ],
     };

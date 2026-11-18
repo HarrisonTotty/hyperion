@@ -562,6 +562,7 @@ export function photorealFrame(inputs: PhotorealInputs): PhotorealFrame {
           sea,
           camera: seaCamera,
           toBodyFixed: atmosphereToBodyFixed(body),
+          time: scene.time,
         });
       }
     }

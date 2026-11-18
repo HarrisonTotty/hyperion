@@ -162,12 +162,33 @@ import {
 import { HDR_COLOUR_FORMAT } from "../photometry/toneCurve";
 import { type OceanSea, STANDARD_GRAVITY_MPS2 } from "../ocean/oceanBody";
 import {
+  drawsNearSea,
+  nearSeaAnchor,
+  OCEAN_GRID_CELL_PX,
+  OCEAN_WAVE_ROWS,
+  oceanGridMesh,
+  oceanGridSize,
+  packOceanWaves,
+} from "../ocean/oceanNear";
+import {
+  OCEAN_COPY_PASS_LABEL,
+  OCEAN_DEPTH_COPY_MATERIAL,
+  OCEAN_NEAR_PASS_MATERIAL,
+  oceanDepthCopyDraw,
+  oceanNearDraw,
+  oceanNearState,
+  type OceanNearState,
+  oceanNearUniforms,
+  type OceanNearView,
+} from "../ocean/oceanNearPass";
+import {
   OCEAN_ECLIPSE_ROWS,
   OCEAN_FAR_PASS_MATERIAL,
   OCEAN_PASS_LABEL,
   type OceanDrawView,
   type OceanEclipse,
   OceanGlare,
+  oceanDrawOptics,
   oceanPassDraw,
   oceanPassUniforms,
   oceanSourcesOfRecord,
@@ -343,6 +364,8 @@ export interface FrameOcean {
   readonly camera: AtmosphereCamera;
   /** The rotation from the frame's galactic axes into the body-fixed ones. */
   readonly toBodyFixed: Quaternion;
+  /** The scene's time on the universe clock, at which its near sea's waves stand (R11.T8.c). */
+  readonly time: UniverseTime;
 }
 
 /**
@@ -607,6 +630,23 @@ function noFormCells(): Record<CellWay, Record<CellForm, FormCells | null>> {
   return { "per-cell": noWayCells(), packed: noWayCells() };
 }
 
+/** The near sea's copies of the scene before its draws (plan R11, R11.T8.c), under `ocean`. */
+interface OceanCopies {
+  /** The scene's depth's bits, `r32uint`. */
+  readonly depthBits: RenderTarget;
+  /** The scene's colour, made only with refraction. */
+  colour: RenderTarget | null;
+}
+
+/** A sea drawn near this frame (R11.T8.c), its draw made once the copies are. */
+interface NearSea {
+  readonly view: OceanNearView;
+  readonly state: OceanNearState;
+  readonly ocean: FrameOcean;
+  readonly tables: SurfaceLightingTables;
+  readonly eclipseRows: BufferHandle;
+}
+
 /** The renderer's GPU objects on one device. */
 interface Resources {
   readonly target: RenderTarget;
@@ -653,6 +693,21 @@ interface Resources {
    * frame that draws one.
    */
   airless: SurfaceLightingTables | null;
+  /**
+   * The near sea's grid and the copy of the scene's depth it reads (plan R11, R11.T8.c), made with
+   * the rest; `null` where its compiler refused either, when every sea is drawn far.
+   */
+  readonly oceanNear: MaterialHandle | null;
+  readonly oceanDepthCopy: MaterialHandle | null;
+  /**
+   * The near sea's copies of the scene (R11.T8.c), under `ocean`: its depth's bits, and with
+   * refraction its colour; made at the first near frame, let go at the first with none.
+   */
+  oceanCopies: OceanCopies | null;
+  /** The near sea's grid at the frame's size and the setting's cell, and its key. */
+  oceanGrid: { readonly mesh: MeshHandle; readonly key: string } | null;
+  /** The one-texel stand-in for the scene's colour where the near sea refracts nothing. */
+  oceanNoColour: TextureHandle | null;
   /**
    * The targets the bodies' composites draw into in turn, the first reading the scene target and
    * each after it the one before (R08.T10.b): made at the first frame that draws an atmosphere.
@@ -907,6 +962,8 @@ export class PhotorealRenderer {
    * its first frame and let go at the first that draws it not; forgotten with a lost device.
    */
   readonly #oceanEclipses = new Map<BodyIdHex, BufferHandle>();
+  /** Each near sea's waves' rows (R11.T8.c; `packOceanWaves`), under `ocean`, as the eclipses'. */
+  readonly #oceanWaves = new Map<BodyIdHex, BufferHandle>();
   /** The latest frame's glare sources: its own and its seas' (R11.T8.b). */
   #glareSources: ReadonlyArray<GlareSource> = [];
   /**
@@ -975,8 +1032,9 @@ export class PhotorealRenderer {
       this.#clouds = new CloudLayers(engine, viewName);
       this.#volumes.dispose();
       this.#volumes = new CloudVolumes(engine, viewName);
-      // The seas' eclipse rows died with it too.
+      // The seas' eclipse and wave rows died with it too.
       this.#oceanEclipses.clear();
+      this.#oceanWaves.clear();
       this.#formCells = noFormCells();
       this.#histogram = undefined;
       this.#making = null;
@@ -1048,6 +1106,8 @@ export class PhotorealRenderer {
     let cloudLayer: MaterialHandle | null;
     let cloudVolume: ReadonlyArray<MaterialHandle | null>;
     let ocean: MaterialHandle | null;
+    let oceanNear: MaterialHandle | null;
+    let oceanDepthCopy: MaterialHandle | null;
     try {
       [
         tonemap,
@@ -1060,6 +1120,8 @@ export class PhotorealRenderer {
         cloudLayer,
         cloudVolume,
         ocean,
+        oceanNear,
+        oceanDepthCopy,
       ] = await Promise.all([
         engine.createMaterialAsync(TONEMAP_MATERIAL, ["canvas-in-pass"], [triangle]),
         engine.createMaterialAsync(OVERLAY_SCENE_DEPTH_MATERIAL, ["canvas"], [triangle]),
@@ -1125,6 +1187,22 @@ export class PhotorealRenderer {
             console.warn(`the photorealistic view ${this.#name} draws no sea:`, error);
             return null;
           }),
+        // A refused near sea leaves every sea drawn far (R11.T8.c).
+        engine
+          .createMaterialAsync(OCEAN_NEAR_PASS_MATERIAL, ["rgba16float"], [triangle])
+          .catch((error: unknown) => {
+            console.warn(`the photorealistic view ${this.#name} draws no near sea:`, error);
+            return null;
+          }),
+        engine
+          .createMaterialAsync(OCEAN_DEPTH_COPY_MATERIAL, ["r32uint"], [triangle])
+          .catch((error: unknown) => {
+            console.warn(
+              `the photorealistic view ${this.#name} copies no depth for its sea:`,
+              error,
+            );
+            return null;
+          }),
       ]);
     } catch (error: unknown) {
       // A chain made before the refusal is released with it, and the meshes made for it.
@@ -1151,6 +1229,8 @@ export class PhotorealRenderer {
         cloudLayer,
         ...cloudVolume,
         ocean,
+        oceanNear,
+        oceanDepthCopy,
       ]) {
         if (material !== null) {
           engine.releaseMaterial(material);
@@ -1197,6 +1277,11 @@ export class PhotorealRenderer {
       cloudVolume: volumeMaterialsOf(engine, cloudVolume),
       ocean,
       airless: null,
+      oceanNear,
+      oceanDepthCopy,
+      oceanCopies: null,
+      oceanGrid: null,
+      oceanNoColour: null,
       airTargets: [],
       visibility: null,
       figureIds: null,
@@ -1238,6 +1323,8 @@ export class PhotorealRenderer {
       }
       resources.visibility?.resize(size);
       resources.figureIds?.resize(size);
+      resources.oceanCopies?.depthBits.resize(size);
+      resources.oceanCopies?.colour?.resize(size);
       resources.size = size;
     }
     const radPx = radPerPx(frame.camera, frame.viewport);
@@ -1798,6 +1885,11 @@ export class PhotorealRenderer {
     const kept = new Set<BodyIdHex>();
     const draws: DrawItem[] = [];
     const glares: GlareSource[] = [];
+    // The seas drawn near (R11.T8.c), their draws made once the scene's copies are.
+    const nearSeas: NearSea[] = [];
+    const nearMaterial = resources.oceanNear;
+    const copyMaterial = resources.oceanDepthCopy;
+    const cellPx = OCEAN_GRID_CELL_PX[frame.setting];
     if (material !== null && oceans.length > 0) {
       const airOf = new Map((frame.atmospheres ?? []).map((each) => [each.id, each]));
       const byId = new Map(bodies.map((body) => [body.id, body]));
@@ -1867,6 +1959,29 @@ export class PhotorealRenderer {
           };
           const rows = this.#oceanEclipseRows(ocean.id);
           this.#engine.writeBuffer(rows, 0, packOceanEclipse(eclipse));
+          // Under 20 km over the sea the near sea draws it, the far draw its basins alone; its state
+          // formed first, so that a throw leaves the whole sea out of the frame, its glare too.
+          const near =
+            nearMaterial !== null &&
+            copyMaterial !== null &&
+            resources.target.depth !== null &&
+            drawsNearSea(oceanDrawOptics(view), ocean.camera.positionM);
+          const nearView: OceanNearView | null = near
+            ? {
+                ...view,
+                time: ocean.time,
+                components: SETTINGS[frame.setting].oceanComponents,
+                cellRad: cellPx * pixelAngleRad,
+                anchor: nearSeaAnchor(
+                  oceanDrawOptics(view),
+                  ocean.sea.map.texels,
+                  ocean.camera.positionM,
+                  ocean.camera.orientation,
+                ),
+                refraction: SETTINGS[frame.setting].oceanRefraction,
+              }
+            : null;
+          const nearState = nearView === null ? null : oceanNearState(nearView);
           draws.push(
             oceanPassDraw(
               resources.triangle,
@@ -1874,9 +1989,12 @@ export class PhotorealRenderer {
               ocean.sea.map.texture,
               tables,
               rows,
-              oceanPassUniforms(view),
+              oceanPassUniforms(view, near),
             ),
           );
+          if (nearView !== null && nearState !== null) {
+            nearSeas.push({ view: nearView, state: nearState, ocean, tables, eclipseRows: rows });
+          }
           kept.add(ocean.id);
           const brightest = suns[0];
           const glare = this.#oceanGlare.sourceOf(
@@ -1906,6 +2024,8 @@ export class PhotorealRenderer {
         this.#oceanEclipses.delete(id);
       }
     }
+    const nearDraws = this.#nearSeaDraws(resources, nearSeas, cellPx, viewRotation, projection);
+    draws.push(...nearDraws);
     if (draws.length > 0) {
       resources.target.render({
         label: OCEAN_PASS_LABEL,
@@ -1917,6 +2037,184 @@ export class PhotorealRenderer {
       });
     }
     return glares;
+  }
+
+  /**
+   * The near seas' draws (plan R11, R11.T8.c; `oceanNearPass.ts`), after the pass's copies of the
+   * scene, its depth's bits and with refraction its colour, drawn first under their own label; the
+   * copies, the grid and the waves' rows let go where no sea is drawn near.
+   */
+  #nearSeaDraws(
+    resources: Resources,
+    nearSeas: ReadonlyArray<NearSea>,
+    cellPx: number,
+    viewRotation: Float32Array,
+    projection: Float32Array,
+  ): DrawItem[] {
+    const nearMaterial = resources.oceanNear;
+    const copyMaterial = resources.oceanDepthCopy;
+    const depth = resources.target.depth;
+    const kept = new Set<BodyIdHex>();
+    const draws: DrawItem[] = [];
+    if (nearSeas.length > 0 && nearMaterial !== null && copyMaterial !== null && depth !== null) {
+      const refraction = nearSeas.some((each) => each.view.refraction);
+      const copies = this.#oceanCopies(resources, refraction);
+      copies.depthBits.render({
+        label: OCEAN_COPY_PASS_LABEL,
+        viewRotation,
+        projection,
+        draws: [oceanDepthCopyDraw(resources.triangle, copyMaterial, depth)],
+        postProcesses: [],
+      });
+      copies.colour?.render({
+        label: OCEAN_COPY_PASS_LABEL,
+        viewRotation,
+        projection,
+        draws: [],
+        postProcesses: [],
+        colourFrom: resources.target.colour,
+      });
+      const grid = this.#oceanGridOf(resources, cellPx);
+      const sceneColour = copies.colour?.colour ?? this.#oceanNoColour(resources);
+      for (const { view, state, ocean, tables, eclipseRows } of nearSeas) {
+        try {
+          const waveRows = this.#oceanWaveRows(ocean.id);
+          this.#engine.writeBuffer(waveRows, 0, packOceanWaves(state.waves, state.set));
+          draws.push(
+            oceanNearDraw(
+              grid,
+              nearMaterial,
+              {
+                oceanMap: ocean.sea.map.texture,
+                tables,
+                eclipseRows,
+                waveRows,
+                sceneDepthBits: copies.depthBits.colour,
+                sceneColour,
+              },
+              oceanNearUniforms(view, state.frame),
+            ),
+          );
+          kept.add(ocean.id);
+        } catch (error: unknown) {
+          if (!lostDevice(error)) {
+            console.error(
+              `the near sea of ${ocean.id} could not be drawn in ${this.#name}:`,
+              error,
+            );
+          }
+        }
+      }
+    } else {
+      this.#releaseOceanCopies(resources);
+    }
+    for (const [id, rows] of this.#oceanWaves) {
+      if (!kept.has(id)) {
+        this.#engine.releaseBuffer(rows);
+        this.#oceanWaves.delete(id);
+      }
+    }
+    return draws;
+  }
+
+  /** The near sea's copies of the scene at its size, its colour's only with refraction. */
+  #oceanCopies(resources: Resources, refraction: boolean): OceanCopies {
+    const target = (name: string, format: ColourTargetFormat): RenderTarget =>
+      this.#engine.createRenderTarget({
+        name: `${this.#name}:ocean ${name}`,
+        size: resources.size,
+        format,
+        mips: 1,
+        depth: false,
+        category: "ocean",
+      });
+    const copies = (resources.oceanCopies ??= {
+      depthBits: target("depth copy", "r32uint"),
+      colour: null,
+    });
+    if (refraction && copies.colour === null) {
+      copies.colour = target("colour copy", HDR_COLOUR_FORMAT);
+    } else if (!refraction && copies.colour !== null) {
+      copies.colour.dispose();
+      copies.colour = null;
+    }
+    return copies;
+  }
+
+  /** Lets go of the near sea's copies, its grid and its colour's stand-in. */
+  #releaseOceanCopies(resources: Resources): void {
+    resources.oceanCopies?.depthBits.dispose();
+    resources.oceanCopies?.colour?.dispose();
+    resources.oceanCopies = null;
+    if (resources.oceanGrid !== null) {
+      this.#engine.releaseMesh(resources.oceanGrid.mesh);
+      resources.oceanGrid = null;
+    }
+    if (resources.oceanNoColour !== null) {
+      this.#engine.releaseTexture(resources.oceanNoColour);
+      resources.oceanNoColour = null;
+    }
+  }
+
+  /** The near sea's grid at the frame's size and `cellPx`, made again where either changed. */
+  #oceanGridOf(resources: Resources, cellPx: number): MeshHandle {
+    const { widthPx, heightPx } = resources.size;
+    const key = `${String(widthPx)} ${String(heightPx)} ${String(cellPx)}`;
+    if (resources.oceanGrid?.key === key) {
+      return resources.oceanGrid.mesh;
+    }
+    if (resources.oceanGrid !== null) {
+      this.#engine.releaseMesh(resources.oceanGrid.mesh);
+    }
+    const { columns, rows } = oceanGridSize(widthPx, heightPx, cellPx);
+    const { positions, indices } = oceanGridMesh(columns, rows);
+    const mesh = this.#engine.createMesh({
+      name: `${this.#name} ocean grid`,
+      positions,
+      indices,
+      topology: "triangle-list",
+      attributes: {},
+    });
+    resources.oceanGrid = { mesh, key };
+    return mesh;
+  }
+
+  /** The one-texel stand-in for the scene's colour where the near sea refracts nothing. */
+  #oceanNoColour(resources: Resources): TextureHandle {
+    if (resources.oceanNoColour === null) {
+      const texture = this.#engine.createTexture({
+        name: `${this.#name} ocean: no colour`,
+        size: [1, 1],
+        dimension: "2d",
+        format: "rgba16float",
+        mips: 1,
+        usage: TEXTURE_USAGE.TEXTURE_BINDING | TEXTURE_USAGE.COPY_DST,
+        category: "ocean",
+      });
+      this.#engine.writeTexture(
+        texture,
+        { x: 0, y: 0 },
+        { width: 1, height: 1 },
+        new Uint16Array(4),
+      );
+      resources.oceanNoColour = texture;
+    }
+    return resources.oceanNoColour;
+  }
+
+  /** `body`'s near sea's waves' rows, made at its first near frame. */
+  #oceanWaveRows(body: BodyIdHex): BufferHandle {
+    let rows = this.#oceanWaves.get(body);
+    if (rows === undefined) {
+      rows = this.#engine.createBuffer({
+        name: `${this.#name} ocean waves ${body}`,
+        bytes: 16 * OCEAN_WAVE_ROWS,
+        usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST,
+        category: "ocean",
+      });
+      this.#oceanWaves.set(body, rows);
+    }
+    return rows;
   }
 
   /** `body`'s sea's eclipse rows, made at its first frame. */
@@ -2427,13 +2725,17 @@ export class PhotorealRenderer {
       }
       this.#engine.releaseMaterial(resources.overlayDepth);
       this.#engine.releaseMesh(resources.atmosphere.triangle);
-      // The sea's material, its airless tables and its eclipse rows (plan R11, R11.T8.b).
-      for (const rows of this.#oceanEclipses.values()) {
+      // The sea's materials, its airless tables, its rows and its copies (plan R11, R11.T8.b–c).
+      for (const rows of [...this.#oceanEclipses.values(), ...this.#oceanWaves.values()]) {
         this.#engine.releaseBuffer(rows);
       }
       this.#oceanEclipses.clear();
-      if (resources.ocean !== null) {
-        this.#engine.releaseMaterial(resources.ocean);
+      this.#oceanWaves.clear();
+      this.#releaseOceanCopies(resources);
+      for (const each of [resources.ocean, resources.oceanNear, resources.oceanDepthCopy]) {
+        if (each !== null) {
+          this.#engine.releaseMaterial(each);
+        }
       }
       if (resources.airless !== null) {
         this.#engine.releaseTexture(resources.airless.body);
