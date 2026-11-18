@@ -36,7 +36,6 @@
 use hyperion_base::rng::{DetailSeed, ObjectKey};
 use hyperion_base::units::Metres;
 
-use super::hold::RockRules;
 use super::law::RockAbundance;
 use super::shape::{MAX_REACH_SHARE, Rock, RockShape};
 use super::site::{rock_abundance, site_at};
@@ -308,8 +307,8 @@ pub(crate) fn rocks_of<F: FieldView>(
 
 /// The authoritative rocks drawn in `cell`, appended to `out` in draw order.
 ///
-/// See the [module documentation](self). Below [`ROCKS_VERSION`](super::ROCKS_VERSION) the hold
-/// places none. `synth_cache` is the caller's, and the rocks do not depend on what it holds.
+/// See the [module documentation](self). `synth_cache` is the caller's, and the rocks do not depend
+/// on what it holds.
 ///
 /// # Errors
 ///
@@ -326,25 +325,19 @@ pub fn rocks_in_cell<F: FieldView>(
     cell: RockCellKey,
     out: &mut Vec<Rock>,
 ) -> Result<(), FindRocksError> {
-    match RockRules::in_force() {
-        RockRules::Held => Ok(()),
-        RockRules::Placed => {
-            let levels = rock_octave_levels(&synth.field().header().figure());
-            let octave = octave_of(levels, cell.level()).unwrap_or_else(|| {
-                panic!(
-                    "level {} is not a rock octave's level, {levels:?}",
-                    cell.level()
-                )
-            });
-            let site = site_cell(cell.cell(), levels[ROCK_OCTAVE_COUNT - 1]);
-            let k = site_abundance(synth, synth_cache, site)?;
-            Ok(rocks_of(synth, synth_cache, cell.cell(), octave, k, out)?)
-        }
-    }
+    let levels = rock_octave_levels(&synth.field().header().figure());
+    let octave = octave_of(levels, cell.level()).unwrap_or_else(|| {
+        panic!(
+            "level {} is not a rock octave's level, {levels:?}",
+            cell.level()
+        )
+    });
+    let site = site_cell(cell.cell(), levels[ROCK_OCTAVE_COUNT - 1]);
+    let k = site_abundance(synth, synth_cache, site)?;
+    Ok(rocks_of(synth, synth_cache, cell.cell(), octave, k, out)?)
 }
 
-/// The rocks of `cell` at the abundance `k`, whatever its site's and whatever the hold's rules,
-/// appended to `out` in draw order.
+/// The rocks of `cell` at the abundance `k`, whatever its site's, appended to `out` in draw order.
 ///
 /// It is [`rocks_in_cell`]'s draw at a stated k, for the benches and other crates' tests (feature
 /// `testing`), never the generator's.
@@ -381,7 +374,6 @@ mod tests {
     use wasm_bindgen_test::wasm_bindgen_test as test;
 
     use super::super::golden::cells_under;
-    use super::super::hold::with_rocks_placed;
     use super::super::shape::ROCK_ASPECT;
     use super::super::{AUTHORITATIVE_ROCK_DIAMETER, AUTHORITATIVE_ROCK_HEIGHT, ROCK_HEIGHT_RATIO};
     use crate::cube::Face;
@@ -470,163 +462,136 @@ mod tests {
         );
     }
 
-    /// Under the hold, at this generator version, no cell has a rock.
-    #[test]
-    fn no_rock_is_placed_under_the_hold() {
-        let field = world(SyntheticWorld::MoonLike);
-        let synth = Synthesiser::new(field, SEED);
-        let mut cache = SynthCache::new();
-        let levels = rock_octave_levels(&field.header().figure());
-        let mut rocks = Vec::new();
-        for dir in DIRS {
-            let site = PatchKey::containing(levels[3], dir).unwrap();
-            for (_, cell) in cells_under(site, levels) {
-                rocks_in_cell(&synth, &mut cache, RockCellKey::new(cell), &mut rocks).unwrap();
-            }
-        }
-        assert_eq!(rocks.len(), 0, "{rocks:?}");
-    }
-
     /// The same seed gives the same rocks twice, from a cold cache and a warm one.
     #[test]
     fn the_same_seed_gives_the_same_rocks_twice() {
-        with_rocks_placed(|| {
-            for w in [SyntheticWorld::MoonLike, SyntheticWorld::EarthLike] {
-                let mut warm = SynthCache::new();
-                for dir in DIRS {
-                    let first = rocks_about(w, dir);
-                    assert_eq!(first, rocks_about(w, dir));
-                    assert_eq!(first, rocks_about_with(w, dir, &mut warm));
-                }
+        for w in [SyntheticWorld::MoonLike, SyntheticWorld::EarthLike] {
+            let mut warm = SynthCache::new();
+            for dir in DIRS {
+                let first = rocks_about(w, dir);
+                assert_eq!(first, rocks_about(w, dir));
+                assert_eq!(first, rocks_about_with(w, dir, &mut warm));
             }
-        });
+        }
     }
 
     /// The rocks of a cell do not depend on what the synthesis cache holds or on the order the
     /// cells are asked in, to the bit.
     #[test]
     fn the_rocks_of_a_cell_are_order_and_cache_independent() {
-        with_rocks_placed(|| {
-            let w = SyntheticWorld::MoonLike;
-            let field = world(w);
-            let synth = Synthesiser::new(field, SEED);
-            let levels = rock_octave_levels(&field.header().figure());
-            let mut cells = Vec::new();
-            for dir in DIRS {
-                let site = PatchKey::containing(levels[3], dir).unwrap();
-                cells.extend(
-                    cells_under(site, levels)
-                        .into_iter()
-                        .map(|(_, c)| c)
-                        .step_by(5),
-                );
-            }
-            let print = |rocks: Vec<Rock>| format!("{rocks:?}");
-            let shared = core::cell::RefCell::new(SynthCache::new());
-            let warm = |cell: &PatchKey| {
-                let mut rocks = Vec::new();
-                let cache = &mut *shared.borrow_mut();
-                rocks_in_cell(&synth, cache, RockCellKey::new(*cell), &mut rocks).unwrap();
-                print(rocks)
-            };
-            hyperion_testkit::order::assert_order_independent(&cells, warm);
-            for cell in &cells {
-                let mut rocks = Vec::new();
-                rocks_in_cell(
-                    &synth,
-                    &mut SynthCache::new(),
-                    RockCellKey::new(*cell),
-                    &mut rocks,
-                )
-                .unwrap();
-                assert_eq!(print(rocks), warm(cell));
-            }
-        });
+        let w = SyntheticWorld::MoonLike;
+        let field = world(w);
+        let synth = Synthesiser::new(field, SEED);
+        let levels = rock_octave_levels(&field.header().figure());
+        let mut cells = Vec::new();
+        for dir in DIRS {
+            let site = PatchKey::containing(levels[3], dir).unwrap();
+            cells.extend(
+                cells_under(site, levels)
+                    .into_iter()
+                    .map(|(_, c)| c)
+                    .step_by(5),
+            );
+        }
+        let print = |rocks: Vec<Rock>| format!("{rocks:?}");
+        let shared = core::cell::RefCell::new(SynthCache::new());
+        let warm = |cell: &PatchKey| {
+            let mut rocks = Vec::new();
+            let cache = &mut *shared.borrow_mut();
+            rocks_in_cell(&synth, cache, RockCellKey::new(*cell), &mut rocks).unwrap();
+            print(rocks)
+        };
+        hyperion_testkit::order::assert_order_independent(&cells, warm);
+        for cell in &cells {
+            let mut rocks = Vec::new();
+            rocks_in_cell(
+                &synth,
+                &mut SynthCache::new(),
+                RockCellKey::new(*cell),
+                &mut rocks,
+            )
+            .unwrap();
+            assert_eq!(print(rocks), warm(cell));
+        }
     }
 
     /// At the site's own k, the draw at a stated k is the cell's own draw; and a cell containing a
     /// direction is the patch key's at the octave's level.
     #[test]
     fn the_draw_at_a_stated_k_and_the_containing_cell_agree() {
-        with_rocks_placed(|| {
-            let w = SyntheticWorld::MoonLike;
-            let field = world(w);
-            let figure = field.header().figure();
-            let synth = Synthesiser::new(field, SEED);
-            let mut cache = SynthCache::new();
-            let levels = rock_octave_levels(&figure);
-            for dir in DIRS {
-                let site = PatchKey::containing(levels[3], dir).unwrap();
-                let k = site_abundance(&synth, &mut cache, site).unwrap();
-                for (octave, cell) in cells_under(site, levels) {
-                    let key = RockCellKey::new(cell);
-                    let (mut own, mut stated) = (Vec::new(), Vec::new());
-                    rocks_in_cell(&synth, &mut cache, key, &mut own).unwrap();
-                    rocks_in_cell_at(&synth, &mut cache, key, k, &mut stated).unwrap();
-                    assert_eq!(own, stated);
-                    let at = cell.vertex_dir(17, 40);
-                    let containing = RockCellKey::containing(&figure, octave, at);
-                    assert_eq!(
-                        containing.cell(),
-                        PatchKey::containing(levels[octave], at).unwrap()
-                    );
-                }
+        let w = SyntheticWorld::MoonLike;
+        let field = world(w);
+        let figure = field.header().figure();
+        let synth = Synthesiser::new(field, SEED);
+        let mut cache = SynthCache::new();
+        let levels = rock_octave_levels(&figure);
+        for dir in DIRS {
+            let site = PatchKey::containing(levels[3], dir).unwrap();
+            let k = site_abundance(&synth, &mut cache, site).unwrap();
+            for (octave, cell) in cells_under(site, levels) {
+                let key = RockCellKey::new(cell);
+                let (mut own, mut stated) = (Vec::new(), Vec::new());
+                rocks_in_cell(&synth, &mut cache, key, &mut own).unwrap();
+                rocks_in_cell_at(&synth, &mut cache, key, k, &mut stated).unwrap();
+                assert_eq!(own, stated);
+                let at = cell.vertex_dir(17, 40);
+                let containing = RockCellKey::containing(&figure, octave, at);
+                assert_eq!(
+                    containing.cell(),
+                    PatchKey::containing(levels[octave], at).unwrap()
+                );
             }
-        });
+        }
     }
 
     /// No rock is narrower than 0.4 m or wider than 6.4 m, every one is in its octave's range, every
     /// rock 0.2 m tall or more is among them, and the drawn ratios lie in their ranges.
     #[test]
     fn every_rock_is_authoritative_and_shaped_within_its_ranges() {
-        with_rocks_placed(|| {
-            let mut seen = 0;
-            for w in [
-                SyntheticWorld::MoonLike,
-                SyntheticWorld::MarsLike,
-                SyntheticWorld::EarthLike,
-            ] {
-                for dir in DIRS {
-                    for rock in rocks_about(w, dir) {
-                        seen += 1;
-                        let d = rock.diameter().value();
-                        assert!((0.4..=6.4).contains(&d), "{d}");
-                        let shape = rock.shape();
-                        let (lo, hi) = ROCK_HEIGHT_RATIO;
-                        assert!((lo..=hi).contains(&shape.height_ratio()));
-                        assert!((ROCK_ASPECT.0..=ROCK_ASPECT.1).contains(&shape.aspect()));
-                        // A rock 0.2 m tall is at least the authoritative diameter across.
-                        if rock.exposed_height() >= AUTHORITATIVE_ROCK_HEIGHT {
-                            assert!(rock.diameter() >= AUTHORITATIVE_ROCK_DIAMETER);
-                        }
+        let mut seen = 0;
+        for w in [
+            SyntheticWorld::MoonLike,
+            SyntheticWorld::MarsLike,
+            SyntheticWorld::EarthLike,
+        ] {
+            for dir in DIRS {
+                for rock in rocks_about(w, dir) {
+                    seen += 1;
+                    let d = rock.diameter().value();
+                    assert!((0.4..=6.4).contains(&d), "{d}");
+                    let shape = rock.shape();
+                    let (lo, hi) = ROCK_HEIGHT_RATIO;
+                    assert!((lo..=hi).contains(&shape.height_ratio()));
+                    assert!((ROCK_ASPECT.0..=ROCK_ASPECT.1).contains(&shape.aspect()));
+                    // A rock 0.2 m tall is at least the authoritative diameter across.
+                    if rock.exposed_height() >= AUTHORITATIVE_ROCK_HEIGHT {
+                        assert!(rock.diameter() >= AUTHORITATIVE_ROCK_DIAMETER);
                     }
                 }
             }
-            assert!(seen > 0, "the worlds' sites hold some rocks");
-        });
+        }
+        assert!(seen > 0, "the worlds' sites hold some rocks");
     }
 
     /// A rock's axis lies in its cell, and its octave's diameters hold its diameter.
     #[test]
     fn each_rock_lies_in_its_cell_and_its_octave() {
-        with_rocks_placed(|| {
-            let field = world(SyntheticWorld::MarsLike);
-            let synth = Synthesiser::new(field, SEED);
-            let mut cache = SynthCache::new();
-            let levels = rock_octave_levels(&field.header().figure());
-            for dir in DIRS {
-                let site = PatchKey::containing(levels[3], dir).unwrap();
-                for (octave, cell) in cells_under(site, levels) {
-                    let mut rocks = Vec::new();
-                    rocks_in_cell(&synth, &mut cache, RockCellKey::new(cell), &mut rocks).unwrap();
-                    let (low, high) = ROCK_OCTAVES[octave];
-                    for rock in rocks {
-                        assert_eq!(PatchKey::containing(cell.level(), rock.dir()), Ok(cell));
-                        assert!(rock.diameter() >= low && rock.diameter() <= high);
-                    }
+        let field = world(SyntheticWorld::MarsLike);
+        let synth = Synthesiser::new(field, SEED);
+        let mut cache = SynthCache::new();
+        let levels = rock_octave_levels(&field.header().figure());
+        for dir in DIRS {
+            let site = PatchKey::containing(levels[3], dir).unwrap();
+            for (octave, cell) in cells_under(site, levels) {
+                let mut rocks = Vec::new();
+                rocks_in_cell(&synth, &mut cache, RockCellKey::new(cell), &mut rocks).unwrap();
+                let (low, high) = ROCK_OCTAVES[octave];
+                for rock in rocks {
+                    assert_eq!(PatchKey::containing(cell.level(), rock.dir()), Ok(cell));
+                    assert!(rock.diameter() >= low && rock.diameter() <= high);
                 }
             }
-        });
+        }
     }
 
     /// A site cell is the ancestor at its level of every octave's cell under it.

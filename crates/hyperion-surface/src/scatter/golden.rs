@@ -1,12 +1,11 @@
 //! The authoritative rocks' golden files, `tests/golden/scatter/<name>.golden` (plan R11, T3.b and
-//! T3.d), under the rules of 33 (`with_rocks_placed`): blessed natively and compared on
-//! `wasm32-wasip1` and `wasm32-unknown-unknown` through the testkit's embedded arm, each golden named
-//! by a literal.
+//! T3.d), placed from generator version 33: blessed natively and compared on `wasm32-wasip1` and
+//! `wasm32-unknown-unknown` through the testkit's embedded arm, each golden named by a literal.
 //!
 //! They live in the library's tests, not in `tests/`, because the synthetic worlds are the
 //! `testing` feature's, which `cfg(test)` turns on here and which `ci`'s wasip1 selection does not
 //! enable for the crate's integration tests, as the ground's goldens do (`ground/golden.rs`). They
-//! carry `GENERATOR_VERSION`; 33's bump re-blesses their headers alone.
+//! carry `GENERATOR_VERSION`; 33's bump re-blessed their headers alone.
 //!
 //! # Format
 //!
@@ -37,7 +36,6 @@ use hyperion_testkit::lcg::Lcg;
 use wasm_bindgen_test::wasm_bindgen_test as test;
 
 use super::contact::{RockCache, surface_height_with_rocks};
-use super::hold::with_rocks_placed;
 use super::law::{MAX_ROCK_ABUNDANCE, RockAbundance};
 use super::place::{
     ROCK_OCTAVE_COUNT, RockCellKey, rock_octave_levels, rocks_in_cell, rocks_in_cell_at,
@@ -101,104 +99,98 @@ pub(crate) fn cells_under(
 
 /// The golden text of the rocks of `w`'s pinned cells.
 fn rocks_text(w: SyntheticWorld) -> String {
-    with_rocks_placed(|| {
-        let field = world(w);
-        let synth = Synthesiser::new(field, SEED);
-        let mut cache = SynthCache::new();
-        let levels = rock_octave_levels(&field.header().figure());
-        let mut out = GoldenWriter::new();
-        out.header(crate::generator_version());
-        for site in pinned_sites(levels[ROCK_OCTAVE_COUNT - 1]) {
-            let k = site_abundance(&synth, &mut cache, site).expect("a whole field");
-            out.line(&format!(
-                "site {} {} {} {} k {}",
-                site.face().index(),
-                site.level(),
-                site.i(),
-                site.j(),
-                hex(k.k())
-            ));
-            for (octave, cell) in cells_under(site, levels) {
-                let mut rocks = Vec::new();
-                rocks_in_cell(&synth, &mut cache, RockCellKey::new(cell), &mut rocks)
-                    .expect("a whole field holds every cell");
-                for (index, rock) in rocks.iter().enumerate() {
-                    out.line(&rock_line(octave, cell, index, rock));
-                }
+    let field = world(w);
+    let synth = Synthesiser::new(field, SEED);
+    let mut cache = SynthCache::new();
+    let levels = rock_octave_levels(&field.header().figure());
+    let mut out = GoldenWriter::new();
+    out.header(crate::generator_version());
+    for site in pinned_sites(levels[ROCK_OCTAVE_COUNT - 1]) {
+        let k = site_abundance(&synth, &mut cache, site).expect("a whole field");
+        out.line(&format!(
+            "site {} {} {} {} k {}",
+            site.face().index(),
+            site.level(),
+            site.i(),
+            site.j(),
+            hex(k.k())
+        ));
+        for (octave, cell) in cells_under(site, levels) {
+            let mut rocks = Vec::new();
+            rocks_in_cell(&synth, &mut cache, RockCellKey::new(cell), &mut rocks)
+                .expect("a whole field holds every cell");
+            for (index, rock) in rocks.iter().enumerate() {
+                out.line(&rock_line(octave, cell, index, rock));
             }
         }
-        out.finish()
-    })
+    }
+    out.finish()
 }
 
 /// The points the contact golden of `w` pins (see the [module documentation](self)).
 fn contact_points(w: SyntheticWorld) -> Vec<[f64; 3]> {
-    with_rocks_placed(|| {
-        let field = world(w);
-        let figure = field.header().figure();
-        let synth = Synthesiser::new(field, SEED);
-        let mut cache = SynthCache::new();
-        let levels = rock_octave_levels(&figure);
-        let mut points = Vec::new();
-        for site in pinned_sites(levels[ROCK_OCTAVE_COUNT - 1]) {
-            for (_, cell) in cells_under(site, levels) {
-                let mut rocks = Vec::new();
-                rocks_in_cell(&synth, &mut cache, RockCellKey::new(cell), &mut rocks)
-                    .expect("a whole field holds every cell");
-                for rock in rocks {
-                    let o = rock.base_centre();
-                    let up = figure.normal(rock.dir());
-                    // Two tangents, from the axis's components alone.
-                    let t1 = unit_dir([-up[1], up[0], 0.0]);
-                    let t2 = [
-                        up[1] * t1[2] - up[2] * t1[1],
-                        up[2] * t1[0] - up[0] * t1[2],
-                        up[0] * t1[1] - up[1] * t1[0],
-                    ];
-                    let r = rock.reach().value();
-                    points.push(o);
-                    for (f1, f2) in [(0.2, 0.1), (-0.1, 0.25), (1.2, 0.0), (0.0, -1.3)] {
-                        points.push([0, 1, 2].map(|k| o[k] + f1 * r * t1[k] + f2 * r * t2[k]));
-                    }
+    let field = world(w);
+    let figure = field.header().figure();
+    let synth = Synthesiser::new(field, SEED);
+    let mut cache = SynthCache::new();
+    let levels = rock_octave_levels(&figure);
+    let mut points = Vec::new();
+    for site in pinned_sites(levels[ROCK_OCTAVE_COUNT - 1]) {
+        for (_, cell) in cells_under(site, levels) {
+            let mut rocks = Vec::new();
+            rocks_in_cell(&synth, &mut cache, RockCellKey::new(cell), &mut rocks)
+                .expect("a whole field holds every cell");
+            for rock in rocks {
+                let o = rock.base_centre();
+                let up = figure.normal(rock.dir());
+                // Two tangents, from the axis's components alone.
+                let t1 = unit_dir([-up[1], up[0], 0.0]);
+                let t2 = [
+                    up[1] * t1[2] - up[2] * t1[1],
+                    up[2] * t1[0] - up[0] * t1[2],
+                    up[0] * t1[1] - up[1] * t1[0],
+                ];
+                let r = rock.reach().value();
+                points.push(o);
+                for (f1, f2) in [(0.2, 0.1), (-0.1, 0.25), (1.2, 0.0), (0.0, -1.3)] {
+                    points.push([0, 1, 2].map(|k| o[k] + f1 * r * t1[k] + f2 * r * t2[k]));
                 }
             }
         }
-        let mut rng = Lcg::new(0x726f_636b_7363_6f6e);
-        let mut dirs: Vec<[f64; 3]> = (0..16)
-            .map(|_| unit_dir([0, 1, 2].map(|_| rng.next_f64() * 2.0 - 1.0)))
-            .collect();
-        dirs.push(unit_dir([1.0, -1.0, 1.0]));
-        dirs.push([0.0, 0.0, 1.0]);
-        for dir in dirs {
-            let ground = crate::patch::collision::finest_surface_height(&synth, dir, &mut cache)
-                .expect("a whole field");
-            points.push(figure.surface_point(dir, ground + rng.next_f64() * 5.0 - 2.0));
-        }
-        points
-    })
+    }
+    let mut rng = Lcg::new(0x726f_636b_7363_6f6e);
+    let mut dirs: Vec<[f64; 3]> = (0..16)
+        .map(|_| unit_dir([0, 1, 2].map(|_| rng.next_f64() * 2.0 - 1.0)))
+        .collect();
+    dirs.push(unit_dir([1.0, -1.0, 1.0]));
+    dirs.push([0.0, 0.0, 1.0]);
+    for dir in dirs {
+        let ground = crate::patch::collision::finest_surface_height(&synth, dir, &mut cache)
+            .expect("a whole field");
+        points.push(figure.surface_point(dir, ground + rng.next_f64() * 5.0 - 2.0));
+    }
+    points
 }
 
 /// The golden text of the ground with its rocks at `w`'s pinned points.
 fn contact_text(w: SyntheticWorld) -> String {
     let points = contact_points(w);
-    with_rocks_placed(|| {
-        let synth = Synthesiser::new(world(w), SEED);
-        let (mut synth_cache, mut cache) = (SynthCache::new(), RockCache::new());
-        let mut out = GoldenWriter::new();
-        out.header(crate::generator_version());
-        for p in points {
-            let ground = ground_at(&synth, &mut synth_cache, &p).expect("a whole field");
-            let with = surface_height_with_rocks(&synth, &mut synth_cache, &mut cache, &p)
-                .expect("a whole field holds every cell");
-            out.line(&format!(
-                "height {} ground {} with {}",
-                hex3(p),
-                hex(ground.height().value()),
-                hex(with.value())
-            ));
-        }
-        out.finish()
-    })
+    let synth = Synthesiser::new(world(w), SEED);
+    let (mut synth_cache, mut cache) = (SynthCache::new(), RockCache::new());
+    let mut out = GoldenWriter::new();
+    out.header(crate::generator_version());
+    for p in points {
+        let ground = ground_at(&synth, &mut synth_cache, &p).expect("a whole field");
+        let with = surface_height_with_rocks(&synth, &mut synth_cache, &mut cache, &p)
+            .expect("a whole field holds every cell");
+        out.line(&format!(
+            "height {} ground {} with {}",
+            hex3(p),
+            hex(ground.height().value()),
+            hex(with.value())
+        ));
+    }
+    out.finish()
 }
 
 /// The `rock` line of `rock`, the `index`th of `cell` of octave `octave`.

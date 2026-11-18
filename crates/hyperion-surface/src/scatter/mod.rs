@@ -19,8 +19,6 @@
 //! - [`shape`]: each rock's superquadric, half buried on the ground, and its top along a normal.
 //! - [`contact`]: the rocks near a point, and the ground with its rocks there, which collision
 //!   reads.
-//! - [`hold`]: the rocks are placed from generator version 33 ([`ROCKS_VERSION`]); below it the
-//!   crate places none.
 //!
 //! # The layers
 //!
@@ -31,7 +29,6 @@
 pub mod contact;
 #[cfg(test)]
 mod golden;
-pub mod hold;
 pub mod law;
 pub mod place;
 pub mod shape;
@@ -40,9 +37,6 @@ pub mod site;
 use hyperion_base::units::Metres;
 
 pub use contact::{RockCache, rocks_near, surface_height_with_rocks};
-pub use hold::{ROCKS_VERSION, RockRules};
-#[cfg(test)]
-pub use hold::{with_rock_rules, with_rocks_placed};
 pub use law::{MAX_ROCK_ABUNDANCE, RockAbundance, exponential_integral_e1};
 #[cfg(any(test, feature = "testing"))]
 pub use place::rocks_in_cell_at;

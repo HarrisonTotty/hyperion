@@ -32,7 +32,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use hyperion_base::rng::DetailSeed;
 use hyperion_base::units::{Gigayears, Metres, Pascals};
 
-use super::hold::RockRules;
 use super::law::RockAbundance;
 use super::place::{
     FindRocksError, REACH_MARGIN, ROCK_OCTAVE_COUNT, ROCK_OCTAVES, rock_octave_levels, rocks_of,
@@ -168,8 +167,8 @@ impl RockCache {
 ///
 /// They are every rock whose outline may come within `radius` of the point's foot on the datum,
 /// its reach taken [`REACH_MARGIN`] wider, octave by octave (see the [module
-/// documentation](self)); none below [`ROCKS_VERSION`](super::ROCKS_VERSION). Both caches are the
-/// caller's, and the rocks do not depend on what they hold.
+/// documentation](self)). Both caches are the caller's, and the rocks do not depend on what they
+/// hold.
 ///
 /// # Errors
 ///
@@ -195,25 +194,21 @@ pub fn rocks_near<F: FieldView>(
     );
     let figure = synth.field().header().figure();
     let (foot, _) = datum_foot(&figure, at);
-    match RockRules::in_force() {
-        RockRules::Held => Ok(()),
-        RockRules::Placed => Ok(each_near(
-            synth,
-            synth_cache,
-            cache,
-            foot,
-            radius_m,
-            |rock| out.push(rock.clone()),
-        )?),
-    }
+    Ok(each_near(
+        synth,
+        synth_cache,
+        cache,
+        foot,
+        radius_m,
+        |rock| out.push(rock.clone()),
+    )?)
 }
 
 /// The authoritative ground with its rocks at the body-fixed point `at`, metres above the datum.
 ///
 /// It is the larger of R10's [`ground_at`] there and every rock's top along the datum's normal
-/// through the point's foot (see the [module documentation](self)); the ground's height below
-/// [`ROCKS_VERSION`](super::ROCKS_VERSION). Both caches are the caller's, and the height does not
-/// depend on what they hold.
+/// through the point's foot (see the [module documentation](self)). Both caches are the caller's,
+/// and the height does not depend on what they hold.
 ///
 /// # Errors
 ///
@@ -230,20 +225,15 @@ pub fn surface_height_with_rocks<F: FieldView>(
     at: &[f64; 3],
 ) -> Result<Metres, FindRocksError> {
     let ground = ground_at(synth, synth_cache, at)?;
-    match RockRules::in_force() {
-        RockRules::Held => Ok(ground.height()),
-        RockRules::Placed => {
-            let figure = synth.field().header().figure();
-            let foot = ground.dir();
-            let mut height = ground.height().value();
-            each_near(synth, synth_cache, cache, foot, 0.0, |rock| {
-                if let Some(top) = rock.top_at_m(&figure, foot) {
-                    height = num::max(height, top);
-                }
-            })?;
-            Ok(Metres::new(num::assert_finite(height)))
+    let figure = synth.field().header().figure();
+    let foot = ground.dir();
+    let mut height = ground.height().value();
+    each_near(synth, synth_cache, cache, foot, 0.0, |rock| {
+        if let Some(top) = rock.top_at_m(&figure, foot) {
+            height = num::max(height, top);
         }
-    }
+    })?;
+    Ok(Metres::new(num::assert_finite(height)))
 }
 
 /// Calls `found` with each rock that may come within `radius_m` metres of the datum point of the
@@ -338,7 +328,6 @@ mod tests {
     use wasm_bindgen_test::wasm_bindgen_test as test;
 
     use super::super::golden::cells_under;
-    use super::super::hold::with_rocks_placed;
     use super::super::place::{RockCellKey, rocks_in_cell};
     use crate::cube::{Face, unit_dir};
     use crate::field::PartialField;
@@ -402,60 +391,185 @@ mod tests {
     /// stands on that ground.
     #[test]
     fn the_exposed_height_above_the_ground_is_the_drawn_one() {
-        with_rocks_placed(|| {
-            let mut seen = 0;
-            for w in [SyntheticWorld::MoonLike, SyntheticWorld::EarthLike] {
-                let field = world(w);
-                let figure = field.header().figure();
-                let synth = Synthesiser::new(field, SEED);
-                let mut cache = SynthCache::new();
-                for dir in DIRS {
-                    for rock in rocks_about(w, dir) {
-                        seen += 1;
-                        let ground = ground_at(&synth, &mut cache, &rock.base_centre()).unwrap();
-                        let g = ground.height().value();
-                        assert!((g - rock.ground_height().value()).abs() < 1e-8, "{g}");
-                        let top = rock
-                            .top_above(&figure, &rock.base_centre())
-                            .unwrap()
-                            .value();
-                        let exposed = top - g;
-                        assert!(
-                            (exposed - rock.exposed_height().value()).abs() < 1e-8,
-                            "{exposed} against {:?}",
-                            rock.exposed_height()
-                        );
-                    }
+        let mut seen = 0;
+        for w in [SyntheticWorld::MoonLike, SyntheticWorld::EarthLike] {
+            let field = world(w);
+            let figure = field.header().figure();
+            let synth = Synthesiser::new(field, SEED);
+            let mut cache = SynthCache::new();
+            for dir in DIRS {
+                for rock in rocks_about(w, dir) {
+                    seen += 1;
+                    let ground = ground_at(&synth, &mut cache, &rock.base_centre()).unwrap();
+                    let g = ground.height().value();
+                    assert!((g - rock.ground_height().value()).abs() < 1e-8, "{g}");
+                    let top = rock
+                        .top_above(&figure, &rock.base_centre())
+                        .unwrap()
+                        .value();
+                    let exposed = top - g;
+                    assert!(
+                        (exposed - rock.exposed_height().value()).abs() < 1e-8,
+                        "{exposed} against {:?}",
+                        rock.exposed_height()
+                    );
                 }
             }
-            assert!(seen > 0);
-        });
+        }
+        assert!(seen > 0);
     }
 
     /// The height with rocks is the ground's, to the bit, where no rock's top is met, and never
     /// below the ground anywhere: over a grid about each rock, out past its outline.
     #[test]
     fn the_rocks_raise_the_ground_and_only_where_they_stand() {
-        with_rocks_placed(|| {
-            let w = SyntheticWorld::MoonLike;
-            let field = world(w);
-            let figure = field.header().figure();
-            let synth = Synthesiser::new(field, SEED);
-            let (mut synth_cache, mut cache) = (SynthCache::new(), RockCache::new());
-            let (mut raised, mut bare) = (0, 0);
-            for dir in DIRS {
-                for rock in rocks_about(w, dir) {
-                    let side = 3.0 * rock.reach().value();
-                    for p in grid_about(&rock, &figure, side, 13) {
-                        let ground = ground_at(&synth, &mut synth_cache, &p).unwrap();
-                        let with =
-                            surface_height_with_rocks(&synth, &mut synth_cache, &mut cache, &p)
-                                .unwrap();
-                        assert!(
-                            with >= ground.height(),
-                            "{with:?} below {:?}",
-                            ground.height()
-                        );
+        let w = SyntheticWorld::MoonLike;
+        let field = world(w);
+        let figure = field.header().figure();
+        let synth = Synthesiser::new(field, SEED);
+        let (mut synth_cache, mut cache) = (SynthCache::new(), RockCache::new());
+        let (mut raised, mut bare) = (0, 0);
+        for dir in DIRS {
+            for rock in rocks_about(w, dir) {
+                let side = 3.0 * rock.reach().value();
+                for p in grid_about(&rock, &figure, side, 13) {
+                    let ground = ground_at(&synth, &mut synth_cache, &p).unwrap();
+                    let with = surface_height_with_rocks(&synth, &mut synth_cache, &mut cache, &p)
+                        .unwrap();
+                    assert!(
+                        with >= ground.height(),
+                        "{with:?} below {:?}",
+                        ground.height()
+                    );
+                    let mut near = Vec::new();
+                    rocks_near(
+                        &synth,
+                        &mut synth_cache,
+                        &mut cache,
+                        &p,
+                        Metres::ZERO,
+                        &mut near,
+                    )
+                    .unwrap();
+                    let met = near
+                        .iter()
+                        .filter_map(|r| r.top_above(&figure, &p))
+                        .any(|top| top > ground.height());
+                    if met {
+                        raised += 1;
+                        assert!(with > ground.height());
+                    } else {
+                        bare += 1;
+                        assert_eq!(bits(with.value()), bits(ground.height().value()));
+                    }
+                }
+            }
+        }
+        assert!(raised > 0 && bare > 0, "{raised} raised, {bare} bare");
+    }
+
+    /// A search at a radius finds every rock the cells within it hold that reaches it, the point's
+    /// own rocks among them, and agrees with the 3 × 3 search at no radius.
+    #[test]
+    fn a_wide_search_finds_every_rock_within_its_radius() {
+        let w = SyntheticWorld::MoonLike;
+        let field = world(w);
+        let figure = field.header().figure();
+        let synth = Synthesiser::new(field, SEED);
+        let (mut synth_cache, mut cache) = (SynthCache::new(), RockCache::new());
+        let mut searched = 0;
+        for dir in DIRS {
+            let all = rocks_about(w, dir);
+            let Some(first) = all.first() else { continue };
+            searched += 1;
+            let at = first.base_centre();
+            let mut wide = Vec::new();
+            rocks_near(
+                &synth,
+                &mut synth_cache,
+                &mut cache,
+                &at,
+                Metres::new(8.0),
+                &mut wide,
+            )
+            .unwrap();
+            let p = figure.point(first.dir());
+            for rock in &all {
+                let q = figure.point(rock.dir());
+                let d = (0..3)
+                    .map(|k| (p[k] - q[k]) * (p[k] - q[k]))
+                    .sum::<f64>()
+                    .sqrt();
+                if d + rock.reach().value() <= 8.0 {
+                    assert!(wide.contains(rock), "{rock:?} at {d} m is missed");
+                }
+            }
+            let mut own = Vec::new();
+            rocks_near(
+                &synth,
+                &mut synth_cache,
+                &mut cache,
+                &at,
+                Metres::ZERO,
+                &mut own,
+            )
+            .unwrap();
+            assert!(own.contains(first));
+            for rock in &own {
+                assert!(wide.contains(rock));
+            }
+        }
+        assert!(searched > 0, "no site held a rock to search about");
+    }
+
+    /// A rock whose cell lies by a face edge or at a cube corner, its outline crossing onto another
+    /// face, is found from the point on that face, and raises the ground there.
+    #[test]
+    fn a_rock_across_a_face_edge_or_corner_is_found_from_the_other_face() {
+        let w = SyntheticWorld::MoonLike;
+        let field = world(w);
+        let figure = field.header().figure();
+        let synth = Synthesiser::new(field, SEED);
+        let (mut synth_cache, mut cache) = (SynthCache::new(), RockCache::new());
+        let levels = rock_octave_levels(&figure);
+        let site_level = levels[3];
+        let side = 1_u32 << site_level;
+        // The site cells along face 0's four edges near its middle, and those at its corners.
+        let mut sites = Vec::new();
+        for along in 0..48 {
+            let m = side / 2 - 24 + along;
+            for (i, j) in [(0, m), (side - 1, m), (m, 0), (m, side - 1)] {
+                sites.push(PatchKey::new(Face::PosX, site_level, i, j).unwrap());
+            }
+        }
+        let mut corners = 0;
+        for face in Face::ALL {
+            for (i, j) in [(0, 0), (0, side - 1), (side - 1, 0), (side - 1, side - 1)] {
+                let corner = PatchKey::new(face, site_level, i, j).unwrap();
+                let (around, count) = neighbourhood(corner);
+                assert_eq!(count, 8, "a cube corner's cell has seven neighbours");
+                sites.extend_from_slice(&around[..count]);
+                corners += 1;
+            }
+        }
+        assert_eq!(corners, 24);
+        let mut crossings = 0;
+        for site in sites {
+            for (_, cell) in cells_under(site, levels) {
+                let mut rocks = Vec::new();
+                rocks_in_cell(&synth, &mut synth_cache, RockCellKey::new(cell), &mut rocks)
+                    .unwrap();
+                for rock in rocks {
+                    let own_face = cell.face();
+                    for p in grid_about(&rock, &figure, 2.0 * rock.reach().value(), 9) {
+                        let (foot, _) = datum_foot(&figure, &p);
+                        let Some(top) = rock.top_at_m(&figure, foot) else {
+                            continue;
+                        };
+                        if PatchKey::containing(cell.level(), foot).unwrap().face() == own_face {
+                            continue;
+                        }
+                        crossings += 1;
                         let mut near = Vec::new();
                         rocks_near(
                             &synth,
@@ -466,151 +580,16 @@ mod tests {
                             &mut near,
                         )
                         .unwrap();
-                        let met = near
-                            .iter()
-                            .filter_map(|r| r.top_above(&figure, &p))
-                            .any(|top| top > ground.height());
-                        if met {
-                            raised += 1;
-                            assert!(with > ground.height());
-                        } else {
-                            bare += 1;
-                            assert_eq!(bits(with.value()), bits(ground.height().value()));
-                        }
+                        assert!(near.contains(&rock), "{rock:?} is missed from {p:?}");
+                        let with =
+                            surface_height_with_rocks(&synth, &mut synth_cache, &mut cache, &p)
+                                .unwrap();
+                        assert!(with.value() >= top);
                     }
                 }
             }
-            assert!(raised > 0 && bare > 0, "{raised} raised, {bare} bare");
-        });
-    }
-
-    /// A search at a radius finds every rock the cells within it hold that reaches it, the point's
-    /// own rocks among them, and agrees with the 3 × 3 search at no radius.
-    #[test]
-    fn a_wide_search_finds_every_rock_within_its_radius() {
-        with_rocks_placed(|| {
-            let w = SyntheticWorld::MoonLike;
-            let field = world(w);
-            let figure = field.header().figure();
-            let synth = Synthesiser::new(field, SEED);
-            let (mut synth_cache, mut cache) = (SynthCache::new(), RockCache::new());
-            let mut searched = 0;
-            for dir in DIRS {
-                let all = rocks_about(w, dir);
-                let Some(first) = all.first() else { continue };
-                searched += 1;
-                let at = first.base_centre();
-                let mut wide = Vec::new();
-                rocks_near(
-                    &synth,
-                    &mut synth_cache,
-                    &mut cache,
-                    &at,
-                    Metres::new(8.0),
-                    &mut wide,
-                )
-                .unwrap();
-                let p = figure.point(first.dir());
-                for rock in &all {
-                    let q = figure.point(rock.dir());
-                    let d = (0..3)
-                        .map(|k| (p[k] - q[k]) * (p[k] - q[k]))
-                        .sum::<f64>()
-                        .sqrt();
-                    if d + rock.reach().value() <= 8.0 {
-                        assert!(wide.contains(rock), "{rock:?} at {d} m is missed");
-                    }
-                }
-                let mut own = Vec::new();
-                rocks_near(
-                    &synth,
-                    &mut synth_cache,
-                    &mut cache,
-                    &at,
-                    Metres::ZERO,
-                    &mut own,
-                )
-                .unwrap();
-                assert!(own.contains(first));
-                for rock in &own {
-                    assert!(wide.contains(rock));
-                }
-            }
-            assert!(searched > 0, "no site held a rock to search about");
-        });
-    }
-
-    /// A rock whose cell lies by a face edge or at a cube corner, its outline crossing onto another
-    /// face, is found from the point on that face, and raises the ground there.
-    #[test]
-    fn a_rock_across_a_face_edge_or_corner_is_found_from_the_other_face() {
-        with_rocks_placed(|| {
-            let w = SyntheticWorld::MoonLike;
-            let field = world(w);
-            let figure = field.header().figure();
-            let synth = Synthesiser::new(field, SEED);
-            let (mut synth_cache, mut cache) = (SynthCache::new(), RockCache::new());
-            let levels = rock_octave_levels(&figure);
-            let site_level = levels[3];
-            let side = 1_u32 << site_level;
-            // The site cells along face 0's four edges near its middle, and those at its corners.
-            let mut sites = Vec::new();
-            for along in 0..48 {
-                let m = side / 2 - 24 + along;
-                for (i, j) in [(0, m), (side - 1, m), (m, 0), (m, side - 1)] {
-                    sites.push(PatchKey::new(Face::PosX, site_level, i, j).unwrap());
-                }
-            }
-            let mut corners = 0;
-            for face in Face::ALL {
-                for (i, j) in [(0, 0), (0, side - 1), (side - 1, 0), (side - 1, side - 1)] {
-                    let corner = PatchKey::new(face, site_level, i, j).unwrap();
-                    let (around, count) = neighbourhood(corner);
-                    assert_eq!(count, 8, "a cube corner's cell has seven neighbours");
-                    sites.extend_from_slice(&around[..count]);
-                    corners += 1;
-                }
-            }
-            assert_eq!(corners, 24);
-            let mut crossings = 0;
-            for site in sites {
-                for (_, cell) in cells_under(site, levels) {
-                    let mut rocks = Vec::new();
-                    rocks_in_cell(&synth, &mut synth_cache, RockCellKey::new(cell), &mut rocks)
-                        .unwrap();
-                    for rock in rocks {
-                        let own_face = cell.face();
-                        for p in grid_about(&rock, &figure, 2.0 * rock.reach().value(), 9) {
-                            let (foot, _) = datum_foot(&figure, &p);
-                            let Some(top) = rock.top_at_m(&figure, foot) else {
-                                continue;
-                            };
-                            if PatchKey::containing(cell.level(), foot).unwrap().face() == own_face
-                            {
-                                continue;
-                            }
-                            crossings += 1;
-                            let mut near = Vec::new();
-                            rocks_near(
-                                &synth,
-                                &mut synth_cache,
-                                &mut cache,
-                                &p,
-                                Metres::ZERO,
-                                &mut near,
-                            )
-                            .unwrap();
-                            assert!(near.contains(&rock), "{rock:?} is missed from {p:?}");
-                            let with =
-                                surface_height_with_rocks(&synth, &mut synth_cache, &mut cache, &p)
-                                    .unwrap();
-                            assert!(with.value() >= top);
-                        }
-                    }
-                }
-            }
-            assert!(crossings > 0, "no rock's outline crosses a face edge");
-        });
+        }
+        assert!(crossings > 0, "no rock's outline crosses a face edge");
     }
 
     /// A rock in the cube corner's cell of one face, its outline over the corner, is found from
@@ -621,83 +600,78 @@ mod tests {
         use super::super::shape::RockShape;
         use crate::patch::collision::finest_surface_height;
         use hyperion_base::units::Radians;
-        with_rocks_placed(|| {
-            let field = world(SyntheticWorld::MoonLike);
-            let header = field.header();
-            let figure = header.figure();
-            let synth = Synthesiser::new(field, SEED);
-            let (mut synth_cache, mut cache) = (SynthCache::new(), RockCache::new());
-            let level = rock_octave_levels(&figure)[0];
-            let dir = unit_dir([1.0, 1.0 - 2e-7, 1.0 - 2e-7]);
-            let home = PatchKey::containing(level, dir).unwrap();
-            assert_eq!(home.face(), Face::PosX);
-            let ground = finest_surface_height(&synth, dir, &mut synth_cache).unwrap();
-            let shape = RockShape::new(0.4, 0.9, Radians::ZERO, 2.0);
-            let rock = Rock::new(&figure, dir, ground, Metres::new(0.8), shape);
-            cache.own(Owner::of(SEED, header));
-            cache.cells.insert(home.to_u64(), vec![rock.clone()]);
-            for other in [[1.0 - 2e-7, 1.0, 1.0 - 2e-7], [1.0 - 2e-7, 1.0 - 2e-7, 1.0]] {
-                let foot = unit_dir(other);
-                let on = PatchKey::containing(level, foot).unwrap();
-                assert_ne!(on.face(), home.face());
-                let top = rock
-                    .top_at_m(&figure, foot)
-                    .expect("the outline covers the point");
-                let p = figure.surface_point(foot, 1.0);
-                let mut near = Vec::new();
-                rocks_near(
-                    &synth,
-                    &mut synth_cache,
-                    &mut cache,
-                    &p,
-                    Metres::ZERO,
-                    &mut near,
-                )
-                .unwrap();
-                assert!(
-                    near.contains(&rock),
-                    "the corner's rock is missed from {:?}",
-                    on.face()
-                );
-                let with =
-                    surface_height_with_rocks(&synth, &mut synth_cache, &mut cache, &p).unwrap();
-                assert!(with.value() >= top);
-            }
-        });
+        let field = world(SyntheticWorld::MoonLike);
+        let header = field.header();
+        let figure = header.figure();
+        let synth = Synthesiser::new(field, SEED);
+        let (mut synth_cache, mut cache) = (SynthCache::new(), RockCache::new());
+        let level = rock_octave_levels(&figure)[0];
+        let dir = unit_dir([1.0, 1.0 - 2e-7, 1.0 - 2e-7]);
+        let home = PatchKey::containing(level, dir).unwrap();
+        assert_eq!(home.face(), Face::PosX);
+        let ground = finest_surface_height(&synth, dir, &mut synth_cache).unwrap();
+        let shape = RockShape::new(0.4, 0.9, Radians::ZERO, 2.0);
+        let rock = Rock::new(&figure, dir, ground, Metres::new(0.8), shape);
+        cache.own(Owner::of(SEED, header));
+        cache.cells.insert(home.to_u64(), vec![rock.clone()]);
+        for other in [[1.0 - 2e-7, 1.0, 1.0 - 2e-7], [1.0 - 2e-7, 1.0 - 2e-7, 1.0]] {
+            let foot = unit_dir(other);
+            let on = PatchKey::containing(level, foot).unwrap();
+            assert_ne!(on.face(), home.face());
+            let top = rock
+                .top_at_m(&figure, foot)
+                .expect("the outline covers the point");
+            let p = figure.surface_point(foot, 1.0);
+            let mut near = Vec::new();
+            rocks_near(
+                &synth,
+                &mut synth_cache,
+                &mut cache,
+                &p,
+                Metres::ZERO,
+                &mut near,
+            )
+            .unwrap();
+            assert!(
+                near.contains(&rock),
+                "the corner's rock is missed from {:?}",
+                on.face()
+            );
+            let with = surface_height_with_rocks(&synth, &mut synth_cache, &mut cache, &p).unwrap();
+            assert!(with.value() >= top);
+        }
     }
 
     /// The list a search returns, contents and order, does not depend on what the caches hold or on
     /// the order the points are asked in.
     #[test]
     fn the_rocks_near_a_point_are_order_and_cache_independent() {
-        with_rocks_placed(|| {
-            let w = SyntheticWorld::MoonLike;
-            let field = world(w);
-            let figure = field.header().figure();
-            let synth = Synthesiser::new(field, SEED);
-            let mut points = Vec::new();
-            for dir in DIRS {
-                for rock in rocks_about(w, dir).iter().take(2) {
-                    points.extend(grid_about(rock, &figure, 3.0 * rock.reach().value(), 3));
-                }
+        let w = SyntheticWorld::MoonLike;
+        let field = world(w);
+        let figure = field.header().figure();
+        let synth = Synthesiser::new(field, SEED);
+        let mut points = Vec::new();
+        for dir in DIRS {
+            for rock in rocks_about(w, dir).iter().take(2) {
+                points.extend(grid_about(rock, &figure, 3.0 * rock.reach().value(), 3));
             }
-            assert_ne!(points.len(), 0);
-            let near = |p: &[f64; 3], radius: f64, caches: &mut (SynthCache, RockCache)| {
-                let mut out = Vec::new();
-                let (synth_cache, cache) = caches;
-                rocks_near(&synth, synth_cache, cache, p, Metres::new(radius), &mut out).unwrap();
-                format!("{out:?}")
-            };
-            for radius in [0.0, 6.0] {
-                let shared = RefCell::new((SynthCache::new(), RockCache::new()));
-                let warm = |p: &[f64; 3]| near(p, radius, &mut shared.borrow_mut());
-                assert_order_independent(&points, warm);
-                for p in &points {
-                    let cold = near(p, radius, &mut (SynthCache::new(), RockCache::new()));
-                    assert_eq!(cold, warm(p));
-                }
+        }
+        assert_ne!(points.len(), 0);
+        let near = |p: &[f64; 3], radius: f64, caches: &mut (SynthCache, RockCache)| {
+            let mut out = Vec::new();
+            let (synth_cache, cache) = caches;
+            rocks_near(&synth, synth_cache, cache, p, Metres::new(radius), &mut out).unwrap();
+            format!("{out:?}")
+        };
+        for radius in [0.0, 6.0] {
+            let shared = RefCell::new((SynthCache::new(), RockCache::new()));
+            let warm = |p: &[f64; 3]| near(p, radius, &mut shared.borrow_mut());
+            assert_order_independent(&points, warm);
+            for p in &points {
+                let cold = near(p, radius, &mut (SynthCache::new(), RockCache::new()));
+                assert_eq!(cold, warm(p));
             }
-        });
+        }
     }
 
     /// The payload's blocks of `cells` of `field`, at 50 m, with their margin, into a client's field.
@@ -740,54 +714,52 @@ mod tests {
             let dir = unit_dir([0, 1, 2].map(|k| start[k] + angle * out[k]));
             figure.surface_point(dir, 0.0)
         };
-        with_rocks_placed(|| {
-            let (mut synth_cache, mut cache) = (SynthCache::new(), RockCache::new());
-            let mut query = |p: &[f64; 3]| {
-                let ground = ground_at(&synth, &mut synth_cache, p).map(|g| g.height());
-                let with = surface_height_with_rocks(&synth, &mut synth_cache, &mut cache, p);
-                match (ground, with) {
-                    (Ok(g), Ok(h)) => {
-                        assert!(h >= g);
-                        (true, true)
-                    }
-                    (ground, Err(FindRocksError::Query(QueryHeightError::NotSurveyed(_)))) => {
-                        (ground.is_ok(), false)
-                    }
-                    (ground, with) => panic!("{ground:?} and {with:?}"),
+        let (mut synth_cache, mut cache) = (SynthCache::new(), RockCache::new());
+        let mut query = |p: &[f64; 3]| {
+            let ground = ground_at(&synth, &mut synth_cache, p).map(|g| g.height());
+            let with = surface_height_with_rocks(&synth, &mut synth_cache, &mut cache, p);
+            match (ground, with) {
+                (Ok(g), Ok(h)) => {
+                    assert!(h >= g);
+                    (true, true)
                 }
-            };
-            // The first step out of the survey, then the edge of the ground's knowledge between it
-            // and the last step in, to a millimetre.
-            let step = 1.5e-3;
-            let first_out = (0..400_u32)
-                .map(|n| f64::from(n) * step)
-                .find(|&angle| !query(&at(angle)).0)
-                .expect("the line leaves the survey");
-            assert!(first_out > 0.0);
-            let (mut inside, mut outside) = (first_out - step, first_out);
-            while (outside - inside) * figure.equatorial_radius_m > 1e-3 {
-                let mid = f64::midpoint(inside, outside);
-                if query(&at(mid)).0 {
-                    inside = mid;
-                } else {
-                    outside = mid;
+                (ground, Err(FindRocksError::Query(QueryHeightError::NotSurveyed(_)))) => {
+                    (ground.is_ok(), false)
                 }
+                (ground, with) => panic!("{ground:?} and {with:?}"),
             }
-            // Back into the survey from its edge, half a metre a step over 40 m.
-            let mut ground_alone = 0;
-            for n in 0..80_u32 {
-                let back = f64::from(n) * 0.5 / figure.equatorial_radius_m;
-                let (ground, rocks) = query(&at(inside - back));
-                assert!(ground, "the ground is known inside its edge");
-                if !rocks {
-                    ground_alone += 1;
-                }
+        };
+        // The first step out of the survey, then the edge of the ground's knowledge between it
+        // and the last step in, to a millimetre.
+        let step = 1.5e-3;
+        let first_out = (0..400_u32)
+            .map(|n| f64::from(n) * step)
+            .find(|&angle| !query(&at(angle)).0)
+            .expect("the line leaves the survey");
+        assert!(first_out > 0.0);
+        let (mut inside, mut outside) = (first_out - step, first_out);
+        while (outside - inside) * figure.equatorial_radius_m > 1e-3 {
+            let mid = f64::midpoint(inside, outside);
+            if query(&at(mid)).0 {
+                inside = mid;
+            } else {
+                outside = mid;
             }
-            assert!(
-                ground_alone > 0,
-                "no point knows its ground but not its rocks"
-            );
-        });
+        }
+        // Back into the survey from its edge, half a metre a step over 40 m.
+        let mut ground_alone = 0;
+        for n in 0..80_u32 {
+            let back = f64::from(n) * 0.5 / figure.equatorial_radius_m;
+            let (ground, rocks) = query(&at(inside - back));
+            assert!(ground, "the ground is known inside its edge");
+            if !rocks {
+                ground_alone += 1;
+            }
+        }
+        assert!(
+            ground_alone > 0,
+            "no point knows its ground but not its rocks"
+        );
     }
 
     /// On a client's field that holds no cell, a query returns `NotSurveyed`, never a height or a
@@ -799,102 +771,69 @@ mod tests {
         let synth = Synthesiser::new(&empty, SEED);
         let figure = field.header().figure();
         let p = figure.surface_point(unit_dir([0.3, 0.2, 0.9]), 10.0);
-        with_rocks_placed(|| {
-            let (mut synth_cache, mut cache) = (SynthCache::new(), RockCache::new());
-            let height = surface_height_with_rocks(&synth, &mut synth_cache, &mut cache, &p);
-            assert!(
-                matches!(
-                    height,
-                    Err(FindRocksError::Query(QueryHeightError::NotSurveyed(_)))
-                ),
-                "{height:?}"
-            );
-            let mut out = Vec::new();
-            let near = rocks_near(
-                &synth,
-                &mut synth_cache,
-                &mut cache,
-                &p,
-                Metres::ZERO,
-                &mut out,
-            );
-            assert!(
-                matches!(
-                    near,
-                    Err(FindRocksError::Query(QueryHeightError::NotSurveyed(_)))
-                ),
-                "{near:?}"
-            );
-        });
-    }
-
-    /// Under the hold the height is the ground's to the bit and no rock is near.
-    #[test]
-    fn the_hold_leaves_the_ground_alone() {
-        let w = SyntheticWorld::MoonLike;
-        let field = world(w);
-        let synth = Synthesiser::new(field, SEED);
         let (mut synth_cache, mut cache) = (SynthCache::new(), RockCache::new());
-        let placed = with_rocks_placed(|| rocks_about(w, DIRS[0]));
-        assert_ne!(placed.len(), 0, "the site holds rocks to test");
-        for rock in &placed {
-            let p = rock.base_centre();
-            let ground = ground_at(&synth, &mut synth_cache, &p).unwrap();
-            let with = surface_height_with_rocks(&synth, &mut synth_cache, &mut cache, &p).unwrap();
-            assert_eq!(bits(with.value()), bits(ground.height().value()));
-            let mut near = Vec::new();
-            rocks_near(
-                &synth,
-                &mut synth_cache,
-                &mut cache,
-                &p,
-                Metres::new(5.0),
-                &mut near,
-            )
-            .unwrap();
-            assert_eq!(near.len(), 0);
-        }
-        assert!(cache.is_empty());
+        let height = surface_height_with_rocks(&synth, &mut synth_cache, &mut cache, &p);
+        assert!(
+            matches!(
+                height,
+                Err(FindRocksError::Query(QueryHeightError::NotSurveyed(_)))
+            ),
+            "{height:?}"
+        );
+        let mut out = Vec::new();
+        let near = rocks_near(
+            &synth,
+            &mut synth_cache,
+            &mut cache,
+            &p,
+            Metres::ZERO,
+            &mut out,
+        );
+        assert!(
+            matches!(
+                near,
+                Err(FindRocksError::Query(QueryHeightError::NotSurveyed(_)))
+            ),
+            "{near:?}"
+        );
     }
 
     /// The heights with rocks do not depend on what either cache holds or on the order they are
     /// asked in.
     #[test]
     fn the_height_with_rocks_is_order_and_cache_independent() {
-        with_rocks_placed(|| {
-            let w = SyntheticWorld::MoonLike;
-            let field = world(w);
-            let figure = field.header().figure();
-            let synth = Synthesiser::new(field, SEED);
-            let mut points = Vec::new();
-            for dir in DIRS {
-                for rock in rocks_about(w, dir).iter().take(3) {
-                    points.extend(grid_about(rock, &figure, 2.0 * rock.reach().value(), 4));
-                }
+        let w = SyntheticWorld::MoonLike;
+        let field = world(w);
+        let figure = field.header().figure();
+        let synth = Synthesiser::new(field, SEED);
+        let mut points = Vec::new();
+        for dir in DIRS {
+            for rock in rocks_about(w, dir).iter().take(3) {
+                points.extend(grid_about(rock, &figure, 2.0 * rock.reach().value(), 4));
             }
-            assert_ne!(points.len(), 0);
-            let caches = RefCell::new((SynthCache::new(), RockCache::new()));
-            let warm = |p: &[f64; 3]| {
-                let (synth_cache, cache) = &mut *caches.borrow_mut();
-                bits(
-                    surface_height_with_rocks(&synth, synth_cache, cache, p)
-                        .unwrap()
-                        .value(),
-                )
-            };
-            assert_order_independent(&points, warm);
-            let cold = |p: &[f64; 3]| {
-                let (mut synth_cache, mut cache) = (SynthCache::new(), RockCache::new());
-                bits(
-                    surface_height_with_rocks(&synth, &mut synth_cache, &mut cache, p)
-                        .unwrap()
-                        .value(),
-                )
-            };
-            assert_order_independent(&points, cold);
-            for p in &points {
-                assert_eq!(warm(p), cold(p));
-            }
-        });
+        }
+        assert_ne!(points.len(), 0);
+        let caches = RefCell::new((SynthCache::new(), RockCache::new()));
+        let warm = |p: &[f64; 3]| {
+            let (synth_cache, cache) = &mut *caches.borrow_mut();
+            bits(
+                surface_height_with_rocks(&synth, synth_cache, cache, p)
+                    .unwrap()
+                    .value(),
+            )
+        };
+        assert_order_independent(&points, warm);
+        let cold = |p: &[f64; 3]| {
+            let (mut synth_cache, mut cache) = (SynthCache::new(), RockCache::new());
+            bits(
+                surface_height_with_rocks(&synth, &mut synth_cache, &mut cache, p)
+                    .unwrap()
+                    .value(),
+            )
+        };
+        assert_order_independent(&points, cold);
+        for p in &points {
+            assert_eq!(warm(p), cold(p));
+        }
     }
 }
