@@ -9,25 +9,32 @@ import type { SysfsFiles } from "../../gpuClocks";
  * The perf samplers' fixtures (plan R12, R12.T2): two sysfs trees and the commands' output.
  *
  * @remarks
- * Written from the kernel's documented layout and the machines as the plan records them
- * (2026-09-29 and 2026-09-30), not captured: the owner's captures of the UHD 620 laptop's and the
- * development machine's `/sys` replace them by hand (R12.T2, NOT RUN in a pod).
+ * The UHD 620 laptop's files are captured from it (2026-11-18, R12.T2 and R12.T3.b); the rest are
+ * written from the kernel's documented layout and the machines as the plan records them (2026-09-29
+ * and 2026-09-30), not captured: the owner's capture of the development machine's `/sys` replaces
+ * them by hand (R12.T2, NOT RUN in a pod).
  *
- * - `x1-yoga/sys`: the ThinkPad X1 Yoga 4th generation, an i7-8665U with its UHD 620 (`8086:3ea0`):
- *   a `Mains` supply `AC` beside two UCSI USB-C sources and `BAT0`; six thermal zones, one
- *   `x86_pkg_temp`, one (`iwlwifi_1`) with no reading; i915's frequency files; eight CPUs with
- *   `thermal_throttle` (17,010 s of package throttling); `intel_pstate`; `intel-rapl-mmio:0` with
- *   PL1 15 W, τ 28 s and PL2 51 W, beside `intel-rapl:0` with another PL1.
+ * - `x1-yoga/sys`: the ThinkPad X1 Yoga 4th generation, an i7-8665U with its UHD 620 (`8086:3ea0`),
+ *   read at idle on AC after the day's descent runs (the load average 0.03): a `Mains` supply `AC`
+ *   beside two UCSI USB-C sources and `BAT0`; seven thermal zones, one `x86_pkg_temp` at 46 °C;
+ *   i915's frequency files under `card1`, at 317 MHz against RP0's 1,150; eight CPUs with
+ *   `thermal_throttle` (524 s of package throttling since boot); `intel_pstate`. The powercap
+ *   files are as read earlier the same day (21:54 UTC), when `intel-rapl-mmio:0` held PL1 15 W,
+ *   τ 27.98 s and PL2 51 W beside `intel-rapl:0`'s PL1 of 51 W; by 23:08 UTC the MMIO zone's
+ *   PL1 read 51 W, raised at run time (not traced), so PL1 is read per run, never assumed.
+ *   `energy_uj` is root-only there, so its two files are written, not captured.
  * - `desktop/sys`: the Ryzen 7 3700X and RTX 3080 (`10de:2206`), trimmed to four of its sixteen
  *   CPUs: no `Mains` supply and no system battery, only a mouse's (`scope` `Device`); no thermal
  *   zone, `k10temp`'s `Tctl`; `acpi-cpufreq` with `schedutil` and no `thermal_throttle`;
  *   `intel-rapl:0` with no constraint files.
- * - `commands/`: `tlp-stat -s` (TLP 1.10's form and 1.6's), `pmset -g batt`, `-g therm` and `-g`,
- *   the long-lived `nvidia-smi` child's CSV, and `nvidia-smi -q -x` on the RTX 3080 idle and with
- *   the GPU process listed as `G`, as `C+G`, and under Windows's WDDM (`N/A`) (R12.T3.b).
- * - `fdinfo/`: the UHD 620's GPU process's two i915 clients (ANGLE's and Skia's, and Dawn's, the
- *   probe's 293.6 MB total and 28.9 MB resident), sharing 6 MiB of swapchain images each, and
- *   Xorg's client (R12.T3.b; Design note 6).
+ * - `commands/`: `tlp-stat -s` (TLP 1.11's, captured on the laptop, its `System` and
+ *   `/proc/cmdline` lines trimmed; 1.10's form and 1.6's, written), `pmset -g batt`, `-g therm` and
+ *   `-g`, the long-lived `nvidia-smi` child's CSV, and `nvidia-smi -q -x` on the RTX 3080 idle and
+ *   with the GPU process listed as `G`, as `C+G`, and under Windows's WDDM (`N/A`) (R12.T3.b).
+ * - `fdinfo/`: captured on the laptop five minutes into a low descent (R12.T3.b; Design note 6):
+ *   the GPU process's six i915 clients on nine descriptors (client 17 behind four), two of them
+ *   resident (61,008 KiB with 14,696 KiB shared, and 186,168 KiB), and Xorg's one client, readable
+ *   since Xorg runs as the user.
  *
  * A path's `:` is stored as `%3A`, since Windows refuses it in a file name (`intel-rapl-mmio:0`).
  */

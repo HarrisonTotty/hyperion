@@ -21,7 +21,7 @@ import {
 } from "./preconditions";
 
 const COMMANDS = {
-  "tlp-stat -s": commandFixture("tlp-stat-s.txt"),
+  "tlp-stat -s": commandFixture("tlp-stat-s-1.11.txt"),
   "pmset -g batt": commandFixture("pmset-batt-ac.txt"),
   "pmset -g therm": commandFixture("pmset-therm-nominal.txt"),
   "pmset -g": commandFixture("pmset-g.txt"),
@@ -73,18 +73,18 @@ describe("checkQuiet on the UHD 620 laptop", () => {
     expect(report.state).toEqual({
       supply: "mains",
       profile: {
-        tlpMode: "performance/AC",
+        tlpMode: "performance/PRF",
         governor: "powersave",
         epp: "balance_performance",
         noTurbo: false,
         pl1Watts: 15,
         pl2Watts: 51,
-        tauSeconds: 28,
+        tauSeconds: 27.983872,
         raplZone: "intel-rapl-mmio:0",
         lowPowerMode: null,
       },
       loadAverage1m: 0.4,
-      startPackageDegC: 52,
+      startPackageDegC: 46,
       temperatureSource: "x86_pkg_temp",
     });
   });
@@ -273,6 +273,7 @@ describe("the supply", () => {
 
 describe("the commands' parsers", () => {
   it("read TLP's mode in each version's form", () => {
+    expect(parseTlpMode(commandFixture("tlp-stat-s-1.11.txt"))).toBe("performance/PRF");
     expect(parseTlpMode(commandFixture("tlp-stat-s.txt"))).toBe("performance/AC");
     expect(parseTlpMode(commandFixture("tlp-stat-s-1.6.txt"))).toBe("AC");
     expect(parseTlpMode("Power profile  = balanced/BAT (manual)\n")).toBe("balanced/BAT");

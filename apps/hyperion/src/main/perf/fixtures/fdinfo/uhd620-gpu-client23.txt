@@ -1,0 +1,21 @@
+pos:	0
+flags:	02100002
+mnt_id:	26
+ino:	206
+drm-driver:	i915
+drm-client-id:	23
+drm-pdev:	0000:00:02.0
+drm-total-system0:	199320 KiB
+drm-shared-system0:	60 KiB
+drm-active-system0:	0
+drm-resident-system0:	186168 KiB
+drm-purgeable-system0:	464 KiB
+drm-total-stolen-system0:	0
+drm-shared-stolen-system0:	0
+drm-active-stolen-system0:	0
+drm-resident-stolen-system0:	0
+drm-purgeable-stolen-system0:	0
+drm-engine-render:	56437356533 ns
+drm-engine-copy:	0 ns
+drm-engine-video:	0 ns
+drm-engine-video-enhance:	0 ns

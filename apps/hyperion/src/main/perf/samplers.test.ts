@@ -109,16 +109,26 @@ function fakeSpawn(): {
 describe("the thermal sampler", () => {
   it("reads the laptop's x86_pkg_temp zone and every zone beside it", async () => {
     const sample = await sampleThermal(sources(X1_YOGA_SYS), 0);
-    expect(sample.packageDegC).toEqual(measured(52));
+    expect(sample.packageDegC).toEqual(measured(46));
     expect(sample.packageSource).toBe("x86_pkg_temp");
-    // iwlwifi_1 has no reading, and is left out.
     expect(sample.zonesDegC).toEqual({
-      acpitz: 48,
+      acpitz: 38,
+      SEN1: 34.05,
       "INT3400 Thermal": 20,
-      pch_cannonlake: 46,
-      B0D4: 52,
-      x86_pkg_temp: 52,
+      pch_cannonlake: 39,
+      B0D4: 38.05,
+      x86_pkg_temp: 46,
+      iwlwifi_1: 44,
     });
+  });
+
+  it("leaves out a zone whose temperature cannot be read", async () => {
+    const files = fixtureFiles(X1_YOGA_SYS, {
+      denied: [`${X1_YOGA_SYS}/class/thermal/thermal_zone6/temp`],
+    });
+    const sample = await sampleThermal(sources(X1_YOGA_SYS, "linux", files), 0);
+    expect(sample.zonesDegC).not.toHaveProperty("iwlwifi_1");
+    expect(sample.zonesDegC).toHaveProperty("x86_pkg_temp", 46);
   });
 
   it("falls back to k10temp's Tctl on the desktop, which has no thermal zone", async () => {
@@ -188,12 +198,13 @@ describe("the throttle sampler", () => {
     const sample = await sampleThrottle(sources(X1_YOGA_SYS), gpu, 5);
     expect(sample.atMs).toBe(5);
     expect(Object.keys(sample.packageThrottleMs)).toHaveLength(8);
-    expect(sample.packageThrottleMs["cpu0"]).toBe(17_010_000);
-    expect(sample.coreThrottleMs["cpu4"]).toBe(6_410_000);
-    expect(sample.cpuMHz[0]).toBe(3900);
+    expect(sample.packageThrottleMs["cpu0"]).toBe(524_127);
+    expect(sample.coreThrottleMs["cpu4"]).toBe(286_008);
+    expect(sample.cpuMHz[0]).toBe(3400.055);
+    // Idle when captured: i915 at 317 MHz, below its RP0 of 1,150.
     expect(sample.gpu).toEqual({
       source: "i915-sysfs",
-      mhz: measured(1150),
+      mhz: measured(317),
       maxMHz: measured(1150),
       slowdown: missing("i915-sysfs reports no slowdown reason"),
     });
@@ -585,8 +596,8 @@ describe("the 10 Hz sampler", () => {
     expect(figures).toMatchObject({
       packageThrottleMs: 0,
       throttleFraction: 0,
-      rp0Share: 1,
-      maxPackageDegC: 52,
+      rp0Share: 0,
+      maxPackageDegC: 46,
     });
     expect(sampler.summarise(200, 300).gpuMedianMHz).toBeNull();
   });
@@ -605,8 +616,9 @@ describe("the 10 Hz sampler", () => {
 
 const KIB = 1024;
 const MIB = 1024 ** 2;
+/** The GPU process's ID, as the desktop's `nvidia-smi` fixtures list it. */
 const GPU_PID = 52_144;
-const XORG_PID = 1351;
+const XORG_PID = 1909;
 const I915 = drmDriversOf(0x80_86);
 
 function memorySources(
@@ -617,39 +629,49 @@ function memorySources(
   return { platform, files, procRoot: "/proc", run: fixtureCommands(commands) };
 }
 
-/** The UHD 620's GPU process: Dawn's client behind two descriptors, and ANGLE's and Skia's. */
+/**
+ * The UHD 620's GPU process five minutes into a low descent (2026-11-18): six i915 clients on nine
+ * descriptors, client 17 behind four of them, and two clients holding resident memory.
+ */
 const UHD_620_GPU = {
   [String(GPU_PID)]: {
-    "10": "uhd620-gpu-client41.txt",
-    "11": "uhd620-gpu-client41.txt",
-    "12": "uhd620-gpu-client40.txt",
+    "22": "uhd620-gpu-client11.txt",
+    "23": "uhd620-gpu-client15.txt",
+    "30": "uhd620-gpu-client16.txt",
+    "43": "uhd620-gpu-client17.txt",
+    "47": "uhd620-gpu-client17.txt",
+    "48": "uhd620-gpu-client17.txt",
+    "49": "uhd620-gpu-client17.txt",
+    "74": "uhd620-gpu-client19.txt",
+    "77": "uhd620-gpu-client23.txt",
   },
 };
 
 describe("the GPU process's kernel memory", () => {
   it("parses the UHD 620's i915 text: system0's total, shared and resident, and stolen-system0", () => {
-    expect(parseFdinfo(fdinfoFixture("uhd620-gpu-client41.txt"))).toMatchObject({
+    expect(parseFdinfo(fdinfoFixture("uhd620-gpu-client15.txt"))).toMatchObject({
       driver: "i915",
-      clientId: "41",
-      totalBytes: { system0: 286_720 * KIB, "stolen-system0": 0 },
-      sharedBytes: { system0: 6144 * KIB, "stolen-system0": 0 },
-      residentBytes: { system0: 28_224 * KIB, "stolen-system0": 0 },
-      engineNs: { render: 81_234_567_890 },
+      clientId: "15",
+      totalBytes: { system0: 67_152 * KIB, "stolen-system0": 0 },
+      sharedBytes: { system0: 14_696 * KIB, "stolen-system0": 0 },
+      residentBytes: { system0: 61_008 * KIB, "stolen-system0": 0 },
+      engineNs: { render: 54_327_119_215 },
     });
   });
 
-  it("counts two descriptors of one client once, and states the lower bound beside the sum", async () => {
+  it("counts the descriptors of one client once, and states the lower bound beside the sum", async () => {
     const sample = await sampleGpuMemory(GPU_PID, I915, memorySources(procFixture(UHD_620_GPU)), 7);
     expect(sample).toEqual(
       measured({
         atMs: 7,
-        residentBytes: (28_224 + 24_576) * KIB,
-        totalBytes: (286_720 + 32_768) * KIB,
-        sharedBytes: 12_288 * KIB,
-        // Σresident − ½·Σshared: the 6 MiB of swapchain images counted in both clients, once.
-        residentLowerBoundBytes: (28_224 + 24_576 - 6144) * KIB,
-        busyNs: 81_234_567_890 + 1_234_567_890,
-        clients: 2,
+        residentBytes: (61_008 + 186_168) * KIB,
+        // Client 17's 268 KiB once, not four times.
+        totalBytes: (67_152 + 268 + 199_320) * KIB,
+        sharedBytes: (14_696 + 60) * KIB,
+        // Σresident − ½·Σshared: memory shared between two clients counted once at most.
+        residentLowerBoundBytes: (61_008 + 186_168 - (14_696 + 60) / 2) * KIB,
+        busyNs: 54_327_119_215 + 56_437_356_533,
+        clients: 6,
         drivers: ["i915"],
       }),
     );
@@ -660,9 +682,9 @@ describe("the GPU process's kernel memory", () => {
       [String(GPU_PID)]: { ...UHD_620_GPU[String(GPU_PID)], "13": "r05:amdgpu-client35.txt" },
     });
     const sample = await sampleGpuMemory(GPU_PID, I915, memorySources(files), 0);
-    expect(sample.value).toMatchObject({ clients: 2, drivers: ["i915"] });
+    expect(sample.value).toMatchObject({ clients: 6, drivers: ["i915"] });
     const every = await sampleGpuMemory(GPU_PID, null, memorySources(files), 0);
-    expect(every.value).toMatchObject({ clients: 3, drivers: ["amdgpu", "i915"] });
+    expect(every.value).toMatchObject({ clients: 7, drivers: ["amdgpu", "i915"] });
   });
 
   it("is null with its reason on NVIDIA, whose driver writes no DRM keys", async () => {
@@ -687,15 +709,20 @@ describe("the GPU process's kernel memory", () => {
 });
 
 describe("the display server", () => {
-  const xorg = { [String(XORG_PID)]: { "4": "uhd620-xorg-client2.txt" } };
-  const comm = { [String(XORG_PID)]: "Xorg", "901": "i3", [String(GPU_PID)]: "hyperion" };
+  // Xorg's one client behind five descriptors, as captured beside the GPU process.
+  const xorg = {
+    [String(XORG_PID)]: Object.fromEntries(
+      ["13", "14", "15", "16", "17"].map((fd) => [fd, "uhd620-xorg-client4.txt"]),
+    ),
+  };
+  const comm = { [String(XORG_PID)]: "Xorg", "901": "i3", [String(GPU_PID)]: "electron" };
 
   it("is Xorg's fdinfo where it is readable", async () => {
     const x11 = memorySources(procFixture(xorg, comm));
     const pid = await findDisplayServerPid(x11);
     expect(pid).toBe(XORG_PID);
     const sample = await sampleDisplayServer(pid, I915, x11, 0);
-    expect(sample).toMatchObject({ residentBytes: 49_152 * KIB, busyNs: 412_345_678_901 });
+    expect(sample).toMatchObject({ residentBytes: 23_024 * KIB, busyNs: 15_193_131_076 });
   });
 
   it("is null where Xorg runs as root, or there is none", async () => {

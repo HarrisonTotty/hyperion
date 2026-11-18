@@ -28,6 +28,10 @@ Prettier.
     (`TLP_PROFILE_AC=PRF`; `tlp-stat -s` showed `performance/PRF`). `/etc/tlp.conf` does not
     override it.
   - `intel_pstate` ran the `powersave` governor at EPP `balance_performance`.
+  - RAPL's PL1 changed during the session. At 21:54 UTC the MMIO zone (`intel-rapl-mmio:0`) held
+    PL1 15 W and PL2 51 W. By 23:08 UTC its PL1 read 51 W. What raised it, and when, was not
+    traced, so the PL1 these runs ran under is unknown. The spike's results do not record it;
+    R12's run records do.
 - **Nothing else ran.** No lane, build, test or local LLM.
 - **Build.** `2fc93d05a`, a clean tree.
 - **Starts on a quiet machine.** A script waited for the 1-minute load average under 1 and the
@@ -158,22 +162,23 @@ the UHD 620's deck bake.
 by-hand evidence on the UHD 620. One capture of the GPU process and of Xorg was taken five minutes
 into the photorealistic run.
 
-- **The GPU process.** It held seven i915 clients: IDs 11, 15, 16, 17 (on four descriptors), 19
-  and 23. Two of them held resident memory:
+- **The GPU process.** It held six i915 clients on nine descriptors: IDs 11, 15, 16, 17 (on four
+  descriptors), 19 and 23. Two of them held resident memory:
   - client 15, 61,008 KiB resident, of which 14,696 KiB shared;
   - client 23, 186,168 KiB resident.
 - **Xorg.** Xorg runs as the user, so its fdinfo is readable. Its client 4, on five descriptors,
   held 23,024 KiB resident.
 - **The `stolen-system0` keys** are present, and zero.
-- **The hand-written fixture differs.** It has two clients for the GPU process, not seven.
+- **Now the fixtures.** These captures replaced the hand-written fdinfo fixtures, which had two
+  clients for the GPU process, not six.
 - **R12's own sampler has not run here yet.** `sampleGpuMemory` and `sampleDisplayServer` run in a
   `perf-run`.
 
 ### R12.T2's `/sys`
 
 [R12.T2](../../agent/plans/rendering-and-planets/12-measurements-and-settings-ladder/records/R12.T2.md)'s
-`/sys` was captured against the `x1-yoga` fixture tree, outside the repository. Its differences from
-the hand-written fixtures:
+`/sys` was captured against the `x1-yoga` fixture tree; the capture now replaces that tree. Its
+differences from the hand-written fixtures:
 
 - **The GPU is `card1`, not `card0`.** The samplers find the card by PCI vendor, so this is
   harmless.
