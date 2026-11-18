@@ -910,6 +910,7 @@ fixtures.
   repetition's start; an unmapped pass fails. Acceptance: `pnpm test`, `just ci`, and by hand one
   repetition of `cockpit-descent`'s script on the development machine gives a record that
   `just perf-record` accepts.
+  Records: [12-measurements-and-settings-ladder/records/R12.T4.c.md](12-measurements-and-settings-ladder/records/R12.T4.c.md).
 
 Files: `apps/hyperion/src/main/{cli,index}.ts`, `src/main/perf/`, `src/preload/{index,api}.ts`,
 `src/renderer/src/view/perf/runPerfScene.ts`, `justfile`, tests.

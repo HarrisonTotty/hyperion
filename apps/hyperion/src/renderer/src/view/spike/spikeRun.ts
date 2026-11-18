@@ -418,6 +418,12 @@ export interface SpikeListeners {
 export interface SpikeFrameInput {
   /** The `requestAnimationFrame` timestamp, ms. */
   readonly nowMs: number;
+  /**
+   * The script's clock for this frame, ms, from which its script time counts from the first
+   * frame's (plan R12, R12.T4.c): a perf run's warm-up gives every frame the same, which holds the
+   * script's first pose (Design note 13). Absent, `nowMs`, the run's own.
+   */
+  readonly scriptNowMs?: number;
   readonly sizes: Readonly<Record<keyof typeof SPIKE_VIEW_NAMES, ViewSize>>;
   readonly tokens: ColourTokens;
   /** One rem in device pixels. */
@@ -967,9 +973,10 @@ export class SpikeRun {
   }
 
   /**
-   * Draws one frame at the script's time for `input.nowMs`; over a generated world, where the main
-   * view draws in the photorealistic style and its pipelines could not be made, draws nothing and
-   * gives the style's refusal ({@link SpikeFrame.refusal}).
+   * Draws one frame at the script's time for `input.nowMs`, or `input.scriptNowMs` where given (a
+   * perf run's warm-up, whose `scriptStartMs` is then on that clock); over a generated world, where
+   * the main view draws in the photorealistic style and its pipelines could not be made, draws
+   * nothing and gives the style's refusal ({@link SpikeFrame.refusal}).
    *
    * @throws Error where the engine refuses a frame.
    */
@@ -991,10 +998,11 @@ export class SpikeRun {
   #testPlanetFrame(input: SpikeFrameInput, main: TestPlanetMain): SpikeFrame {
     const started = performance.now();
     this.#lastNowMs = input.nowMs;
-    const startMs = this.#startMs ?? input.nowMs;
+    const scriptNowMs = input.scriptNowMs ?? input.nowMs;
+    const startMs = this.#startMs ?? scriptNowMs;
     this.#startMs = startMs;
     const { profile } = this.#prepared;
-    const tS = Math.min(Math.max((input.nowMs - startMs) / 1000, 0), profile.durationS);
+    const tS = Math.min(Math.max((scriptNowMs - startMs) / 1000, 0), profile.durationS);
     this.#resize(input.sizes);
     const rotation = testPlanetRotationAt(tS);
     const pose = profile.poseAt(tS);
@@ -1104,11 +1112,12 @@ export class SpikeRun {
   #bodyFrame(input: SpikeFrameInput, main: BodyMain): SpikeFrame {
     const started = performance.now();
     this.#lastNowMs = input.nowMs;
-    const startMs = this.#startMs ?? input.nowMs;
+    const scriptNowMs = input.scriptNowMs ?? input.nowMs;
+    const startMs = this.#startMs ?? scriptNowMs;
     this.#startMs = startMs;
     const { profile } = this.#prepared;
     const { world, session, second } = main;
-    const tS = Math.min(Math.max((input.nowMs - startMs) / 1000, 0), profile.durationS);
+    const tS = Math.min(Math.max((scriptNowMs - startMs) / 1000, 0), profile.durationS);
     // The drawers size their views themselves, from their stages.
     this.#resize(input.sizes, second === null ? ["orbit", "craft"] : ["orbit"]);
     const pose = profile.poseAt(tS);

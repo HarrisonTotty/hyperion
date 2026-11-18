@@ -36,6 +36,11 @@ warmCanvas2d(document);
 const SpikeApp = lazy(async () => ({ default: (await import("./view/spike/SpikeApp")).SpikeApp }));
 const spike = window.hyperion.spike;
 
+// A `--perf-run` launch draws its scene in place of the consoles (plan R12, R12.T4.c), its module
+// loaded only then, as the spike's is.
+const PerfApp = lazy(async () => ({ default: (await import("./view/perf/PerfApp")).PerfApp }));
+const perf = window.hyperion.perf;
+
 // A `--terrain --whole` launch's field (plan R10, R10.T14.c), the native tool's file as the main
 // process reads it, is provided before VIEW makes `TERRAIN TEST`'s scene on it; a field that cannot
 // be had ends the run, naming why.
@@ -52,7 +57,11 @@ if (viewsCheck?.launch.fixture === "terrain-test-whole") {
 
 createRoot(container).render(
   <StrictMode>
-    {spike === undefined ? (
+    {perf !== undefined ? (
+      <Suspense fallback={null}>
+        <PerfApp perf={perf} graphics={window.hyperion.graphics} />
+      </Suspense>
+    ) : spike === undefined ? (
       <App />
     ) : (
       <Suspense fallback={null}>

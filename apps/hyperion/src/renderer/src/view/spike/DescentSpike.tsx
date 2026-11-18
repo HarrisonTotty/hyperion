@@ -1,3 +1,4 @@
+import type { BodyIdHex } from "@hyperion/protocol";
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { StatusLine, type StatusStanding } from "../../components/StatusLine";
@@ -47,6 +48,8 @@ import {
   surveyFailureStatus,
 } from "../terrain/readouts";
 import type { Selection, SelectionInput } from "../terrain/select";
+import type { TerrainSession } from "../terrain/session";
+import type { TerrainPass } from "../terrain/terrainPass";
 import type { HorizonLayerSetting, TestPlanetRidges } from "../terrain/workers/messages";
 import { type DrawnSurveyEdge, viewStrokesAt } from "../wireframe/drawList";
 import {
@@ -182,6 +185,41 @@ export interface DescentSpikeProps {
    * takes none.
    */
   readonly geometry?: GeometrySettings | undefined;
+  /**
+   * A perf run's hooks on the run's loop (plan R12, R12.T4.c): its script's clock and what each
+   * frame drew on. Read at each frame, so a new object does not restart the run; absent, the spike
+   * is R05's.
+   */
+  readonly perf?: DescentSpikePerf | undefined;
+}
+
+/**
+ * What a perf run reads of the terrain session a frame drew through (`TerrainSession`'s): its
+ * passes' patch caches and its height workers' memory.
+ */
+export interface SpikeDrawnSession extends Pick<TerrainSession, "workerMemory"> {
+  pass(body: BodyIdHex): Pick<TerrainPass, "usedSlots"> | null;
+  wirePass(body: BodyIdHex): Pick<TerrainPass, "usedSlots"> | null;
+}
+
+/** What a frame the run drew drew on, for a perf run (plan R12, R12.T4.c). */
+export interface SpikeDrawnFrame {
+  /** The session the main view drew through: a generated world's, `null` over the test planet. */
+  readonly session: SpikeDrawnSession | null;
+  /** Each view's canvas's drawing size, device px. */
+  readonly sizes: Readonly<Record<"main" | "orbit" | "craft", ViewSize>>;
+}
+
+/** A perf run's hooks on the spike's loop (plan R12, R12.T4.c; Design note 13). */
+export interface DescentSpikePerf {
+  /**
+   * The script's clock for a frame's `requestAnimationFrame` time, ms
+   * (`SpikeFrameInput.scriptNowMs`): the warm-up gives a constant, which holds the script's first
+   * pose. Absent, the frame's own.
+   */
+  readonly scriptNowMs?: ((nowMs: number) => number) | undefined;
+  /** Called after each frame the run drew, with what it drew on. */
+  readonly onDrawn?: ((drawn: SpikeDrawnFrame) => void) | undefined;
 }
 
 type Preparation =
@@ -508,6 +546,7 @@ export function DescentSpike({
   sizes: measured,
   horizonMap,
   geometry,
+  perf,
 }: DescentSpikeProps) {
   const id = useId();
   // The variant by its fields, so that a new object of the same variant does not restart the run.
@@ -555,7 +594,8 @@ export function DescentSpike({
     readonly tokens: ColourTokens | null;
     readonly selection: CameraTarget | null;
     readonly listeners: SpikeListeners | undefined;
-  }>({ main: null, orbit: null, craft: null, tokens: null, selection: null, listeners });
+    readonly perf: DescentSpikePerf | undefined;
+  }>({ main: null, orbit: null, craft: null, tokens: null, selection: null, listeners, perf });
 
   useLayoutEffect(() => {
     inputsRef.current = {
@@ -565,8 +605,9 @@ export function DescentSpike({
       tokens: mainCanvas === null || !mainCanvas.isConnected ? null : readTokens(mainCanvas),
       selection,
       listeners,
+      perf,
     };
-  }, [mainSize, orbitSize, craftSize, mainCanvas, selection, listeners]);
+  }, [mainSize, orbitSize, craftSize, mainCanvas, selection, listeners, perf]);
 
   // The run's listeners read the latest props through the ref, so that the run is made once.
   const [forwarding] = useState<SpikeListeners>(() => ({
@@ -789,10 +830,12 @@ export function DescentSpike({
         sizes.orbit !== null &&
         sizes.craft !== null
       ) {
+        const scriptNowMs = inputs.perf?.scriptNowMs;
         let drawn: SpikeFrame;
         try {
           drawn = run.frame({
             nowMs,
+            ...(scriptNowMs === undefined ? {} : { scriptNowMs: scriptNowMs(nowMs) }),
             sizes: { main: sizes.main, orbit: sizes.orbit, craft: sizes.craft },
             tokens: inputs.tokens,
             remPx: inputs.main.remPx * inputs.main.devicePixelRatio,
@@ -814,6 +857,10 @@ export function DescentSpike({
           stop(drawn.refusal, drawn.refusal);
           return;
         }
+        inputs.perf?.onDrawn?.({
+          session,
+          sizes: { main: sizes.main, orbit: sizes.orbit, craft: sizes.craft },
+        });
         if (measured !== undefined && generated && nowMs - readoutMs >= SIZES_READOUT_INTERVAL_MS) {
           readoutMs = nowMs;
           // `VIEW`'s readout at its 4 Hz, so that the workers' figures include its queries; its

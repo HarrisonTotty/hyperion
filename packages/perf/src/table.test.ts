@@ -186,6 +186,32 @@ describe("the table writer", () => {
     expect(frameRow([remote, coResident], "Station wireframe view")).not.toContain(coResident.id);
   });
 
+  it("reads the compositing row NOT AVAILABLE where the busy time was unread, else its mean", () => {
+    const compositing = (meanMs: number | null, n: number): PerfRunRecord =>
+      sampleRecord(undefined, {
+        id: `2026-11-13-uhd620-cockpit-descent-${String(n)}`,
+        runs: UHD620.runs.map((run, i) =>
+          Object.assign({}, run, {
+            rows: [
+              ...run.rows,
+              {
+                row: "compositing",
+                frames: 36_000,
+                meanMs: meanMs === null ? null : meanMs + i * 0.1,
+                p50Ms: null,
+                p95Ms: null,
+                p99Ms: null,
+              },
+            ],
+          }),
+        ),
+      });
+    const unread = compositing(null, 1);
+    expect(frameRow([unread], "Consoles' compositing")).toContain(`NOT AVAILABLE (${unread.id})`);
+    const read = compositing(1.5, 2);
+    expect(frameRow([read], "Consoles' compositing")).toContain(`mean 1.70 (${read.id})`);
+  });
+
   it("reports each record's percentiles with their ranges and the pooled p99", () => {
     expect(sectionOf([UHD620], "frames")).toContain(
       "| UHD 620, low | 2026-11-13-uhd620-cockpit-descent-1 | 180000 | 33.30 [33.30, 33.30]",

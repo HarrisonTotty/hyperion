@@ -393,10 +393,32 @@ function frameCell(
       cell = `NOT AVAILABLE (${record.id})`;
       break;
     case "full":
-      cell = `${rowFigures(record, budgetRow)} (${record.id})${forcedMark(record)}`;
+      cell =
+        budgetRow === "compositing"
+          ? compositingCell(record)
+          : `${rowFigures(record, budgetRow)} (${record.id})${forcedMark(record)}`;
       break;
   }
   return `${cell}${coResident}`;
+}
+
+/**
+ * The `compositing` row's cell of `record` (Design note 6): the GPU process's busy time less the
+ * timed passes is a mean a frame, which has no percentiles, so the cell shows the median of the
+ * repetitions' means where the percentiles are not had; `NOT AVAILABLE` where the busy time was
+ * unread, every figure `null` (NVIDIA, hardware item 2; R12.T3.b's record).
+ */
+function compositingCell(record: PerfRunRecord): string {
+  const found = record.runs.flatMap((run) => run.rows.filter((r) => r.row === "compositing"));
+  const unread = found.every(
+    (r) => r.meanMs === null && r.p50Ms === null && r.p95Ms === null && r.p99Ms === null,
+  );
+  if (unread) return `NOT AVAILABLE (${record.id})`;
+  const percentiles = found.some((r) => r.p50Ms !== null || r.p95Ms !== null || r.p99Ms !== null);
+  const figures = percentiles
+    ? rowFigures(record, "compositing")
+    : `mean ${fixed(mediansOf(found.map((r) => r.meanMs)), 2)}`;
+  return `${figures} (${record.id})${forcedMark(record)}`;
 }
 
 function frameTimeSection(records: ReadonlyArray<PerfRunRecord>): string {

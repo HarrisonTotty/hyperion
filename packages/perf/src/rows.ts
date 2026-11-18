@@ -64,14 +64,96 @@ export function isPassKey(value: string): value is PassKey {
 }
 
 /**
- * Every pass the harness times, by role and label, to its row (Design note 4).
+ * The passes both styles submit (R12.T0's record): the terrain's and the bodies' cluster culls and
+ * the terrain's compaction (plan R14), and R06's star bake with its splat, at a bake.
+ */
+const SHARED_PASSES = [
+  "terrain cluster cull",
+  "terrain cluster compact",
+  "body cluster cull",
+  "sky bake",
+  "sky:bakeSplat",
+] as const;
+
+/** The passes only a wireframe view submits: R02's draw list and plan R14's two culls. */
+const WIREFRAME_PASSES = ["view:wireframe", "hull cluster cull", "mesh occluder cull"] as const;
+
+/** A wireframe view's passes, the shared ones among them, all to `row`. */
+function wireframeRows(
+  role: "instrument" | "station",
+  row: "cockpit-instruments" | "station-wireframe",
+): Readonly<Record<PassKey, BudgetRow>> {
+  const rows: Record<PassKey, BudgetRow> = {};
+  for (const label of [...WIREFRAME_PASSES, ...SHARED_PASSES]) {
+    rows[`${role}:${label}`] = row;
+  }
+  return rows;
+}
+
+/**
+ * Every pass the harness times, by role and label, to its row (Design note 4): R12.T0's list of
+ * timed pass labels (the plan's records, R12.T0) and R11's that have landed, R11.T2's `decoration`
+ * and R11.T7's `clouds` (R12.T4.c).
  *
  * @remarks
- * Empty until R12.T0's list of timed pass labels (the plan's records, R12.T0) is entered here by
- * R12.T4.c, whose Vitest fails on a pass that the renderer times without a row. A record stores
- * each pass's row beside its key, so that a record stays readable when this map changes.
+ * A photorealistic view is a `primary`: R06's sky and its bake are the star field's row; R07's disc
+ * cells, discs and symbology `other`; R10's cascades `shadows`; the bodies' passes, the terrain's
+ * and plan R14's visibility buffer, pyramid and culls, and R11's detail sets, `terrain`; R08's
+ * tables, its per-frame passes, R07's histogram and its bloom and tone mapping their own rows;
+ * R05's own `spike display`, the test planet's, `other`. A wireframe view's passes, the shared ones
+ * among them, are `cockpit-instruments` on an `instrument` and `station-wireframe` on a `station`.
+ * The renderer's `passRowOf` (`view/perf/passRows.ts`) reads this map, and keys the terrain's
+ * cluster counters, `terrain clusters (<view ID>) …`, which carry the view's ID, by their prefix;
+ * its Vitest fails on a pass that the renderer times without a row. A record stores each pass's row
+ * beside its key, so that a record stays readable when this map changes.
  */
-export const PASS_ROWS: Readonly<Record<PassKey, BudgetRow>> = {};
+export const PASS_ROWS: Readonly<Record<PassKey, BudgetRow>> = {
+  "primary:sky": "stars",
+  "primary:sky bake": "stars",
+  "primary:sky:bakeSplat": "stars",
+  "primary:disc cells": "other",
+  "primary:discs": "other",
+  "primary:symbology": "other",
+  "primary:spike display": "other",
+  "primary:terrain shadows": "shadows",
+  "primary:bodies": "terrain",
+  "primary:bodies late": "terrain",
+  "primary:terrain": "terrain",
+  "primary:figure id raster": "terrain",
+  "primary:figure resolve": "terrain",
+  "primary:terrain id raster": "terrain",
+  "primary:terrain id raster late": "terrain",
+  "primary:terrain resolve": "terrain",
+  "primary:depth pyramid": "terrain",
+  "primary:terrain cluster cull": "terrain",
+  "primary:terrain cluster compact": "terrain",
+  "primary:body cluster cull": "terrain",
+  "primary:decoration": "terrain",
+  "primary:atmosphere tables": "atmosphere-tables",
+  "primary:atmosphere view": "atmosphere-frame",
+  "primary:atmosphere behind": "atmosphere-frame",
+  "primary:atmosphere composite": "atmosphere-frame",
+  "primary:histogram": "exposure-histogram",
+  "primary:bloom": "bloom-tonemap",
+  "primary:tonemap": "bloom-tonemap",
+  "primary:clouds": "clouds",
+  ...wireframeRows("instrument", "cockpit-instruments"),
+  ...wireframeRows("station", "station-wireframe"),
+};
+
+/**
+ * The rows of the passes whose labels carry a view's ID, by the label's prefix and the view's role
+ * (R12.T0's record): the terrain's cluster counters, `terrain clusters (<view ID>) stats` and
+ * `… over counts` (plan R14), each in the terrain's row on a photorealistic view and in the
+ * wireframe's on the others.
+ */
+export const PASS_ROW_PREFIXES: Readonly<Record<string, Readonly<Record<ViewRole, BudgetRow>>>> = {
+  "terrain clusters (": {
+    primary: "terrain",
+    instrument: "cockpit-instruments",
+    station: "station-wireframe",
+  },
+};
 
 /**
  * Every row of the memory table, in the brainstorm's order (Performance budget, the memory table),

@@ -139,6 +139,19 @@ describe("the spike's run", () => {
     run.dispose();
   });
 
+  it("holds the script where the script's clock stands still, its frames' timestamps their own", async () => {
+    const { run, samples } = await made();
+    expect(run.frame({ ...input(5_000), scriptNowMs: 0 }).tS).toBe(0);
+    expect(run.frame({ ...input(5_000 + 400_000), scriptNowMs: 0 }).tS).toBe(0);
+    expect(samples.map(({ scriptTimeS, rafTimestampMs }) => [scriptTimeS, rafTimestampMs])).toEqual(
+      [
+        [0, 5_000],
+        [0, 405_000],
+      ],
+    );
+    run.dispose();
+  });
+
   it("tells every frame where script time starts: its first frame's timestamp", async () => {
     const { run, samples } = await made();
     run.frame(input(5_000));
