@@ -92,7 +92,7 @@ import {
   cloudFreeGrounds,
   type ViewAtmosphereInput,
 } from "./viewAtmosphere";
-import { bakeInputOf, type DrawnSky } from "./useViewSky";
+import { type DrawnSky, skyBakeSource } from "./useViewSky";
 import { runPose, sceneStarsStandIn, type ViewRun } from "./viewRun";
 
 /** What one frame of a view draws from. */
@@ -453,6 +453,12 @@ export class ViewFrameDrawer {
   #bandFor: DrawnSky | null = null;
   /** A sky whose bake failed is not baked again until another sky or a restore. */
   #failedFor: DrawnSky | null = null;
+  /**
+   * The sky the view's frames draw (lane perf-long-tasks-3): the frame's own once its cube is
+   * baked, and until then the one they drew before, with the cube it holds, or none; `null` before
+   * the first.
+   */
+  #shown: DrawnSky | null = null;
   #frameFailed = false;
   /**
    * The guards of the survey edges (S5) and of the wireframe's terrain (R10.T11), R10.T16.e's: a
@@ -599,7 +605,10 @@ export class ViewFrameDrawer {
     // Offline (no server) the interim field is empty, and a kept scene's own stars, as
     // `ATMOSPHERE TEST` carries (plan R08, R08.T10.b), stand in for the field where no sky is drawn
     // either; R06's star layer is the server's. Every other kept scene has none.
-    const sceneStars = sceneStarsStandIn(run.scene.stars, inputs.stars, inputs.sky !== null);
+    // The sky drawn, with its cube: the frame's once its cube is baked, until then the one drawn
+    // before (lane perf-long-tasks-3).
+    const { sky, cube } = this.#skyFor(inputs.sky, inputs.setting);
+    const sceneStars = sceneStarsStandIn(run.scene.stars, inputs.stars, sky !== null);
     // The style this frame is foreseen to draw in, the one its list is built for: a frame that
     // falls back to the wireframe within its draw keeps that style's survey edges and inside datum.
     const style = frameStyleOf(inputs, this.#photoreal.status);
@@ -617,7 +626,7 @@ export class ViewFrameDrawer {
         remPx: size.remPx * ratio,
         // The guide's CSS-pixel widths at the display's ratio, never under 2 device pixels.
         ...viewStrokesAt(ratio),
-        skyStars: inputs.sky === null ? null : skySprites(inputs.sky, camera.pose, run.scene),
+        skyStars: sky === null ? null : skySprites(sky, camera.pose, run.scene),
         // The surveys' edges, in both styles (R10.T16.c), in the style the frame draws.
         surveyEdges:
           inputs.terrain === undefined
@@ -655,7 +664,6 @@ export class ViewFrameDrawer {
               cloudFreeGrounds(inputs.classMaps),
             ),
           );
-    const cube = this.#cubeFor(inputs.sky, inputs.setting);
     const exposed = exposureScale(ev100);
     let drawn = false;
     let terrain: TerrainAnnunciation | null = null;
@@ -663,6 +671,7 @@ export class ViewFrameDrawer {
     if (triesPhotoreal) {
       const photoreal = this.#drawPhotoreal(
         inputs,
+        sky,
         tokens,
         { presentedPx: viewport, selectionPx: selection },
         camera,
@@ -765,6 +774,7 @@ export class ViewFrameDrawer {
 
   #drawPhotoreal(
     inputs: ViewFrameInputs,
+    sky: DrawnSky | null,
     tokens: ColourTokens,
     sizes: { readonly presentedPx: ViewSize; readonly selectionPx: ViewSize },
     camera: { readonly pose: CameraPose; readonly fovXRad: number },
@@ -776,7 +786,7 @@ export class ViewFrameDrawer {
     readonly terrain: TerrainAnnunciation | null;
     readonly decorated: boolean;
   } {
-    const { sky, run } = inputs;
+    const { run } = inputs;
     const grid = inputs.grid ?? true;
     const { presentedPx: viewport, selectionPx } = sizes;
     const airView = inputs.atmosphere?.view;
@@ -939,32 +949,47 @@ export class ViewFrameDrawer {
     );
   }
 
-  #cubeFor(sky: DrawnSky | null, setting: QualitySetting): BakedCube | null {
+  /**
+   * The sky a frame draws and its cube (lane perf-long-tasks-3): the frame's sky where its cube is
+   * held, or baked, or has none; while its cube is baked, in the tasks after the frame
+   * (`SkyCubeCache.want`), the sky drawn before with the cube the view holds, or none before the
+   * first, so that a sky's stars, band and cube arrive together, a few frames later.
+   */
+  #skyFor(
+    sky: DrawnSky | null,
+    setting: QualitySetting,
+  ): { readonly sky: DrawnSky | null; readonly cube: BakedCube | null } {
     const cache = skyCubeCacheOf(this.#engine);
     if (this.#engine.capabilities.float32Blendable) {
       // The GPU bake's solid angles formed on a worker while the first sky is awaited, rather
-      // than in its frame (perf-long-tasks-2); a no-op once formed.
+      // than in its first bake (perf-long-tasks-2); a no-op once formed.
       warmTexelSolidAngles(skyFaceSizePx(setting, true));
     }
     if (sky === null || sky === this.#failedFor) {
       cache.release(this.#name);
-      return null;
+      this.#shown = sky;
+      return { sky, cube: null };
     }
-    try {
-      return cache.acquire(this.#name, {
-        stars: sky.model.stars,
-        baked: sky.selection.baked,
-        // Read at the bake: a restore may have brought a device without float32-blendable.
-        bakeInput: () =>
-          bakeInputOf(sky, skyFaceSizePx(setting, this.#engine.capabilities.float32Blendable)),
-      });
-    } catch (error: unknown) {
+    const state = cache.want(this.#name, {
+      stars: sky.model.stars,
+      baked: sky.selection.baked,
+      // Read at the bake: a restore may have brought a device without float32-blendable.
+      bakeSource: () =>
+        skyBakeSource(sky, skyFaceSizePx(setting, this.#engine.capabilities.float32Blendable)),
+    });
+    if (state.kind === "baking") {
+      const shown = this.#shown;
+      return { sky: shown, cube: shown === null ? null : cache.held(this.#name) };
+    }
+    this.#shown = sky;
+    if (state.kind === "failed") {
       // A bake that fails (a lost device) leaves the sprites; tried again on another sky.
-      console.error("the sky's cube could not be baked:", error);
+      console.error("the sky's cube could not be baked:", state.error);
       this.#failedFor = sky;
       cache.release(this.#name);
-      return null;
+      return { sky, cube: null };
     }
+    return { sky, cube: state.cube };
   }
 
   /**

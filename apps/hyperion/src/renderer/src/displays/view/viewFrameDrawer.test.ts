@@ -27,6 +27,9 @@ import type {
 import { PoseIntervals } from "../../view/terrain/poseInterval";
 import type { ResidentHeightsView } from "../../view/terrain/residentHeights";
 import { SETTINGS } from "../../view/quality/qualitySetting";
+import { skyCubeCacheOf } from "../../view/sky/cache";
+import type { SkyModel } from "../../view/sky/model";
+import { decodedSky, skyPayload, skyRequest, skyResponse } from "../../test/skyFixtures";
 import type { TerrainViewFrameInput } from "../../view/terrain/terrainPass";
 import { heightAboveGroundM } from "../../view/terrain/terrainWire";
 import { buildWireframeDrawList, viewStrokesAt } from "../../view/wireframe/drawList";
@@ -40,6 +43,7 @@ import {
   type ViewFrameDrawn,
   type ViewFrameInputs,
 } from "./viewFrameDrawer";
+import type { DrawnSky } from "./useViewSky";
 import { runPose, startRun, type ViewRun } from "./viewRun";
 
 /** A canvas view that records whether it was disposed. */
@@ -1651,5 +1655,134 @@ describe("a kept scene's own stars, offline (R08.T10.b)", () => {
 
   it("draws the interim field, not the scene's own stars, where it has stars", async () => {
     expect(await spritesDrawn(ATMOSPHERE_STARS, [INTERIM_STAR])).toBe(1);
+  });
+});
+
+/** A drawn sky of two stars, both baked; each call is another arrival's. */
+function drawnSky(): DrawnSky {
+  const stars = [
+    { direction: [1, 0, 0], distanceLy: 40, vMag: 9 },
+    { direction: [0, 1, 0], distanceLy: 400, vMag: 9.5 },
+  ] as const;
+  const payload = skyPayload(stars, 2, null);
+  const request = skyRequest(0);
+  const model: SkyModel = {
+    request,
+    response: skyResponse(request, payload, stars.length, 2),
+    ...decodedSky(payload, stars.length),
+    stale: false,
+  };
+  return {
+    model,
+    selection: { sprites: new Uint32Array(0), baked: Uint32Array.from([0, 1]) },
+    bandIlluminanceLx: new Float64Array(6 * 2 * 2 * 3),
+  };
+}
+
+describe("a view's sky while its cube is baked (lane perf-long-tasks-3)", () => {
+  /**
+   * A drawer on an engine without float32-blendable whose bakes' tasks wait to be run, each one
+   * step, and the cubes the bakes made.
+   */
+  async function bakingDrawer(): Promise<{
+    readonly frameWith: (sky: DrawnSky | null) => ReadonlyArray<TextureHandle>;
+    readonly runTasks: () => void;
+    readonly cubes: TextureHandle[];
+    readonly released: TextureHandle[];
+  }> {
+    const engine = await countingRenderEngine();
+    const cubes: TextureHandle[] = [];
+    const released: TextureHandle[] = [];
+    vi.spyOn(engine, "createPackedCube").mockImplementation(() => {
+      const cube: TextureHandle = { kind: "texture", name: `cube ${String(cubes.length + 1)}` };
+      cubes.push(cube);
+      return cube;
+    });
+    vi.spyOn(engine, "writePackedCubeLevel").mockImplementation(() => undefined);
+    const releaseTexture = engine.releaseTexture.bind(engine);
+    vi.spyOn(engine, "releaseTexture").mockImplementation((texture) => {
+      if (cubes.includes(texture)) {
+        released.push(texture);
+      } else {
+        releaseTexture(texture);
+      }
+    });
+    const tasks: Array<() => void> = [];
+    let clockMs = 0;
+    skyCubeCacheOf(engine, {
+      schedule: (task) => {
+        tasks.push(task);
+      },
+      now: () => {
+        clockMs += 10;
+        return clockMs;
+      },
+    });
+    const view = new RecordingView("view");
+    const drawer = new ViewFrameDrawer(engine, view, "view");
+    return {
+      frameWith: (sky) => {
+        drawer.draw({
+          run: phaseRun(false),
+          size: { widthPx: 320, heightPx: 180, devicePixelRatio: 1, remPx: 16 },
+          tokens: TOKENS,
+          exposure: DEFAULT_EXPOSURE,
+          white: null,
+          stars: [],
+          sky,
+          hostDiscs: null,
+          selection: null,
+          style: "wireframe",
+          setting: "low",
+          geometry: undefined,
+          renderScale: 1,
+          availability: { wireframe: true, photorealistic: true },
+          meter: null,
+        });
+        const frame = view.frames.at(-1);
+        // The cubes the frame's draws sample.
+        return (frame?.draws ?? []).flatMap((item) =>
+          Object.values(item.textures).filter((texture) => cubes.includes(texture)),
+        );
+      },
+      runTasks: () => {
+        for (let task = tasks.shift(); task !== undefined; task = tasks.shift()) {
+          task();
+        }
+      },
+      cubes,
+      released,
+    };
+  }
+
+  it("draws a sky's first cube from the frame after its bake, which runs in the tasks between", async () => {
+    const { frameWith, runTasks, cubes } = await bakingDrawer();
+    const sky = drawnSky();
+    expect([frameWith(sky), cubes]).toEqual([[], []]);
+    runTasks();
+    expect(cubes).toHaveLength(1);
+    expect(frameWith(sky)).toEqual(cubes);
+  });
+
+  it("draws the cube it drew before while a new sky's is baked, and lets it go as the new one is drawn", async () => {
+    const { frameWith, runTasks, cubes, released } = await bakingDrawer();
+    const first = drawnSky();
+    frameWith(first);
+    runTasks();
+    expect(frameWith(first)).toEqual([cubes[0]]);
+    const next = drawnSky();
+    expect([frameWith(next), released]).toEqual([[cubes[0]], []]);
+    runTasks();
+    // Baked: the new sky's frame draws its cube, and the old one goes.
+    expect(frameWith(next)).toEqual([cubes[1]]);
+    expect(released).toEqual([cubes[0]]);
+  });
+
+  it("drops a bake under way where the frame's sky goes", async () => {
+    const { frameWith, runTasks, cubes } = await bakingDrawer();
+    frameWith(drawnSky());
+    expect(frameWith(null)).toEqual([]);
+    runTasks();
+    expect(cubes).toEqual([]);
   });
 });

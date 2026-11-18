@@ -27,6 +27,12 @@
  * same steps' TypeScript references (`splatCpu.ts`, `mips.ts`, `pack.ts`), one face at a time; the
  * sums are the same in another order.
  *
+ * A bake is made in steps ({@link startSkyBake}; lane perf-long-tasks-3): its stars laid out a
+ * range at a time, its uploads in parts, then a tile's splat and levels or a face's last levels a
+ * step, so that a view's bake runs in short tasks between its frames (`cache.ts`) rather than as one
+ * long frame. Its commands are the same and come in the same order on resources of its own, so the
+ * cube is the one {@link bakeSkyCube}, which runs every step at once, makes, to the bit.
+ *
  * The cube counts under `MemoryCategory` `sky-cube`; every transient, the scratch face's levels (or
  * a tile's and the face's upper levels), the solid angles, the points and the staging, under
  * `sky-scratch`, released when the bake ends (T13.h's `releaseBuffer` and `releaseTexture`).
@@ -131,7 +137,7 @@ export interface BakedCube {
   readonly path: "gpu" | "cpu";
 }
 
-/** What a bake is given. */
+/** What a bake is given: its stars as arrays, the harness's and the tests' form. */
 export interface BakeInput {
   /** The baked stars' directions, three floats a star, galactic axes. */
   readonly directions: Float32Array;
@@ -146,6 +152,89 @@ export interface BakeInput {
    * absent. The harness's check sets it, to compare a tiled bake with an untiled one.
    */
   readonly tilePx?: number;
+}
+
+/**
+ * The stars a bake splats, laid out a range at a time into the splat's points (lane
+ * perf-long-tasks-3): a view's are read from its sky as the bake goes, with no arrays of their own.
+ */
+export interface BakeStars {
+  /** How many stars are baked. */
+  readonly count: number;
+  /**
+   * Lays stars [from, to) out in `points`, each through {@link writeBakePoint} at its index.
+   *
+   * @param points - The splat's points, {@link BAKE_POINTS_HEADER} floats of header first.
+   */
+  writeInto(points: Float32Array, from: number, to: number): void;
+}
+
+/** What a bake is given, its stars laid out as it goes ({@link startSkyBake}). */
+export interface SkyBakeSource extends Omit<BakeInput, "directions" | "illuminanceLx"> {
+  readonly stars: BakeStars;
+}
+
+/** The floats before the first star of the splat's points: (face, size, tile side, tile). */
+export const BAKE_POINTS_HEADER = 4;
+
+/**
+ * Writes one star into the splat's points as `splat.wgsl` reads it: its direction, 0, its
+ * illuminance per channel, lx, and 1, each stored as `f32`.
+ *
+ * @param star - Its index among the baked stars.
+ */
+export function writeBakePoint(
+  points: Float32Array,
+  star: number,
+  x: number,
+  y: number,
+  z: number,
+  redLx: number,
+  greenLx: number,
+  blueLx: number,
+): void {
+  const at = BAKE_POINTS_HEADER + star * SPLAT_POINT_FLOATS;
+  points[at] = x;
+  points[at + 1] = y;
+  points[at + 2] = z;
+  points[at + 3] = 0;
+  points[at + 4] = redLx;
+  points[at + 5] = greenLx;
+  points[at + 6] = blueLx;
+  points[at + 7] = 1;
+}
+
+/**
+ * A bake's source over stars given as arrays.
+ *
+ * @throws Error for directions and illuminances of different counts.
+ */
+export function bakeSourceOf(input: BakeInput): SkyBakeSource {
+  const { directions, illuminanceLx, ...rest } = input;
+  if (directions.length !== illuminanceLx.length || directions.length % 3 !== 0) {
+    throw new Error("a bake's directions and illuminances are not the same whole stars");
+  }
+  return {
+    ...rest,
+    stars: {
+      count: directions.length / 3,
+      writeInto: (points, from, to) => {
+        for (let star = from; star < to; star += 1) {
+          const at = star * 3;
+          writeBakePoint(
+            points,
+            star,
+            directions[at] ?? 0,
+            directions[at + 1] ?? 0,
+            directions[at + 2] ?? 0,
+            illuminanceLx[at] ?? 0,
+            illuminanceLx[at + 1] ?? 0,
+            illuminanceLx[at + 2] ?? 0,
+          );
+        }
+      },
+    },
+  };
 }
 
 /**
@@ -189,29 +278,76 @@ export function bakeTiling(faceSizePx: number, maxTilePx: number = BAKE_TILE_PX)
   return { tilePx, tilesPerSide: faceSizePx / tilePx, upperLevel };
 }
 
+/** The stars a bake's step lays out (lane perf-long-tasks-3): 16,384, about 5 ms on a pod. */
+export const BAKE_STARS_A_STEP = 16_384;
+
+/** The floats of the points or solid angles a bake's step uploads: 1 MiB. */
+export const BAKE_UPLOAD_FLOATS = 262_144;
+
 /**
- * The splat's points with the header `splat.wgsl` reads: (face, size, tile side, tile), the face
- * and tile written before each draw, then the stars.
+ * The page's one array of splat points, kept from bake to bake (lane perf-long-tasks-3): a
+ * re-bake's 300,000 stars took a new 9.6 MB array each time, beside the garbage it set off.
  */
-function headedPoints(input: BakeInput): Float32Array {
-  const { directions, illuminanceLx } = input;
-  const count = directions.length / 3;
-  const points = new Float32Array(4 + count * SPLAT_POINT_FLOATS);
-  points[1] = input.faceSizePx;
-  // Element by element, the same f32 values, with no view made a star: a re-bake's 300,000 stars
-  // made 600,000 (perf-long-tasks-2).
-  for (let star = 0; star < count; star += 1) {
-    const at = 4 + star * SPLAT_POINT_FLOATS;
-    const from = star * 3;
-    points[at] = directions[from] ?? 0;
-    points[at + 1] = directions[from + 1] ?? 0;
-    points[at + 2] = directions[from + 2] ?? 0;
-    points[at + 4] = illuminanceLx[from] ?? 0;
-    points[at + 5] = illuminanceLx[from + 1] ?? 0;
-    points[at + 6] = illuminanceLx[from + 2] ?? 0;
-    points[at + 7] = 1;
+let pointsScratch: Float32Array | null = null;
+/** Whether a bake holds {@link pointsScratch}, from its stars' layout to their upload. */
+let pointsScratchTaken = false;
+
+/**
+ * The splat's points for `count` stars, {@link BAKE_POINTS_HEADER} floats of header first: the
+ * page's kept array where it is free and large enough, else a new one, kept where none is held.
+ * Every float of the header and of each star is written before it is read; what lies past them is
+ * never read.
+ */
+function takePoints(count: number): Float32Array {
+  const floats = BAKE_POINTS_HEADER + count * SPLAT_POINT_FLOATS;
+  if (!pointsScratchTaken && pointsScratch !== null && pointsScratch.length >= floats) {
+    pointsScratchTaken = true;
+    return pointsScratch.subarray(0, floats);
+  }
+  const points = new Float32Array(floats);
+  if (!pointsScratchTaken) {
+    pointsScratch = points;
+    pointsScratchTaken = true;
   }
   return points;
+}
+
+/** Gives the page's kept array back once a bake's points are uploaded. */
+function givePoints(points: Float32Array): void {
+  if (pointsScratch !== null && points.buffer === pointsScratch.buffer) {
+    pointsScratchTaken = false;
+  }
+}
+
+/**
+ * Lays a bake's stars out in the splat's points, a step of {@link BAKE_STARS_A_STEP} at a time,
+ * after the header `splat.wgsl` reads: (face, size, tile side, tile), the face and tile written
+ * before each draw.
+ */
+function* layOutPoints(source: SkyBakeSource, points: Float32Array): Generator<void, void, void> {
+  points.fill(0, 0, BAKE_POINTS_HEADER);
+  points[1] = source.faceSizePx;
+  const { count } = source.stars;
+  for (let from = 0; from < count; from += BAKE_STARS_A_STEP) {
+    source.stars.writeInto(points, from, Math.min(count, from + BAKE_STARS_A_STEP));
+    yield;
+  }
+}
+
+/** Uploads `data` into `buffer` from its start, {@link BAKE_UPLOAD_FLOATS} floats a step. */
+function* uploadInParts(
+  engine: RenderEngine,
+  buffer: BufferHandle,
+  data: Float32Array,
+): Generator<void, void, void> {
+  for (let at = 0; at < data.length; at += BAKE_UPLOAD_FLOATS) {
+    engine.writeBuffer(
+      buffer,
+      at * Float32Array.BYTES_PER_ELEMENT,
+      data.subarray(at, Math.min(data.length, at + BAKE_UPLOAD_FLOATS)),
+    );
+    yield;
+  }
 }
 
 /** The `f32` bits of a value, as the peak buffer holds them. */
@@ -349,19 +485,87 @@ function placed(size: Uint32Array, origin: readonly [number, number, number, num
 }
 
 /**
- * Bakes the stars into a cube (Design note 21).
+ * A bake under way, made a step at a time ({@link startSkyBake}).
+ *
+ * @remarks
+ * A step is the stars' layout of {@link BAKE_STARS_A_STEP}, an upload of
+ * {@link BAKE_UPLOAD_FLOATS}, the scratch's making, a tile's splat and peak, a tile's splat and
+ * levels, or a face's last levels; the CPU bake, the fallback, is one.
+ */
+export interface SkyBakeJob {
+  /**
+   * Runs the bake's next steps, at least one, until `now()` reaches `untilMs`.
+   *
+   * @returns The cube once its last step is run, and `null` until then; what it made is then the
+   *   caller's, to release with {@link releaseBakedCube}.
+   * @throws Whatever a step throws (a lost device, a refused allocation), having released what
+   *   the bake made; the job is then over.
+   */
+  step(untilMs: number, now: () => number): BakedCube | null;
+  /** Stops an unfinished bake and releases what it made; nothing once it has finished or failed. */
+  cancel(): void;
+}
+
+/**
+ * Starts a bake that runs as its steps are asked for (Design note 21; lane perf-long-tasks-3).
+ *
+ * @throws Error for a face size with no mip chain to one texel.
+ */
+export function startSkyBake(engine: RenderEngine, source: SkyBakeSource): SkyBakeJob {
+  mipSizes(source.faceSizePx);
+  const steps = engine.capabilities.float32Blendable
+    ? bakeOnGpu(engine, source)
+    : bakeOnCpu(engine, source);
+  let over = false;
+  return {
+    step: (untilMs, now) => {
+      if (over) {
+        throw new Error(`the bake of ${source.name} is over`);
+      }
+      try {
+        for (;;) {
+          const next = steps.next();
+          if (next.done === true) {
+            over = true;
+            if (next.value === null) {
+              throw new Error(`the bake of ${source.name} ended without its cube`);
+            }
+            return next.value;
+          }
+          if (now() >= untilMs) {
+            return null;
+          }
+        }
+      } catch (error: unknown) {
+        over = true;
+        throw error;
+      }
+    },
+    cancel: () => {
+      if (!over) {
+        over = true;
+        // The generator's `finally` releases what the bake made.
+        steps.return(null);
+      }
+    },
+  };
+}
+
+/** The clock {@link bakeSkyCube} never reads: it runs every step at once. */
+const NO_CLOCK = (): number => 0;
+
+/**
+ * Bakes the stars into a cube (Design note 21), every step at once.
  *
  * @throws Error for a face size with no mip chain to one texel, or directions and illuminances of
  *   different counts.
  */
 export function bakeSkyCube(engine: RenderEngine, input: BakeInput): BakedCube {
-  if (input.directions.length !== input.illuminanceLx.length || input.directions.length % 3 !== 0) {
-    throw new Error("a bake's directions and illuminances are not the same whole stars");
+  const baked = startSkyBake(engine, bakeSourceOf(input)).step(Number.POSITIVE_INFINITY, NO_CLOCK);
+  if (baked === null) {
+    throw new Error(`the bake of ${input.name} stopped before its end`);
   }
-  mipSizes(input.faceSizePx);
-  return engine.capabilities.float32Blendable
-    ? bakeOnGpu(engine, input)
-    : bakeSkyCubeOnCpu(engine, input);
+  return baked;
 }
 
 /** A storage binding of one level of a bake texture. */
@@ -370,19 +574,16 @@ interface LevelOf {
   readonly level: number;
 }
 
-function bakeOnGpu(engine: RenderEngine, input: BakeInput): BakedCube {
-  const size = input.faceSizePx;
+/** The GPU bake, a step at a time; its `finally` releases its transients, and all on a failure. */
+function* bakeOnGpu(
+  engine: RenderEngine,
+  source: SkyBakeSource,
+): Generator<void, BakedCube | null, void> {
+  const size = source.faceSizePx;
   const sizes = mipSizes(size);
-  const { tilePx, tilesPerSide, upperLevel } = bakeTiling(size, input.tilePx);
+  const { tilePx, tilesPerSide, upperLevel } = bakeTiling(size, source.tilePx);
   const upperSize = sizes[upperLevel] ?? 1;
-  const kernels: BakeKernels = {
-    clear: engine.createCompute(BAKE_CLEAR_KERNEL),
-    peak: engine.createCompute(BAKE_PEAK_KERNEL),
-    mip: engine.createCompute(BAKE_MIP_KERNEL),
-    pack: engine.createCompute(BAKE_PACK_KERNEL),
-  };
-  const headed = headedPoints(input);
-  const count = input.directions.length / 3;
+  const count = source.stars.count;
   // Everything made is released on the way out; the cube and its peak only on a failure.
   const transients: Array<BufferHandle | TextureHandle> = [];
   const made = <T extends BufferHandle | TextureHandle>(handle: T): T => {
@@ -392,34 +593,45 @@ function bakeOnGpu(engine: RenderEngine, input: BakeInput): BakedCube {
   let splat: PointSplatHandle | null = null;
   let result: BakedCube | null = null;
   const kept: Array<BufferHandle | TextureHandle> = [];
+  let headed: Float32Array | null = takePoints(count);
   try {
+    yield* layOutPoints(source, headed);
+    const kernels: BakeKernels = {
+      clear: engine.createCompute(BAKE_CLEAR_KERNEL),
+      peak: engine.createCompute(BAKE_PEAK_KERNEL),
+      mip: engine.createCompute(BAKE_MIP_KERNEL),
+      pack: engine.createCompute(BAKE_PACK_KERNEL),
+    };
     splat = engine.createPointSplat(BAKE_SPLAT);
     const points = made(
       engine.createBuffer({
-        name: `${input.name} points`,
+        name: `${source.name} points`,
         bytes: Math.max(16, headed.byteLength),
         usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST,
         category: "sky-scratch",
       }),
     );
-    engine.writeBuffer(points, 0, headed);
+    yield* uploadInParts(engine, points, headed);
+    // Written into the queue's own copy: the page's array is free for the next bake.
+    givePoints(headed);
+    headed = null;
     const solidAngles = texelSolidAnglesF32(size);
     const omega = made(
       engine.createBuffer({
-        name: `${input.name} solid angles`,
+        name: `${source.name} solid angles`,
         bytes: solidAngles.byteLength,
         usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST,
         category: "sky-scratch",
       }),
     );
-    engine.writeBuffer(omega, 0, solidAngles);
+    yield* uploadInParts(engine, omega, solidAngles);
     const usage =
       TEXTURE_USAGE.RENDER_ATTACHMENT | TEXTURE_USAGE.STORAGE_BINDING | TEXTURE_USAGE.COPY_SRC;
     // The face's levels from the upper level down, each flux and solid angle summed from its
     // children; on a face of one tile, level 0 is the splat's target (flux and a count).
     const upper = made(
       engine.createTexture({
-        name: `${input.name} face levels`,
+        name: `${source.name} face levels`,
         size: [upperSize, upperSize],
         dimension: "2d",
         format: "rgba32float",
@@ -434,7 +646,7 @@ function bakeOnGpu(engine: RenderEngine, input: BakeInput): BakedCube {
         ? upper
         : made(
             engine.createTexture({
-              name: `${input.name} tile levels`,
+              name: `${source.name} tile levels`,
               size: [tilePx, tilePx],
               dimension: "2d",
               format: "rgba32float",
@@ -445,7 +657,7 @@ function bakeOnGpu(engine: RenderEngine, input: BakeInput): BakedCube {
           );
     const staging = made(
       engine.createBuffer({
-        name: `${input.name} staging`,
+        name: `${source.name} staging`,
         bytes:
           Math.max(paddedRowTexels(tilePx) * tilePx, paddedRowTexels(upperSize) * upperSize) * 4,
         usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_SRC,
@@ -453,15 +665,13 @@ function bakeOnGpu(engine: RenderEngine, input: BakeInput): BakedCube {
       }),
     );
     const peak = engine.createBuffer({
-      name: `${input.name} peak`,
+      name: `${source.name} peak`,
       bytes: 4,
       usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST | BUFFER_USAGE.COPY_SRC,
       category: "sky-cube",
     });
     kept.push(peak);
     engine.writeBuffer(peak, 0, f32Bits(0));
-    const cube = engine.createPackedCube(size, sizes.length, "sky-cube", input.name);
-    kept.push(cube);
     const activeSplat = splat;
     const tileCount = tilesPerSide * tilesPerSide;
     // A tile's origin on the face at a level below the upper level, texels; tiles row after row.
@@ -517,10 +727,33 @@ function bakeOnGpu(engine: RenderEngine, input: BakeInput): BakedCube {
         BAKE_PASS,
       );
     };
+    yield;
+    for (let face = 0; face < CUBE_FACE_COUNT; face += 1) {
+      for (let tile = 0; tile < tileCount; tile += 1) {
+        splatTile(face, tile);
+        const [x, y] = originOf(tile, 0);
+        engine.dispatch(
+          kernels.peak,
+          {
+            uniforms: { params: params(tilePx, x, y) },
+            buffers: { omega, peak },
+            sampled: {},
+            storage: { splat: { texture: tiles, level: 0 } },
+          },
+          groups(tilePx),
+          BAKE_PASS,
+        );
+        yield;
+      }
+    }
+    // The cube is made once the peak is found: a re-bake's stand-in, the cube it replaces, is then
+    // held beside it the shortest while (`cache.ts`).
+    const cube = engine.createPackedCube(size, sizes.length, "sky-cube", source.name);
+    kept.push(cube);
     // Packs the face's `level`, or a tile's `side`² of it at `origin`, and copies it to the cube.
     const pack = (
       face: number,
-      source: LevelOf,
+      from: LevelOf,
       level: number,
       side: number,
       origin: readonly [number, number] | null,
@@ -541,7 +774,7 @@ function bakeOnGpu(engine: RenderEngine, input: BakeInput): BakedCube {
           },
           buffers: { peak, omega, packed: staging },
           sampled: {},
-          storage: { level: source },
+          storage: { level: from },
         },
         groups(side),
         BAKE_PASS,
@@ -557,23 +790,6 @@ function bakeOnGpu(engine: RenderEngine, input: BakeInput): BakedCube {
         });
       }
     };
-    for (let face = 0; face < CUBE_FACE_COUNT; face += 1) {
-      for (let tile = 0; tile < tileCount; tile += 1) {
-        splatTile(face, tile);
-        const [x, y] = originOf(tile, 0);
-        engine.dispatch(
-          kernels.peak,
-          {
-            uniforms: { params: params(tilePx, x, y) },
-            buffers: { omega, peak },
-            sampled: {},
-            storage: { splat: { texture: tiles, level: 0 } },
-          },
-          groups(tilePx),
-          BAKE_PASS,
-        );
-      }
-    }
     for (let face = 0; face < CUBE_FACE_COUNT; face += 1) {
       for (let tile = 0; tile < tileCount; tile += 1) {
         splatTile(face, tile);
@@ -602,6 +818,7 @@ function bakeOnGpu(engine: RenderEngine, input: BakeInput): BakedCube {
             originOf(tile, upperLevel),
           );
         }
+        yield;
       }
       for (let level = upperLevel; level < sizes.length; level += 1) {
         const side = sizes[level] ?? 1;
@@ -617,10 +834,14 @@ function bakeOnGpu(engine: RenderEngine, input: BakeInput): BakedCube {
         }
         pack(face, { texture: upper, level: level - upperLevel }, level, side, null);
       }
+      yield;
     }
     result = { cube, peak, faceSizePx: size, path: "gpu" };
     return result;
   } finally {
+    if (headed !== null) {
+      givePoints(headed);
+    }
     splat?.dispose();
     for (const handle of transients) {
       release(engine, handle);
@@ -642,9 +863,18 @@ function release(engine: RenderEngine, handle: BufferHandle | TextureHandle): vo
   }
 }
 
-/** The stars of one face, in the splat's layout without the header. */
-function pointsOf(input: BakeInput): Float32Array {
-  return headedPoints(input).subarray(4);
+/** The CPU bake, as steps: its stars laid out, then the rest as one. */
+function* bakeOnCpu(
+  engine: RenderEngine,
+  source: SkyBakeSource,
+): Generator<void, BakedCube | null, void> {
+  const points = takePoints(source.stars.count);
+  try {
+    yield* layOutPoints(source, points);
+    return bakePointsOnCpu(engine, points.subarray(BAKE_POINTS_HEADER), source);
+  } finally {
+    givePoints(points);
+  }
 }
 
 /**
@@ -652,17 +882,29 @@ function pointsOf(input: BakeInput): Float32Array {
  * the GPU bake.
  */
 export function bakeSkyCubeOnCpu(engine: RenderEngine, input: BakeInput): BakedCube {
-  const size = input.faceSizePx;
+  const source = bakeSourceOf(input);
+  const points = new Float32Array(BAKE_POINTS_HEADER + source.stars.count * SPLAT_POINT_FLOATS);
+  source.stars.writeInto(points, 0, source.stars.count);
+  return bakePointsOnCpu(engine, points.subarray(BAKE_POINTS_HEADER), source);
+}
+
+/** The CPU bake of stars in the splat's layout, without its header. */
+function bakePointsOnCpu(
+  engine: RenderEngine,
+  points: Float32Array,
+  source: Pick<SkyBakeSource, "faceSizePx" | "name">,
+): BakedCube {
+  const size = source.faceSizePx;
   const sizes = mipSizes(size);
   const omegas = texelSolidAnglesSr(size);
   // The six faces at once: the fallback serves the low setting's 1,024² faces (some 100 MB here)
   // on adapters without float32-blendable; the high setting's devices have it.
-  const faces = splatCpu(pointsOf(input), size);
+  const faces = splatCpu(points, size);
   for (const face of faces) {
     divideBySolidAngle(face, size, omegas);
   }
   const exponent = peakScaleExponent(faces);
-  const cube = engine.createPackedCube(size, sizes.length, "sky-cube", input.name);
+  const cube = engine.createPackedCube(size, sizes.length, "sky-cube", source.name);
   const levels: Uint32Array[] = sizes.map(
     (levelSize) => new Uint32Array(levelSize * levelSize * 6),
   );
@@ -677,7 +919,7 @@ export function bakeSkyCubeOnCpu(engine: RenderEngine, input: BakeInput): BakedC
     engine.writePackedCubeLevel(cube, level, packed);
   });
   const peak = engine.createBuffer({
-    name: `${input.name} peak`,
+    name: `${source.name} peak`,
     bytes: 4,
     usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST | BUFFER_USAGE.COPY_SRC,
     category: "sky-cube",

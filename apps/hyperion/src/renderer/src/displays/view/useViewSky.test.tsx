@@ -14,7 +14,9 @@ import {
   type FixtureStar,
   InThreadSkyWorker,
   nearestFirstCensus,
+  decodedSky,
   skyPayload,
+  skyRequest,
   skyResponse,
 } from "../../test/skyFixtures";
 import { AU_M, aViewScene, FIXTURE_SYSTEM } from "../../test/viewFixtures";
@@ -22,7 +24,17 @@ import { galacticDeltaM } from "../../view/coords/position";
 import { DEFAULT_EXPOSURE, type ExposureControl } from "../../view/photometry/exposure";
 import type { QualitySetting } from "../../view/quality/qualitySetting";
 import type { ViewScene } from "../../view/scene/model";
-import { primarySkyPlace, type SkyLineReading, useViewSky } from "./useViewSky";
+import { BAKE_POINTS_HEADER, BAKE_STARS_A_STEP } from "../../view/sky/bake";
+import type { SkyModel } from "../../view/sky/model";
+import { starIlluminanceRgbLx } from "../../view/sky/photometry";
+import { SPLAT_POINT_FLOATS } from "../../view/sky/splatCpu";
+import {
+  type DrawnSky,
+  primarySkyPlace,
+  type SkyLineReading,
+  skyBakeSource,
+  useViewSky,
+} from "./useViewSky";
 import { type LabelField, startInstrumentRun, startServerRun, type ViewRun } from "./viewRun";
 
 const UNIVERSE = "000000000000002a";
@@ -1039,4 +1051,79 @@ describe("a view's sky at its quality setting (R07.T17)", () => {
       expect(result.current.drawn?.selection.sprites.length).toBe(sprites);
     },
   );
+});
+
+/** A sky of `count` stars in directions and magnitudes of a fixed sequence. */
+function bakedSkyOf(count: number): SkyModel {
+  let state = 7;
+  const next = (): number => {
+    state = (state * 1_103_515_245 + 12_345) % 2_147_483_648;
+    return state / 2_147_483_648;
+  };
+  const stars = Array.from({ length: count }, () => {
+    const direction = [next() * 2 - 1, next() * 2 - 1, next() * 2 - 1] as const;
+    return { direction, distanceLy: 10 + next() * 1_000, vMag: 4 + next() * 9 };
+  });
+  const payload = skyPayload(stars, 2, null);
+  const request = skyRequest(0);
+  return {
+    request,
+    response: skyResponse(request, payload, count, 2),
+    ...decodedSky(payload, count),
+    stale: false,
+  };
+}
+
+/**
+ * The baked stars' points as `bakeInputOf` and `headedPoints` made them before
+ * perf-long-tasks-3: the directions and illuminances as arrays, then copied into the splat's
+ * layout.
+ */
+function pointsBefore(sky: DrawnSky): Float32Array {
+  const { stars } = sky.model;
+  const count = sky.selection.baked.length;
+  const directions = new Float32Array(count * 3);
+  const illuminanceLx = new Float32Array(count * 3);
+  sky.selection.baked.forEach((index, at) => {
+    directions.set(stars.directions.subarray(index * 3, index * 3 + 3), at * 3);
+    illuminanceLx.set(
+      starIlluminanceRgbLx(
+        stars.vMag[index] ?? Number.POSITIVE_INFINITY,
+        stars.chroma[index * 2] ?? 0,
+        stars.chroma[index * 2 + 1] ?? 0,
+      ),
+      at * 3,
+    );
+  });
+  const points = new Float32Array(4 + count * SPLAT_POINT_FLOATS);
+  for (let star = 0; star < count; star += 1) {
+    const at = 4 + star * SPLAT_POINT_FLOATS;
+    points.set(directions.subarray(star * 3, star * 3 + 3), at);
+    points.set(illuminanceLx.subarray(star * 3, star * 3 + 3), at + 4);
+    points[at + 7] = 1;
+  }
+  return points;
+}
+
+describe("skyBakeSource (lane perf-long-tasks-3)", () => {
+  it("lays the baked stars out as the arrays did, bit for bit, a range at a time", () => {
+    const model = bakedSkyOf(BAKE_STARS_A_STEP + 1_000);
+    // Every third star, brightest first as a cull leaves them, past one step's stars.
+    const baked = Uint32Array.from(
+      { length: Math.floor(model.stars.vMag.length / 3) * 3 },
+      (_, at) => (at * 7) % model.stars.vMag.length,
+    );
+    const sky: DrawnSky = {
+      model,
+      selection: { sprites: new Uint32Array(0), baked },
+      bandIlluminanceLx: new Float64Array(0),
+    };
+    const source = skyBakeSource(sky, 64);
+    const points = new Float32Array(BAKE_POINTS_HEADER + baked.length * SPLAT_POINT_FLOATS);
+    for (let from = 0; from < baked.length; from += 1_000) {
+      source.stars.writeInto(points, from, Math.min(baked.length, from + 1_000));
+    }
+    expect([source.stars.count, source.faceSizePx]).toEqual([baked.length, 64]);
+    expect(new Uint32Array(points.buffer)).toStrictEqual(new Uint32Array(pointsBefore(sky).buffer));
+  });
 });

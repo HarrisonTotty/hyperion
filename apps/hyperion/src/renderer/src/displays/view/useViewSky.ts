@@ -12,7 +12,7 @@ import type { ServedSky } from "../../view/scene/model";
 import type { ExposureControl } from "../../view/photometry/exposure";
 import { type QualitySetting, SETTINGS } from "../../view/quality/qualitySetting";
 import { cameraGalacticPosition } from "../../view/sky/camera";
-import type { BakeInput } from "../../view/sky/bake";
+import { type SkyBakeSource, writeBakePoint } from "../../view/sky/bake";
 import { cullSky } from "../../view/sky/cull";
 import { starIlluminanceRgbLx } from "../../view/sky/photometry";
 import {
@@ -75,29 +75,43 @@ export interface ViewSky {
   readonly pending: boolean;
 }
 
-/** The baked stars of a view's sky as a bake takes them: directions and light per channel. */
-export function bakeInputOf(sky: DrawnSky, faceSizePx: number): BakeInput {
+/**
+ * The baked stars of a view's sky as a bake lays them out, a range at a time (lane
+ * perf-long-tasks-3): each star's direction and its light per channel, `starIlluminanceRgbLx`'s,
+ * read from the sky as the bake goes, with no arrays of their own; the same `f32` values the
+ * arrays held.
+ */
+export function skyBakeSource(sky: DrawnSky, faceSizePx: number): SkyBakeSource {
   const { stars } = sky.model;
-  const count = sky.selection.baked.length;
-  const directions = new Float32Array(count * 3);
-  const illuminanceLx = new Float32Array(count * 3);
-  // Element by element, the same f32 values, with no view made a star (perf-long-tasks-2).
-  sky.selection.baked.forEach((index, at) => {
-    const from = index * 3;
-    const to = at * 3;
-    directions[to] = stars.directions[from] ?? 0;
-    directions[to + 1] = stars.directions[from + 1] ?? 0;
-    directions[to + 2] = stars.directions[from + 2] ?? 0;
-    const [r, g, b] = starIlluminanceRgbLx(
-      stars.vMag[index] ?? Number.POSITIVE_INFINITY,
-      stars.chroma[index * 2] ?? 0,
-      stars.chroma[index * 2 + 1] ?? 0,
-    );
-    illuminanceLx[to] = r;
-    illuminanceLx[to + 1] = g;
-    illuminanceLx[to + 2] = b;
-  });
-  return { directions, illuminanceLx, faceSizePx, name: "sky cube: view" };
+  const { baked } = sky.selection;
+  return {
+    faceSizePx,
+    name: "sky cube: view",
+    stars: {
+      count: baked.length,
+      writeInto: (points, from, to) => {
+        for (let at = from; at < to; at += 1) {
+          const index = baked[at] ?? 0;
+          const direction = index * 3;
+          const [r, g, b] = starIlluminanceRgbLx(
+            stars.vMag[index] ?? Number.POSITIVE_INFINITY,
+            stars.chroma[index * 2] ?? 0,
+            stars.chroma[index * 2 + 1] ?? 0,
+          );
+          writeBakePoint(
+            points,
+            at,
+            stars.directions[direction] ?? 0,
+            stars.directions[direction + 1] ?? 0,
+            stars.directions[direction + 2] ?? 0,
+            r,
+            g,
+            b,
+          );
+        }
+      },
+    },
+  };
 }
 
 /** A view's culled sky: what its loop draws, and its label block's `STARS` reading. */

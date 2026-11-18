@@ -12,10 +12,13 @@ import type {
   TextureHandle,
 } from "../engine/types";
 import {
+  BAKE_STARS_A_STEP,
   BAKE_TILE_PX,
   bakeSkyCube,
+  bakeSourceOf,
   bakeTiling,
   type SolidAnglesWorker,
+  startSkyBake,
   warmTexelSolidAngles,
 } from "./bake";
 import { texelSolidAnglesLowerF32 } from "./cube";
@@ -30,6 +33,10 @@ interface Seen {
   readonly dispatches: string[];
   /** Each whole buffer written from offset 0, as f32 values, by name. */
   readonly writes: Array<{ name: string; values: Float32Array }>;
+  /** The arrays each write to a buffer of that name came from, by identity. */
+  readonly sources: Array<{ name: string; buffer: ArrayBufferLike }>;
+  /** Every call, in order: `made <name>`, `dispatch <kernel>`, `splat`, `copy`, `released <name>`. */
+  readonly calls: string[];
   splats: number;
 }
 
@@ -53,6 +60,8 @@ async function gpuEngine(
     copies: [],
     dispatches: [],
     writes: [],
+    sources: [],
+    calls: [],
     splats: 0,
   };
   const engine = Object.assign(new FakeRenderEngine(device), {
@@ -64,11 +73,13 @@ async function gpuEngine(
     createPointSplat: (): PointSplatHandle => ({
       draw: (): void => {
         seen.splats += 1;
+        seen.calls.push("splat");
       },
       dispose: (): void => undefined,
     }),
     createBuffer: (spec: BufferSpec): BufferHandle => {
       seen.made.push({ name: spec.name, category: spec.category });
+      seen.calls.push(`made ${spec.name}`);
       seen.sizes.set(spec.name, `${spec.bytes} B`);
       return { kind: "buffer", name: spec.name, bytes: spec.bytes };
     },
@@ -77,6 +88,7 @@ async function gpuEngine(
         throw new Error(`out of memory for ${spec.name}`);
       }
       seen.made.push({ name: spec.name, category: spec.category });
+      seen.calls.push(`made ${spec.name}`);
       seen.sizes.set(spec.name, `${JSON.stringify(spec.size)} × ${spec.mips}`);
       return { kind: "texture", name: spec.name };
     },
@@ -87,15 +99,18 @@ async function gpuEngine(
       name = "packed star cube",
     ): TextureHandle => {
       seen.made.push({ name, category });
+      seen.calls.push(`made ${name}`);
       return { kind: "texture", name };
     },
     writeBuffer: (buffer: BufferHandle, offset: number, data: ArrayBufferView): void => {
+      seen.sources.push({ name: buffer.name, buffer: data.buffer });
       if (offset === 0 && data instanceof Float32Array) {
         seen.writes.push({ name: buffer.name, values: Float32Array.from(data) });
       }
     },
     dispatch: (kernel: ComputeHandle): void => {
       seen.dispatches.push(kernel.name);
+      seen.calls.push(`dispatch ${kernel.name}`);
     },
     writePackedCubeLevelFromBuffer: (
       _cube: TextureHandle,
@@ -105,12 +120,15 @@ async function gpuEngine(
       region?: TexelRect,
     ): void => {
       seen.copies.push(region === undefined ? { level, face } : { level, face, region });
+      seen.calls.push("copy");
     },
     releaseBuffer: (buffer: BufferHandle): void => {
       seen.released.push(buffer.name);
+      seen.calls.push(`released ${buffer.name}`);
     },
     releaseTexture: (texture: TextureHandle): void => {
       seen.released.push(texture.name);
+      seen.calls.push(`released ${texture.name}`);
     },
   });
   return { engine, seen };
@@ -257,5 +275,98 @@ describe("bakeSkyCube on the GPU, a tile at a time (the owner's priority)", () =
     expect(seen.sizes.get("sky cube: test solid angles")).toBe(`${((48 * 49) / 2) * 4} B`);
     const kept = seen.made.filter((made) => !seen.released.includes(made.name));
     expect(kept.map((made) => made.name)).toEqual(["sky cube: test peak", "sky cube: test"]);
+  });
+});
+
+/** A clock past any budget at each read: each call of a job's `step` runs one step. */
+function expiring(): () => number {
+  let ms = 0;
+  return () => {
+    ms += 1;
+    return ms;
+  };
+}
+
+/** `count` stars along a turning direction, each of the same light. */
+function manyStars(count: number): { directions: Float32Array; illuminanceLx: Float32Array } {
+  const directions = Float32Array.from({ length: count * 3 }, (_, i) => Math.sin(i + 1));
+  return { directions, illuminanceLx: new Float32Array(count * 3).fill(1e-9) };
+}
+
+/** The array a bake's points were uploaded from. */
+function pointsOf(seen: Seen): ArrayBufferLike | undefined {
+  return seen.sources.find((each) => each.name.endsWith(" points"))?.buffer;
+}
+
+describe("startSkyBake: the bake in steps (lane perf-long-tasks-3)", () => {
+  it("makes in steps the calls a bake at once makes, in the same order", async () => {
+    const input = { ...TILED, ...manyStars(BAKE_STARS_A_STEP + 5) };
+    const atOnce = await gpuEngine();
+    bakeSkyCube(atOnce.engine, input);
+    const stepped = await gpuEngine();
+    const job = startSkyBake(stepped.engine, bakeSourceOf(input));
+    const now = expiring();
+    let steps = 1;
+    while (job.step(0, now) === null) {
+      steps += 1;
+    }
+    expect(stepped.seen.calls).toEqual(atOnce.seen.calls);
+    expect(stepped.seen.writes).toEqual(atOnce.seen.writes);
+    // Two steps of stars, an upload each of the points and the solid angles, the scratch's making,
+    // a step a tile in each pass, a face's last levels a step, and the last, which hands the cube.
+    expect(steps).toBe(2 + 1 + 1 + 1 + 6 * 9 + 6 * 9 + 6 + 1);
+  });
+
+  it("splats at most one tile a step, and makes the cube once the peak pass has ended", async () => {
+    const { engine, seen } = await gpuEngine();
+    const job = startSkyBake(engine, bakeSourceOf(TILED));
+    const now = expiring();
+    let splats = 0;
+    let most = 0;
+    for (let baked = job.step(0, now); ; baked = job.step(0, now)) {
+      most = Math.max(most, seen.splats - splats);
+      splats = seen.splats;
+      if (baked !== null) {
+        break;
+      }
+    }
+    expect(most).toBe(1);
+    const cubeAt = seen.calls.indexOf("made sky cube: test");
+    const peaks = seen.calls.filter((call) => call === "dispatch sky bake peak").length;
+    expect(
+      seen.calls.slice(0, cubeAt).filter((call) => call === "dispatch sky bake peak"),
+    ).toHaveLength(peaks);
+  });
+
+  it("releases everything it made when it is cancelled partway, and makes nothing after", async () => {
+    const { engine, seen } = await gpuEngine();
+    const job = startSkyBake(engine, bakeSourceOf(TILED));
+    const now = expiring();
+    for (let step = 0; step < 70; step += 1) {
+      expect(job.step(0, now)).toBeNull();
+    }
+    job.cancel();
+    const calls = seen.calls.length;
+    expect(seen.made.map((made) => made.name).toSorted()).toEqual(seen.released.toSorted());
+    expect(seen.made.map((made) => made.name)).toContain("sky cube: test");
+    expect(() => job.step(0, now)).toThrow(/is over/);
+    job.cancel();
+    expect(seen.calls).toHaveLength(calls);
+  });
+
+  it("lays each bake's stars out in the page's one kept array, and a bake beside it in its own", async () => {
+    const first = await gpuEngine();
+    bakeSkyCube(first.engine, INPUT);
+    const second = await gpuEngine();
+    bakeSkyCube(second.engine, INPUT);
+    expect(pointsOf(second.seen)).toBe(pointsOf(first.seen));
+    // A bake under way holds it: one made meanwhile lays its stars out in an array of its own.
+    const third = await gpuEngine();
+    const held = startSkyBake(third.engine, bakeSourceOf(INPUT));
+    expect(held.step(0, expiring())).toBeNull();
+    const fourth = await gpuEngine();
+    bakeSkyCube(fourth.engine, INPUT);
+    held.cancel();
+    expect(pointsOf(fourth.seen)).not.toBe(pointsOf(first.seen));
   });
 });

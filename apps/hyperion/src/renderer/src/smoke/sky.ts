@@ -19,11 +19,14 @@ import {
   BAKE_CLEAR_KERNEL,
   BAKE_PACK_KERNEL,
   BAKE_SPLAT,
+  type BakedCube,
   type BakeInput,
   bakeSkyCube,
   bakeSkyCubeOnCpu,
+  bakeSourceOf,
   paddedRowTexels,
   releaseBakedCube,
+  startSkyBake,
 } from "../view/sky/bake";
 import { BandLayer } from "../view/sky/band";
 import { METER_CLASS } from "../view/post/meter";
@@ -569,5 +572,62 @@ export async function checkSkyBake(engine: RenderEngine, checks: Checks): Promis
     "R06.T13.g the tiled bake equals the whole face's bit for bit, its peak and every level",
     !differences.includes("FAILED"),
     differences.filter((text) => text !== "FAILED").join("; "),
+  );
+
+  // The bake in steps (lane perf-long-tasks-3): two bakes' steps taken in turn, so that each
+  // step's GPU work is queued between the other's, as a view's bake's is between its frames,
+  // against each bake made at once, bit for bit at every level and its peak.
+  const inputs = [
+    { ...bakeStars(20_000, 96), name: "sky cube: smoke stepped 96", tilePx: 32 },
+    { ...bakeStars(12_000, 64), name: "sky cube: smoke stepped 64" },
+  ];
+  const jobs = inputs.map((each) => startSkyBake(engine, bakeSourceOf(each)));
+  const stepped: Array<BakedCube | null> = jobs.map(() => null);
+  let stepsTaken = 0;
+  while (stepped.includes(null)) {
+    jobs.forEach((job, index) => {
+      if (stepped[index] === null) {
+        // A clock already past the step's end: one step a call.
+        stepped[index] = job.step(-1, () => 0);
+        stepsTaken += 1;
+      }
+    });
+  }
+  const steppedDifferences: string[] = [];
+  for (const [index, each] of inputs.entries()) {
+    const inSteps = stepped[index];
+    if (inSteps === null || inSteps === undefined) {
+      steppedDifferences.push(`${each.name} not baked`, "FAILED");
+      continue;
+    }
+    const atOnce = bakeSkyCube(engine, { ...each, name: `${each.name} at once` });
+    const sizes = mipSizes(each.faceSizePx);
+    // The harness's checks run in order: each reads the GPU back before the next draws.
+    // oxlint-disable-next-line no-await-in-loop
+    const reads = await Promise.all([
+      engine.readBuffer(inSteps.peak, "tolerance"),
+      engine.readBuffer(atOnce.peak, "tolerance"),
+      ...sizes.flatMap((_, levelIndex) => [
+        engine.readTexture(inSteps.cube, levelIndex),
+        engine.readTexture(atOnce.cube, levelIndex),
+      ]),
+    ]);
+    let differing = 0;
+    for (let pair = 0; pair < reads.length; pair += 2) {
+      const a = new Uint32Array(reads[pair] ?? new ArrayBuffer(0));
+      const b = new Uint32Array(reads[pair + 1] ?? new ArrayBuffer(0));
+      differing += a.length === b.length ? a.filter((bits, i) => bits !== b[i]).length : a.length;
+    }
+    steppedDifferences.push(`${each.faceSizePx}²: ${differing} words differ`);
+    if (differing > 0 || reads.length !== 2 + 2 * sizes.length) {
+      steppedDifferences.push("FAILED");
+    }
+    releaseBakedCube(engine, inSteps);
+    releaseBakedCube(engine, atOnce);
+  }
+  checks.check(
+    "R06.T13.g a bake in steps, two taken in turn, equals the bake at once bit for bit (perf-long-tasks-3)",
+    !steppedDifferences.includes("FAILED"),
+    `${stepsTaken} steps; ${steppedDifferences.filter((text) => text !== "FAILED").join("; ")}`,
   );
 }
