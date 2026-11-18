@@ -212,6 +212,7 @@ import {
   type TerrainViewFrameInput,
 } from "./terrainPass";
 import { wireframeTerrainSettings } from "./terrainWire";
+import type { RockSource } from "./terrainPass";
 import { hullBoundingRadiusM } from "../wireframe/hulls";
 import type { BakeSettings, SlopeBaselineM, SurfaceGroundReadout } from "./workers/messages";
 import {
@@ -320,6 +321,11 @@ export interface TerrainSessionOptions {
    * one frame's cost; absent, the setting's.
    */
   readonly litTerrain?: TerrainSettings;
+  /**
+   * Where its passes build their finest patches' authoritative rocks (plan R11, R11.T4.b;
+   * `TerrainPassOptions.rocks`): the app's the rocks' worker; absent, its passes draw no rock.
+   */
+  readonly rocks?: RockSource;
 }
 
 /**
@@ -1124,6 +1130,7 @@ export class TerrainSession {
   readonly #unsubscribe: ReadonlyArray<() => void>;
   readonly #horizonMap: HorizonLayerSetting;
   readonly #lookaheadClockMs: (() => number) | null;
+  readonly #rockSource: RockSource | null;
   /** Its passes' geometry (plan R14), `null` for their setting's. */
   readonly #geometry: GeometrySettings | null;
   readonly #morphInMs: number | undefined;
@@ -1158,6 +1165,7 @@ export class TerrainSession {
       );
     this.#horizonMap = options.horizonMap ?? "baked";
     this.#lookaheadClockMs = options.lookaheadClockMs ?? null;
+    this.#rockSource = options.rocks ?? null;
     this.#geometry = options.geometry ?? null;
     this.#morphInMs = options.morphInMs;
     this.#budgetHoldMargin = options.budgetHoldMargin;
@@ -2449,6 +2457,8 @@ export class TerrainSession {
           : {}),
         // Its body's generated detail sets, on a setting that draws decoration (R11.T2.c).
         ...(detailSets === null ? {} : { detailSets }),
+        // The finest patches' rocks, lit or in the wireframe (plan R11, R11.T4.b).
+        ...(this.#rockSource === null ? {} : { rocks: this.#rockSource }),
       });
     } catch (error: unknown) {
       if (error instanceof EngineUnavailable) {

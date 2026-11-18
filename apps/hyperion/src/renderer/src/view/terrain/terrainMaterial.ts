@@ -975,6 +975,21 @@ function rewritten(
 /** The lit fragment stage's head, which the resolve calls as `lit_fragment` over a face's edges. */
 const LIT_FRAGMENT_HEAD = "@fragment\nfn fragmentMain(in : LitVertexOut) -> @location(0) vec4f {";
 
+/**
+ * A lit terrain source with its vertex and fragment stages made functions, `lit_vertex` and
+ * `lit_fragment_main`, for a consumer of its shading that brings stages of its own (plan R11,
+ * T4.b: the authoritative rocks, `surface/scatter/rockMaterial.ts`), every function of the
+ * shading kept to the byte.
+ *
+ * @throws Error unless each stage's head occurs exactly once in `source`.
+ */
+export function withLitStagesAsFunctions(source: string): string {
+  return rewritten("a lit library", source, [
+    [LIT_VERTEX_HEAD, LIT_VERTEX_FUNCTION, 1],
+    [LIT_FRAGMENT_HEAD, "fn lit_fragment_main(in : LitVertexOut) -> vec4f {", 1],
+  ]);
+}
+
 /** The resolve's console names, a vertex path's and its emissive form's (plan R14, R14.T2.d). */
 const RESOLVE_DISPLAY_NAMES: Readonly<Record<TerrainVertexPath, string>> = {
   "baked-offsets": "RESOLVE OFFSETS",

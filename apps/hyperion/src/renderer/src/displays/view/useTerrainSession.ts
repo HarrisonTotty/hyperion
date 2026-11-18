@@ -17,6 +17,8 @@
  * call, 2026-11-01), so that what training surveyed never reaches the live scene's fields. The
  * scene topic tells the live log's revisions alone, so a training session takes none of them.
  */
+import { createWorkerRockPageBuilder } from "../../view/clusters/meshPageProducer";
+import type { RockSource } from "../../view/terrain/terrainPass";
 import type { SurveyScopeDto, UniverseIdHex } from "@hyperion/protocol";
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 
@@ -31,6 +33,18 @@ import type { HorizonLayerSetting } from "../../view/terrain/workers/messages";
 import type { WorkerLike } from "../../view/terrain/workers/pool";
 import type { ViewEngineState } from "./useViewEngine";
 import type { SceneOption } from "./viewRun";
+
+/**
+ * The rocks' builder of the app's terrain sessions (plan R11, R11.T4.b; plan R14, R14.T5.c): the
+ * procedural builder in its own mesh page worker, one a pass's device. A session draws rocks where
+ * its height workers are the browser's ({@link browserHeightWorker}), never beside a test's.
+ */
+const WORKER_ROCKS: RockSource = { createBuilder: () => createWorkerRockPageBuilder() };
+
+/** The rocks of a session whose height workers `createWorker` starts. */
+function rocksBeside(createWorker: () => WorkerLike): { readonly rocks?: RockSource } {
+  return createWorker === browserHeightWorker ? { rocks: WORKER_ROCKS } : {};
+}
 
 /** Listens for a scene's surface events (`SceneView.onSurface`'s shape); returns the unsubscribe. */
 export type SurfaceEvents = SceneView["onSurface"];
@@ -278,6 +292,7 @@ export function useTerrainSession(input: TerrainSessionInput): TerrainSession | 
         createWorker,
         setting,
         lookaheadClockMs,
+        ...rocksBeside(createWorker),
         ...counted,
       });
       holder.set(made);
@@ -298,6 +313,7 @@ export function useTerrainSession(input: TerrainSessionInput): TerrainSession | 
       createWorker,
       setting,
       lookaheadClockMs,
+      ...rocksBeside(createWorker),
       ...counted,
     });
     const unsubscribe = link.onSurface((event) => {

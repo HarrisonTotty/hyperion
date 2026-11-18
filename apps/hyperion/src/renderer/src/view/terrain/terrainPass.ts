@@ -262,6 +262,12 @@ import { joinDemand } from "./priority";
 import { RESELECT_MOVE_FRACTION, selectionTolerancePx } from "./selectionTolerance";
 import { PATCH_VERTICES_PER_SIDE, TERRAIN_SHADING_TRAITS, type TerrainShading } from "./slotLayout";
 import { ResidentRocks, type ResidentRocksView } from "../surface/scatter/residentRocks";
+import type { RockPageBuilder } from "../clusters/meshPageProducer";
+import { ROCK_CLUSTER_MESH, type RockFrameCounts, RockView } from "../surface/scatter/rockDraw";
+import { rockLitMaterialSpec, rockWireMaterialSpec } from "../surface/scatter/rockMaterial";
+import { RockMeshes } from "../surface/scatter/rockMeshes";
+import { couldTouch, rocksLimitDetail, rocksToDraw } from "../surface/scatter/rockSelection";
+import { wireframeToleranceRad } from "../wireframe/meshOccluders";
 import { ResidentHeights, type ResidentHeightsView } from "./residentHeights";
 import { DrawnGround, type DrawnGroundView } from "./drawnGround";
 import {
@@ -782,6 +788,12 @@ export interface TerrainViewFrame {
    * `DECORATION ON`: what was drawn, not what the setting allows; none is drawn yet.
    */
   readonly decorated: boolean;
+  /**
+   * Its authoritative rocks (plan R11, R11.T4.b): the finest patches, instances, rocks and
+   * triangles its rock draws took, appended to {@link TerrainViewFrame.draws} (or, by the
+   * visibility buffer, to its forward draws); absent where it drew none.
+   */
+  readonly rocks?: RockFrameCounts;
 }
 
 /**
@@ -940,7 +952,43 @@ export interface TerrainPassOptions {
    * Absent, the pass generates none; the other shadings take none.
    */
   readonly detailSets?: DetailSetSource;
+  /**
+   * Where the pass's finest patches' authoritative rocks are built (plan R11, R11.T4.b; plan R14,
+   * R14.T5.c): the procedural builder, in its worker or on this thread. Absent, the pass draws no
+   * rock; with it, a lit or wireframe pass on the cluster path with a page pool draws them.
+   */
+  readonly rocks?: RockSource;
 }
+
+/** What a terrain pass builds its rocks with ({@link TerrainPassOptions.rocks}). */
+export interface RockSource {
+  /** Makes the builder, once a device: the rocks' worker's (`createWorkerRockPageBuilder`). */
+  readonly createBuilder: () => RockPageBuilder;
+}
+
+/**
+ * A device's rocks (plan R11, R11.T4.b): their meshes in their pool, the template mesh their
+ * buckets draw, their material for the pass's shading and the plain cluster cull's kernel, each
+ * `null` until made.
+ */
+interface DeviceRocks {
+  readonly meshes: RockMeshes;
+  readonly mesh: MeshHandle;
+  material: MaterialHandle | null;
+  kernel: ComputeHandle | null;
+  /** The rocks' draw base made of each lit or wireframe cluster base, the same while it is. */
+  readonly bases: WeakMap<BucketDrawBase, BucketDrawBase>;
+}
+
+/** A view-frame's rocks: their draws, whether they limit its detail, and their counts. */
+interface RockFrame {
+  readonly draws: ReadonlyArray<DrawItem>;
+  readonly limited: boolean;
+  readonly counts: RockFrameCounts | null;
+}
+
+/** No rock drawn. */
+const NO_ROCKS: RockFrame = { draws: [], limited: false, counts: null };
 
 /**
  * A listener of a pass's selections and residency beside its options' (plan R10, R10.T14.c): the
@@ -1285,6 +1333,13 @@ interface Device {
   readonly givenUp: Set<string>;
   /** Each resident patch's place for the wireframe's graticule, by key string (R10.T11). */
   readonly graticules: Map<string, HeldGraticule>;
+  /**
+   * Its rocks (plan R11, R11.T4.b), made at the first frame that draws them; `null` before, and
+   * where the pass draws none ({@link TerrainPassOptions.rocks}).
+   */
+  rocks: DeviceRocks | null;
+  /** Each view's rock draw on this device, by view. */
+  readonly rockViews: Map<TerrainViewId, RockView>;
 }
 
 /** One view's own frame state: its records, bands, uniforms, draw and debounce. */
@@ -2166,6 +2221,9 @@ export class TerrainPass {
   /** What the render thread keeps of the resident bakes' heights (R10.T16.c), on the current device. */
   readonly #heights = new ResidentHeights();
   readonly #rocks = new ResidentRocks();
+  readonly #rockSource: RockSource | null;
+  /** The last step's grounded and descending bodies, whose region's rocks are drawn whole. */
+  #grounded: ReadonlyArray<GroundContact> = [];
   /** The planet as selection reads it: its figure and the field's level table, which grows. */
   #planet: PlanetGeometry;
   #rangesVersion = 0;
@@ -2234,6 +2292,8 @@ export class TerrainPass {
       (this.#shading === "lit" ? CLUSTER_CULL_OCCLUSION_KERNEL : CLUSTER_CULL_KERNEL);
     this.#cullOccludes = this.#cullKernel === CLUSTER_CULL_OCCLUSION_KERNEL;
     this.#detailSource = this.#shading === "lit" ? (options.detailSets ?? null) : null;
+    this.#rockSource =
+      this.#shading === "lit" || this.#shading === "wire" ? (options.rocks ?? null) : null;
     if (this.#shading === "lit") {
       this.#ownShadows = options.shadows === undefined;
       this.#shadows =
@@ -3227,6 +3287,7 @@ export class TerrainPass {
       return this.#faultedStep();
     }
     this.#leaveViews(stepViews);
+    this.#grounded = input.grounded;
     const device = this.#device;
     if (!this.#faulted && device.pool.unavailable === true) {
       this.#fault(TERRAIN_NOT_AVAILABLE);
@@ -3352,6 +3413,13 @@ export class TerrainPass {
       still,
     } = this.#writeOrNone(state, mask, selected.nearContacts, input, set);
     this.#lastStill = still;
+    const rocks = this.#rockFrame(state, input, mask);
+    const drawn =
+      rocks.draws.length === 0 || visibility !== null ? draws : [...draws, ...rocks.draws];
+    const byIds =
+      rocks.draws.length === 0 || visibility === null
+        ? visibility
+        : { ...visibility, forward: [...visibility.forward, ...rocks.draws] };
     const conditions: TerrainConditions = {
       streaming: missing || standingIn,
       // A view of weight w is limited where its τ′ is above τ (decision-r10-t16-contracts §3); the
@@ -3363,7 +3431,9 @@ export class TerrainPass {
         (this.#overCounting() && this.#overCount(state) > 0) ||
         (this.#setting === "low" &&
           TERRAIN_SHADING_TRAITS[this.#shading].coarserOnLow &&
-          count > 0),
+          count > 0) ||
+        // A finest patch in view whose rocks the low setting leaves out (plan R11, R11.T4.b).
+        rocks.limited,
     };
     const annunciation = state.debounce.update(conditions, input.nowMs);
     if (cast.passes.length === 0 && !cast.reused.includes(true)) {
@@ -3376,7 +3446,7 @@ export class TerrainPass {
     state.lastOverlayPass = overlayPass;
     state.lastLit = lit;
     return {
-      draws,
+      draws: drawn,
       opaqueDraws,
       patches,
       conditions,
@@ -3389,9 +3459,148 @@ export class TerrainPass {
         !missing && !refused && (draws.length > 0 || count === 0) && !this.#seesCodeZeroOpen(mask),
       cascades: set === null ? null : { set, received: state.farPlan?.received ?? set, ...cast },
       overlayDepth,
-      visibility,
+      visibility: byIds,
       decorated: false,
+      ...(rocks.counts === null ? {} : { rocks: rocks.counts }),
     };
+  }
+
+  /**
+   * View `state`'s authoritative rocks this frame, of view bit `mask` (plan R11, R11.T4.b; plan R14,
+   * R14.T5.c): the rock meshes of the finest patches its draw set draws whole, each by its rule
+   * (`rockSelection.ts`'s `rockRule`, the region what the last step's grounded and descending
+   * bodies could touch, `couldTouch`),
+   * culled by the camera's frustum and the body's horizon at the setting's mesh tolerance, a
+   * region's at 0, and drawn by its lit or wireframe cluster base with the rocks' material; and
+   * whether the low setting limits its detail for rocks it leaves out. None where the pass takes
+   * no rocks, the cluster path or its pool is off, or the rocks' material or kernel is not made.
+   */
+  #rockFrame(state: ViewState, input: TerrainViewFrameInput, mask: number): RockFrame {
+    const device = this.#device;
+    const geometry = this.#geometry;
+    const source = this.#rockSource;
+    const drawSet = this.#selected?.drawSet;
+    if (
+      source === null ||
+      drawSet === undefined ||
+      !geometry.clusterPath ||
+      geometry.pageBytes <= 0
+    ) {
+      return NO_ROCKS;
+    }
+    const rocks = (device.rocks ??= this.#makeRocks(device, source));
+    rocks.meshes.sync(this.#rocks);
+    const { view } = input;
+    const cameraBodyFixedM = rotateToBodyFixed(view.rotation, view.cameraM);
+    // What the last step's bodies could touch: each footprint widened by the rocks' reach.
+    const region = this.#grounded.map((contact) =>
+      couldTouch({ groundPointM: contact.positionM, radiusM: contact.radiusM }),
+    );
+    const { patches, inView } = rocksToDraw(
+      drawSet,
+      mask,
+      this.#planet.finestLevel,
+      rocks.meshes,
+      region,
+      this.#setting,
+    );
+    const pxPerRad = view.viewport.widthPx / (2 * Math.tan(view.fovXRad / 2));
+    const limited = rocksLimitDetail(
+      inView,
+      region,
+      this.#setting,
+      cameraBodyFixedM,
+      pxPerRad,
+      geometry.meshTolerancePx.camera,
+    );
+    const base = state.clusters?.litBase ?? null;
+    const { material, kernel } = rocks;
+    if (patches.length === 0 || base === null || material === null || kernel === null) {
+      return { draws: NO_DRAWS, limited, counts: null };
+    }
+    let rockView = device.rockViews.get(state.id);
+    if (rockView === undefined) {
+      rockView = new RockView(this.#engine, `terrain ${String(state.id)}`);
+      device.rockViews.set(state.id, rockView);
+    }
+    let rockBase = rocks.bases.get(base);
+    if (rockBase?.material !== material) {
+      rockBase = { ...base, material };
+      rocks.bases.set(base, rockBase);
+    }
+    const cull = this.#litCullPass(input, false, 0);
+    const draws = rockView.frame({
+      patches,
+      meshes: rocks.meshes,
+      cameraBodyFixedM,
+      rotationRows: view.rotation.rows,
+      planes: cull.planes,
+      horizon: cull.horizon,
+      toleranceRad: wireframeToleranceRad(
+        geometry.meshTolerancePx.camera,
+        view.fovXRad,
+        view.viewport,
+      ),
+      viewAxis: viewAxisOf(view.orientation),
+      kernel,
+      mesh: rocks.mesh,
+      base: rockBase,
+    });
+    return { draws, limited, counts: rockView.counts };
+  }
+
+  /** `device`'s rocks, their material and kernel asked for (see {@link DeviceRocks}). */
+  #makeRocks(device: Device, source: RockSource): DeviceRocks {
+    const rocks: DeviceRocks = {
+      meshes: new RockMeshes(this.#engine, source.createBuilder(), this.#geometry.pageBytes),
+      mesh: this.#engine.createMesh(ROCK_CLUSTER_MESH.mesh),
+      material: null,
+      kernel: null,
+      bases: new WeakMap(),
+    };
+    void this.#readyRocks(device, rocks);
+    return rocks;
+  }
+
+  /**
+   * Compiles `rocks`' material, the lit pass's into the scene target or the wireframe's into the
+   * canvas, and the plain cluster cull's kernel; never rejects. One that cannot be made is
+   * reported, and no rock is drawn.
+   */
+  async #readyRocks(device: Device, rocks: DeviceRocks): Promise<void> {
+    const lit = this.#shading === "lit";
+    const [material, kernel] = await Promise.allSettled([
+      this.#engine.createMaterialAsync(
+        lit ? rockLitMaterialSpec() : rockWireMaterialSpec(),
+        [lit ? "rgba16float" : "canvas"],
+        [rocks.mesh],
+      ),
+      this.#engine.createComputeAsync(CLUSTER_CULL_KERNEL),
+    ]);
+    const current = device === this.#device && !this.#disposed && device.rocks === rocks;
+    if (material.status === "fulfilled") {
+      if (current) {
+        rocks.material = material.value;
+      } else {
+        this.#releaseOwn(material.value);
+      }
+    }
+    if (kernel.status === "fulfilled") {
+      if (current) {
+        rocks.kernel = kernel.value;
+      } else {
+        this.#engine.releaseCompute(kernel.value);
+      }
+    }
+    for (const outcome of [material, kernel]) {
+      if (
+        outcome.status === "rejected" &&
+        !this.#superseded(device) &&
+        !(outcome.reason instanceof EngineUnavailable)
+      ) {
+        console.error("the terrain's rocks could not be made: none is drawn", outcome.reason);
+      }
+    }
   }
 
   /**
@@ -3649,6 +3858,8 @@ export class TerrainPass {
    * and with it its morph bands (the batch review's C9).
    */
   #forgetView(id: TerrainViewId): void {
+    this.#device.rockViews.get(id)?.dispose();
+    this.#device.rockViews.delete(id);
     this.#stepped.delete(id);
     this.#nearestGround.delete(id);
     this.#margins.delete(id);
@@ -3792,6 +4003,22 @@ export class TerrainPass {
     if (device.airless !== null) {
       this.#engine.releaseTexture(device.airless.body);
     }
+    for (const view of device.rockViews.values()) {
+      view.dispose();
+    }
+    device.rockViews.clear();
+    const rocks = device.rocks;
+    if (rocks !== null) {
+      rocks.meshes.dispose();
+      this.#engine.releaseMesh(rocks.mesh);
+      if (rocks.material !== null) {
+        this.#releaseOwn(rocks.material);
+      }
+      if (rocks.kernel !== null) {
+        this.#engine.releaseCompute(rocks.kernel);
+      }
+      device.rocks = null;
+    }
   }
 
   #makeDevice(resources?: TerrainResources): Device {
@@ -3880,6 +4107,8 @@ export class TerrainPass {
       asked: new Map(),
       givenUp: new Set(),
       graticules: new Map(),
+      rocks: null,
+      rockViews: new Map(),
     };
     return device;
   }

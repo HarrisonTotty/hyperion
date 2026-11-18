@@ -8,7 +8,7 @@
  * `no-subgroups` requests it with subgroups and `depth-clip-control` withheld (T9.c; R10.T9.b's
  * pulled-back cascades). A fixture adds a broken shader to the
  * catalogue or makes external requests, either of which must fail the run. The part does too: the
- * groups are in thirty-two parts, 1 to 32, each a run of its own under the harness's
+ * groups are in thirty-three parts, 1 to 33, each a run of its own under the harness's
  * watchdog (perf-smoke, 2026-10-13), parts 2 to 6, 8 to 14 and 30 the atmosphere's CPU-twin groups
  * (R08.T6, R08.T7,
  * R08.T9.b, R08.T8.a, R08.T8.b, R08.T8.c, R08.T8.e, R08.T11, R08.T14.c, R08.T14.f, R08.T15.a.2),
@@ -67,6 +67,7 @@
  * transfer check instead of every group (`transfer.ts`): no adapter, only the server's socket.
  */
 
+import { checkPlacedRocks, checkRockBake } from "./rocks";
 import {
   ATMOSPHERE_DECK_ENTRIES,
   ATMOSPHERE_LIMB_ENTRIES,
@@ -85,6 +86,7 @@ import {
   CLOUD_ENTRIES,
   DECORATION_ENTRIES,
   INSTANCE_ENTRIES,
+  ROCK_ENTRIES,
   WGSL_CATALOGUE,
 } from "../view/engine/catalogue";
 import { loadRenderEngine } from "../view/engine/loadEngine";
@@ -376,7 +378,10 @@ const VARIANTS: Readonly<Record<string, CapabilityOverrides | undefined>> = {
  * still of flat colours (R11.T10.b) took part 28, alone (2026-11-14). Plan R14's instance path
  * (R14.T5.d) took part 29, alone: its kernels' catalogue, the instance cull against its twin over
  * 10⁶ instances and their SwiftShader frame, a particle's faces, and the instances above the
- * cluster cull folded past 65,535 (2026-11-13; parts 25 to 28 are the lanes' beside it).
+ * cluster cull folded past 65,535 (2026-11-13; parts 25 to 28 are the lanes' beside it). Plan
+ * R11's authoritative rocks (R11.T4, with R14.T5.c) took part 33, alone: their materials'
+ * catalogue, the height worker's bake of finest patches with their rocks and its cost, the
+ * procedural builder's worker against the render thread, and placed rocks drawn (2026-11-18).
  */
 type PagePart =
   | 1
@@ -411,6 +416,7 @@ type PagePart =
   | 30
   | 31
   | 32
+  | 33
   // Plan R12's ladder (R12.T7.a): a run per setting, which its query names (`ladder.ts`).
   | "ladder";
 
@@ -484,6 +490,8 @@ function partOf(value: string | null): PagePart | "all" | null {
       return 31;
     case "32":
       return 32;
+    case "33":
+      return 33;
     case "ladder":
       return "ladder";
     default:
@@ -548,7 +556,7 @@ async function run(
     setupError,
   });
   if (part === null) {
-    return failed("the part asked for is not 1 to 32, ladder or all");
+    return failed("the part asked for is not 1 to 33, ladder or all");
   }
   if (part === "ladder" && ladderSetting === null) {
     return failed("the ladder's part runs at a setting, high or low, and none was given");
@@ -637,6 +645,7 @@ async function run(
       !CLOUD_ENTRIES.includes(entry) &&
       !DECORATION_ENTRIES.includes(entry) &&
       !INSTANCE_ENTRIES.includes(entry) &&
+      !ROCK_ENTRIES.includes(entry) &&
       !ATMOSPHERE_THICK_LEVER_ENTRIES.includes(entry) &&
       !RING_ENTRIES.includes(entry) &&
       !OCEAN_ENTRIES.includes(entry),
@@ -931,6 +940,19 @@ async function run(
   await group(29, "R14.T5.d a particle's faces", () => checkParticleFaces(engine, checks));
   await group(29, "R14.T5.d instances above the cluster cull, folded past 65,535", () =>
     checkInstancesAboveClusters(engine, checks),
+  );
+  // Plan R11's authoritative rocks (R11.T4; plan R14, R14.T5.c) in part 33, alone: their
+  // materials' catalogue, the height worker's bake of finest patches with their rocks and its cost,
+  // the procedural builder's worker against the render thread, and placed rocks drawn through the
+  // cluster path.
+  await group(33, "T9.b catalogue: the rocks' materials", () =>
+    checkCatalogue(engine, status, ROCK_ENTRIES, checks),
+  );
+  await group(33, "R11.T4.a the rocks baked with their patch, and R14.T5.c their builder", () =>
+    checkRockBake(checks),
+  );
+  await group(33, "R11.T4.b placed rocks drawn through the cluster path", () =>
+    checkPlacedRocks(engine, checks),
   );
   await group(17, "R08.T8.d the far limb's node rays packed in the general forms", () =>
     checkMarchPackedGeneral(engine, checks, summary.fallback),

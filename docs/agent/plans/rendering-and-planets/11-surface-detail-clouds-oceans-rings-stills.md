@@ -1094,6 +1094,8 @@ Acceptance: `cargo test -p hyperion-surface scatter`, `just ci` (both wasm targe
   function of pose, field of view, viewport, setting and bodies alone; the low setting raises the
   annunciation exactly when a finest-level patch with pixel-sized rocks is in view outside the
   region.
+  _Built 2026-11-18._
+  Records: [11-surface-detail-clouds-oceans-rings-stills/records/R11.T4.b.md](11-surface-detail-clouds-oceans-rings-stills/records/R11.T4.b.md).
 - **R11.T4.c Collision agrees, with rocks.** R10's collision-agrees test (R10.T15.a) gains rocks. In
   Rust, on native and both wasm targets under R04's machinery, goldens of
   `surface_height_with_rocks` at 10⁴ sample points on four sampled worlds; in Vitest, against the
