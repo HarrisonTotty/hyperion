@@ -938,6 +938,7 @@ Files: `apps/hyperion/src/main/{cli,index}.ts`, `src/main/perf/`, `src/preload/{
   ring), with a failure message that says to re-pin and bump the scene's version. A Vitest checks
   that `scenes.ts` and the test's constants agree by reading the test file's text. Acceptance:
   `cargo test -p hyperion-server --test perf_scenes`, `just ci`.
+  Records: [12-measurements-and-settings-ladder/records/R12.T5.b.md](12-measurements-and-settings-ladder/records/R12.T5.b.md).
 
 ### R12.T6 The comparison tool
 
