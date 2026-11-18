@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { dot, normalise, vec3 } from "../../../geometry/vec3";
-import { rockLayerFrom, rocksAbout } from "../../../test/rockFixtures";
+import { meshPagesOf, rockLayerFrom, rocksAbout } from "../../../test/rockFixtures";
 import {
   createWorkerRockPageBuilder,
   InThreadRockPageBuilder,
@@ -14,12 +14,9 @@ import {
 } from "../../clusters/meshPageWork";
 import {
   CLUSTER_TABLE_BYTES,
-  type MeshPage,
   pageClusterCorners,
   PAGE_RECORD_BYTES,
   PAGE_VERTEX_BYTES,
-  readMeshIndex,
-  readMeshPage,
 } from "../../clusters/pageFormat";
 import { finestLevel, uvToSt, vertexDir, xyzToFaceUv } from "../../terrain/cube";
 import type { PatchKey } from "../../terrain/patchKey";
@@ -87,25 +84,6 @@ function surfaceDistanceM(rock: Rock, x: number, y: number, z: number): number {
   return Math.abs(f - 1) / Math.hypot(...g);
 }
 
-/** The pages of `file`, read as the producer reads them. */
-function pagesOf(file: ArrayBuffer): MeshPage[] {
-  const index = readMeshIndex(file);
-  if (index.kind !== "read") {
-    throw new Error(index.reason);
-  }
-  return index.value.pages.map((entry, p) => {
-    const page = readMeshPage(
-      file.slice(entry.offsetBytes, entry.offsetBytes + entry.bytes),
-      entry,
-      p,
-    );
-    if (page.kind !== "read") {
-      throw new Error(page.reason);
-    }
-    return page.value;
-  });
-}
-
 describe("the procedural builder's rocks (R14.T5.c)", () => {
   it("builds the same bytes for the same rocks in a worker and on the render thread", async () => {
     const input = patchInput(7);
@@ -131,7 +109,7 @@ describe("the procedural builder's rocks (R14.T5.c)", () => {
       throw new Error("forty rocks make a mesh");
     }
     let vertices = 0;
-    for (const page of pagesOf(built.file)) {
+    for (const page of meshPagesOf(built.file)) {
       const view = new DataView(page.body);
       // Half a step an axis, to first order in the step.
       const slack = (Math.sqrt(3) / 2) * page.stepM * 1.01;
@@ -169,7 +147,7 @@ describe("the procedural builder's rocks (R14.T5.c)", () => {
       throw new Error("forty rocks make a mesh");
     }
     const seen = new Map<number, string>();
-    for (const page of pagesOf(built.file)) {
+    for (const page of meshPagesOf(built.file)) {
       const view = new DataView(page.body);
       for (let c = 0; c < page.clusters; c += 1) {
         const r = page.sections.records + PAGE_RECORD_BYTES * c;

@@ -1102,6 +1102,8 @@ Acceptance: `cargo test -p hyperion-surface scatter`, `just ci` (both wasm targe
   wasm build of those same points, the drawn surface (R05's finest mesh formed in `Math.fround`
   from a committed bake fixture, and T4.a's rock meshes) agrees with them within the chordal bound
   where a rock stands and the `f32` step of the height texture elsewhere.
+  _Built 2026-11-18._
+  Records: [11-surface-detail-clouds-oceans-rings-stills/records/R11.T4.c.md](11-surface-detail-clouds-oceans-rings-stills/records/R11.T4.c.md).
 - **R11.T4.d The swept region, into R05's selection.** In `rockSelection.ts`,
   `couldTouchContacts(bodies, sweepS)`, which sweeps each descending body's footprint along R03's
   `predictedPath` over `sweepS` = R05's `FORCED_REGION_RESIDENCY_S`, widened by

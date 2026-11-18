@@ -4,6 +4,7 @@
  */
 
 import { cross, normalise, scale, type Vec3, vec3 } from "../geometry/vec3";
+import { type MeshPage, readMeshIndex, readMeshPage } from "../view/clusters/pageFormat";
 import {
   ROCK_WORDS,
   type Rock,
@@ -129,5 +130,28 @@ export function rocksAbout(
       ),
     );
     return rockOf(random, 0.4 * 16 ** random(), dir, scale(dir, radiusM));
+  });
+}
+
+/**
+ * The pages of the mesh file `file`, read as the producer reads them.
+ *
+ * @throws Error naming why the file or a page was refused.
+ */
+export function meshPagesOf(file: ArrayBuffer): MeshPage[] {
+  const index = readMeshIndex(file);
+  if (index.kind !== "read") {
+    throw new Error(index.reason);
+  }
+  return index.value.pages.map((entry, p) => {
+    const page = readMeshPage(
+      file.slice(entry.offsetBytes, entry.offsetBytes + entry.bytes),
+      entry,
+      p,
+    );
+    if (page.kind !== "read") {
+      throw new Error(page.reason);
+    }
+    return page.value;
   });
 }

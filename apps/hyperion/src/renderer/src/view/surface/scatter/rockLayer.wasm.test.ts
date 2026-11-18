@@ -12,16 +12,22 @@ import {
   bakePatch,
   initSync,
   rockWords,
-  SigmaSurvey,
   SurfaceFields,
   testPlanetVersion,
 } from "../../../generated/surface/hyperion_surface";
 import wasmDataUrl from "../../../generated/surface/hyperion_surface_bg.wasm?inline";
+import {
+  directFieldsOf,
+  finestAbout,
+  parseWorkerFixture,
+  type WorkerFixture,
+  workerFieldsOf,
+} from "../../../test/workerFieldFixtures";
 import { finestLevel, uvToSt, vertexDir, xyzToFaceUv } from "../../terrain/cube";
 import type { PatchKey } from "../../terrain/patchKey";
 import { type BodyFigure, spheroidPoint } from "../../terrain/planet";
-import { answerRequest, type HeightModule, WorkerFields } from "../../terrain/workers/heightBake";
-import type { BakeSettings, HeightWorkerRequest } from "../../terrain/workers/messages";
+import { answerRequest, type HeightModule } from "../../terrain/workers/heightBake";
+import type { BakeSettings } from "../../terrain/workers/messages";
 import { ROCK_WORDS, rockAt, rockLayerOf } from "./rockLayer";
 
 /** The module's bytes, from the `data:` URL Vite inlines them as. */
@@ -36,52 +42,8 @@ const module: HeightModule = {
   createFields: () => new SurfaceFields(),
 };
 
-/** The bytes of a hexadecimal string, in a buffer of their own. */
-function bytesOf(hex: string): ArrayBuffer {
-  const bytes = new Uint8Array(hex.length / 2);
-  for (let n = 0; n < bytes.length; n += 1) {
-    bytes[n] = Number.parseInt(hex.slice(2 * n, 2 * n + 2), 16);
-  }
-  return bytes.buffer;
-}
-
-/** A fixture's body, seed and blocks, and the first patch it pins, on surveyed ground. */
-interface Fixture {
-  readonly body: string;
-  readonly seed: string;
-  readonly blocks: ReadonlyArray<ArrayBuffer>;
-  readonly anchor: PatchKey;
-}
-
-function parse(text: string): Fixture {
-  let body = "";
-  let seed = "";
-  let anchor: PatchKey | null = null;
-  const blocks: ArrayBuffer[] = [];
-  for (const line of text.split("\n")) {
-    const [head, ...rest] = line.split(" ");
-    if (head === "body") {
-      body = rest[0] ?? "";
-    } else if (head === "seed") {
-      seed = rest[0] ?? "";
-    } else if (head === "block") {
-      blocks.push(bytesOf(rest[2] ?? ""));
-    } else if (head === "patch" && anchor === null) {
-      const [face, level, i, j] = rest.slice(1, 5).map(Number);
-      if (face !== 0 && face !== 1 && face !== 2 && face !== 3 && face !== 4 && face !== 5) {
-        throw new Error(`the fixture's patch names no face, ${String(face)}`);
-      }
-      anchor = { face, level: level ?? 0, i: i ?? 0, j: j ?? 0 };
-    }
-  }
-  if (anchor === null) {
-    throw new Error("the fixture pins no patch");
-  }
-  return { body, seed, blocks, anchor };
-}
-
 /** The settings of the wireframe's bake: no weights, horizon or normals. */
-function settingsOf(fixture: Fixture): BakeSettings {
+function settingsOf(fixture: WorkerFixture): BakeSettings {
   return {
     vertexPath: "face-differences",
     normals: "mesh",
@@ -94,48 +56,6 @@ function settingsOf(fixture: Fixture): BakeSettings {
       normals: "skipped",
     },
   };
-}
-
-/** A worker's fields holding every block of `fixture`, through the worker's answers. */
-function workerFields(fixture: Fixture): WorkerFields {
-  const fields = new WorkerFields(module);
-  fixture.blocks.forEach((block, n) => {
-    const request: HeightWorkerRequest =
-      n === 0
-        ? {
-            kind: "field-init",
-            id: n,
-            body: fixture.body,
-            block,
-            form: "payload",
-            sigma: "skipped",
-          }
-        : { kind: "field-chunk", id: n, body: fixture.body, block };
-    const { reply } = answerRequest(module, request, fields);
-    if (reply.kind !== "field-held") {
-      throw new Error(`block ${String(n)} was refused: ${JSON.stringify(reply)}`);
-    }
-  });
-  return fields;
-}
-
-/** The module's own fields holding every block of `fixture`, on the main thread. */
-function directFields(fixture: Fixture): {
-  readonly direct: SurfaceFields;
-  readonly args: readonly [bigint, number];
-} {
-  const direct = new SurfaceFields();
-  const [system, index] = fixture.body.split(".");
-  const args = [BigInt(`0x${system ?? ""}`), Number.parseInt(index ?? "", 16)] as const;
-  fixture.blocks.forEach((block, n) => {
-    const bytes = new Uint8Array(block);
-    const taken =
-      n === 0
-        ? direct.fieldInit(...args, bytes, SigmaSurvey.Skipped)
-        : direct.fieldChunk(...args, bytes);
-    taken.free();
-  });
-  return { direct, args };
 }
 
 /** The patch of `level` holding the direction `dir`, as the surface crate's `PatchKey::containing`. */
@@ -167,28 +87,19 @@ describe("a finest patch's rocks on the real module (R11.T4.a)", () => {
     "on %s, bakes each finest patch's list in the worker as rocksNear about it finds them on the main thread",
     { timeout: 60_000 },
     (_, text) => {
-      const fixture = parse(text);
-      const fields = workerFields(fixture);
-      const { direct, args } = directFields(fixture);
-      const seed = BigInt(`0x${fixture.seed}`);
+      const fixture = parseWorkerFixture(text);
+      const fields = workerFieldsOf(module, fixture);
+      const { direct, args, seed } = directFieldsOf(() => new SurfaceFields(), fixture);
       const [a, c] = direct.figureM(...args) ?? [];
       if (a === undefined || c === undefined) {
         throw new Error("the fixture's field holds a figure");
       }
       const figure: BodyFigure = { equatorialRadiusM: a, polarRadiusM: c, pole: null };
       const finest = finestLevel(a);
-      const { anchor } = fixture;
-      const down = finest - anchor.level;
       let compared = 0;
       let baked = 0;
       for (let step = 0; step < 24; step += 1) {
-        // The anchor's middle descendant at the finest level, and the patches about it.
-        const key: PatchKey = {
-          face: anchor.face,
-          level: finest,
-          i: anchor.i * 2 ** down + Math.floor(2 ** down / 2) + (step % 5) - 2,
-          j: anchor.j * 2 ** down + Math.floor(2 ** down / 2) + Math.floor(step / 5) - 2,
-        };
+        const key = finestAbout(fixture, finest, step);
         const { reply } = answerRequest(
           module,
           { kind: "bake", id: 100 + step, key, generation: 1, settings: settingsOf(fixture) },

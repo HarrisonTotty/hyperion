@@ -22,6 +22,13 @@
 //! points drawn over the sphere, a cube corner and a pole, from 2 m below the ground to 3 m above
 //! it.
 //!
+//! `collision_<world>` (plan R11, T4.c): the authoritative ground with its rocks at
+//! [`COLLISION_POINTS`] points a world, on the Moon-, Earth-, Mars- and Ceres-like worlds, `<p>
+//! <g> <h>` a line: the body-fixed point p, R10's ground g and [`surface_height_with_rocks`] h
+//! there. The points lie over the finest patches of the twelve pinned site cells: each of their
+//! rocks' axis, two points inside its outline and one past it, then points drawn uniformly over
+//! the patches from 2 m below the ground to 3 m above it, until there are [`COLLISION_POINTS`].
+//!
 //! `octaves_moon_like`: the rocks of every octave at a stated k, [`MAX_ROCK_ABUNDANCE`], through
 //! [`rocks_in_cell_at`], so that the larger octaves, which the worlds' sites hold too few of, are
 //! pinned too: for each octave, its cells of a row-major block on face 3 in turn, until four rocks
@@ -259,6 +266,131 @@ fn octaves_text() -> String {
     out.finish()
 }
 
+/// The points a world's collision golden pins: 2,500, so that the four worlds hold 10⁴ (plan R11,
+/// T4.c).
+const COLLISION_POINTS: usize = 2_500;
+
+/// The finest patches of `w`'s pinned site cells, the patch holding each one's centre.
+fn pinned_finest_patches(w: SyntheticWorld) -> Vec<PatchKey> {
+    let figure = world(w).header().figure();
+    let levels = rock_octave_levels(&figure);
+    let finest = crate::geometry::finest_level(figure.equatorial_radius_m);
+    pinned_sites(levels[ROCK_OCTAVE_COUNT - 1])
+        .into_iter()
+        .map(|site| PatchKey::containing(finest, site.vertex_dir(32, 32)).expect("a finest patch"))
+        .collect()
+}
+
+/// The points the collision golden of `w` pins (see the [module documentation](self)).
+fn collision_points(w: SyntheticWorld) -> Vec<[f64; 3]> {
+    let field = world(w);
+    let figure = field.header().figure();
+    let synth = Synthesiser::new(field, SEED);
+    let mut cache = SynthCache::new();
+    let levels = rock_octave_levels(&figure);
+    let patches = pinned_finest_patches(w);
+    let mut points = Vec::new();
+    for &patch in &patches {
+        for (_, cell) in cells_under(patch, levels) {
+            let mut rocks = Vec::new();
+            rocks_in_cell(&synth, &mut cache, RockCellKey::new(cell), &mut rocks)
+                .expect("a whole field holds every cell");
+            for rock in rocks {
+                let o = rock.base_centre();
+                let up = figure.normal(rock.dir());
+                let t1 = unit_dir([-up[1], up[0], 0.0]);
+                let t2 = [
+                    up[1] * t1[2] - up[2] * t1[1],
+                    up[2] * t1[0] - up[0] * t1[2],
+                    up[0] * t1[1] - up[1] * t1[0],
+                ];
+                let r = rock.reach().value();
+                points.push(o);
+                for (f1, f2) in [(0.3, 0.1), (-0.2, 0.35), (1.25, 0.0)] {
+                    points.push([0, 1, 2].map(|k| o[k] + f1 * r * t1[k] + f2 * r * t2[k]));
+                }
+            }
+        }
+    }
+    assert!(
+        points.len() < COLLISION_POINTS,
+        "{} rock points",
+        points.len()
+    );
+    let mut rng = Lcg::new(0x636f_6c6c_6973_696f);
+    let mut n = 0_usize;
+    while points.len() < COLLISION_POINTS {
+        let patch = patches[n % patches.len()];
+        n += 1;
+        let side = f64::from(1_u32 << patch.level());
+        let s_at = (f64::from(patch.i()) + rng.next_f64()) / side;
+        let t_at = (f64::from(patch.j()) + rng.next_f64()) / side;
+        let dir = unit_dir(crate::cube::face_uv_to_xyz(crate::cube::FaceUv {
+            face: patch.face(),
+            u: crate::cube::st_to_uv(s_at),
+            v: crate::cube::st_to_uv(t_at),
+        }));
+        let ground = crate::patch::collision::finest_surface_height(&synth, dir, &mut cache)
+            .expect("a whole field");
+        points.push(figure.surface_point(dir, ground + rng.next_f64() * 5.0 - 2.0));
+    }
+    points
+}
+
+/// The golden text of the collision surface at `w`'s pinned points.
+fn collision_text(w: SyntheticWorld) -> String {
+    let points = collision_points(w);
+    let synth = Synthesiser::new(world(w), SEED);
+    let (mut synth_cache, mut cache) = (SynthCache::new(), RockCache::new());
+    let mut out = GoldenWriter::new();
+    out.header(crate::generator_version());
+    for p in points {
+        let ground = ground_at(&synth, &mut synth_cache, &p).expect("a whole field");
+        let with = surface_height_with_rocks(&synth, &mut synth_cache, &mut cache, &p)
+            .expect("a whole field holds every cell");
+        out.line(&format!(
+            "{} {} {}",
+            hex3(p),
+            hex(ground.height().value()),
+            hex(with.value())
+        ));
+    }
+    out.finish()
+}
+
+/// Whether the collision golden text `text` stands on rocks and on bare ground: some points meet a
+/// rock's top above the ground, and elsewhere the height is the ground's to the bit.
+fn meets_rocks_and_bare_ground(text: &str) -> bool {
+    let lines: Vec<&str> = text.lines().skip(1).collect();
+    let raised = lines
+        .iter()
+        .filter(|line| {
+            let words: Vec<&str> = line.split(' ').collect();
+            words.get(3) != words.get(4)
+        })
+        .count();
+    lines.len() == COLLISION_POINTS && raised > 0 && raised < COLLISION_POINTS
+}
+
+#[test]
+fn the_collision_surface_matches_its_goldens() {
+    for (name, w) in [
+        ("moon_like", SyntheticWorld::MoonLike),
+        ("earth_like", SyntheticWorld::EarthLike),
+        ("mars_like", SyntheticWorld::MarsLike),
+        ("ceres_like", SyntheticWorld::CeresLike),
+    ] {
+        let text = collision_text(w);
+        assert!(meets_rocks_and_bare_ground(&text), "{name}");
+        match name {
+            "moon_like" => golden!("scatter/collision_moon_like", &text),
+            "earth_like" => golden!("scatter/collision_earth_like", &text),
+            "mars_like" => golden!("scatter/collision_mars_like", &text),
+            _ => golden!("scatter/collision_ceres_like", &text),
+        }
+    }
+}
+
 #[test]
 fn every_octaves_rocks_match_their_golden() {
     golden!("scatter/octaves_moon_like", &octaves_text());
@@ -317,6 +449,6 @@ mod native_only {
             );
             seen += 1;
         }
-        assert!(seen >= 6, "{seen} scatter goldens");
+        assert!(seen >= 10, "{seen} scatter goldens");
     }
 }
