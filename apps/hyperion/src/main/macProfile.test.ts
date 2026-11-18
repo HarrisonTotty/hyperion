@@ -147,18 +147,33 @@ describe("the Mac batch's matrix", () => {
     expect(MAC_PROFILE_DEFAULTS.levers).toContain("decoration-sets");
   });
 
-  it("leaves the decked air's ground and the ring's shadow out of the defaults, whose body has no deck or ring, and runs each when named (R08, R11.T9.a)", () => {
-    expect(MAC_PROFILE_BODY_LEVERS).toEqual(["decked-air-surface", "ring-shadow-on-body"]);
+  it("pairs the rocks built and drawn (A) against no mesh page pool (B) at DPR 1, out of the defaults (R11.T4)", () => {
+    expect(leverNamed("rocks")).toMatchObject({
+      a: [],
+      b: ["--geometry", "pageBytes=0"],
+      ratios: [1],
+      countSides: false,
+    });
+    expect(MAC_PROFILE_DEFAULTS.levers).not.toContain("rocks");
+    const named = macProfileMatrix({ ...MAC_PROFILE_DEFAULTS, levers: ["rocks"] });
+    expect(named.filter((run) => run.place.kind === "pair").map((run) => run.id)).toEqual([
+      "rocks-high-dpr1-a1",
+      "rocks-high-dpr1-b1",
+      "rocks-high-dpr1-a2",
+      "rocks-high-dpr1-b2",
+    ]);
+  });
+
+  it("leaves the decked air's ground, the ring's shadow and the rocks out of the defaults, whose body has no deck or ring and whose pose stands off its ground, and runs each when named (R08, R11.T9.a, R11.T4)", () => {
+    expect(MAC_PROFILE_BODY_LEVERS).toEqual(["decked-air-surface", "ring-shadow-on-body", "rocks"]);
     expect(MAC_PROFILE_DEFAULTS.levers).toEqual(
       MAC_PROFILE_LEVERS.map((lever) => lever.name).filter(
-        (name) => name !== "decked-air-surface" && name !== "ring-shadow-on-body",
+        (name) => !MAC_PROFILE_BODY_LEVERS.includes(name),
       ),
     );
     expect(
       macProfileMatrix(MAC_PROFILE_DEFAULTS).some(
-        (run) =>
-          run.place.kind === "pair" &&
-          (run.place.lever === "decked-air-surface" || run.place.lever === "ring-shadow-on-body"),
+        (run) => run.place.kind === "pair" && MAC_PROFILE_BODY_LEVERS.includes(run.place.lever),
       ),
     ).toBe(false);
     expect([

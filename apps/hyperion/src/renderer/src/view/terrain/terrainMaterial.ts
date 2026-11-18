@@ -110,6 +110,7 @@ import terrainLitShadeWgsl from "./shaders/terrainLitShade.wgsl?raw";
 import terrainPatchWgsl from "./shaders/terrainPatch.wgsl?raw";
 import terrainClusterWgsl from "./shaders/terrainCluster.wgsl?raw";
 import { type ResolveMaterial, VISIBILITY_IDS_TEXTURE } from "../clusters/resolve";
+import resolveBarycentricsWgsl from "../clusters/resolveBarycentrics.wgsl?raw";
 import resolveTerrainWgsl from "../clusters/resolveTerrain.wgsl?raw";
 import { VISIBLE_FIRST_UNIFORM } from "../clusters/visibility";
 import terrainClusterIdWgsl from "./shaders/terrainClusterId.wgsl?raw";
@@ -1060,7 +1061,7 @@ export function terrainResolveMaterialSpec(
     ["contacts.count", "resolve_contact_count()", 2],
     ["contacts.items[i]", "resolve_contact(i)", 2],
   ]);
-  const source = `${withClusterLibrary(shaded)}\n${resolveTerrainWgsl}`;
+  const source = `${withClusterLibrary(shaded)}\n${resolveBarycentricsWgsl}\n${resolveTerrainWgsl}`;
   const fragment = ["fragment"] as const;
   const b = TERRAIN_LIT_BINDINGS;
   return {

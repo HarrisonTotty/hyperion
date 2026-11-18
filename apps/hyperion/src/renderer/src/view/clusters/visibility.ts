@@ -123,8 +123,14 @@ export function withVisibleFirst(draw: DrawItem, first: number): DrawItem {
     : { ...draw, uniforms: { ...draw.uniforms, [VISIBLE_FIRST_UNIFORM]: Float32Array.of(first) } };
 }
 
-/** A consumer class of the visibility buffer: terrain alone until T5.e's meshes. */
-export type VisibleConsumer = "terrain";
+/** A consumer class of the visibility buffer: terrain, and T5.e's meshes, the rocks. */
+export type VisibleConsumer = "terrain" | "rocks";
+
+/** A consumer's lists in a view's frame: its class and its entries, every pass's. */
+export interface VisibleConsumerLists {
+  readonly consumer: VisibleConsumer;
+  readonly entries: number;
+}
 
 /** A consumer's range of a view's visible-cluster index space (see the module's remarks). */
 export interface VisibleConsumerRange {
@@ -136,25 +142,25 @@ export interface VisibleConsumerRange {
 }
 
 /**
- * A view's index space for the terrain of a frame's bodies, the lists of each of `terrainEntries`
- * entries, all its passes': each body's range in its order, the first from 0 and each other just
- * after the one before (plan R14, R14.T2.d), so that two bodies' IDs never meet.
+ * A view's index space for a frame's consumers' lists, `consumers` in the frame's order (each
+ * body's terrain, then its rocks): each one's range in turn, the first from 0 and each other just
+ * after the one before (plan R14, R14.T2.d; R14.T5.e), so that no two consumers' IDs meet.
  *
  * @throws RangeError for a count that is no whole number of entries, or a space past
  *   {@link MAX_LIST_ENTRIES}, where the frame draws its terrain forward instead.
  */
 export function visibleConsumerRanges(
-  terrainEntries: ReadonlyArray<number>,
+  consumers: ReadonlyArray<VisibleConsumerLists>,
 ): ReadonlyArray<VisibleConsumerRange> {
   const ranges: VisibleConsumerRange[] = [];
   let first = 0;
-  for (const entries of terrainEntries) {
+  for (const { consumer, entries } of consumers) {
     if (!Number.isInteger(entries) || entries < 0 || first + entries > MAX_LIST_ENTRIES) {
       throw new RangeError(
         `${String(entries)} entries from ${String(first)} do not fit the visible-cluster index space`,
       );
     }
-    ranges.push({ consumer: "terrain", first, entries });
+    ranges.push({ consumer, first, entries });
     first += entries;
   }
   return ranges;

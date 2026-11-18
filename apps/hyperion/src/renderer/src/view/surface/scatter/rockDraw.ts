@@ -20,10 +20,16 @@
  * - **Buffers**, category `scatter`: the instances and the view's rock records (each patch's
  *   records in turn), grown to a power of two and written each frame; the cull's buckets are the
  *   consumer path's.
+ * - **By the visibility buffer** (plan R14, R14.T5.e; Design note 9): where the frame shades by
+ *   IDs, the same buckets drawn by the ID raster's base into the view's IDs, and one resolve, the
+ *   rocks' whole lists their range of the view's index space ({@link RockVisibility}), numbered
+ *   from 0 until the frame moves them past its terrain's (`frameTerrain.ts`' `rangedVisibility`);
+ *   nothing drawn forward.
  */
 
 import type { Vec3 } from "../../../geometry/vec3";
 import type { BucketDrawBase } from "../../clusters/buckets";
+import { resolveUniforms } from "../../clusters/resolve";
 import { type ClusterConsumer, ClusterConsumerPath } from "../../clusters/consumer";
 import type { CullHorizon, CullPlane } from "../../clusters/cullPass";
 import { MAX_PAGE_CLUSTERS } from "../../clusters/pageFormat";
@@ -101,7 +107,39 @@ export interface RockFrameInput {
    * beside the base's own.
    */
   readonly base: BucketDrawBase;
+  /** Where the frame shades by the visibility buffer, its ID raster's and resolve's draws; else `null`. */
+  readonly ids: RockIdsInput | null;
 }
+
+/** What a frame by the visibility buffer gives the rocks' draws (plan R14, R14.T5.e). */
+export interface RockIdsInput {
+  /** The ID raster's base: the lit base's uniforms with the rocks' ID material. */
+  readonly idBase: BucketDrawBase;
+  /**
+   * The resolve's draw: its material, the full-screen mesh, the lit base's uniforms and textures
+   * with the view's resolve frame; the rocks' storage and the resolve's lists are set beside them.
+   */
+  readonly resolve: DrawItem;
+  /** The device's sub-pixel grid's bits (`GpuCapabilities.subpixelBits`). */
+  readonly subpixelBits: number;
+}
+
+/** The rocks by the visibility buffer in a frame: their raster, their resolve and their range's size. */
+export interface RockVisibility {
+  readonly raster: ReadonlyArray<DrawItem>;
+  readonly resolve: ReadonlyArray<DrawItem>;
+  /** The entries of their range of the view's index space: every pass's of their lists. */
+  readonly entries: number;
+}
+
+/** A view-frame's rock draws: forward, or by the visibility buffer. */
+export interface RockDraws {
+  readonly forward: ReadonlyArray<DrawItem>;
+  readonly byIds: RockVisibility | null;
+}
+
+/** No rock drawn. */
+const NO_ROCK_DRAWS: RockDraws = { forward: [], byIds: null };
 
 /** What a view's last rock frame drew, for its counts. */
 export interface RockFrameCounts {
@@ -118,6 +156,12 @@ export type RockViewEngine = Pick<
   "createBuffer" | "writeBuffer" | "releaseBuffer" | "dispatch"
 >;
 
+/** A draw base with the rocks' storage set beside its own, and the base it was made from. */
+interface HeldBase<Base> {
+  from: Base | null;
+  made: Base | null;
+}
+
 /** A buffer of the view's, grown to a power of two. */
 interface Grown {
   buffer: BufferHandle | null;
@@ -131,8 +175,9 @@ export class RockView {
   readonly #path: ClusterConsumerPath;
   readonly #instances: Grown = { buffer: null, bytes: 0 };
   readonly #records: Grown = { buffer: null, bytes: 0 };
-  #base: BucketDrawBase | null = null;
-  #heldBase: BucketDrawBase | null = null;
+  readonly #forward: HeldBase<BucketDrawBase> = { from: null, made: null };
+  readonly #resolve: HeldBase<DrawItem> = { from: null, made: null };
+  #resolveDraw: DrawItem | null = null;
   #counts: RockFrameCounts = { patches: 0, instances: 0, rocks: 0, triangles: 0 };
   #disposed = false;
 
@@ -148,13 +193,13 @@ export class RockView {
   }
 
   /**
-   * Culls `input`'s rocks and hands back their draws, pass 0's buckets then pass 1's; none where it
-   * draws no rock.
+   * Culls `input`'s rocks and hands back their draws, pass 0's buckets then pass 1's, forward or,
+   * where `input.ids` is given, by the visibility buffer; none where it draws no rock.
    */
-  frame(input: RockFrameInput): ReadonlyArray<DrawItem> {
+  frame(input: RockFrameInput): RockDraws {
     this.#counts = { patches: 0, instances: 0, rocks: 0, triangles: 0 };
     if (this.#disposed) {
-      return [];
+      return NO_ROCK_DRAWS;
     }
     const { meshes } = input;
     const { pool } = meshes;
@@ -167,7 +212,7 @@ export class RockView {
     });
     const count = drawn.reduce((sum, each) => sum + each.pages.length, 0);
     if (count === 0) {
-      return [];
+      return NO_ROCK_DRAWS;
     }
     const rocks = drawn.reduce((sum, each) => sum + each.held.rocks, 0);
     const instances = new ArrayBuffer(count * ROCK_INSTANCE_BYTES);
@@ -238,43 +283,73 @@ export class RockView {
       },
       ROCK_CULL_LABEL,
     );
-    const lists = this.#path.buckets?.lists;
-    if (lists === undefined) {
-      return [];
+    const buckets = this.#path.buckets;
+    if (buckets === null) {
+      return NO_ROCK_DRAWS;
     }
-    const base = this.#baseOf(input.base, {
-      clusterLists: lists,
+    const storage = {
+      clusterLists: buckets.lists,
       rockPages: pool.pages,
-      rockPageRecords: pool.records,
       rockInstances: instanceBuffer,
       rockRecords: recordBuffer,
-    });
+    };
     this.#counts = {
       patches: drawn.length,
       instances: count,
       rocks,
       triangles: drawn.reduce((sum, each) => sum + each.held.triangles, 0),
     };
-    return [
+    const { ids } = input;
+    const drawBase = ids === null ? input.base : ids.idBase;
+    const base = this.#baseOf(this.#forward, drawBase, storage);
+    const draws = [
       ...this.#path.drawItems(ROCK_PIXEL_PASS, input.mesh, base, 1),
       ...this.#path.drawItems(ROCK_REGION_PASS, input.mesh, base, 1),
     ];
+    if (ids === null) {
+      return { forward: draws, byIds: null };
+    }
+    const resolve = this.#baseOf(this.#resolve, ids.resolve, storage);
+    const { resolveLists } = resolveUniforms(buckets, ids.subpixelBits);
+    const held = this.#resolveDraw;
+    const resolveDraw =
+      held !== null &&
+      held.storageBuffers === resolve.storageBuffers &&
+      held.uniforms["resolveLists"]?.every((x, k) => x === resolveLists[k]) === true
+        ? held
+        : { ...resolve, uniforms: { ...resolve.uniforms, resolveLists } };
+    this.#resolveDraw = resolveDraw;
+    return {
+      forward: [],
+      byIds: {
+        raster: draws,
+        resolve: [resolveDraw],
+        entries: buckets.passes * buckets.passEntries,
+      },
+    };
   }
 
-  /** The draw base with the rocks' storage, the same object while nothing in it changes. */
-  #baseOf(base: BucketDrawBase, storage: Readonly<Record<string, BufferHandle>>): BucketDrawBase {
-    const held = this.#base;
-    const same =
-      held !== null &&
-      this.#heldBase === base &&
-      Object.entries(storage).every(([name, buffer]) => held.storageBuffers?.[name] === buffer);
-    if (same) {
-      return held;
+  /**
+   * `base` with the rocks' `storage` beside its own, held in `held`: the same object while nothing
+   * in it changes, so that the buckets' draws are kept.
+   */
+  #baseOf<Base extends BucketDrawBase>(
+    held: HeldBase<Base>,
+    base: Base,
+    storage: Readonly<Record<string, BufferHandle>>,
+  ): Base {
+    const made = held.made;
+    if (
+      made !== null &&
+      held.from === base &&
+      Object.entries(storage).every(([name, buffer]) => made.storageBuffers?.[name] === buffer)
+    ) {
+      return made;
     }
-    const made = { ...base, storageBuffers: { ...base.storageBuffers, ...storage } };
-    this.#base = made;
-    this.#heldBase = base;
-    return made;
+    const next = { ...base, storageBuffers: { ...base.storageBuffers, ...storage } };
+    held.made = next;
+    held.from = base;
+    return next;
   }
 
   /** `bytes` written to `grown`'s buffer, made again larger where it does not hold them. */

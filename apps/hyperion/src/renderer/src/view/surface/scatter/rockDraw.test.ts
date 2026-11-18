@@ -7,6 +7,8 @@ import { CLUSTER_BASE_UNIFORM } from "../../clusters/buckets";
 import { CLUSTER_CULL_KERNEL } from "../../clusters/cull";
 import { InThreadRockPageBuilder } from "../../clusters/meshPageProducer";
 import { pageSlotOffsetBytes } from "../../clusters/pages";
+import { RESOLVE_SCREEN_MESH } from "../../clusters/resolve";
+import type { WgslMaterialSpec } from "../../engine/types";
 import type { PatchKey } from "../../terrain/patchKey";
 import type { BakedPatch, TerrainLayers } from "../../terrain/workers/messages";
 import { ResidentRocks } from "./residentRocks";
@@ -80,6 +82,23 @@ async function heldRocks(engine: CountingRenderEngine): Promise<{
   return { meshes, keys: ["2/17/10/20", "2/17/11/20"], originM };
 }
 
+/** A material of no shader, named `name`, for the fake engine. */
+function emptySpec(name: string): WgslMaterialSpec {
+  return {
+    name,
+    displayName: name.toUpperCase(),
+    vertexWgsl: "",
+    fragmentWgsl: "",
+    uniforms: [],
+    samplers: [],
+    textures: [],
+    cullMode: "back",
+    depthWrite: true,
+    colourWrites: true,
+    blend: "none",
+  };
+}
+
 describe("a view's rock draw (R11.T4.b, R14.T5.c)", () => {
   it("culls each patch's pages once into its rule's pass, its instances placed about the camera", async () => {
     const engine = new CountingRenderEngine(await fakeDevice());
@@ -99,7 +118,7 @@ describe("a view's rock draw (R11.T4.b, R14.T5.c)", () => {
       colourWrites: true,
       blend: "none",
     });
-    const draws = view.frame({
+    const { forward: draws, byIds } = view.frame({
       patches: [
         { keyString: keys[0], terrainSlot: 7, rule: "pixel" },
         { keyString: keys[1], terrainSlot: 9, rule: "region" },
@@ -114,7 +133,9 @@ describe("a view's rock draw (R11.T4.b, R14.T5.c)", () => {
       kernel: engine.createCompute(CLUSTER_CULL_KERNEL),
       mesh: engine.createMesh(ROCK_CLUSTER_MESH.mesh),
       base: { material, offsetFromCameraM: new Float32Array(3), uniforms: {}, textures: {} },
+      ids: null,
     });
+    expect(byIds).toBeNull();
     const pages = keys.map((key) => {
       const held = meshes.get(key);
       return held === undefined ? [] : meshes.pool.residentPages(held.mesh);
@@ -163,7 +184,6 @@ describe("a view's rock draw (R11.T4.b, R14.T5.c)", () => {
       expect(Object.keys(draw.storageBuffers ?? {}).toSorted()).toEqual([
         "clusterLists",
         "rockInstances",
-        "rockPageRecords",
         "rockPages",
         "rockRecords",
       ]);
@@ -189,6 +209,7 @@ describe("a view's rock draw (R11.T4.b, R14.T5.c)", () => {
       viewAxis: vec3(0, 0, -1),
       kernel: engine.createCompute(CLUSTER_CULL_KERNEL),
       mesh: engine.createMesh(ROCK_CLUSTER_MESH.mesh),
+      ids: null,
       base: {
         material: engine.createMaterial({
           name: "rock test",
@@ -208,9 +229,74 @@ describe("a view's rock draw (R11.T4.b, R14.T5.c)", () => {
         textures: {},
       },
     };
-    expect(view.frame(frame)).toEqual([]);
-    expect(view.frame({ ...frame, patches: [] })).toEqual([]);
+    expect(view.frame(frame)).toEqual({ forward: [], byIds: null });
+    expect(view.frame({ ...frame, patches: [] })).toEqual({ forward: [], byIds: null });
     expect(engine.dispatched.length).toBe(before);
+    view.dispose();
+    meshes.dispose();
+  });
+
+  it("draws by the visibility buffer its buckets' ID raster and one resolve over its whole lists, nothing forward (R14.T5.e)", async () => {
+    const engine = new CountingRenderEngine(await fakeDevice());
+    const { meshes, keys, originM } = await heldRocks(engine);
+    const view = new RockView(engine, "primary");
+    const forward = engine.createMaterial(emptySpec("rock forward"));
+    const raster = engine.createMaterial(emptySpec("rock id"));
+    const resolveMaterial = engine.createMaterial(emptySpec("rock resolve"));
+    const screen = engine.createMesh(RESOLVE_SCREEN_MESH);
+    const base = {
+      material: forward,
+      offsetFromCameraM: new Float32Array(3),
+      uniforms: {},
+      textures: {},
+    };
+    const input = {
+      patches: [
+        { keyString: keys[0], terrainSlot: 7, rule: "pixel" as const },
+        { keyString: keys[1], terrainSlot: 9, rule: "region" as const },
+      ],
+      meshes,
+      cameraBodyFixedM: vec3(originM.x + 3, originM.y - 250, originM.z + 4),
+      rotationRows: [vec3(1, 0, 0), vec3(0, 1, 0), vec3(0, 0, 1)] as const,
+      planes: [],
+      horizon: null,
+      toleranceRad: 1e-3,
+      viewAxis: vec3(0, 0, -1),
+      kernel: engine.createCompute(CLUSTER_CULL_KERNEL),
+      mesh: engine.createMesh(ROCK_CLUSTER_MESH.mesh),
+      base,
+      ids: {
+        idBase: { ...base, material: raster },
+        resolve: { ...base, mesh: screen, material: resolveMaterial },
+        subpixelBits: 8,
+      },
+    };
+    const { forward: drawn, byIds } = view.frame(input);
+    if (byIds === null) {
+      throw new Error("a frame by IDs draws its rocks by them");
+    }
+    const [resolve] = byIds.resolve;
+    expect([drawn, byIds.raster.length, byIds.resolve.length]).toEqual([[], 2, 1]);
+    expect(byIds.raster.every((draw) => draw.material === raster)).toBe(true);
+    expect([resolve?.material, resolve?.mesh]).toEqual([resolveMaterial, screen]);
+    const lists = byIds.raster[0]?.storageBuffers?.["clusterLists"];
+    expect(resolve?.storageBuffers?.["clusterLists"]).toBe(lists);
+    expect(Object.keys(resolve?.storageBuffers ?? {}).toSorted()).toEqual([
+      "clusterLists",
+      "rockInstances",
+      "rockPages",
+      "rockRecords",
+    ]);
+    // Its range: the rocks' whole lists, both passes', from 0 until the frame moves it.
+    const entries = Array.from(resolve?.uniforms["resolveLists"] ?? []);
+    expect([entries[1], entries[2], entries[3]]).toEqual([0, byIds.entries, 256]);
+    expect(byIds.entries).toBe(2 * (entries[0] ?? 0));
+    // The same draws the next frame, while nothing they hold changes.
+    const next = view.frame(input).byIds;
+    expect([next?.raster[0] === byIds.raster[0], next?.resolve[0] === resolve]).toEqual([
+      true,
+      true,
+    ]);
     view.dispose();
     meshes.dispose();
   });

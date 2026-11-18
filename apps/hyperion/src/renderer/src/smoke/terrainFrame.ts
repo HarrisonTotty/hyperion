@@ -119,6 +119,7 @@ import { type PatchKey, sameKey } from "../view/terrain/patchKey";
 import { planetGeometry } from "../view/terrain/planet";
 import { SurveyedCells } from "../view/terrain/surveyLookup";
 import {
+  type RockSource,
   TerrainPass,
   type TerrainDrawnPatches,
   type TerrainGeometryCounts,
@@ -147,6 +148,9 @@ import {
 } from "../view/wireframe/drawList";
 import { WireframeRenderer, WIREFRAME_MATERIALS } from "../view/wireframe/submit";
 import { moonLikeFixture } from "../test/moonLikeFixture";
+import { rockLayerFrom, rocksAbout } from "../test/rockFixtures";
+import type { RockFrameCounts } from "../view/surface/scatter/rockDraw";
+import { InThreadRockPageBuilder } from "../view/clusters/meshPageProducer";
 import { addCanvas } from "./frames";
 import { bytesDigest, type Checks, halfTexels, pause } from "./harness";
 import { MOON_LIKE } from "./litTerrain";
@@ -211,6 +215,7 @@ const CRAFT_TIMEOUT_MS = 150_000;
 /** 70° and 8°, rad: R14.T3.c's view of a grounded craft, its depression and its field. */
 const RAD_70 = (70 * Math.PI) / 180;
 const RAD_8 = (8 * Math.PI) / 180;
+const RAD_1 = Math.PI / 180;
 
 /** The view's name, as the session knows `VIEW`'s primary. */
 const VIEW = viewId("view");
@@ -366,6 +371,9 @@ interface LiveFrame {
 /** The patches the last frame of each pass drew (plan R14, R14.T1.a), by pass. */
 const drawnPatches = new WeakMap<TerrainPass, TerrainDrawnPatches>();
 
+/** The rocks the last frame of each pass drew (plan R11, R11.T4.b), by pass; `null` for none. */
+const drawnRocks = new WeakMap<TerrainPass, RockFrameCounts | null>();
+
 /** The hold on each pass's lanes, which {@link settled} releases and holds again (`lockstep.ts`). */
 const laneHolds = new WeakMap<TerrainPass, LaneHold>();
 
@@ -375,6 +383,7 @@ function sourceOf(pass: TerrainPass, mask: CoverageMask): FrameTerrainSource {
     drawTerrain: (view, _body, input) => {
       const frame = pass.drawFor(view, input);
       drawnPatches.set(pass, frame.patches);
+      drawnRocks.set(pass, frame.rocks ?? null);
       return frame;
     },
     coverageMask: () => mask.texture,
@@ -2226,6 +2235,7 @@ async function partWorld(
   engine: RenderEngine,
   name: string,
   lay: ((bake: BakedPatch) => BakedPatch) | null = null,
+  rocks: RockSource | null = null,
 ): Promise<PartWorld> {
   const field = moonLikeFixture("first");
   const pool = new HeightWorkerPool({
@@ -2274,6 +2284,7 @@ async function partWorld(
       createPool: (bake) =>
         hold.wrap(lay === null ? pool.lane(bake) : onTheDatumLane(pool.lane(bake), lay)),
       survey,
+      ...(rocks === null ? {} : { rocks }),
     });
     made = pass;
     pass.setReducedMotion(true);
@@ -2846,5 +2857,140 @@ export async function checkStridesUnderCraft(engine: RenderEngine, checks: Check
     offChange();
     pool.terminate();
     mask.release();
+  }
+}
+
+/** The rocks' pixels by IDs that must be within ⅓ stop of the forward frame's: T2.d's share. */
+const ROCKS_WITHIN_SHARE = RESOLVE_WITHIN_SHARE;
+
+/** The polls, 20 ms apart, over which the frame's rocks must hold their count: a second. */
+const ROCKS_HELD_POLLS = 50;
+
+/** How far from the craft's ground a finest bake takes the test mesh's rocks, m. */
+const TEST_ROCKS_WITHIN_M = 40;
+
+/** How far the test mesh's rocks stand above their patch's origin, m: clear of the patch's relief, so that the whole mesh is in view. */
+const TEST_ROCKS_LIFT_M = 4;
+
+/**
+ * A lane's laying of each bake with a test mesh of rocks in place of a finest patch's own (plan
+ * R14, R14.T5.e's "lit test mesh"): within {@link TEST_ROCKS_WITHIN_M} of `near` along the
+ * ground, 12 rocks of 1 to 3 m over a 24 m square about the patch's origin, {@link TEST_ROCKS_LIFT_M} past the
+ * origin's distance from the body's centre, seeded by its key, so that they cover far more of the view than the fixture's few small
+ * rocks (some 0.02% of it); farther, none, so that the meshes the rocks' pool holds are the
+ * view's (a patch's mesh of these is some 0.5 MB); any other bake as it is.
+ */
+function withTestRocks(near: Vec3): (bake: BakedPatch) => BakedPatch {
+  return (bake) => {
+    const layers = bake.layers;
+    if (layers?.rocks === undefined) {
+      return bake;
+    }
+    const { key, originM } = bake;
+    const seed = (key.face * 7_919 + key.i * 104_729 + key.j) >>> 0;
+    const rocks =
+      // Apart along the ground, whatever the relief over the datum.
+      norm(sub(normalise(originM), normalise(near))) * norm(near) <= TEST_ROCKS_WITHIN_M
+        ? rocksAbout(seed, 12, normalise(originM), 24, norm(originM) + TEST_ROCKS_LIFT_M, [1, 3])
+        : [];
+    return { ...bake, layers: { ...layers, rocks: rockLayerFrom(rocks) } };
+  };
+}
+
+/** Whether `draw` is a rock draw: the one kind that binds the rocks' pages. */
+function isRockDraw(draw: DrawItem): boolean {
+  return draw.storageBuffers?.["rockPages"] !== undefined;
+}
+
+/**
+ * Plan R14, R14.T5.e's acceptance on the device (`R14.T5.e the rocks by the visibility buffer`), in
+ * a part of its own (part 34): part 15's frame check's world made again ({@link partWorld}) with
+ * the rocks, each finest bake's near the craft a test mesh of them ({@link withTestRocks}), a 20 m craft grounded
+ * on the surveyed column and the camera 1.5 km from it, 70° above its horizon through a field of
+ * half a degree, so that the rocks of its could-touch region, which holds the view, are drawn at
+ * their finest cut on the low setting, some 0.2 m a pixel. Its frame by the visibility buffer, the rocks by their own ID raster and resolve in
+ * their range after the terrain's, against the forward frame, from the same selection and
+ * residents, at stride 1: the rocks' pixels within ⅓ stop, at least {@link ROCKS_WITHIN_SHARE} of
+ * them, and the depth the same bytes.
+ */
+export async function checkRocksByIds(engine: RenderEngine, checks: Checks): Promise<void> {
+  const foot = datumAt(OVER, 48, 20);
+  const world = await partWorld(engine, "rocks by IDs smoke", withTestRocks(foot.p), {
+    createBuilder: () => new InThreadRockPageBuilder(),
+  });
+  const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
+  try {
+    const { pool, mask, pass } = world;
+    pass.setGeometry(LOW_AT_STRIDE_1);
+    const first = await settled(pass, pool, mask, grazingPose(RAD_70, 1_500, RAD_8, 48, 20), [
+      foot.p,
+    ]);
+    const craft: GroundContact = {
+      positionM: heldGroundUnder(MOON_LIKE_FIGURE, pass.heights)(foot.p).groundPointM,
+      radiusM: 20,
+    };
+    // From 1.5 km, 70° above the craft's horizon, as R14.T3.c's check looks, through a field of
+    // half a degree: some 0.2 m a pixel of the 64 × 48 frame there, its view within the craft's
+    // region.
+    const pose = poseLookingAt(craft.positionM, foot.nu, RAD_70, 1_500, RAD_1 / 2);
+    const near = await settled(pass, pool, mask, pose, null, [craft], CRAFT_TIMEOUT_MS);
+    // The rocks' meshes are built one by one after their patches land, and their forms compiled
+    // at their first frame: the forward frame is taken once they draw and their count has held
+    // for a second.
+    let forwardFrame = liveFrame(pass, mask, pose, performance.now(), [craft]);
+    let drawnCount = 0;
+    let heldPolls = 0;
+    await until(() => {
+      forwardFrame = liveFrame(pass, mask, pose, performance.now(), [craft]);
+      const count = drawnRocks.get(pass)?.rocks ?? 0;
+      heldPolls = count > 0 && count === drawnCount ? heldPolls + 1 : 0;
+      drawnCount = count;
+      return forwardFrame.terrainDraws.some(isRockDraw) && heldPolls >= ROCKS_HELD_POLLS;
+    }, ID_FORM_TIMEOUT_MS);
+    const rockDraws = forwardFrame.terrainDraws.filter(isRockDraw);
+    const forwardScene = await drawnScene(engine, pose, [
+      ...renderer.meshDraws(forwardFrame.plan),
+      ...forwardFrame.terrainDraws,
+    ]);
+    // The rocks alone, for the pixels judged: those a rock draws, by its meter class.
+    const judged = await drawnScene(engine, pose, rockDraws);
+    pass.setGeometry({ ...LOW_AT_STRIDE_1, shading: "visibility" });
+    let idFrame = liveFrame(pass, mask, pose, performance.now(), [craft]);
+    const rocksByIds = (): boolean =>
+      idFrame.terrain.visibility()?.raster.some(isRockDraw) === true;
+    await until(() => {
+      idFrame = liveFrame(pass, mask, pose, performance.now(), [craft]);
+      return rocksByIds();
+    }, ID_FORM_TIMEOUT_MS);
+    const byIds = idFrame.terrain.visibility();
+    const idScene =
+      byIds === null || !rocksByIds()
+        ? null
+        : await drawnByIds(engine, pose, renderer.meshDraws(idFrame.plan), byIds);
+    pass.setGeometry(LOW_AT_STRIDE_1);
+    const apart =
+      idScene === null ? null : stopsApart(forwardScene.colour, idScene.colour, judged.colour);
+    const depthSame =
+      idScene !== null && bytesDigest(idScene.depth) === bytesDigest(forwardScene.depth);
+    const rockRaster = byIds?.raster.filter(isRockDraw).length ?? 0;
+    const rockResolves = byIds?.resolve.filter(isRockDraw).length ?? 0;
+    const forwardRocks = byIds?.forward.filter(isRockDraw).length ?? 0;
+    checks.check(
+      "R14.T5.e the rocks by the visibility buffer, their own ID raster and resolve in their range after the terrain's, draw their forward frame: at least 99.5% of their pixels within ⅓ stop, the depth byte for byte",
+      near.done &&
+        rockDraws.length > 0 &&
+        apart !== null &&
+        apart.terrain > 100 &&
+        apart.within >= ROCKS_WITHIN_SHARE * apart.terrain &&
+        depthSame &&
+        rockResolves === 1 &&
+        forwardRocks === 0,
+      apart === null
+        ? `no frame of rocks by IDs (settled ${String(near.done)}: ${near.state}; ${String(rockDraws.length)} rock draws forward, the last frame's rocks ${JSON.stringify(drawnRocks.get(pass) ?? null)}; the ground first ${first.state})`
+        : `settled ${String(near.done)}; ${String(drawnCount)} rocks in ${JSON.stringify(drawnRocks.get(pass) ?? null)}; ${String(rockDraws.length)} rock draws forward, by IDs ${String(rockRaster)} raster, ${String(rockResolves)} resolve, ${String(forwardRocks)} forward; rocks ${String(apart.terrain)} px: ${String(apart.within)} within ⅓ stop (${((100 * apart.within) / apart.terrain).toFixed(3)}%), ${String(apart.differing)} differing at all, the largest ${apart.largestStops.toFixed(4)} stops; the depth ${depthSame ? "the same bytes" : "differs"}; digests ${bytesDigest(forwardScene.colour)} forward, ${idScene === null ? "—" : bytesDigest(idScene.colour)} by IDs`,
+    );
+  } finally {
+    renderer.dispose();
+    world.release();
   }
 }

@@ -302,7 +302,7 @@ export async function checkPlacedRocks(engine: RenderEngine, checks: Checks): Pr
       0.01,
     );
     const contours = new Float32Array(4).fill(0);
-    const draws = view.frame({
+    const { forward: draws } = view.frame({
       patches: [{ keyString: "4/17/1/1", terrainSlot: 0, rule: "region" }],
       meshes,
       cameraBodyFixedM: vec3(0, 0, radiusM + 20),
@@ -329,6 +329,7 @@ export async function checkPlacedRocks(engine: RenderEngine, checks: Checks): Pr
         },
         textures: {},
       },
+      ids: null,
     });
     target.render({
       label: "R11 placed rocks",

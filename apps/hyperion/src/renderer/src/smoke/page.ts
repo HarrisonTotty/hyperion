@@ -8,7 +8,7 @@
  * `no-subgroups` requests it with subgroups and `depth-clip-control` withheld (T9.c; R10.T9.b's
  * pulled-back cascades). A fixture adds a broken shader to the
  * catalogue or makes external requests, either of which must fail the run. The part does too: the
- * groups are in thirty-three parts, 1 to 33, each a run of its own under the harness's
+ * groups are in thirty-four parts, 1 to 34, each a run of its own under the harness's
  * watchdog (perf-smoke, 2026-10-13), parts 2 to 6, 8 to 14 and 30 the atmosphere's CPU-twin groups
  * (R08.T6, R08.T7,
  * R08.T9.b, R08.T8.a, R08.T8.b, R08.T8.c, R08.T8.e, R08.T11, R08.T14.c, R08.T14.f, R08.T15.a.2),
@@ -18,8 +18,9 @@
  * R08.T15.a.2's deck, part 25 R11.T2.a's decoration library, part 26 R11.T7.b's clouds, part 30
  * R08.T18.b's thermal forms and R08.T11's (T) row, part 32 R11.T9.c's ring slab (its materials'
  * catalogue and its frames against their twin; its captures stay with part 1's) and R11.T9.d's
- * particles (their field's placement against its twin and their frames), and part 1 every
- * other; with no part given the page runs them all, in its order.
+ * particles (their field's placement against its twin and their frames), parts 33 and 34 R11.T4's
+ * rocks (with R14.T5.c, and by the visibility buffer, R14.T5.e), and part 1 every other; with no
+ * part given the page runs them all, in its order.
  * Each part checks its path (T9.c) itself. R08.T6.f's slices and bands run in two groups: the
  * Saturn-class figure's in part 5, with R08.T6.i's layer edges, and Earth's, which took R08.T6.g's
  * Earth, in part 8, with R07.T8.e–f's cell pass for every record (`cellPass.ts`) after it;
@@ -233,6 +234,7 @@ import { checkWireframe } from "./wireframe";
 import { checkShadowCascades, checkSharedPass, checkVisibilityCascades } from "./sharedPass";
 import {
   checkOcclusionByIds,
+  checkRocksByIds,
   checkStridesUnderCraft,
   checkTerrainFrame,
   checkTerrainFrameSymbology,
@@ -381,7 +383,9 @@ const VARIANTS: Readonly<Record<string, CapabilityOverrides | undefined>> = {
  * cluster cull folded past 65,535 (2026-11-13; parts 25 to 28 are the lanes' beside it). Plan
  * R11's authoritative rocks (R11.T4, with R14.T5.c) took part 33, alone: their materials'
  * catalogue, the height worker's bake of finest patches with their rocks and its cost, the
- * procedural builder's worker against the render thread, and placed rocks drawn (2026-11-18).
+ * procedural builder's worker against the render thread, and placed rocks drawn (2026-11-18). Their
+ * frame by the visibility buffer against the forward one (R14.T5.e), which streams a world of its
+ * own about a grounded craft, took part 34, alone (2026-11-18).
  */
 type PagePart =
   | 1
@@ -417,6 +421,7 @@ type PagePart =
   | 31
   | 32
   | 33
+  | 34
   // Plan R12's ladder (R12.T7.a): a run per setting, which its query names (`ladder.ts`).
   | "ladder";
 
@@ -492,6 +497,8 @@ function partOf(value: string | null): PagePart | "all" | null {
       return 32;
     case "33":
       return 33;
+    case "34":
+      return 34;
     case "ladder":
       return "ladder";
     default:
@@ -556,7 +563,7 @@ async function run(
     setupError,
   });
   if (part === null) {
-    return failed("the part asked for is not 1 to 33, ladder or all");
+    return failed("the part asked for is not 1 to 34, ladder or all");
   }
   if (part === "ladder" && ladderSetting === null) {
     return failed("the ladder's part runs at a setting, high or low, and none was given");
@@ -953,6 +960,11 @@ async function run(
   );
   await group(33, "R11.T4.b placed rocks drawn through the cluster path", () =>
     checkPlacedRocks(engine, checks),
+  );
+  // In part 34, alone: the rocks of a grounded craft's region by the visibility buffer against
+  // their forward frame (plan R14, R14.T5.e), its own pass streamed about the craft.
+  await group(34, "R14.T5.e the rocks by the visibility buffer", () =>
+    checkRocksByIds(engine, checks),
   );
   await group(17, "R08.T8.d the far limb's node rays packed in the general forms", () =>
     checkMarchPackedGeneral(engine, checks, summary.fallback),

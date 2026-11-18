@@ -21,6 +21,7 @@ import {
   VISIBLE_FIRST_UNIFORM,
   VisibilityBuffer,
   visibleConsumerRanges,
+  type VisibleConsumerLists,
   withVisibleFirst,
 } from "./visibility";
 
@@ -141,31 +142,47 @@ describe("the ID raster's de-indexed mesh (plan R14, R14.T2.c)", () => {
   });
 });
 
+/** Each body's terrain lists of `entries`. */
+function terrainOf(entries: ReadonlyArray<number>): VisibleConsumerLists[] {
+  return entries.map((n) => ({ consumer: "terrain", entries: n }));
+}
+
 describe("the views' visible-cluster index space (plan R14, R14.T2.c; Design note 9)", () => {
   it("gives terrain's lists, all its passes', the space's first range, from 0, for a later consumer's after it", () => {
-    expect(visibleConsumerRanges([70_000])).toEqual([
+    expect(visibleConsumerRanges(terrainOf([70_000]))).toEqual([
       { consumer: "terrain", first: 0, entries: 70_000 },
     ]);
-    expect(() => visibleConsumerRanges([MAX_LIST_ENTRIES + 1])).toThrow(RangeError);
+    expect(() => visibleConsumerRanges(terrainOf([MAX_LIST_ENTRIES + 1]))).toThrow(RangeError);
+    expect(
+      visibleConsumerRanges([
+        { consumer: "terrain", entries: 70_000 },
+        { consumer: "rocks", entries: 1_024 },
+      ]),
+    ).toEqual([
+      { consumer: "terrain", first: 0, entries: 70_000 },
+      { consumer: "rocks", first: 70_000, entries: 1_024 },
+    ]);
   });
 
   it("gives each body's terrain a range of its own, each just after the one before, within the space (R14.T2.d)", () => {
-    expect(visibleConsumerRanges([70_000, 50_000, 0, 10])).toEqual([
+    expect(visibleConsumerRanges(terrainOf([70_000, 50_000, 0, 10]))).toEqual([
       { consumer: "terrain", first: 0, entries: 70_000 },
       { consumer: "terrain", first: 70_000, entries: 50_000 },
       { consumer: "terrain", first: 120_000, entries: 0 },
       { consumer: "terrain", first: 120_000, entries: 10 },
     ]);
     expect(visibleConsumerRanges([])).toEqual([]);
-    expect(visibleConsumerRanges([MAX_LIST_ENTRIES / 2, MAX_LIST_ENTRIES / 2]).at(-1)).toEqual({
+    expect(
+      visibleConsumerRanges(terrainOf([MAX_LIST_ENTRIES / 2, MAX_LIST_ENTRIES / 2])).at(-1),
+    ).toEqual({
       consumer: "terrain",
       first: MAX_LIST_ENTRIES / 2,
       entries: MAX_LIST_ENTRIES / 2,
     });
-    expect(() => visibleConsumerRanges([MAX_LIST_ENTRIES / 2, MAX_LIST_ENTRIES / 2 + 1])).toThrow(
-      RangeError,
-    );
-    expect(() => visibleConsumerRanges([1.5])).toThrow(RangeError);
+    expect(() =>
+      visibleConsumerRanges(terrainOf([MAX_LIST_ENTRIES / 2, MAX_LIST_ENTRIES / 2 + 1])),
+    ).toThrow(RangeError);
+    expect(() => visibleConsumerRanges(terrainOf([1.5]))).toThrow(RangeError);
   });
 
   it("moves an ID raster's draw to a range from its first index, and leaves the first body's itself", () => {

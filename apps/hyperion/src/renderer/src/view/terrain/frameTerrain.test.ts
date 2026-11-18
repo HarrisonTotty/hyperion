@@ -966,6 +966,50 @@ describe("a view's frame terrain by the visibility buffer (plan R14, R14.T2.c)",
     ]);
   });
 
+  it("gives each body's rocks the range just after its terrain's, the next body's after them (R14.T5.e)", () => {
+    const near = {
+      raster: [part("near raster")],
+      resolve: [resolvePart("near resolve", 70_000)],
+      forward: [],
+      entries: 70_000,
+      meshes: {
+        raster: [part("near rocks raster")],
+        resolve: [resolvePart("near rocks resolve", 3_000)],
+        entries: 3_000,
+      },
+    };
+    const other = {
+      raster: [part("other raster")],
+      resolve: [resolvePart("other resolve", 50_000)],
+      forward: [],
+      entries: 50_000,
+    };
+    const { terrain, order } = twoBodies(near, other);
+    const nearFirst = order()[0] === BODY;
+    const frame = terrain.visibility();
+    const firsts = frame?.raster.map((draw) => draw.uniforms[VISIBLE_FIRST_UNIFORM]?.[0] ?? 0);
+    const lists = frame?.resolve.map((draw) => Array.from(draw.uniforms["resolveLists"] ?? []));
+    expect([firsts, lists]).toEqual(
+      nearFirst
+        ? [
+            [0, 70_000, 73_000],
+            [
+              [7, 0, 70_000, 16],
+              [7, 70_000, 3_000, 16],
+              [7, 73_000, 50_000, 16],
+            ],
+          ]
+        : [
+            [0, 50_000, 120_000],
+            [
+              [7, 0, 50_000, 16],
+              [7, 50_000, 70_000, 16],
+              [7, 120_000, 3_000, 16],
+            ],
+          ],
+    );
+  });
+
   it("gives none where the two bodies' ranges together pass the view's index space", () => {
     const half = {
       raster: [part("raster")],

@@ -107,7 +107,7 @@ export function rockLayerFrom(rocks: ReadonlyArray<Rock>): RockLayer {
 
 /**
  * `count` rocks from `seed` scattered over a square of `sideM` about the direction `centre` on a
- * sphere of `radiusM`, their diameters log-uniform over 0.4 to 6.4 m.
+ * sphere of `radiusM`, their diameters log-uniform over `diametersM`, by default 0.4 to 6.4 m.
  */
 export function rocksAbout(
   seed: number,
@@ -115,6 +115,7 @@ export function rocksAbout(
   centre: Vec3,
   sideM: number,
   radiusM = 1_737_400,
+  diametersM: readonly [number, number] = [0.4, 6.4],
 ): Rock[] {
   const random = seededRandom(seed);
   const up = normalise(centre);
@@ -129,7 +130,8 @@ export function rocksAbout(
         up.z * radiusM + x * east.z + y * north.z,
       ),
     );
-    return rockOf(random, 0.4 * 16 ** random(), dir, scale(dir, radiusM));
+    const [least, most] = diametersM;
+    return rockOf(random, least * (most / least) ** random(), dir, scale(dir, radiusM));
   });
 }
 

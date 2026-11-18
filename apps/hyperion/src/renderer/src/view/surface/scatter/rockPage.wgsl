@@ -3,7 +3,10 @@
 // and culled by the cluster path into a bucket's list (`clusters/buckets.ts`), each template vertex
 // of the mesh shape's one template (`clusters/templates.ts`' `meshTemplate`, 128 triangles by index
 // pulling) decoded from its page as `meshOccluderCluster.wgsl` decodes a corner: the cluster's
-// template reference from the pool's records, its first vertex from the page's cluster table, its
+// template reference from the page's own records, which the pool's copy for the cull holds
+// unchanged (it rewrites a record's errors alone), so that a rock draw binds no records of the
+// pool's and the visibility path's resolve keeps within eight storage buffers (plan R14,
+// R14.T5.e); its first vertex from the page's cluster table, its
 // triangle's 8-bit index, its vertex's 21-bit grid coordinates times the page's step about the
 // page's origin, exactly in `f32`, its octahedral normal and its rock's index in its fourth word. A
 // template vertex past the cluster's last triangle is placed outside the clip volume by its draw.
@@ -42,17 +45,18 @@ struct RockRecord {
 
 // The rocks' bindings, past the lit terrain's.
 @group(2) @binding(25) var<storage, read> rock_pages : array<u32>;
-@group(2) @binding(26) var<storage, read> rock_page_records : array<u32>;
 @group(2) @binding(27) var<storage, read> rock_instances : array<RockInstance>;
 @group(2) @binding(28) var<storage, read> rock_records : array<RockRecord>;
 
-// A slot's records and a record's words (`clusters/pages.ts`).
-const ROCK_PAGE_CLUSTERS : u32 = 128u;
+// A cluster record's words (`clusters/pageFormat.ts`' PAGE_RECORD_BYTES), its template reference
+// the seventh.
 const ROCK_RECORD_WORDS : u32 = 8u;
+const ROCK_RECORD_TEMPLATE_WORD : u32 = 6u;
 
-// A page header's words (`page.rs`): the grid's step, then the cluster table's, the vertices' and
-// the triangles' byte offsets in the page.
+// A page header's words (`page.rs`): the grid's step, then the records', the cluster table's, the
+// vertices' and the triangles' byte offsets in the page.
 const ROCK_PAGE_STEP_WORD : u32 = 14u;
+const ROCK_PAGE_RECORDS_WORD : u32 = 18u;
 const ROCK_PAGE_TABLE_WORD : u32 = 20u;
 const ROCK_PAGE_VERTICES_WORD : u32 = 21u;
 const ROCK_PAGE_TRIANGLES_WORD : u32 = 22u;
@@ -81,10 +85,11 @@ struct RockCorner {
 
 // The corner `corner` of triangle `triangle` of `cluster` in the page of `instance`.
 fn rock_corner(instance : RockInstance, cluster : u32, triangle : u32, corner : u32) -> RockCorner {
-  let templateRef = rock_page_records[(instance.slot * ROCK_PAGE_CLUSTERS + cluster) * ROCK_RECORD_WORDS + 6u];
+  let page = instance.pageWord;
+  let records = page + rock_pages[page + ROCK_PAGE_RECORDS_WORD] / 4u;
+  let templateRef = rock_pages[records + cluster * ROCK_RECORD_WORDS + ROCK_RECORD_TEMPLATE_WORD];
   let firstTriangle = templateRef & 0xffffffu;
   let triangleCount = templateRef >> 24u;
-  let page = instance.pageWord;
   let table = page + rock_pages[page + ROCK_PAGE_TABLE_WORD] / 4u;
   let vertices = page + rock_pages[page + ROCK_PAGE_VERTICES_WORD] / 4u;
   let triangles = page + rock_pages[page + ROCK_PAGE_TRIANGLES_WORD] / 4u;

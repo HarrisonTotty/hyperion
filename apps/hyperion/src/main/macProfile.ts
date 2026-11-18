@@ -207,6 +207,15 @@ export const MAC_PROFILE_LEVERS: ReadonlyArray<MacProfileLever> = [
     countSides: false,
   },
   {
+    name: "rocks",
+    decides:
+      "R11.T4 with R14.T5.c and T5.e, the authoritative rocks, their bake's lever (the ground from the patch's own vertex heights) inside both: built and drawn, the setting's own (A), against none built or drawn, no mesh page pool (B); its sides differ where finest patches with rocks are in view",
+    a: [],
+    b: ["--geometry", "pageBytes=0"],
+    ratios: [1],
+    countSides: false,
+  },
+  {
     name: "terrain-planetshine",
     decides:
       "perf-bodies-near-ground, the terrain's planetshine: every source its record carries (A) against the brightest alone (B)",
@@ -340,11 +349,14 @@ export interface MacProfileMatrixOptions {
  * body is not, and alike on it: decked-air-surface, on a decked air's body, such as
  * 42002cae00000004.0300; and ring-shadow-on-body (R11.T9.a), on a ringed body whose ring's shadow
  * crosses its lit disc, such as the served giant 41ffecb1ffc00013.0400 (a lean, 2026-11-13: its
- * rings were drawn on 2026-11-04, not checked since). `--levers` names each, on such a body's batch.
+ * rings were drawn on 2026-11-04, not checked since); and rocks (R11.T4), whose sides draw apart
+ * only near the ground of a generated world, where finest patches are drawn (a lean, 2026-11-18).
+ * `--levers` names each, on such a body's batch.
  */
 export const MAC_PROFILE_BODY_LEVERS: ReadonlyArray<string> = [
   "decked-air-surface",
   "ring-shadow-on-body",
+  "rocks",
 ];
 
 /**

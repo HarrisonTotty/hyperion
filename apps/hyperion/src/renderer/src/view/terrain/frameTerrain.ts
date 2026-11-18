@@ -251,28 +251,44 @@ export interface RangedVisibility {
 /**
  * A frame's terrain by the visibility buffer from each body's in the frame's order (plan R14,
  * R14.T2.d; `TerrainViewFrame.visibility`), with each body's first index of the view's index space:
- * each body's range just after the one before (`visibleConsumerRanges`), its raster's IDs and its
- * resolve moved to it, so that its resolve shades its own pixels alone, the first body's draws
- * themselves; `null` for no body, or where the ranges together pass the space
- * (`MAX_LIST_ENTRIES`), when the frame draws forward.
+ * each body's terrain's range just after the one before, and its rocks' just after its terrain's
+ * (R14.T5.e; `visibleConsumerRanges`), each raster's IDs and each resolve moved to its range, so
+ * that each resolve shades its own pixels alone, the first body's terrain's draws themselves; `null`
+ * for no body, or where the ranges together pass the space (`MAX_LIST_ENTRIES`), when the frame
+ * draws forward.
  */
 export function rangedVisibility(bodies: ReadonlyArray<BodyVisibility>): RangedVisibility | null {
-  const total = bodies.reduce((sum, { by }) => sum + by.entries, 0);
+  const total = bodies.reduce((sum, { by }) => sum + by.entries + (by.meshes?.entries ?? 0), 0);
   if (bodies.length === 0 || total > MAX_LIST_ENTRIES) {
     return null;
   }
-  const ranges = visibleConsumerRanges(bodies.map(({ by }) => by.entries));
+  const ranges = visibleConsumerRanges(
+    bodies.flatMap(({ by }) => [
+      { consumer: "terrain" as const, entries: by.entries },
+      ...(by.meshes === undefined
+        ? []
+        : [{ consumer: "rocks" as const, entries: by.meshes.entries }]),
+    ]),
+  );
   const raster: DrawItem[] = [];
   const resolve: DrawItem[] = [];
   const forward: DrawItem[] = [];
   const firsts = new Map<BodyIdHex, number>();
-  bodies.forEach(({ body, by }, n) => {
+  let n = 0;
+  for (const { body, by } of bodies) {
     const first = ranges[n]?.first ?? 0;
+    n += 1;
     firsts.set(body, first);
     raster.push(...by.raster.map((draw) => withVisibleFirst(draw, first)));
     resolve.push(...by.resolve.map((draw) => withResolveFirst(draw, first)));
+    if (by.meshes !== undefined) {
+      const rocksFirst = ranges[n]?.first ?? first + by.entries;
+      n += 1;
+      raster.push(...by.meshes.raster.map((draw) => withVisibleFirst(draw, rocksFirst)));
+      resolve.push(...by.meshes.resolve.map((draw) => withResolveFirst(draw, rocksFirst)));
+    }
     forward.push(...by.forward);
-  });
+  }
   return { frame: { raster, resolve, forward }, firsts };
 }
 

@@ -8,7 +8,12 @@
  * `default`, and R12.T7.a adds the ladder's (R01 Design note 18): {@link CatalogueSetting}.
  */
 
-import { rockLitMaterialSpec, rockWireMaterialSpec } from "../surface/scatter/rockMaterial";
+import {
+  rockIdMaterialSpec,
+  rockLitMaterialSpec,
+  rockResolveMaterialSpec,
+  rockWireMaterialSpec,
+} from "../surface/scatter/rockMaterial";
 import {
   AERIAL_PERSPECTIVE_BELOW_DECK_KERNEL,
   AERIAL_PERSPECTIVE_BELOW_DECK_THERMAL_KERNEL,
@@ -664,13 +669,16 @@ export const INSTANCE_ENTRIES: ReadonlyArray<CatalogueEntry> = [
 ];
 
 /**
- * Plan R11's authoritative rocks (R11.T4.b; plan R14, R14.T5.c): their lit draw and their
- * wireframe's on the cluster path (`surface/scatter/rockMaterial.ts`). The smoke page compiles them
- * in part 33, alone, beside their group's checks.
+ * Plan R11's authoritative rocks (R11.T4.b; plan R14, R14.T5.c and T5.e): their lit draw and their
+ * wireframe's on the cluster path, and their ID raster and resolve by the visibility buffer
+ * (`surface/scatter/rockMaterial.ts`). The smoke page compiles them in part 33, alone, beside their
+ * group's checks.
  */
 export const ROCK_ENTRIES: ReadonlyArray<CatalogueEntry> = [
   { kind: "material", spec: rockLitMaterialSpec() },
   { kind: "material", spec: rockWireMaterialSpec() },
+  { kind: "material", spec: rockIdMaterialSpec(), targets: ["r32uint"] },
+  { kind: "material", spec: rockResolveMaterialSpec() },
 ];
 
 /** Every shader the engine can create; later plans add theirs here. */

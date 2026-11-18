@@ -1627,6 +1627,7 @@ Size L–XL, tool and client, after T4; each subtask waits on its content except
   cascades' receiver, in the visibility path (a resolve pass of its own, Design note 9), and its
   forward twin. _Tests:_ the barycentric and BRDF twin. _Acceptance:_ a lit test mesh's pixels
   within 1/3 stop of its forward rendering.
+  - _Built_ (2026-11-18): records at the end of Risks.
 - **R14.T5.f Meshes in the wireframe.** Size S–M, after T5.b. The DAG consumers' occluder depth for
   hidden-line removal at `meshTolerancePx.wireframeOccluder`, under the strokes' half-width (Design
   note 13). _Acceptance:_ in test-render's hidden-line frames no hull edge flips between hidden and
@@ -2936,3 +2937,29 @@ pages are assets and presentation; collision never reads them. No domain tag is 
     category `scatter` (new in `MemoryCategory`, `@hyperion/perf`'s `MEMORY_ITEMS`).
   - Decoration's bounded prototypes a biome (the task's last sentence) are not built: no
     decoration mesh exists until R11.T6.
+- **R14.T5.e** (`r11-rocks-client`, 2026-11-18, with R11.T4's rocks, the one mesh consumer):
+  - The mesh is the rocks': their ID raster (`rockId.wgsl`) and resolve (`rockResolve.wgsl`) are
+    `rockMaterial.ts`' `rockIdMaterialSpec` and `rockResolveMaterialSpec`, over the forward draw's
+    own `rock_vertex` and `rock_fragment` (R11's `shade_terrain` with the cascades' receiver), not a
+    generic `body_brdf` mesh (lean, 2026-11-18: no other mesh consumer is drawn yet).
+  - The ID: the mesh template's vertex carries its triangle (`local.y`), so the raster writes it
+    from the vertex stage on every device, no de-indexed mesh and no `primitive_index`.
+  - Range: `TerrainVisibility.meshes` (`RockVisibility`: raster, resolve, entries), each body's
+    rocks' range just after its terrain's (`rangedVisibility`); `VisibleConsumer` gains `rocks`, and
+    `visibleConsumerRanges` takes `{ consumer, entries }` lists. Forward over the resolve until the
+    forms are made.
+  - Bindings: a cluster's template is read from its page's own records (`rockPage.wgsl`), so the
+    rocks bind no pool records; the resolve's fragment stage binds eight storage buffers, its
+    lights the resolve frame's rows, IDs and frame at 29 and 30. `resolveBarycentrics.wgsl` holds
+    the resolves' shared snap and weights.
+  - Twins (`rockResolve.test.ts`): the corner decode against `pageClusterCorners`; the snapped
+    barycentrics put a pixel's place within 1/256 px of its centre; the face normal from the edges
+    the derivatives' to 10⁻⁹. The BRDF twin is the shading's own source (lean): both forms compose
+    `rock.wgsl` to the byte, the resolve reading the lights from the resolve frame's rows.
+  - Acceptance: smoke part 32 (`checkRocksByIds`), the lit test mesh a layer of 12 rocks of 1–3 m
+    laid on each finest bake within 40 m of a grounded craft, by IDs against forward within ⅓ stop
+    at T2.d's 99.5%: on SwiftShader, both variants, 179 rock px, every one the same, the frames and
+    depth byte for byte (2026-11-18).
+  - Mac pair `rocks` (`macProfile.ts`, B `--geometry pageBytes=0`, no rock built or drawn), a body
+    lever out of the defaults: its sides differ only near the ground.
+  - Fixed beside it: `result.test.ts`' part count, which R11.T4.b's part 31 left at 30.

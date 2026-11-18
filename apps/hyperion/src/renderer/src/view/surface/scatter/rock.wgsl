@@ -16,7 +16,10 @@
 // 3: no decoration). The meter class is the terrain's. Composed after the lit terrain's source,
 // its `Draw` with `clusterBase` (`terrainMaterial.ts`' `withClusterBase`), its vertex and fragment
 // stages renamed into functions, the cascades' receiver, the path's source and `rockPage.wgsl`
-// (`rockMaterial.ts`).
+// (`rockMaterial.ts`). Its entry points are each draw's own: the forward draw's
+// (`rockForward.wgsl`), the visibility buffer's ID raster's (`rockId.wgsl`) and its resolve's
+// (`rockResolve.wgsl`; plan R14, R14.T5.e), so that the three shade and place a rock by these
+// functions alone.
 
 struct RockVertexOut {
   @builtin(position) @invariant clip : vec4f,
@@ -98,17 +101,4 @@ fn rock_fragment(in : RockVertexOut, geometric : vec3f) -> vec4f {
     meter = select(METER_UNLIT_BODY, METER_LIT_BODY, shaded.lit);
   }
   return vec4f(min(shaded.radiance, vec3f(HALF_FLOAT_MAX)), meter);
-}
-
-@vertex
-fn vertexMain(@location(0) local : vec3f, @builtin(instance_index) entry : u32) -> RockVertexOut {
-  return rock_vertex(local, entry);
-}
-
-@fragment
-fn fragmentMain(in : RockVertexOut) -> @location(0) vec4f {
-  let geometric = cascade_geometric_normal(
-    dpdxFine(in.fromCameraBf), dpdyFine(in.fromCameraBf), normalize(in.datum)
-  );
-  return rock_fragment(in, geometric);
 }

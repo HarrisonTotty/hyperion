@@ -263,8 +263,19 @@ import { RESELECT_MOVE_FRACTION, selectionTolerancePx } from "./selectionToleran
 import { PATCH_VERTICES_PER_SIDE, TERRAIN_SHADING_TRAITS, type TerrainShading } from "./slotLayout";
 import { ResidentRocks, type ResidentRocksView } from "../surface/scatter/residentRocks";
 import type { RockPageBuilder } from "../clusters/meshPageProducer";
-import { ROCK_CLUSTER_MESH, type RockFrameCounts, RockView } from "../surface/scatter/rockDraw";
-import { rockLitMaterialSpec, rockWireMaterialSpec } from "../surface/scatter/rockMaterial";
+import {
+  ROCK_CLUSTER_MESH,
+  type RockFrameCounts,
+  type RockIdsInput,
+  RockView,
+  type RockVisibility,
+} from "../surface/scatter/rockDraw";
+import {
+  rockIdMaterialSpec,
+  rockLitMaterialSpec,
+  rockResolveMaterialSpec,
+  rockWireMaterialSpec,
+} from "../surface/scatter/rockMaterial";
 import { RockMeshes } from "../surface/scatter/rockMeshes";
 import { couldTouch, rocksLimitDetail, rocksToDraw } from "../surface/scatter/rockSelection";
 import { wireframeToleranceRad } from "../wireframe/meshOccluders";
@@ -836,6 +847,12 @@ export interface TerrainVisibility {
    * body (`clusters/visibility.ts`' `visibleConsumerRanges`).
    */
   readonly entries: number;
+  /**
+   * The body's rocks by the visibility buffer (plan R14, R14.T5.e): their ID raster and resolve,
+   * their range numbered from 0 as the terrain's is, which its frame places just after the
+   * terrain's; absent where they draw forward or none is drawn.
+   */
+  readonly meshes?: RockVisibility;
 }
 
 /** The survey a pass's selection reads, with a count of its changes (R10.T16.b). */
@@ -978,17 +995,32 @@ interface DeviceRocks {
   kernel: ComputeHandle | null;
   /** The rocks' draw base made of each lit or wireframe cluster base, the same while it is. */
   readonly bases: WeakMap<BucketDrawBase, BucketDrawBase>;
+  /**
+   * The visibility buffer's forms (plan R14, R14.T5.e), its ID raster's and its resolve's, asked at
+   * the first frame by IDs that draws rocks; `null` until made, and for good where refused.
+   */
+  ids: { readonly raster: MaterialHandle; readonly resolve: MaterialHandle } | null;
+  idsAsked: boolean;
+  /** The rocks' draws by IDs made of each lit cluster base and resolve frame, the same while they are. */
+  readonly idInputs: WeakMap<
+    BucketDrawBase,
+    { readonly frame: TextureHandle; readonly input: RockIdsInput }
+  >;
 }
 
-/** A view-frame's rocks: their draws, whether they limit its detail, and their counts. */
+/**
+ * A view-frame's rocks: their draws, forward or by the visibility buffer, whether they limit its
+ * detail, and their counts.
+ */
 interface RockFrame {
   readonly draws: ReadonlyArray<DrawItem>;
+  readonly byIds: RockVisibility | null;
   readonly limited: boolean;
   readonly counts: RockFrameCounts | null;
 }
 
 /** No rock drawn. */
-const NO_ROCKS: RockFrame = { draws: [], limited: false, counts: null };
+const NO_ROCKS: RockFrame = { draws: [], byIds: null, limited: false, counts: null };
 
 /**
  * A listener of a pass's selections and residency beside its options' (plan R10, R10.T14.c): the
@@ -3413,13 +3445,17 @@ export class TerrainPass {
       still,
     } = this.#writeOrNone(state, mask, selected.nearContacts, input, set);
     this.#lastStill = still;
-    const rocks = this.#rockFrame(state, input, mask);
+    const rocks = this.#rockFrame(state, input, mask, visibility !== null);
     const drawn =
       rocks.draws.length === 0 || visibility !== null ? draws : [...draws, ...rocks.draws];
-    const byIds =
-      rocks.draws.length === 0 || visibility === null
-        ? visibility
-        : { ...visibility, forward: [...visibility.forward, ...rocks.draws] };
+    // By IDs, the rocks' own raster and resolve in a range after the terrain's (plan R14, R14.T5.e),
+    // or forward over the resolve until their forms are made.
+    let byIds = visibility;
+    if (visibility !== null && rocks.byIds !== null) {
+      byIds = { ...visibility, meshes: rocks.byIds };
+    } else if (visibility !== null && rocks.draws.length > 0) {
+      byIds = { ...visibility, forward: [...visibility.forward, ...rocks.draws] };
+    }
     const conditions: TerrainConditions = {
       streaming: missing || standingIn,
       // A view of weight w is limited where its τ′ is above τ (decision-r10-t16-contracts §3); the
@@ -3474,8 +3510,15 @@ export class TerrainPass {
    * region's at 0, and drawn by its lit or wireframe cluster base with the rocks' material; and
    * whether the low setting limits its detail for rocks it leaves out. None where the pass takes
    * no rocks, the cluster path or its pool is off, or the rocks' material or kernel is not made.
+   * Where the frame's terrain draws by the visibility buffer (`byIds`), by their own ID raster and
+   * resolve once their forms are made (plan R14, R14.T5.e), forward until then.
    */
-  #rockFrame(state: ViewState, input: TerrainViewFrameInput, mask: number): RockFrame {
+  #rockFrame(
+    state: ViewState,
+    input: TerrainViewFrameInput,
+    mask: number,
+    byIds: boolean,
+  ): RockFrame {
     const device = this.#device;
     const geometry = this.#geometry;
     const source = this.#rockSource;
@@ -3516,8 +3559,9 @@ export class TerrainPass {
     const base = state.clusters?.litBase ?? null;
     const { material, kernel } = rocks;
     if (patches.length === 0 || base === null || material === null || kernel === null) {
-      return { draws: NO_DRAWS, limited, counts: null };
+      return { draws: NO_DRAWS, byIds: null, limited, counts: null };
     }
+    const ids = byIds ? this.#rockIdsInput(device, rocks, state, base) : null;
     let rockView = device.rockViews.get(state.id);
     if (rockView === undefined) {
       rockView = new RockView(this.#engine, `terrain ${String(state.id)}`);
@@ -3545,8 +3589,77 @@ export class TerrainPass {
       kernel,
       mesh: rocks.mesh,
       base: rockBase,
+      ids,
     });
-    return { draws, limited, counts: rockView.counts };
+    return { draws: draws.forward, byIds: draws.byIds, limited, counts: rockView.counts };
+  }
+
+  /**
+   * The rocks' draws by the visibility buffer over the lit cluster base `base` (plan R14,
+   * R14.T5.e), the same object while the base and the view's resolve frame are; `null` until the
+   * forms are made, which the first call asks for.
+   */
+  #rockIdsInput(
+    device: Device,
+    rocks: DeviceRocks,
+    state: ViewState,
+    base: BucketDrawBase,
+  ): RockIdsInput | null {
+    if (!rocks.idsAsked) {
+      rocks.idsAsked = true;
+      void this.#readyRockIds(device, rocks);
+    }
+    const forms = rocks.ids;
+    const screen = device.resources.screenMesh;
+    const frame = device.resources.resolveFrame(state.id);
+    if (forms === null || screen === null || frame === null) {
+      return null;
+    }
+    const held = rocks.idInputs.get(base);
+    if (held?.frame === frame) {
+      return held.input;
+    }
+    const input: RockIdsInput = {
+      idBase: { ...base, material: forms.raster },
+      resolve: {
+        ...base,
+        mesh: screen,
+        material: forms.resolve,
+        textures: { ...base.textures, [RESOLVE_FRAME_TEXTURE]: frame },
+      },
+      subpixelBits: this.#engine.capabilities.subpixelBits,
+    };
+    rocks.idInputs.set(base, { frame, input });
+    return input;
+  }
+
+  /**
+   * Compiles the rocks' ID raster into `r32uint` and their resolve into the scene target (plan
+   * R14, R14.T5.e); never rejects. A form that cannot be made is reported, and the rocks draw
+   * forward over the terrain's resolve.
+   */
+  async #readyRockIds(device: Device, rocks: DeviceRocks): Promise<void> {
+    const screen = device.resources.screenMesh;
+    const meshes = screen === null ? [rocks.mesh] : [rocks.mesh, screen];
+    const [raster, resolve] = await Promise.allSettled([
+      this.#engine.createMaterialAsync(rockIdMaterialSpec(), ["r32uint"], [rocks.mesh]),
+      this.#engine.createMaterialAsync(rockResolveMaterialSpec(), ["rgba16float"], meshes),
+    ]);
+    const current = device === this.#device && !this.#disposed && device.rocks === rocks;
+    if (current && raster.status === "fulfilled" && resolve.status === "fulfilled") {
+      rocks.ids = { raster: raster.value, resolve: resolve.value };
+      return;
+    }
+    for (const outcome of [raster, resolve]) {
+      if (outcome.status === "fulfilled") {
+        this.#releaseOwn(outcome.value);
+      } else if (!this.#superseded(device) && !(outcome.reason instanceof EngineUnavailable)) {
+        console.error(
+          "the terrain's rocks by the visibility buffer could not be made: they draw forward",
+          outcome.reason,
+        );
+      }
+    }
   }
 
   /** `device`'s rocks, their material and kernel asked for (see {@link DeviceRocks}). */
@@ -3557,6 +3670,9 @@ export class TerrainPass {
       material: null,
       kernel: null,
       bases: new WeakMap(),
+      ids: null,
+      idsAsked: false,
+      idInputs: new WeakMap(),
     };
     void this.#readyRocks(device, rocks);
     return rocks;
@@ -4016,6 +4132,10 @@ export class TerrainPass {
       }
       if (rocks.kernel !== null) {
         this.#engine.releaseCompute(rocks.kernel);
+      }
+      if (rocks.ids !== null) {
+        this.#releaseOwn(rocks.ids.raster);
+        this.#releaseOwn(rocks.ids.resolve);
       }
       device.rocks = null;
     }

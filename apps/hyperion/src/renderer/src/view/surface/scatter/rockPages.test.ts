@@ -85,22 +85,27 @@ function surfaceDistanceM(rock: Rock, x: number, y: number, z: number): number {
 }
 
 describe("the procedural builder's rocks (R14.T5.c)", () => {
-  it("builds the same bytes for the same rocks in a worker and on the render thread", async () => {
-    const input = patchInput(7);
-    const inWorker = await createWorkerRockPageBuilder(() => new CloningWorker()).build(input);
-    const inThread = await new InThreadRockPageBuilder().build(input);
-    if (
-      typeof inWorker === "string" ||
-      inWorker === null ||
-      typeof inThread !== "object" ||
-      inThread === null
-    ) {
-      throw new Error("both builds make a mesh");
-    }
-    expect(new Uint8Array(inWorker.file)).toEqual(new Uint8Array(inThread.file));
-    expect(new Uint8Array(inWorker.records)).toEqual(new Uint8Array(inThread.records));
-    expect(inWorker.rocks).toBe(40);
-  });
+  // Two builds of forty rocks, some 20 s under a whole suite's load.
+  it(
+    "builds the same bytes for the same rocks in a worker and on the render thread",
+    { timeout: 60_000 },
+    async () => {
+      const input = patchInput(7);
+      const inWorker = await createWorkerRockPageBuilder(() => new CloningWorker()).build(input);
+      const inThread = await new InThreadRockPageBuilder().build(input);
+      if (
+        typeof inWorker === "string" ||
+        inWorker === null ||
+        typeof inThread !== "object" ||
+        inThread === null
+      ) {
+        throw new Error("both builds make a mesh");
+      }
+      expect(new Uint8Array(inWorker.file)).toEqual(new Uint8Array(inThread.file));
+      expect(new Uint8Array(inWorker.records)).toEqual(new Uint8Array(inThread.records));
+      expect(inWorker.rocks).toBe(40);
+    },
+  );
 
   it("puts every vertex on its rock's surface to the grid's half step, its rock named in its fourth word", () => {
     const input = patchInput(11);

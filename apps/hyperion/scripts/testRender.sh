@@ -9,7 +9,7 @@
 #                 [--fixture=broken-wgsl|external-fetch] [--drop-adapter-switches] [--captures=DIR]
 #                 [--geometry=FIELD=VALUE[,...]]
 #
-# The page's groups are in thirty-three parts, 1 to 33 (`src/renderer/src/smoke/page.ts`), each a run
+# The page's groups are in thirty-four parts, 1 to 34 (`src/renderer/src/smoke/page.ts`), each a run
 # of its own under its own watchdog, the harness's hang detector (perf-smoke, 2026-10-13): parts 2
 # to 6, 8 to 14 and 30 hold the atmosphere's CPU-twin groups (2 R08.T6.b but its four absorbers, 3
 # R08.T6.g and R08.T14.c's thick read on a Saturn-class figure, 4 R08.T8.b's far limb, 5 R08.T6.f's
@@ -35,7 +35,7 @@
 # part 29 plan R14's instance path (R14.T5.d), part 31 plan R11's stills of terrain, at a size and
 # tiled (R11.T10.e; part 28 took 222 s of its 360 s alone on a pod with them, 2026-11-18), part 32
 # plan R11's ring slab (R11.T9.c), part 33 plan R11's authoritative rocks (R11.T4, with R14.T5.c),
-# and part 1 every other group.
+# part 34 their frame by the visibility buffer (R14.T5.e), and part 1 every other group.
 # SwiftShader's GPU process and the twins together took some 940 CPU-seconds for the two variants
 # (measured 2026-10-13), so on a machine busy with other work, with about 4 cores left to the
 # smoke, a run of the whole page outlasted the 180 s watchdog however its work overlapped. Three
@@ -150,7 +150,7 @@ geometry=()
 for arg in "$@"; do
     case "$arg" in
         --variant=*) variants+=("${arg#--variant=}") ;;
-        --part=[1-9] | --part=1[0-9] | --part=2[0-9] | --part=3[0-3]) parts+=("${arg#--part=}") ;;
+        --part=[1-9] | --part=1[0-9] | --part=2[0-9] | --part=3[0-4]) parts+=("${arg#--part=}") ;;
         --part=ladder) ladder=1 ;;
         --setting=high | --setting=low) settings+=("${arg#--setting=}") ;;
         --fixture=*) fixture="${arg#--fixture=}" ;;
@@ -164,7 +164,7 @@ if [[ ${#variants[@]} -eq 0 ]]; then
     variants=(default no-subgroups)
 fi
 if [[ ${#parts[@]} -eq 0 && $ladder -eq 0 ]]; then
-    parts=(1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33)
+    parts=(1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34)
     ladder=1
 fi
 if [[ ${#settings[@]} -eq 0 ]]; then
