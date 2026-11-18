@@ -124,9 +124,11 @@ export const OPTICS_MEDIA_KEPT = 2;
  * What every assembly a worker makes takes beside its k-tables (R08.T16.a.2): a gas envelope sent
  * `ok` drawn ({@link AssembleOptions.envelopes}), split at its floor (`thick/regime.ts`'s
  * `classifyRegime`), its deck baked where its gate opens the route (`thick/routing.ts`'s
- * `deckRouted`) and drawn by the analytic term under `ATMOSPHERE: APPROXIMATE` until then.
+ * `deckRouted`) and drawn by the analytic term under `ATMOSPHERE: APPROXIMATE` until then; and the
+ * deck R11's clouds draw on a partly cloudy surface left out of its near medium
+ * ({@link AssembleOptions.cloudLayers}, plan R11, R11.T7.b).
  */
-export const OPTICS_ASSEMBLY: AssembleOptions = { envelopes: true };
+export const OPTICS_ASSEMBLY: AssembleOptions = { envelopes: true, cloudLayers: true };
 
 /** What a worker's jobs take from outside: how its k-tables are read. */
 export interface OpticsJobsDeps {

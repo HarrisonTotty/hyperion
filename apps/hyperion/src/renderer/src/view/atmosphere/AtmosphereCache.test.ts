@@ -2953,6 +2953,37 @@ describe("a body's disc table (R08.T16.b)", () => {
     ]);
   });
 
+  it("asks a body whose near medium leaves out its clouds' deck its table from its full medium (R11.T7.b)", async () => {
+    const h = harness();
+    // The full medium: the near one with a uniform haze of its first term again, as a deck would be.
+    const [first] = R05_EARTH_REFERENCE.terms;
+    if (first === undefined) {
+      throw new Error("the reference medium has no term");
+    }
+    const full = {
+      ...R05_EARTH_REFERENCE,
+      terms: [...R05_EARTH_REFERENCE.terms, { ...first, name: "aerosol:H2O" }],
+    };
+    const near = airAssembly();
+    if (near.medium === undefined) {
+      throw new Error("the air assembly draws a medium");
+    }
+    const sources = full.terms.map(channelSource);
+    await drawn(h, [lit(A)], {
+      ...near,
+      drawn: { ...near.drawn, disc: { medium: full, sources, regime: { kind: "thin" } } },
+    });
+    const { ask } = latestDisc(h);
+    expect([ask.column, ask.air.medium, ask.air.kernelMedium, ask.air.bake]).toEqual([
+      spectralColumnOf(full, sources),
+      full,
+      kernelMedium(full),
+      undefined,
+    ]);
+    // Its tables are of the near medium.
+    expect(madeAt(h, 0).built.medium).toBe(R05_EARTH_REFERENCE);
+  });
+
   /** A cache with A drawn with air, its table asked, landed `table` (or {@link aTable}'s). */
   async function landed(h: Harness, table?: DiscReflectanceTable): Promise<DiscReflectanceTable> {
     await drawn(h, [lit(A)], airAssembly());
@@ -3722,6 +3753,53 @@ describe("a decked air's cloud-free ground (fix-r08-decked-air-opacity; research
     expect(h.cache.entryOf(A)?.built?.medium.groundAlbedo).toEqual(
       R05_EARTH_REFERENCE.groundAlbedo,
     );
+  });
+
+  it("draws a near medium without its clouds' deck over R07's ground, and its disc's full medium over the cloud-free one (R11.T7.b)", async () => {
+    // The decked range takes a thick-scattering medium over the cloud-free ground alone.
+    const deckedThick = (regime: AtmosphereRegime, medium: AtmosphereMedium): boolean =>
+      regime.kind === "thickScattering" && deckedOverGround(regime, medium);
+    const h = harness(
+      undefined,
+      (): boolean => true,
+      routesNone,
+      undefined,
+      undefined,
+      deckedThick,
+    );
+    const near = sourcedEarth();
+    if (near.medium === undefined) {
+      throw new Error("R05's Earth's assembly draws its medium");
+    }
+    const disc = {
+      medium: R05_EARTH_REFERENCE,
+      sources: R05_EARTH_REFERENCE.terms.map(channelSource),
+      regime: { kind: "thickScattering" } as const,
+    };
+    note(h, [grounded(GROUND)]);
+    await answer(h, A, answerFor(A, earthDetail()));
+    await land(h, A, { kind: "built", assembled: { ...near, drawn: { ...near.drawn, disc } } });
+    note(h, [grounded(GROUND)]);
+    const built = h.cache.entryOf(A)?.built;
+    expect([built?.medium.groundAlbedo, built?.disc?.medium.groundAlbedo]).toEqual([
+      R05_EARTH_REFERENCE.groundAlbedo,
+      GROUND,
+    ]);
+    // Its view's ground moving a step builds it again, as its disc's medium takes that ground.
+    const asked = h.builder.builds.length;
+    note(h, [grounded(movedBy(2))]);
+    expect(h.builder.builds.length).toBe(asked + 1);
+  });
+
+  it("carries its record's clouds onto its drawn entry (R11.T7.b)", async () => {
+    const h = harness();
+    const air = airAssembly();
+    if (air.medium === undefined) {
+      throw new Error("the air assembly draws a medium");
+    }
+    const clouds = { cloudFraction: 0.6, surfacePressurePa: 101_325, decks: [] };
+    await drawn(h, [lit(A)], { ...air, drawn: { ...air.drawn, clouds } });
+    expect(h.cache.entryOf(A)?.clouds).toEqual(clouds);
   });
 
   it("holds a ground that moves by less than its step", async () => {

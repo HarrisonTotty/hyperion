@@ -64,6 +64,12 @@ import {
   TERRAIN_SETTINGS,
   type TerrainVertexPath,
 } from "../quality/qualitySetting";
+import {
+  terrainLitCloudMaterialSpec,
+  terrainLitClusterCloudMaterialSpec,
+  terrainLitFinCloudMaterialSpec,
+  terrainLitInteriorCloudMaterialSpec,
+} from "./cloudLight";
 import { stillMaterialSpec } from "./gpu/material";
 import { fittedTerrainLayout, type TerrainLimits, terrainMeshSpec } from "./gpu/resources";
 import type { TerrainShading } from "./slotLayout";
@@ -104,7 +110,9 @@ import {
  * `shadow-fin`, plan R14, R14.T1.g), and the visibility buffer's ID raster of the interior patches
  * on it, de-indexed or by `primitive_index` (`id-cluster`, `id-cluster-primitive`, plan R14,
  * R14.T2.c), and its resolve and the resolve's emissive form (`resolve`, `resolve-emissive`, plan
- * R14, R14.T2.d).
+ * R14, R14.T2.d); and the cloudy forms of the lit material, its interior patches' form and both on
+ * the cluster path (`lit-clouds`, `lit-interior-clouds`, `lit-cluster-clouds`, `lit-fin-clouds`;
+ * plan R11, R11.T7.b, `cloudLight.ts`), compiled at their first ask.
  */
 export type TerrainMaterialKind =
   | "lit"
@@ -115,6 +123,10 @@ export type TerrainMaterialKind =
   | "lit-emissive-cluster"
   | "lit-fin"
   | "lit-emissive-fin"
+  | "lit-clouds"
+  | "lit-interior-clouds"
+  | "lit-cluster-clouds"
+  | "lit-fin-clouds"
   | "depth"
   | "depth-cluster"
   | "depth-fin"
@@ -204,6 +216,30 @@ export function terrainMaterialOf(
     case "lit-emissive-fin":
       made = {
         spec: terrainLitFinMaterialSpec(path, kind === "lit-emissive-fin"),
+        targets: ["rgba16float"],
+        shading: "lit",
+      };
+      break;
+    case "lit-clouds":
+      made = { spec: terrainLitCloudMaterialSpec(path), targets: ["rgba16float"], shading: "lit" };
+      break;
+    case "lit-interior-clouds":
+      made = {
+        spec: terrainLitInteriorCloudMaterialSpec(path),
+        targets: ["rgba16float"],
+        shading: "lit",
+      };
+      break;
+    case "lit-cluster-clouds":
+      made = {
+        spec: terrainLitClusterCloudMaterialSpec(path),
+        targets: ["rgba16float"],
+        shading: "lit",
+      };
+      break;
+    case "lit-fin-clouds":
+      made = {
+        spec: terrainLitFinCloudMaterialSpec(path),
         targets: ["rgba16float"],
         shading: "lit",
       };

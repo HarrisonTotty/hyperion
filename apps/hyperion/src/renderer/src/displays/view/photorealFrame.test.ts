@@ -715,3 +715,37 @@ describe("the air between the camera and a star (fix-view-light)", () => {
     ).toEqual([alone(SUN_CURVES), alone(SUN_CURVES)]);
   });
 });
+
+describe("a body's clouds in a frame (R11.T7.b)", () => {
+  it("carries the cache's clouds of each body whose air it draws, and the scene's clock", async () => {
+    const engine = await countingRenderEngine();
+    const { scene, pose } = sliceScene();
+    const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, 6_371_008.8);
+    const clouds = { cloudFraction: 0.67, surfacePressurePa: 101_325, decks: [] };
+    const frame = photorealFrame({
+      run: startServerRun(scene),
+      pose,
+      viewport: VIEWPORT,
+      presentedPx: VIEWPORT,
+      setting: "high",
+      exposureScale: exposureScale(controlEv100(DEFAULT_EXPOSURE)),
+      white: null,
+      list: emptyDrawList(viewStrokesAt(1)),
+      sky: null,
+      hostDiscs: null,
+      band: null,
+      discs: new HostDiscLayer(engine),
+      cube: null,
+      previousRegimes: new Map(),
+      overlay: null,
+      meter: "average",
+      atmospheres: (id) => (id === FIXTURE_EARTH ? tables : null),
+      clouds: (id) => (id === FIXTURE_EARTH ? clouds : null),
+    });
+    expect(frame.atmospheres?.map((each) => [each.id, each.clouds])).toEqual([
+      [FIXTURE_EARTH, clouds],
+    ]);
+    expect([frame.time, frame.timeRate]).toEqual([scene.time, scene.timeRate]);
+    tables.dispose();
+  });
+});

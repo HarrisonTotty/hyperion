@@ -332,8 +332,8 @@ describe("the key the cache holds a medium under", () => {
     );
   });
 
-  it("keys on the optics' version 6, raised last by a mode's τ taken over the whole sky", () => {
-    expect(ATMOSPHERE_OPTICS_VERSION).toBe(6);
+  it("keys on the optics' version 7, raised last by R11's clouds' deck leaving the near medium", () => {
+    expect(ATMOSPHERE_OPTICS_VERSION).toBe(7);
   });
 
   it.each(["unset", "airless"] as const)(

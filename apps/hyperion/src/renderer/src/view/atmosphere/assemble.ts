@@ -43,6 +43,8 @@
  *   body, and its ground opaque under it). The sky's τ keeps the deck's column, not its clear share:
  *   the uniform term still veils the ground the broken deck leaves clear (Cahalan et al. 1994,
  *   J. Atmos. Sci. 51, 2434, the plane-parallel bias), which plan R11's coverage field draws;
+ *   under {@link AssembleOptions.cloudLayers}, the deck R11's layer draws on a partly cloudy surface
+ *   (`condensates.ts`' `layerDeckOf`) leaves the near medium (see "The clouds" below);
  * - at most `MAX_TERMS` (8) terms: the molecular term, then the others of greatest vertical depth
  *   (an absorber by `absorberRankingDepth`, a mode by its sky's τ(550), Thomson by σ_T U, the earlier
  *   listed first on a tie), the rest left out and reported.
@@ -57,6 +59,18 @@
  * **The regime** is the router's, of the medium and the body's cover ({@link bodyCoverOf}),
  * computed once here and carried with the medium ({@link AssembledMedium}), so that the read path
  * routes on it (R08.T14.c).
+ *
+ * **The clouds** (plan R11, R11.T7.b; the R08 double count's sign-off, 2026-11-18). A surface's air
+ * carries what R11's clouds read ({@link DrawnMedium.clouds}): its cloud fraction, its pressure and
+ * its decks on the column, each with its thickest mode's optics at 550 nm. Under
+ * {@link AssembleOptions.cloudLayers}, on a surface of cloud fraction strictly between 0 and 1 with
+ * a deck, the modes of the deck R11's layer draws are left out of the near medium, which the
+ * composite, the surface lighting and the layer read, and which the τ rule, the phase reasons and
+ * the regime are of; the places they free are not filled. Their material and size reasons stand,
+ * since the layer takes their optics, and the reasons of that deck's modes not drawn go, since the
+ * layer draws them by stand-ins. The full medium, with its sources and its regime, is kept for the
+ * disc table ({@link DrawnMedium.disc}), so that a disc beyond the 10⁹ m boundary and a point keep
+ * the clouds' light, as a uniform term.
  *
  * **A gas envelope's medium** (R08.T16.a; Design notes 9, 13 and 17; `decision-deep-decks-split.md`
  * §3.3; `envelope.ts`) is built the same way from its `ok` envelope section, with no ground:
@@ -125,8 +139,16 @@ import {
   type KDistributionTable,
 } from "./absorbers/kDistribution";
 import {
+  type BodyClouds,
+  type CloudDeck,
+  cloudCondensateOf,
+  cloudDecksOf,
+  layerDeckOf,
+} from "../clouds/condensates";
+import {
   type AerosolModeSpec,
   type AerosolParticles,
+  type AerosolTerm,
   aerosolTerm,
   aerosolTermInRange,
   phaseApproximations,
@@ -259,6 +281,28 @@ export interface DrawnMedium {
   readonly temperature?: MediumTemperature;
   /** A gas envelope's floor and column (R08.T16.a); absent for a surface's air. */
   readonly envelope?: DrawnEnvelope;
+  /**
+   * What of the record its clouds read (plan R11, R11.T7.b; `clouds/condensates.ts`): the surface's
+   * cloud fraction (P14.T24.b), its surface pressure and its inventory's decks on the column
+   * ({@link bodyCloudsOf}); `null` for a gas envelope's air, whose cover is whole; absent for a kept
+   * scene's medium.
+   */
+  readonly clouds?: BodyClouds | null;
+  /**
+   * The full medium, the deck R11's layer draws among its terms, with its terms' sources and its
+   * regime, from which the disc table is baked beyond the 10⁹ m boundary (plan R11, R11.T7.b; the R08
+   * double count's sign-off, 2026-11-18): present where the near medium leaves that deck's modes
+   * out ({@link AssembleOptions.cloudLayers}); absent, the disc's medium is the near one.
+   */
+  readonly disc?: DrawnDisc;
+}
+
+/** A body's full medium for its disc table, beside a near medium without its layer's deck. */
+export interface DrawnDisc {
+  readonly medium: AtmosphereMedium;
+  readonly sources: ReadonlyArray<SpectralSource>;
+  /** `classifyRegime`'s, of the full medium and the body's cover. */
+  readonly regime: AtmosphereRegime;
 }
 
 /**
@@ -317,6 +361,14 @@ export interface AssembleOptions {
    * when every line species reports `noCrossSections`.
    */
   readonly kDistributions?: ReadonlyArray<KDistributionTable>;
+  /**
+   * Whether R11's clouds draw a partly cloudy surface's deck (plan R11, R11.T7.b): with it, the near
+   * medium leaves out the modes of the deck their layer draws (`condensates.ts`' `layerDeckOf`), on
+   * a surface of cloud fraction strictly between 0 and 1, and the full medium is kept for the disc
+   * table ({@link DrawnMedium.disc}); `false` if absent, every mode a uniform term. The optics
+   * workers' `true` (`opticsJobs.ts`' `OPTICS_ASSEMBLY`).
+   */
+  readonly cloudLayers?: boolean;
 }
 
 /** A body's absorber specs alone, for a curve-share job ({@link absorberSpecsOf}). */
@@ -1634,6 +1686,84 @@ function envelopeCoverOf(
 }
 
 // ---------------------------------------------------------------------------------------------
+// The clouds R11 draws.
+
+/**
+ * A surface's clouds as R11 reads them (plan R11, R11.T7.b; `condensates.ts`' `BodyClouds`): its
+ * cloud fraction and surface pressure, and each deck of its inventory on `column` by the τ rule's
+ * own map of pressure to height (`cloudDecksOf`), its optics at 550 nm its thickest mode's, as the
+ * medium's term computed them (`AerosolTerm.at550`: g and 1 − ϖ₀), `null` for a mode the medium
+ * does not draw, which the clouds then take from the condensate's stand-in.
+ */
+function bodyCloudsOf(
+  surface: BodySurface,
+  inventory: AerosolInventory | undefined,
+  column: AtmosphereColumn,
+  aerosols: ReadonlyArray<{ readonly planned: PlannedMode; readonly term: AerosolTerm }>,
+): BodyClouds {
+  const optics = new Map(aerosols.map(({ planned, term }) => [planned.index, term.at550]));
+  return {
+    cloudFraction: surface.cloudFraction,
+    surfacePressurePa: surface.surfacePressurePa,
+    decks:
+      inventory === undefined
+        ? []
+        : cloudDecksOf(
+            inventory,
+            (pressurePa) => heightAtPa(column, pressurePa),
+            (index) => {
+              const at550 = optics.get(index);
+              return at550 === undefined
+                ? null
+                : { asymmetry: at550.asymmetry, coAlbedo: 1 - at550.singleScatteringAlbedo };
+            },
+          ),
+  };
+}
+
+/**
+ * Of an inventory's modes at `indices`, the first of the largest modelled in-cloud τ(550), whose
+ * optics a deck's clouds take (`condensates.ts`' `cloudDecksOf`); `null` with none.
+ */
+function thickestModeOf(
+  inventory: AerosolInventory | undefined,
+  indices: ReadonlySet<number>,
+): number | null {
+  let thickest: number | null = null;
+  let most = -1;
+  for (const index of indices) {
+    const depth = inventory?.modes[index]?.opticalDepth;
+    if (depth?.kind === "value" && depth.value.tau550 > most) {
+      most = depth.value.tau550;
+      thickest = index;
+    }
+  }
+  return thickest;
+}
+
+/**
+ * The reason a deck R11's layer draws carries where it is drawn with a stand-in's optics or
+ * optical depth (`condensates.ts`' `CloudCondensate.opticsSource` and `opticalDepthSource`), as
+ * player text; `null` where both are the record's.
+ */
+function standInCloudReason(deck: CloudDeck, surfacePressurePa: number): string | null {
+  const condensate = cloudCondensateOf([deck], surfacePressurePa);
+  if (condensate === null) {
+    return null;
+  }
+  const optics = condensate.opticsSource === "stand-in";
+  const depth = condensate.opticalDepthSource === "stand-in";
+  const name = `${substanceName(deck.condensate)} clouds`;
+  if (optics && depth) {
+    return `${name}: drawn with a stand-in's optics and optical depth`;
+  }
+  if (optics) {
+    return `${name}: drawn with a stand-in's optics`;
+  }
+  return depth ? `${name}: drawn at a stand-in's optical depth` : null;
+}
+
+// ---------------------------------------------------------------------------------------------
 // The assembly.
 
 /** No medium, with its labels. */
@@ -1712,7 +1842,25 @@ export function assembleMedium(
   const lines = plan.specs.some(
     (spec) => spec.kind === "column" && spec.species.some((s) => s.lines !== undefined),
   );
-  const medium: AtmosphereMedium = {
+  // R11's clouds and the deck their layer draws (plan R11, R11.T7.b): under `cloudLayers` the near
+  // medium leaves that deck's modes out, which the layer draws (the module's remarks, "The clouds").
+  const clouds =
+    source.kind === "surface"
+      ? bodyCloudsOf(source.surface, source.inventory, column, aerosols)
+      : null;
+  const layerDeck = options.cloudLayers === true && clouds !== null ? layerDeckOf(clouds) : null;
+  const layerModes = new Set(
+    layerDeck === null || source.inventory === undefined
+      ? []
+      : [...source.inventory.modes.entries()]
+          .filter(([, mode]) => mode.deck === layerDeck.condensate)
+          .map(([index]) => index),
+  );
+  const near = aerosols.filter(({ planned }) => !layerModes.has(planned.index));
+  // The mode whose optics the layer takes, its deck's thickest of a modelled τ (`cloudDecksOf`).
+  const layerOpticsMode = thickestModeOf(source.inventory, layerModes);
+  // The medium of `drawn` of the aerosol terms, every other term as planned.
+  const mediumOf = (drawn: typeof aerosols): AtmosphereMedium => ({
     name: plan.air.record.designation,
     topHeightM: column.topHeightM,
     groundAlbedo,
@@ -1720,13 +1868,12 @@ export function assembleMedium(
       plan.molecular,
       ...(thomson === undefined ? [] : [thomson]),
       ...absorberTerms,
-      ...aerosols.map(({ term }) => term.term),
+      ...drawn.map(({ term }) => term.term),
     ],
     ...(lines ? { pressureBar: columnPressureBar(column) } : {}),
-  };
-  checkTabulatedTops(medium);
+  });
   // Each term's source, in the terms' order, from what each term was formed from.
-  const sources: ReadonlyArray<SpectralSource> = [
+  const sourcesOf = (drawn: typeof aerosols): ReadonlyArray<SpectralSource> => [
     {
       kind: "molecular",
       fractions: plan.air.gases,
@@ -1736,12 +1883,15 @@ export function assembleMedium(
       ? []
       : [{ kind: "thomson", electronDensityPerM3: electrons.electronDensityPerM3 } as const]),
     ...absorberTerms.map(absorberSourceOf),
-    ...aerosols.map(({ planned, term }): SpectralSource => ({
+    ...drawn.map(({ planned, term }): SpectralSource => ({
       kind: "aerosol",
       particles: planned.spec.particles,
       extinction550PerM: term.extinction550PerM,
     })),
   ];
+  const medium = mediumOf(near);
+  checkTabulatedTops(medium);
+  const sources = sourcesOf(near);
 
   const sigma550M2 = molecularMixture(plan.air.gases).crossSectionM2(TAU_WAVELENGTH_NM);
   const above = depthAbove(column, medium.topHeightM, [
@@ -1749,15 +1899,17 @@ export function assembleMedium(
     ...(thomson === undefined
       ? []
       : [{ density: thomson.density, extinctionPerM: thomson.scattering[1] }]),
-    ...aerosols.map(({ planned, term }) => ({
+    ...near.map(({ planned, term }) => ({
       density: term.term.density,
       extinctionPerM:
         planned.spec.opticalDepth550 / columnLengthM(term.term.density, column.topHeightM),
     })),
   ]);
   const shown: string[] = [];
-  for (const { reason, topPa } of reasons.all()) {
-    if (above(topPa) < CLOUD_DECK_SPLIT_OPTICAL_DEPTH) {
+  for (const { slot, reason, topPa } of reasons.all()) {
+    // The layer draws its deck's modes, by stand-ins where the record leaves them out.
+    const layerMode = [...layerModes].some((index) => slot === `mode:${String(index)}`);
+    if (!layerMode && above(topPa) < CLOUD_DECK_SPLIT_OPTICAL_DEPTH) {
       shown.push(reason);
     }
   }
@@ -1769,27 +1921,57 @@ export function assembleMedium(
     ])) {
       shown.push(reason);
     }
-    for (const { reason } of phaseApproximations([
-      { material, optics: term.channels, opticalDepthAbove550 },
-    ])) {
+    // The layer's deck's phase function is the layer's two-stream, not the medium's, but for the
+    // asymmetry it takes from its thickest mode, whose reasons stand.
+    const phases =
+      layerModes.has(planned.index) && planned.index !== layerOpticsMode
+        ? []
+        : phaseApproximations([{ material, optics: term.channels, opticalDepthAbove550 }]);
+    for (const { reason } of phases) {
       shown.push(namedFirst(material, reason));
     }
     if (opticalDepthAbove550 < CLOUD_DECK_SPLIT_OPTICAL_DEPTH) {
       shown.push(...sizeConvergenceReasons(material, phase, [...term.channels, term.at550]));
     }
   }
+  // A layer's deck drawn with a stand-in's optics or optical depth says so, as its modes not drawn
+  // said what the medium left out.
+  if (layerDeck !== null && clouds !== null && source.inventory !== undefined) {
+    const reason = standInCloudReason(layerDeck, clouds.surfacePressurePa);
+    const topPa = source.inventory.decks.find(
+      (deck) => deck.condensate === layerDeck.condensate,
+    )?.topPa;
+    if (reason !== null && topPa !== undefined && above(topPa) < CLOUD_DECK_SPLIT_OPTICAL_DEPTH) {
+      shown.push(reason);
+    }
+  }
   let temperature: MediumTemperature;
   let regime: AtmosphereRegime;
   let envelope: DrawnEnvelope | undefined;
+  let disc: DrawnDisc | undefined;
   switch (source.kind) {
-    case "surface":
-      temperature = { heightsM: column.altitudesM, temperaturesK: column.temperaturesK };
-      regime = classifyRegime(medium, bodyCoverOf(source.surface, column), {
-        temperature,
-        stellarFluxWM2: source.surface.stellarFluxWM2,
-      });
+    case "surface": {
+      const surfaceTemperature = {
+        heightsM: column.altitudesM,
+        temperaturesK: column.temperaturesK,
+      };
+      temperature = surfaceTemperature;
+      const cover = bodyCoverOf(source.surface, column);
+      const classified = (each: AtmosphereMedium): AtmosphereRegime =>
+        classifyRegime(each, cover, {
+          temperature: surfaceTemperature,
+          stellarFluxWM2: source.surface.stellarFluxWM2,
+        });
+      regime = classified(medium);
       envelope = undefined;
+      if (near.length < aerosols.length) {
+        // The disc table is baked from the full medium, the layer's deck a uniform term in it.
+        const full = mediumOf(aerosols);
+        checkTabulatedTops(full);
+        disc = { medium: full, sources: sourcesOf(aerosols), regime: classified(full) };
+      }
       break;
+    }
     case "envelope": {
       // Nothing below the floor is drawn, its glow included: the deck's bake carries none.
       const { floor } = source;
@@ -1829,6 +2011,8 @@ export function assembleMedium(
       sources,
       temperature,
       ...(envelope === undefined ? {} : { envelope }),
+      clouds,
+      ...(disc === undefined ? {} : { disc }),
     },
     labels: ordered([...plan.air.labels, ...approximate]),
     reasons: reasonsShown,

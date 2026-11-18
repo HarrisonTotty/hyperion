@@ -181,13 +181,14 @@ import { toBodyDetail, toBodyDetailRequest } from "../../lib/system/bodiesWire";
 import type { BodyDetail } from "../../lib/system/model";
 import { heldAppearanceOf } from "../appearance/fromWire";
 import type { LitRegime } from "../bodies/regime";
+import type { BodyClouds } from "../clouds/condensates";
 import { EngineUnavailable } from "../engine/resilientEngine";
 import type { RenderEngine } from "../engine/types";
 import { SUN_BAKE_SPECTRUM } from "../lighting/hostDisc";
 import type { Rgb } from "../photometry/toneCurve";
 import { ANNUNCIATION_CLEAR_MS, ANNUNCIATION_ONSET_MS } from "../terrain/annunciation";
 import { FIELD_RETRY_DELAY_MS, FIELD_RETRY_MAX_DELAY_MS } from "../terrain/coarseFieldStore";
-import type { AssembledMedium } from "./assemble";
+import type { AssembledMedium, DrawnDisc } from "./assemble";
 import {
   ATMOSPHERE_OPTICS_VERSION,
   atmosphereKey,
@@ -324,6 +325,12 @@ export interface BuiltAtmosphere {
    * field; absent below the thermal cut, where nothing of it is computed.
    */
   readonly temperature?: MediumTemperature;
+  /**
+   * The full medium its disc table is baked from, with its terms' sources and its regime, where
+   * `medium` leaves out the deck R11's clouds draw (plan R11, R11.T7.b; `DrawnMedium.disc`);
+   * absent, the disc's medium is `medium`.
+   */
+  readonly disc?: DrawnDisc;
 }
 
 /**
@@ -501,6 +508,11 @@ export interface AtmosphereEntry<T> {
   readonly built: BuiltAtmosphere | null;
   /** Its per-planet tables; `null` with no `built`, after an eviction, or while the device is lost. */
   readonly tables: T | null;
+  /**
+   * What of its record its clouds read (plan R11, R11.T7.b; `DrawnMedium.clouds`); absent, or
+   * `null`, where its assembly drew no surface's air.
+   */
+  readonly clouds?: BodyClouds | null;
 }
 
 /**
@@ -691,6 +703,8 @@ interface ToDraw extends Labelled {
    * with; `null` for a kept scene's medium, whose bake carries its own lights.
    */
   readonly input: BodyAtmosphereInput | null;
+  /** What of its record its clouds read (`DrawnMedium.clouds`); absent, or `null`, for none. */
+  readonly clouds?: BodyClouds | null;
 }
 
 /** A record's build under way, a server body's or a kept scene's. */
@@ -1081,9 +1095,11 @@ function toDrawOf(key: string, input: BodyAtmosphereInput, assembled: AssembledM
           ...(assembled.regime.selfLuminous === true && drawn.temperature !== undefined
             ? { temperature: drawn.temperature }
             : {}),
+          ...(drawn.disc === undefined ? {} : { disc: drawn.disc }),
         }
       : null,
     input,
+    ...(drawn.clouds === undefined ? {} : { clouds: drawn.clouds }),
   };
 }
 
@@ -1336,24 +1352,39 @@ function discBakeAskOf(
   tables: CachedTables,
   lights: ReadonlyArray<BodyLight>,
   landed: DiscLanded,
+  haze: (regime: AtmosphereRegime, medium: AtmosphereMedium) => boolean,
 ): DiscBakeAsk | null {
-  if (built.sources === undefined) {
+  // Beside a near medium without R11's clouds' deck (plan R11, R11.T7.b), the full medium, which
+  // solves its own J: the near medium's bake is of another column.
+  const { disc } = built;
+  const medium = disc?.medium ?? built.medium;
+  const sources = disc?.sources ?? built.sources;
+  if (sources === undefined) {
     return null;
   }
   // A routed body's disc reads its landed bake's J; one solved here is the bins'.
-  const ask = thickBakeAskOf(input, built, built.sources, tables, lights, false);
+  const ask = thickBakeAskOf(
+    input,
+    { ...built, medium },
+    sources,
+    tables,
+    lights,
+    disc === undefined ? false : haze(disc.regime, disc.medium),
+  );
   if (ask === null) {
     return null;
   }
+  const bake = disc === undefined ? landed.bake : undefined;
+  const deck = disc === undefined ? landed.deck : undefined;
   return {
     ...ask,
     air: {
-      medium: built.medium,
-      kernelMedium: kernelMedium(built.medium),
+      medium,
+      kernelMedium: kernelMedium(medium),
       curves: built.curves,
-      ...(landed.bake === undefined ? {} : { bake: landed.bake }),
+      ...(bake === undefined ? {} : { bake }),
       ...(landed.correction === undefined ? {} : { correction: landed.correction }),
-      ...(landed.deck === undefined ? {} : { deck: landed.deck }),
+      ...(deck === undefined ? {} : { deck }),
       // A self-luminous medium's table holds its own light (R08.T18.b).
       ...(built.temperature === undefined ? {} : { temperature: built.temperature }),
     },
@@ -1871,9 +1902,7 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
       // keeps the ground it was built with, so its next re-request builds it once more.
       const entry = held.build?.kind === "landed" ? held.build.entry : held.drawn;
       const matters =
-        entry === null ||
-        this.#deckedOver(entry, was) !== null ||
-        this.#deckedOver(entry, ground) !== null;
+        entry === null || this.#takesGround(entry, was) || this.#takesGround(entry, ground);
       if (held.problem === null && matters) {
         this.#rebuild(held);
       }
@@ -1912,9 +1941,44 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
    */
   #withDeckedGround(entry: ToDraw, ground: Rgb | null): ToDraw {
     const medium = this.#deckedOver(entry, ground);
-    return medium === null || entry.built === null
-      ? entry
-      : { ...entry, built: { ...entry.built, medium } };
+    const disc = this.#deckedDiscOver(entry, ground);
+    if (entry.built === null || (medium === null && disc === null)) {
+      return entry;
+    }
+    return {
+      ...entry,
+      built: {
+        ...entry.built,
+        ...(medium === null ? {} : { medium }),
+        ...(disc === null ? {} : { disc }),
+      },
+    };
+  }
+
+  /**
+   * The full medium of `entry`'s disc table over the cloud-free `ground` (plan R11, R11.T7.b;
+   * `BuiltAtmosphere.disc`): as {@link #deckedOver} takes it, of the full medium and its own regime;
+   * `null` for an entry with no disc medium of its own, or one whose decked air does not take it.
+   */
+  #deckedDiscOver(entry: Pick<ToDraw, "built" | "envelope">, ground: Rgb | null): DrawnDisc | null {
+    const disc = entry.built?.disc;
+    if (disc === undefined || entry.built === null) {
+      return null;
+    }
+    const medium = this.#deckedOver(
+      {
+        built: { ...entry.built, medium: disc.medium },
+        regime: disc.regime,
+        envelope: entry.envelope,
+      },
+      ground,
+    );
+    return medium === null ? null : { ...disc, medium };
+  }
+
+  /** Whether `entry`'s near medium or its disc's takes the cloud-free `ground` (`#deckedOver`). */
+  #takesGround(entry: Pick<ToDraw, "built" | "regime" | "envelope">, ground: Rgb | null): boolean {
+    return this.#deckedOver(entry, ground) !== null || this.#deckedDiscOver(entry, ground) !== null;
   }
 
   /** Asks for a body's record, cancelling a request or wait standing, or waits for the link. */
@@ -2085,8 +2149,7 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
           held.reply === null ? null : cloudFreeGroundOf(held.reply, held.cloudFreeGround);
         if (
           !sameGround(building.cloudFreeGround, ground) &&
-          (this.#deckedOver(entry, building.cloudFreeGround) !== null ||
-            this.#deckedOver(entry, ground) !== null)
+          (this.#takesGround(entry, building.cloudFreeGround) || this.#takesGround(entry, ground))
         ) {
           this.#rebuild(held);
         }
@@ -2588,7 +2651,11 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
       return;
     }
     try {
-      if (!this.#discs(spectralColumnOf(built.medium, built.sources))) {
+      const column =
+        built.disc === undefined
+          ? spectralColumnOf(built.medium, built.sources)
+          : spectralColumnOf(built.disc.medium, built.disc.sources);
+      if (!this.#discs(column)) {
         return;
       }
     } catch (error: unknown) {
@@ -2621,7 +2688,14 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
     }
     let handle: DiscBake;
     try {
-      const ask = discBakeAskOf(entry.input, built, tables, held.lights, discLandedOf(baked, held));
+      const ask = discBakeAskOf(
+        entry.input,
+        built,
+        tables,
+        held.lights,
+        discLandedOf(baked, held),
+        this.#bakedAsHaze,
+      );
       if (ask === null) {
         // No light to bake under: drawn by the full passes at every distance.
         held.disc = null;

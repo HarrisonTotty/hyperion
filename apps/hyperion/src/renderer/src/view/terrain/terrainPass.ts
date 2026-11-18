@@ -282,6 +282,7 @@ import {
   fitCascades,
 } from "./shadows/cascades";
 import { CascadeReuse, TerrainShadows } from "./shadows/terrainShadows";
+import { CLOUD_TEXTURES, type CloudBodyGpu } from "../clouds/cloudLayer";
 import {
   DISC_NORMALS_TEXTURE,
   RESOLVE_FRAME_TEXTURE,
@@ -425,6 +426,12 @@ export interface TerrainWireFrameInput {
 export interface TerrainFrameLighting extends TerrainLighting {
   /** The body's tables (`surfaceLightingTablesOf`); absent for a body without an atmosphere. */
   readonly atmosphere?: SurfaceLightingTables;
+  /**
+   * The body's clouds this frame (plan R11, R11.T7.b; `CloudLayers.frame`), whose light on the
+   * ground the lit forms' cloudy forms take (`cloudLight.ts`), given where the setting's
+   * `cloudShadows` is on; absent, the plain forms draw it, writing neither of R11's hooks.
+   */
+  readonly clouds?: CloudBodyGpu;
 }
 
 /**
@@ -1216,6 +1223,19 @@ interface Device {
   emissiveResolveMaterial: MaterialHandle | null;
   emissiveVisibilityAsked: boolean;
   /**
+   * The cloudy forms of the lit material, its interior patches' form and both on the cluster path
+   * (plan R11, R11.T7.b; `cloudLight.ts`), asked at the first frame whose lighting carries clouds
+   * (`cloudyAsked`); each `null` before and where it cannot be made. A frame draws by them once the
+   * lit material's is made, as by the emissive forms.
+   */
+  readonly cloudy: {
+    edge: MaterialHandle | null;
+    interior: MaterialHandle | null;
+    cluster: MaterialHandle | null;
+    fin: MaterialHandle | null;
+  };
+  cloudyAsked: boolean;
+  /**
    * The still forms of its materials (plan R10, R10.T16.i; `stillMaterialSpec`), by the material:
    * a frame none of whose instances mixes its heights draws each draw's still form where it is made.
    */
@@ -1398,6 +1418,8 @@ interface ViewState {
    * `HandoverFade.discNormals`).
    */
   drawnDiscNormals: TextureHandle | null;
+  /** The clouds the lit draw binds (plan R11, R11.T7.b), or `null` for none. */
+  drawnClouds: CloudBodyGpu | null;
   /** The wireframe's `Draw` (`terrainWire.wgsl`), rewritten in place each frame (R10.T11). */
   readonly wireUniforms: {
     readonly bodyRotation: Float32Array;
@@ -2596,6 +2618,7 @@ export class TerrainPass {
       | "lit-cluster"
       | "lit-emissive-cluster"
       | FinKind
+      | CloudyKind
       | "wire-cluster"
       | "id-cluster"
       | "id-cluster-primitive"
@@ -3036,6 +3059,35 @@ export class TerrainPass {
         console.error(
           "the terrain's emissive form failed: its ground is drawn unlit by itself",
           error,
+        );
+      }
+    }
+  }
+
+  /**
+   * Compiles, or takes, `device`'s cloudy forms (plan R11, R11.T7.b; `cloudLight.ts`), once a
+   * device; never rejects. One that cannot be made is reported, and its frames draw by the plain
+   * form it stands for, the lit material's for all four until that one is made.
+   */
+  async #readyCloudy(device: Device, path: TerrainLayout["vertexPath"]): Promise<void> {
+    const made = await Promise.allSettled(
+      CLOUDY_FORMS.map(async (form) => this.#materialOf(CLOUDY_KINDS[form], device, path)),
+    );
+    for (const [index, outcome] of made.entries()) {
+      const form = CLOUDY_FORMS[index];
+      if (form === undefined) {
+        continue;
+      }
+      if (outcome.status === "fulfilled") {
+        if (device === this.#device && !this.#disposed && device.cloudy[form] === null) {
+          device.cloudy[form] = outcome.value;
+        } else {
+          this.#releaseOwn(outcome.value);
+        }
+      } else if (!this.#superseded(device) && !(outcome.reason instanceof EngineUnavailable)) {
+        console.error(
+          `the terrain's ${CLOUDY_KINDS[form]} form failed: its ground is drawn without its clouds' light`,
+          outcome.reason,
         );
       }
     }
@@ -3662,6 +3714,13 @@ export class TerrainPass {
     }
     device.resolveMaterial = null;
     device.emissiveResolveMaterial = null;
+    for (const form of CLOUDY_FORMS) {
+      const held = device.cloudy[form];
+      if (held !== null) {
+        this.#releaseOwn(held);
+        device.cloudy[form] = null;
+      }
+    }
     for (const kind of FIN_KINDS) {
       const held = finMaterialOf(device, kind);
       if (held !== null) {
@@ -3745,6 +3804,8 @@ export class TerrainPass {
       resolveMaterial: null,
       emissiveResolveMaterial: null,
       emissiveVisibilityAsked: false,
+      cloudy: { edge: null, interior: null, cluster: null, fin: null },
+      cloudyAsked: false,
       stills: new Map(),
       stillDraws: new WeakMap(),
       clusterShadowMaterial: null,
@@ -4127,6 +4188,7 @@ export class TerrainPass {
       casters: null,
       drawnShadow: null,
       drawnDiscNormals: null,
+      drawnClouds: null,
       wireUniforms: {
         bodyRotation,
         atlas: new Float32Array(4),
@@ -5397,6 +5459,16 @@ export class TerrainPass {
         },
       );
     }
+    // The cloudy forms at the first frame whose lighting carries clouds (plan R11, R11.T7.b); a body
+    // above the thermal cut draws its emission without them, and a frame by the visibility buffer,
+    // whose resolve takes none, draws none, so that no seam parts its patches.
+    const clouds = input.lighting?.clouds !== undefined && !emission && !byIds;
+    if (clouds && !device.cloudyAsked) {
+      device.cloudyAsked = true;
+      void this.#readyCloudy(device, device.resources.layout.vertexPath).catch((error: unknown) => {
+        console.error("the terrain's cloudy forms could not be taken:", error);
+      });
+    }
     if (emission && !device.emissiveAsked) {
       device.emissiveAsked = true;
       const path = device.resources.layout.vertexPath;
@@ -5412,6 +5484,9 @@ export class TerrainPass {
       void this.#readyFin(device, "lit-emissive-fin", path).catch((error: unknown) => {
         console.error("the terrain's emissive fin form could not be taken:", error);
       });
+    }
+    if (clouds && device.cloudy.edge !== null) {
+      return { ...device.cloudy, resolve: device.resolveMaterial };
     }
     return emission && device.emissiveMaterial !== null
       ? {
@@ -5540,6 +5615,9 @@ export class TerrainPass {
     // The disc's normal map of a fade under way (R10.T15.b.2), or the normals atlas, a 2D array of
     // the same kind, unread at a share of 1, in its place.
     const discNormals = lighting?.fade?.discNormals ?? resources.normals;
+    // The body's clouds, bound where the frame gives them (plan R11, R11.T7.b), which the cloudy
+    // forms read and the plain ones leave unread.
+    const clouds = lighting?.clouds ?? null;
     if (
       state.draw === null ||
       state.drawDevice !== device ||
@@ -5547,6 +5625,7 @@ export class TerrainPass {
       state.drawnAtmosphere !== atmosphere ||
       state.drawnShadow !== shadow ||
       state.drawnDiscNormals !== discNormals ||
+      !sameClouds(state.drawnClouds, clouds) ||
       state.draw.material !== material
     ) {
       state.draw = this.#drawItem(device, state, material, {
@@ -5554,12 +5633,14 @@ export class TerrainPass {
         atmosphere,
         shadow,
         discNormals,
+        clouds,
       });
       state.drawDevice = device;
       state.drawnTable = table;
       state.drawnAtmosphere = atmosphere;
       state.drawnShadow = shadow;
       state.drawnDiscNormals = discNormals;
+      state.drawnClouds = clouds;
     }
     const draw = state.draw;
     const interior = state.interior.count > 0 ? this.#interiorDrawOf(device, state, forms) : null;
@@ -6946,6 +7027,8 @@ export class TerrainPass {
       readonly shadow: TextureHandle;
       /** The disc's normal map, or a texture in its place (R10.T15.b.2). */
       readonly discNormals: TextureHandle;
+      /** The body's clouds (plan R11, R11.T7.b), or `null` for none. */
+      readonly clouds: CloudBodyGpu | null;
     } | null = null,
   ): DrawItem {
     const { resources } = device;
@@ -6999,6 +7082,10 @@ export class TerrainPass {
     storageBuffers["terrainLights"] = buffers.lights;
     storageBuffers["horizonMap"] = horizonMap;
     storageBuffers["surveyMask"] = surveyMask;
+    const { clouds } = phase;
+    if (clouds !== null) {
+      storageBuffers[CLOUD_TEXTURES.layer] = clouds.layer;
+    }
     return {
       mesh: resources.mesh,
       material,
@@ -7010,11 +7097,43 @@ export class TerrainPass {
         ...surfaceLightingDrawTextures(phase.atmosphere),
         [SHADOW_CASCADES_TEXTURE]: phase.shadow,
         [DISC_NORMALS_TEXTURE]: phase.discNormals,
+        ...(clouds === null
+          ? {}
+          : { [CLOUD_TEXTURES.coverage]: clouds.coverage, [CLOUD_TEXTURES.noise]: clouds.noise }),
       },
       storageBuffers,
       indirect: { buffer: buffers.indirect, offsetBytes: 0 },
     };
   }
+}
+
+/** The cloudy forms a device holds (plan R11, R11.T7.b), by the lit form each stands for. */
+type CloudyForm = "edge" | "interior" | "cluster" | "fin";
+
+/** Every cloudy form, for a device's release. */
+const CLOUDY_FORMS: ReadonlyArray<CloudyForm> = ["edge", "interior", "cluster", "fin"];
+
+/** The session's material kind of each cloudy form (`materialSet.ts`). */
+const CLOUDY_KINDS = {
+  edge: "lit-clouds",
+  interior: "lit-interior-clouds",
+  cluster: "lit-cluster-clouds",
+  fin: "lit-fin-clouds",
+} as const satisfies Readonly<Record<CloudyForm, TerrainMaterialKind>>;
+
+/** The session's material kinds of the cloudy forms. */
+type CloudyKind = (typeof CLOUDY_KINDS)[CloudyForm];
+
+/** Whether two frames' clouds bind the same buffer and textures. */
+function sameClouds(a: CloudBodyGpu | null, b: CloudBodyGpu | null): boolean {
+  return (
+    a === b ||
+    (a !== null &&
+      b !== null &&
+      a.layer === b.layer &&
+      a.coverage === b.coverage &&
+      a.noise === b.noise)
+  );
 }
 
 /** The edge patches' fin forms (plan R14, R14.T1.g), as the session's material kinds name them. */

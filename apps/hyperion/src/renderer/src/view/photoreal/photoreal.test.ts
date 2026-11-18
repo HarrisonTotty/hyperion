@@ -5,6 +5,7 @@ import { HDR_COLOUR_FORMAT } from "../photometry/toneCurve";
 import { METER_CLASS } from "../post/meter";
 import { QUALITY_SETTINGS } from "../quality/qualitySetting";
 import { TERRAIN_PASS_LABEL, TERRAIN_SHADOW_PASS_LABEL } from "../terrain/gpu/material";
+import { CLOUD_LAYER_PASS } from "../clouds/cloudLayer";
 import { PHOTOREAL_PASS_LABELS, photorealisticPasses } from "./passes";
 import { sceneTargetSpec } from "./sceneTarget";
 import { aCameraScene } from "../../test/viewFixtures";
@@ -108,6 +109,18 @@ describe("photorealisticPasses", () => {
         ],
       });
       expect(labels.slice(at - 1, at + 2)).toEqual(["discs", "atmosphere", "rings"]);
+    },
+  );
+
+  it.each(QUALITY_SETTINGS)(
+    "builds R11's clouds after the atmosphere, on %s (R11.T7.b)",
+    (setting) => {
+      const passes = photorealisticPasses(setting).passes;
+      const labels = passes.map((pass) => pass.label);
+      const at = labels.indexOf(CLOUD_LAYER_PASS);
+      expect(passes[at]).toEqual({ label: CLOUD_LAYER_PASS, owner: "R11", built: true });
+      expect(at).toBeGreaterThan(labels.indexOf("atmosphere"));
+      expect(at).toBeLessThan(labels.indexOf(PHOTOREAL_PASS_LABELS.histogram));
     },
   );
 });

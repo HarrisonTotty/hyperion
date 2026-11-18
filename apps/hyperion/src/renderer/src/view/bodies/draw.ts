@@ -71,6 +71,7 @@ import type { BodyIdHex } from "@hyperion/protocol";
 
 import { dot, norm, normalise, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
 import type { RingProfile } from "../rings/ringProfile";
+import type { CloudBodyGpu } from "../clouds/cloudLayer";
 import { ringShadowRecordOf } from "../rings/ringShadows";
 import type { DiscNormalMap, DiscSurface } from "../appearance/bodyAppearance";
 import type { BodyFigure, BodyPhotometry } from "../appearance/fromWire";
@@ -285,6 +286,13 @@ export interface LitBodyInput {
    * and for every body where R11's `ringShadowOnBody` is off (the low setting).
    */
   readonly ring?: LitBodyRing;
+  /**
+   * Its clouds this frame (plan R11, R11.T7.b; `clouds/cloudLayer.ts`' `CloudLayers.frame`), whose
+   * light its terrain's cloudy forms take on the ground, through its record (`DiscRecord.clouds`);
+   * given by a frame that draws its clouds where the setting's `cloudShadows` is on. Absent, its
+   * terrain draws by the plain forms.
+   */
+  readonly clouds?: CloudBodyGpu;
 }
 
 /** A lit body's ring as its shadow on the body reads it (R11.T9.a). */
@@ -1004,6 +1012,7 @@ function discRecordOf(
     ...(body.ring === undefined
       ? {}
       : { ring: ringShadowRecordOf(body.ring.profile, body.ring.normal, a) }),
+    ...(body.clouds === undefined ? {} : { clouds: body.clouds }),
   };
 }
 

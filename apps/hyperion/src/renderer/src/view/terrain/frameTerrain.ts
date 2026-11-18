@@ -115,7 +115,8 @@ const NO_SUN = vec3(0, 0, 1);
  * distance, radius, illuminance and annuli and each occluder's radius as they stand; its uniform
  * law, `elsewhere` (the record's surface's first law, `discSurfaceLaws`: its uniform law, or its
  * class map's unsurveyed ground's), whose A the terrain scales for the figure as the disc does;
- * the frame's pre-exposure; the record's atmosphere tables, where it has them (R08.T10.b); and its
+ * the frame's pre-exposure; the record's atmosphere tables, where it has them (R08.T10.b); its
+ * clouds, where the frame gives them (plan R11, R11.T7.b), whose rows are body-fixed already; and its
  * ground's emission, where it carries one (R08.T18.a), its star turned body-fixed as the lights
  * are. The sun is the brightest light's, the record's first (`lightsAt` puts the brightest first).
  *
@@ -155,6 +156,7 @@ export function terrainLightingOf(
       elsewhere,
       exposureScale,
       ...(record.atmosphere === undefined ? {} : { atmosphere: record.atmosphere }),
+      ...(record.clouds === undefined ? {} : { clouds: record.clouds }),
       ...(emission === undefined
         ? {}
         : { emission: { ...emission, star: rotateToBodyFixed(rotation, emission.star) } }),

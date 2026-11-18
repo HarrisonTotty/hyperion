@@ -20,9 +20,12 @@
  * - **The height.** The layer stands at the deck's base plus {@link LAYER_HEIGHT_SHARE} of its
  *   depth (lean, 2026-11-02): a deck's condensate lies mostly low in it, its mixing ratio falling
  *   above its base as (p ÷ p_base)^f_sed.
- * - **Not drawn yet.** The photorealistic style's pass after each body's composite, the decks
- *   carried from R08's assembly and the terrain's cloudy lit forms are the wiring's, a later
- *   change's (plan R11's T7.b records); the smoke harness draws the layer and probes its field.
+ * - **Where it is drawn** (R11.T7.b's wiring): the photorealistic renderer draws each body's layer
+ *   after its atmosphere's composite, into the target that composite drew, as the `clouds` pass
+ *   (`photoreal/renderer.ts`), from the decks R08's assembly carries (`DrawnMedium.clouds`) through
+ *   the atmosphere cache, and the terrain beneath takes its light through its cloudy lit forms
+ *   (`terrain/cloudLight.ts`) where the setting's `cloudShadows` is on; the smoke harness draws the
+ *   layer and probes its field.
  */
 import type { BodyIdHex, UniverseTime } from "@hyperion/protocol";
 
@@ -64,7 +67,12 @@ import {
   coverageTexels,
   type CoverageTexels,
 } from "./cloudDensity";
-import { type BodyClouds, type CloudCondensate, cloudCondensateOf } from "./condensates";
+import {
+  type BodyClouds,
+  type CloudCondensate,
+  cloudCondensateOf,
+  layerDeckOf,
+} from "./condensates";
 import {
   calibrateOffset,
   type CloudSeason,
@@ -116,11 +124,8 @@ export function cloudLayerHeightM(
  * fraction of 0 or 1, or no deck (Design note 9).
  */
 export function layerCondensateOf(clouds: BodyClouds): CloudCondensate | null {
-  const { cloudFraction } = clouds;
-  if (!(cloudFraction > 0 && cloudFraction < 1)) {
-    return null;
-  }
-  return cloudCondensateOf(clouds.decks, clouds.surfacePressurePa);
+  const deck = layerDeckOf(clouds);
+  return deck === null ? null : cloudCondensateOf([deck], clouds.surfacePressurePa);
 }
 
 /** The material's bindings in `@group(2)` (`cloudLayer.wgsl`'s). */

@@ -15,9 +15,10 @@
  * rings, clouds and oceans; the histogram; bloom of the light above the
  * display's range; the tone-mapping pass; the symbology cased over the result. A style owns no
  * scene, camera or projection, so switching style is a change of pass list. The slots of R06, R08,
- * R10 and R11 are listed with the labels their plans give or (for R11, whose passes are not built)
- * the lane's provisional names, marked `built: false` until those plans fill them (R06's sky, drawn
- * by R07.T8.a's frame, is; R08's atmosphere since R08.T10.b, its slot carrying its passes' labels); the settings share one order today, their differences being
+ * R10 and R11 are listed with the labels their plans give or (for R11's passes not yet built) the
+ * lane's provisional names, marked `built: false` until those plans fill them (R06's sky, drawn
+ * by R07.T8.a's frame, is; R08's atmosphere since R08.T10.b, its slot carrying its passes' labels;
+ * R11's clouds since R11.T7.b, each body's after its composite); the settings share one order today, their differences being
  * each pass's parameters (Design note 18): on the high setting the terrain's cascade passes are
  * submitted before the bodies pass, while the low setting, which has no cascades, submits none in
  * their slot.
@@ -28,6 +29,7 @@ import {
   ATMOSPHERE_VIEW_PASS,
 } from "../atmosphere/hillaire";
 import { ATMOSPHERE_TABLES_PASS } from "../atmosphere/tables";
+import { CLOUD_LAYER_PASS } from "../clouds/cloudLayer";
 import { DISC_CELLS_PASS } from "../bodies/draw";
 import { DEPTH_PYRAMID_LABEL } from "../clusters/hzb";
 import {
@@ -172,7 +174,8 @@ export function photorealisticPasses(setting: QualitySetting): PassList {
       // Each body's air over everything opaque drawn before it (R08.T10.b).
       slot("atmosphere", "R08", true, ATMOSPHERE_PASS_LABELS),
       slot("rings", "R11", false),
-      slot("clouds", "R11", false),
+      // Each body's clouds after its composite, into the target it drew (plan R11, R11.T7.b).
+      slot(CLOUD_LAYER_PASS, "R11", true),
       slot("ocean", "R11", false),
       own(PHOTOREAL_PASS_LABELS.histogram),
       own(PHOTOREAL_PASS_LABELS.bloom),

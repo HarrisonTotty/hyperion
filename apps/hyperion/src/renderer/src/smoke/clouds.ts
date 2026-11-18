@@ -678,7 +678,7 @@ export async function checkCloudLayerDraw(engine: RenderEngine, checks: Checks):
   }
 }
 
-/** R11.T7.b's kernels compiled: the layer and the probe (`CLOUD_ENTRIES`). */
+/** R11.T7.b's kernels compiled: the layer, the probe and the terrain's cloudy forms (`CLOUD_ENTRIES`). */
 export async function checkCloudCatalogue(
   engine: RenderEngine,
   status: GraphicsStatusStore,

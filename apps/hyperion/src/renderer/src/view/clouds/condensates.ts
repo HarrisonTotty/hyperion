@@ -216,9 +216,35 @@ function skyMeanOpticalDepth(deck: CloudDeck): number {
 }
 
 /**
- * The condensate a body's cloud layer draws from its decks: the deck of largest sky-mean τ, the
- * first listed on a tie (the inventory lists the deepest first), each member the record's where
- * modelled and its stand-in's otherwise; `null` with no deck.
+ * The deck a body's cloud layer draws of its decks: the one of largest sky-mean τ, the first listed
+ * on a tie (the inventory lists the deepest first); `null` with none.
+ */
+export function drawnDeckOf(decks: ReadonlyArray<CloudDeck>): CloudDeck | null {
+  let chosen: CloudDeck | null = null;
+  for (const deck of decks) {
+    if (chosen === null || skyMeanOpticalDepth(deck) > skyMeanOpticalDepth(chosen)) {
+      chosen = deck;
+    }
+  }
+  return chosen;
+}
+
+/**
+ * The deck R11's two-dimensional layer draws on a body (R11.T7.b; Design note 9): its
+ * {@link drawnDeckOf}, on a body whose cloud fraction lies strictly between 0 and 1; `null` for a
+ * clear sky, an overcast (an overcast's deck is R08's split, or its uniform medium's) or a body
+ * with no deck. R08's assembly leaves this deck's modes out of the near medium under
+ * `AssembleOptions.cloudLayers`, since the layer draws them (the R08 double count's sign-off,
+ * 2026-11-18).
+ */
+export function layerDeckOf(clouds: BodyClouds): CloudDeck | null {
+  const { cloudFraction } = clouds;
+  return cloudFraction > 0 && cloudFraction < 1 ? drawnDeckOf(clouds.decks) : null;
+}
+
+/**
+ * The condensate a body's cloud layer draws from its decks: its {@link drawnDeckOf}, each member
+ * the record's where modelled and its stand-in's otherwise; `null` with no deck.
  *
  * @remarks
  * A deck whose condensate has no stand-in and whose optics or τ the record leaves out takes liquid
@@ -230,13 +256,8 @@ export function cloudCondensateOf(
   decks: ReadonlyArray<CloudDeck>,
   surfacePressurePa: number,
 ): CloudCondensate | null {
-  let chosen: CloudDeck | undefined;
-  for (const deck of decks) {
-    if (chosen === undefined || skyMeanOpticalDepth(deck) > skyMeanOpticalDepth(chosen)) {
-      chosen = deck;
-    }
-  }
-  if (chosen === undefined) {
+  const chosen = drawnDeckOf(decks);
+  if (chosen === null) {
     return null;
   }
   const standIn =

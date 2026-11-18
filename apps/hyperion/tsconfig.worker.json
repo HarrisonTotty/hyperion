@@ -44,6 +44,7 @@
     "src/renderer/src/view/terrain/workers/f32Digest.ts",
     "src/renderer/src/view/atmosphere/absorbers.ts",
     "src/renderer/src/view/atmosphere/aerosol.ts",
+    "src/renderer/src/view/clouds/condensates.ts",
     "src/renderer/src/view/atmosphere/aggregate.ts",
     "src/renderer/src/view/atmosphere/assemble.ts",
     "src/renderer/src/view/atmosphere/channels.ts",

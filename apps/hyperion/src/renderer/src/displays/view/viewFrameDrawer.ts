@@ -855,6 +855,8 @@ export class ViewFrameDrawer {
               )
           : null,
         atmospheres: inputs.atmosphere?.tablesOf,
+        // Each body's clouds over its air, from its record (plan R11, R11.T7.b).
+        clouds: inputs.atmosphere?.cloudsOf,
         // Each body's ground drawn emitting where its record's field is above the cut (R08.T18.a).
         groundFields: inputs.atmosphere?.groundFieldOf,
         // A disc beneath a gas envelope's air on that air's ground, not its 1-bar figure (R08.T16.a.2).

@@ -89,6 +89,7 @@ import { HALF_FLOAT_MAX } from "../photometry/toneCurve";
 import { METER_CLASS, type MeterClass } from "../post/meter";
 import { type Rotation3, rotateToBody } from "../coords/rotation";
 import type { TextureHandle } from "../engine/types";
+import type { CloudBodyGpu } from "../clouds/cloudLayer";
 import type { ScreenRect } from "../wireframe/submit";
 import { MATURITY_NODES } from "../terrain/maturityNodes";
 import { type NormalMapTexels, normalMapNormalAt } from "./discNormals";
@@ -1155,6 +1156,12 @@ export interface DiscRecord {
    * casts none, and for every body where R11's `ringShadowOnBody` is off.
    */
   readonly ring?: RingShadowRecord;
+  /**
+   * Its body's clouds this frame (plan R11, R11.T7.b; `LitBodyInput.clouds`), which its terrain's
+   * cloudy forms bind (`terrain/frameTerrain.ts`' `terrainLightingOf`); the disc and mesh regimes
+   * read none. Absent, its terrain draws by the plain forms.
+   */
+  readonly clouds?: CloudBodyGpu;
 }
 
 /** The pole's stretch M x = x + (a ÷ c − 1)(x · p) p. */

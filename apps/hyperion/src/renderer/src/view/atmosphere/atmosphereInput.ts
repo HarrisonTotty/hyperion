@@ -32,9 +32,10 @@ import type { BakeSpectrum } from "./spectralColour";
  * for both though they landed apart, since every cache keyed on it lasts one session. 5 since
  * R08.T3.e: a record that sends its vertical structure takes its column on the structure's nodes,
  * not isothermal at T_s. 6 since the owner's report of 2026-11-01: an aerosol mode's term takes
- * its τ over the whole sky, its coverage applied.
+ * its τ over the whole sky, its coverage applied. 7 since plan R11's R11.T7.b: the deck R11's
+ * clouds draw on a partly cloudy surface leaves its near medium, kept in its disc table's.
  */
-export const ATMOSPHERE_OPTICS_VERSION = 6;
+export const ATMOSPHERE_OPTICS_VERSION = 7;
 
 /** One star lighting a body, as `lightsAt` lists it: its body ID and its spectrum in the bake bins. */
 export interface BodyLight {

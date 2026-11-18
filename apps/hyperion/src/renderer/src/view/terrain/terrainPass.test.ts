@@ -76,6 +76,8 @@ import {
   terrainLitMaterialSpec,
 } from "./terrainMaterial";
 import { microtasks } from "../../test/opticsFakes";
+import { CLOUD_TEXTURES, type CloudBodyGpu } from "../clouds/cloudLayer";
+import { terrainLitCloudMaterialSpec } from "./cloudLight";
 import { lavaWorldSurface } from "../../test/thermalSurfaces";
 import { surfaceTemperatureFieldOf } from "../atmosphere/thermal";
 import {
@@ -339,6 +341,36 @@ function writtenSlots(engine: CountingRenderEngine, buffer = "terrain instances"
 afterEach(() => {
   performance.clearMeasures(SELECT_MEASURE);
 });
+
+/** A body's clouds on `engine`: its rows, its coverage texture and the noise tile. */
+function cloudsOn(engine: CountingRenderEngine): CloudBodyGpu {
+  return {
+    layer: engine.createBuffer({
+      name: "a body's cloud rows",
+      bytes: 544,
+      usage: 0,
+      category: "clouds",
+    }),
+    coverage: engine.createTexture({
+      name: "a body's cloud coverage",
+      size: { width: 256, height: 128 },
+      dimension: "2d",
+      format: "rgba16float",
+      mips: 1,
+      usage: 0,
+      category: "clouds",
+    }),
+    noise: engine.createTexture({
+      name: "the cloud noise",
+      size: { width: 64, height: 64, depthOrArrayLayers: 64 },
+      dimension: "3d",
+      format: "r8unorm",
+      mips: 1,
+      usage: 0,
+      category: "clouds",
+    }),
+  };
+}
 
 describe("the terrain pass", () => {
   it("submits one instanced draw whose instances are the drawn patches' slots", async () => {
@@ -1961,6 +1993,60 @@ describe("the lit terrain of a body (R10.T10.b)", () => {
     );
     expect(reported).toHaveBeenCalledWith(
       "the terrain's emissive form failed: its ground is drawn unlit by itself",
+      expect.any(Error),
+    );
+  });
+
+  it("draws a body under clouds by the plain form until its cloudy form is made, then by that, its clouds bound (R11.T7.b)", async () => {
+    const { pass, engine, view } = await bakedLitPass();
+    const clouds = cloudsOn(engine);
+    const lighting: TerrainFrameLighting = { ...LIGHTING, clouds };
+    const plain = pass.frame({ ...inputAt(view), lighting });
+    await microtasks();
+    const cloudy = pass.frame({ ...inputAt(view), lighting });
+    const path = pass.layout.vertexPath;
+    expect([plain, cloudy].map((frame) => frame.draws.at(-1)?.material.name)).toEqual([
+      stillMaterialSpec(terrainLitMaterialSpec(path)).name,
+      stillMaterialSpec(terrainLitCloudMaterialSpec(path)).name,
+    ]);
+    const draw = cloudy.draws.at(-1);
+    expect([
+      draw?.storageBuffers?.[CLOUD_TEXTURES.layer],
+      draw?.textures[CLOUD_TEXTURES.coverage],
+      draw?.textures[CLOUD_TEXTURES.noise],
+    ]).toEqual([clouds.layer, clouds.coverage, clouds.noise]);
+    // A frame without them goes back to the plain form.
+    const after = pass.frame({ ...inputAt(view), lighting: LIGHTING });
+    expect(after.draws.at(-1)?.material.name).toBe(
+      stillMaterialSpec(terrainLitMaterialSpec(path)).name,
+    );
+  });
+
+  it("draws an emitting body under clouds by its emissive form, which takes no clouds (R11.T7.b)", async () => {
+    const { pass, engine, view } = await bakedLitPass();
+    const lighting: TerrainFrameLighting = { ...EMITTING, clouds: cloudsOn(engine) };
+    pass.frame({ ...inputAt(view), lighting });
+    await microtasks();
+    const frame = pass.frame({ ...inputAt(view), lighting });
+    expect(frame.draws.at(-1)?.material.name).toBe(
+      stillMaterialSpec(terrainLitEmissiveMaterialSpec(pass.layout.vertexPath)).name,
+    );
+    expect(engine.compiles.some((made) => made.name.endsWith("-clouds"))).toBe(false);
+  });
+
+  it("reports a cloudy form the device refuses, and draws on by the plain form (R11.T7.b)", async () => {
+    const { pass, engine, view } = await bakedLitPass();
+    const reported = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    engine.failMaterials((name) => name.endsWith("-clouds"));
+    const lighting: TerrainFrameLighting = { ...LIGHTING, clouds: cloudsOn(engine) };
+    pass.frame({ ...inputAt(view), lighting });
+    await microtasks();
+    const frame = pass.frame({ ...inputAt(view), lighting });
+    expect(frame.draws.at(-1)?.material.name).toBe(
+      stillMaterialSpec(terrainLitMaterialSpec(pass.layout.vertexPath)).name,
+    );
+    expect(reported).toHaveBeenCalledWith(
+      "the terrain's lit-clouds form failed: its ground is drawn without its clouds' light",
       expect.any(Error),
     );
   });

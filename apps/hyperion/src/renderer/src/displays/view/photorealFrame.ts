@@ -23,6 +23,7 @@ import { atmosphereToBodyFixed, bodyAtmosphereCamera } from "../../view/atmosphe
 import { tablesFigureOf } from "../../view/atmosphere/hillaire";
 import type { AtmosphereTables } from "../../view/atmosphere/tables";
 import type { SurfaceTemperatureField } from "../../view/atmosphere/thermal";
+import type { BodyClouds } from "../../view/clouds/condensates";
 
 import { rotateToBody } from "../../view/coords/rotation";
 import { relativeToCamera } from "../../view/coords/relative";
@@ -183,6 +184,12 @@ export interface PhotorealInputs {
    * the frame draws no atmosphere.
    */
   readonly atmospheres?: ((body: BodyIdHex) => AtmosphereTables | null) | undefined;
+  /**
+   * What of a lit body's record its clouds read, as the view's atmosphere cache holds it (plan R11,
+   * R11.T7.b; `AtmosphereCache.entryOf(id).clouds`), `null` for none; read for the bodies whose air
+   * the frame draws. Absent, no clouds are drawn.
+   */
+  readonly clouds?: ((body: BodyIdHex) => BodyClouds | null) | undefined;
   /**
    * A lit body's ground temperature field as its record gives it (plan R08, R08.T18.a;
    * `AtmosphereCache.groundFieldOf`), `null` for one with a medium or no record held; absent, no
@@ -523,6 +530,7 @@ export function photorealFrame(inputs: PhotorealInputs): PhotorealFrame {
           tables,
           camera: air,
           toBodyFixed: atmosphereToBodyFixed(body),
+          clouds: inputs.clouds?.(body.id) ?? null,
         });
       }
     }
@@ -558,6 +566,9 @@ export function photorealFrame(inputs: PhotorealInputs): PhotorealFrame {
     atmosphereLevers: inputs.atmosphereLevers,
     floorLowest: inputs.floorLowest,
     exposureScale,
+    // The scene's clock, at which its clouds are drawn (plan R11, R11.T7.b).
+    time: scene.time,
+    timeRate: scene.timeRate,
     sky: [...(band === null ? [] : [band]), ...(inputs.cube === null ? [] : [inputs.cube])],
     starSprites: [...inputs.list.sprites.map(starRecord), ...hostSprites],
     hostDraws,

@@ -30,6 +30,7 @@ import {
   type BodyAtmosphereProblem,
 } from "../../view/atmosphere/labels";
 import type { AtmosphereTables } from "../../view/atmosphere/tables";
+import type { BodyClouds } from "../../view/clouds/condensates";
 import type { SurfaceTemperatureField } from "../../view/atmosphere/thermal";
 import type { BodyLightSources } from "../../view/bodies/draw";
 import type { LitRegime } from "../../view/bodies/regime";
@@ -52,6 +53,11 @@ export interface ViewAtmosphereInput {
   readonly view: AtmosphereView;
   /** A body's tables as the cache holds them now (`AtmosphereCache.entryOf(id).tables`). */
   readonly tablesOf: (body: BodyIdHex) => AtmosphereTables | null;
+  /**
+   * What of a body's record its clouds read, as the cache's drawn entry holds it (plan R11,
+   * R11.T7.b; `AtmosphereCache.entryOf(id).clouds`), `null` for none.
+   */
+  readonly cloudsOf: (body: BodyIdHex) => BodyClouds | null;
   /**
    * A body's ground temperature field from the record the cache holds (plan R08, R08.T18.a;
    * `AtmosphereCache.groundFieldOf`).
@@ -100,6 +106,7 @@ export class ViewAtmosphereHandle {
     return {
       view,
       tablesOf: (body) => cache.entryOf(body)?.tables ?? null,
+      cloudsOf: (body) => cache.entryOf(body)?.clouds ?? null,
       groundFieldOf: (body) => cache.groundFieldOf(body),
       discGroundOf: (body) => cache.discGroundOf(body),
       scene,

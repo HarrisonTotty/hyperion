@@ -158,6 +158,14 @@ export const TERRAIN_LIT_BINDINGS = {
    * `terrainLitShade.wgsl`'s `disc_normals`).
    */
   discNormals: 24,
+  /**
+   * The cloudy forms' clouds (plan R11, R11.T7.b; `cloudLight.ts`): the body's cloud rows, its
+   * coverage texture, the noise tile and their sampler, read by the fragment stage alone.
+   */
+  cloudLayer: 25,
+  cloudCoverage: 26,
+  cloudNoise: 27,
+  cloudSampler: 28,
 } as const;
 
 /**
