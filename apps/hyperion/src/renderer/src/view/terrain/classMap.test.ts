@@ -32,6 +32,7 @@ import {
   classMapLawsOf,
   classMapMeltOf,
   type ClassMapPool,
+  classMapSeabedAlbedoOf,
   ClassMapStore,
   classMapTexelsOf,
   normalMapTexelsOf,
@@ -42,7 +43,7 @@ import { MATURITY_NODES } from "./maturityNodes";
 import type { Face } from "./patchKey";
 import type { BodyFigure } from "./planet";
 import { materialFormName } from "./readouts";
-import { classRowLaw, MELT_CLASS_CODE, PHASE_LAW } from "./terrainMaterial";
+import { classRowLaw, MELT_CLASS_CODE, PHASE_LAW, SEABED_CLASS_CODE } from "./terrainMaterial";
 import { type ClassMapAnswer, PALETTE_NONE } from "./workers/messages";
 import { fnv1a64 } from "./workers/f32Digest";
 import type { FieldChange } from "./workers/pool";
@@ -249,6 +250,27 @@ describe("a class map from a worker's answer", () => {
     const molten = { ...answerOf(TEXELS), classes: Uint8Array.from([1, 0, MELT_CLASS_CODE, 1]) };
     expect(classMapMeltOf(molten)).toEqual([false, true]);
     expect(materialFormName(MELT_CLASS_CODE)).toBe("MELT");
+  });
+
+  it("takes its Seabed classes' mean albedo for its sea's bed, and none without one (R11.T8.b)", () => {
+    expect(classMapSeabedAlbedoOf(answerOf(TEXELS))).toBeNull();
+    // Both named classes are seabeds, the unnamed one too, which counts for nothing.
+    const seabed = {
+      ...answerOf(TEXELS),
+      classes: Uint8Array.from([
+        SEABED_CLASS_CODE,
+        0,
+        SEABED_CLASS_CODE,
+        1,
+        SEABED_CLASS_CODE,
+        PALETTE_NONE,
+      ]),
+    };
+    const albedo = classMapSeabedAlbedoOf(seabed);
+    // The photometry's B, V and R as r, g and b, the two classes' means.
+    [(0.12 + 0.9) / 2, (0.11 + 0.85) / 2, (0.1 + 0.8) / 2].forEach((expected, k) => {
+      expect(albedo?.[k]).toBeCloseTo(expected, 6);
+    });
   });
 
   it("is at level 6, 64 texels a face, each texel's weights taken at band level 0", () => {
@@ -597,6 +619,25 @@ describe("the class-map store", () => {
     expect(store.classMapOf(MOON, other)?.elsewhere).toBe(other);
     expect(store.classMapOf(MOON, other)?.texels).toBe(surface?.texels);
     expect(store.classMapOf("0200080020000000.0301", ELSEWHERE)).toBeNull();
+    // A map of no Seabed class gives the ocean no bed's albedo (R11.T8.b).
+    expect(store.seabedAlbedoOf(MOON)).toBeNull();
+    store.dispose();
+  });
+
+  it("gives the albedo of a held map's Seabed classes, and none for a body it does not hold (R11.T8.b)", async () => {
+    const engine = await countingRenderEngine();
+    const pool = new ScriptedPool();
+    const store = new ClassMapStore(engine, pool);
+    store.want(MOON, SEED);
+    expect(store.seabedAlbedoOf(MOON)).toBeNull();
+    const answer = {
+      ...answerOf(TEXELS),
+      classes: Uint8Array.from([SEABED_CLASS_CODE, 0, 4, 1, 2, PALETTE_NONE]),
+    };
+    pool.asked[0]?.resolve(answer);
+    await settle(store);
+    expect(store.seabedAlbedoOf(MOON)).toEqual(classMapSeabedAlbedoOf(answer));
+    expect(store.seabedAlbedoOf("0200080020000000.0301")).toBeNull();
     store.dispose();
   });
 

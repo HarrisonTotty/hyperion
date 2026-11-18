@@ -1,6 +1,8 @@
 /**
- * Plan R11, R11.T8.b's check on the run's adapter: the far ocean's WGSL (`ocean/oceanFar.wgsl`)
- * against its CPU twin (`ocean/oceanFar.ts`), through its probe kernel, in smoke part 27.
+ * Plan R11, R11.T8.b's checks on the run's adapter, in smoke part 27: the far ocean's WGSL
+ * (`ocean/oceanFar.wgsl`) against its CPU twin (`ocean/oceanFar.ts`), through its probe kernel, and
+ * the `ocean` pass that draws it (`ocean/oceanPass.wgsl`) against the same twin through the pass's
+ * own rays.
  *
  * @remarks
  * A level-5 water world under a 7 m/s wind, with a dry cell, a cell under ice, a closed basin 250 m
@@ -10,8 +12,26 @@
  * the limb, and over an oblate figure. Each ray's hit and radiance are held to the twin's, run on the
  * probe's own `f32` inputs: the same rays met or missed, the distance to 10⁻⁵, the radiance to 10⁻³
  * of the case's brightest.
+ *
+ * The pass draws the same world from two radii out into a 48 × 48 target with depth, lit by one
+ * source through the airless tables, so that each pixel's light is the twin's at the source's own
+ * light: each pixel's ray as the pass forms it (`oceanPassRay`), met or missed as the twin meets
+ * it, its radiance to 2 × 10⁻³ of the frame's brightest and its meter class the lit or unlit body's,
+ * a pixel at a cell's edge or the limb, where `f32` and `f64` part, let off up to 2% of the pixels.
+ * Then a flat wall drawn after it at the sea's median view depth, testing depth and writing none,
+ * stands in front of every pixel whose sea lies farther and behind every one whose sea lies nearer:
+ * the pass wrote its own depth, reversed-Z, and its test kept the nearer. A moon of 0.3 radii three
+ * radii towards the sun eclipses the sunward sea, each pixel's light dimmed as the twin's
+ * (`oceanSourceVisible`) dims it, its umbra unlit.
  */
-import { add, cross, normalise, scale, sub, type Vec3, vec3 } from "../geometry/vec3";
+import { add, cross, dot, normalise, scale, sub, type Vec3, vec3 } from "../geometry/vec3";
+import { createAirlessTables } from "../view/atmosphere/surfaceLighting";
+import { DISC_ANNULI_HIGH } from "../view/lighting/annuli";
+import { SUN_RADIUS_M } from "../view/lighting/hostDisc";
+import { hostAnnuli } from "../view/lighting/hostLights";
+import { AU_M } from "../view/scenes/kept";
+import { aHostDisc } from "../test/litFixtures";
+import { lookAlong } from "../view/camera/quaternion";
 import { OCEAN_FIXTURE_LEVEL, oceanCellCentre, waterWorldAnswer } from "../test/oceanFixtures";
 import { BUFFER_USAGE, TEXTURE_USAGE } from "../view/engine/gpuFlags";
 import type { ComputeHandle, RenderEngine, TextureHandle } from "../view/engine/types";
@@ -30,12 +50,41 @@ import {
   packOceanFarProbe,
   packOceanRays,
 } from "../view/ocean/oceanFarProbe";
-import { OCEAN_MAP_FORMAT, type OceanTexels, packOceanTexels } from "../view/ocean/oceanMap";
-import { oceanMaskOf } from "../view/ocean/oceanMask";
+import {
+  type HeldOceanMap,
+  OCEAN_MAP_FORMAT,
+  type OceanTexels,
+  packOceanTexels,
+} from "../view/ocean/oceanMap";
+import { type OceanMask, oceanMaskOf } from "../view/ocean/oceanMask";
+import { type OceanSea, STANDARD_GRAVITY_MPS2 } from "../view/ocean/oceanBody";
+import {
+  OCEAN_ECLIPSE_ROWS,
+  OCEAN_FAR_PASS_MATERIAL,
+  OCEAN_LIT_SHARE,
+  type OceanDrawView,
+  oceanDrawOptics,
+  type OceanEclipse,
+  oceanPassDraw,
+  oceanPassRay,
+  oceanPassUniforms,
+  oceanSourceVisible,
+  packOceanEclipse,
+} from "../view/ocean/oceanPass";
+import { BLOOM_THRESHOLD_EXPOSED } from "../view/post/bloom";
+import type { OceanMapAnswer } from "../view/terrain/workers/messages";
 import { EARTH_SEA } from "../view/ocean/seaState";
 import { fieldCellIndex } from "../view/terrain/coverage";
 import { OCEAN_MAP_WIND_BYTES } from "../view/terrain/workers/messages";
-import type { Checks } from "./harness";
+import {
+  type Checks,
+  drawOf,
+  flatSpec,
+  frameOf,
+  fullScreenMesh,
+  halfTexels,
+  projection,
+} from "./harness";
 
 /** Earth's mean radius, m. */
 const R = 6_371_000;
@@ -63,6 +112,15 @@ const UNSURVEYED = { face: 0, i: 7, j: 4 } as const;
 
 /** The ocean map: a water world, its special cells in place and one cell left unsurveyed. */
 function oceanTexels(): OceanTexels {
+  return oceanWorld().texels;
+}
+
+/** The ocean map's answer, its mask and its texels (see {@link oceanTexels}). */
+function oceanWorld(): {
+  readonly answer: OceanMapAnswer;
+  readonly mask: OceanMask;
+  readonly texels: OceanTexels;
+} {
   const world = waterWorldAnswer(4000, 64, 152, [
     { ...DRY, depthM: 0, levelM: 300, ice: 0 },
     { ...ICED, depthM: 30, levelM: 0, ice: 255 },
@@ -78,7 +136,8 @@ function oceanTexels(): OceanTexels {
     ice: Uint8Array.from(kept, (k) => world.ice[k] ?? 0),
     winds: keptWinds(world.winds, kept),
   };
-  return packOceanTexels(answer, oceanMaskOf(answer), { from: 0, to: 0, weight: 0 });
+  const mask = oceanMaskOf(answer);
+  return { answer, mask, texels: packOceanTexels(answer, mask, { from: 0, to: 0, weight: 0 }) };
 }
 
 /** The winds of the answer's places `kept`, in their order. */
@@ -352,4 +411,257 @@ export async function checkOceanFar(engine: RenderEngine, checks: Checks): Promi
     );
   }
   engine.releaseTexture(oceanMap);
+}
+
+/** The pass check's target's side, px. */
+const PASS_SIDE_PX = 48;
+
+/** The share of the pass check's pixels let off at cells' edges and the limb. */
+const PASS_EDGE_SHARE = 0.02;
+
+/** The wall's tint's alpha, a meter class no pass writes, by which a pixel the wall drew is told. */
+const WALL_ALPHA = 7;
+
+/** The pass check's sun: from the body's centre, body-fixed. */
+const PASS_SUN = normalise(vec3(1, 0.4, 0.3));
+
+/** The pass check's eclipse: the Sun at 1 au and a moon of 0.3 radii three radii towards it. */
+function passEclipse(): OceanEclipse {
+  return {
+    lights: [
+      {
+        direction: PASS_SUN,
+        distance: AU_M / R,
+        radius: SUN_RADIUS_M / R,
+        illuminance: [1.1e5, 1.2e5, 1.25e5],
+        annuli: hostAnnuli(aHostDisc(), DISC_ANNULI_HIGH),
+      },
+    ],
+    occluders: [{ centre: scale(PASS_SUN, 3), radius: 0.3 }],
+    radiusM: R,
+  };
+}
+
+/** The pass check's view: the water world from two radii out on +x, lit obliquely, pre-exposed. */
+function passView(map: HeldOceanMap): OceanDrawView {
+  const sea: OceanSea = {
+    body: "0200080020000000.0300",
+    map,
+    substance: "H2O",
+    liquid: WATER,
+    air: EARTH_SEA.air,
+    equatorialRadiusM: R,
+    polarRadiusM: R,
+    seaLevelM: 0,
+    surfaceGravityMps2: null,
+    bedAlbedo: [0.3, 0.3, 0.25],
+  };
+  return {
+    sea,
+    camera: { positionM: vec3(2 * R, 0, 0), orientation: lookAlong(vec3(-1, 0, 0), vec3(0, 0, 1)) },
+    gravityMps2: STANDARD_GRAVITY_MPS2,
+    figureOnDatum: false,
+    suns: [
+      {
+        directionBodyFixed: PASS_SUN,
+        illuminanceLx: [1.1e5, 1.2e5, 1.25e5],
+        angularRadiusRad: 4.65e-3,
+        curveSlot: 0,
+      },
+    ],
+    eclipse: passEclipse(),
+    exposureScale: 1e-5,
+    thresholdPreExposed: BLOOM_THRESHOLD_EXPOSED,
+    pixelAngleRad: 2 / PASS_SIDE_PX,
+    whitecaps: true,
+  };
+}
+
+/**
+ * Each pixel's twin: its ray's view length, what it meets of the sea, lit as the pass lights it, its
+ * source's light dimmed by its eclipse at the hit, and that light's share.
+ */
+function passTwins(view: OceanDrawView): ReadonlyArray<{
+  readonly viewLength: number;
+  readonly sample: ReturnType<typeof oceanFarSample>;
+  readonly visible: number;
+}> {
+  const size = { widthPx: PASS_SIDE_PX, heightPx: PASS_SIDE_PX };
+  const sun = view.suns[0];
+  const e = view.exposureScale;
+  const light = sun?.illuminanceLx ?? [0, 0, 0];
+  // Through the airless tables the source reaches the sea whole and no sky lights it; every value
+  // pre-exposed, as the pass draws.
+  const optics = onProbeInputs({
+    ...oceanDrawOptics(view),
+    glintCapCdM2: view.thresholdPreExposed,
+    sunLux: [light[0] * e, light[1] * e, light[2] * e],
+    skyLux: [0, 0, 0],
+  });
+  const f = Math.fround;
+  const o = view.camera.positionM;
+  const origin = vec3(f(o.x), f(o.y), f(o.z));
+  const twins = [];
+  for (let y = 0; y < PASS_SIDE_PX; y += 1) {
+    for (let x = 0; x < PASS_SIDE_PX; x += 1) {
+      const ray = oceanPassRay(x, y, size, projection(1), view.camera.orientation);
+      const d = ray.direction;
+      const direction = vec3(f(d.x), f(d.y), f(d.z));
+      const whole = oceanFarSample(optics, view.sea.map.texels, origin, direction);
+      const shares =
+        whole === null
+          ? ([1, 1, 1] as const)
+          : oceanSourceVisible(view.eclipse, 0, whole.hit.point);
+      const dimmed =
+        whole === null || shares.every((share) => share === 1)
+          ? whole
+          : oceanFarSample(
+              {
+                ...optics,
+                sunLux: [
+                  optics.sunLux[0] * shares[0],
+                  optics.sunLux[1] * shares[1],
+                  optics.sunLux[2] * shares[2],
+                ],
+              },
+              view.sea.map.texels,
+              origin,
+              direction,
+            );
+      twins.push({ viewLength: ray.viewLength, sample: dimmed, visible: Math.max(...shares) });
+    }
+  }
+  return twins;
+}
+
+/** R11.T8.b: the `ocean` pass draws the far sea as its twin does, and writes its depth. */
+export async function checkOceanPass(engine: RenderEngine, checks: Checks): Promise<void> {
+  const world = oceanWorld();
+  const side = world.texels.faceTexels;
+  const oceanMap = engine.createTexture({
+    name: "smoke ocean pass map",
+    size: { width: side, height: side, depthOrArrayLayers: 6 },
+    dimension: "2d",
+    format: OCEAN_MAP_FORMAT,
+    mips: 1,
+    usage: TEXTURE_USAGE.TEXTURE_BINDING | TEXTURE_USAGE.COPY_DST,
+    category: "ocean",
+  });
+  engine.writeTexture(
+    oceanMap,
+    { x: 0, y: 0, z: 0 },
+    { width: side, height: side, depthOrArrayLayers: 6 },
+    world.texels.data,
+  );
+  const airless = createAirlessTables(engine, "smoke ocean pass: no air");
+  const target = engine.createRenderTarget({
+    name: "smoke ocean pass",
+    size: { widthPx: PASS_SIDE_PX, heightPx: PASS_SIDE_PX },
+    format: "rgba16float",
+    mips: 1,
+    depth: true,
+    category: "render-targets",
+  });
+  const material = engine.createMaterial(OCEAN_FAR_PASS_MATERIAL);
+  const triangle = fullScreenMesh(engine, "smoke ocean pass triangle");
+  const view = passView({ ...world, texture: oceanMap });
+  const eclipseRows = engine.createBuffer({
+    name: "smoke ocean pass eclipse",
+    bytes: 16 * OCEAN_ECLIPSE_ROWS,
+    usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST,
+    category: "ocean",
+  });
+  engine.writeBuffer(eclipseRows, 0, packOceanEclipse(view.eclipse));
+  try {
+    target.render(
+      frameOf("smoke ocean pass", [
+        oceanPassDraw(triangle, material, oceanMap, airless, eclipseRows, oceanPassUniforms(view)),
+      ]),
+    );
+    const sea = halfTexels(await engine.readTexture(target.colour));
+    const twins = passTwins(view);
+    const brightest = Math.max(
+      1e-30,
+      ...twins.flatMap(({ sample }) => (sample === null ? [] : sample.light.radiance)),
+    );
+    let met = 0;
+    let parted = 0;
+    let unlike = 0;
+    let umbra = 0;
+    let first: string | null = null;
+    for (const [p, { sample, visible }] of twins.entries()) {
+      const alpha = sea[4 * p + 3] ?? Number.NaN;
+      const drawn = alpha === 2 || alpha === 3;
+      if (drawn !== (sample !== null)) {
+        parted += 1;
+        first ??= `pixel ${p}: the pass ${drawn ? "drew" : "left"} it, the twin ${sample === null ? "missed" : "met"} the sea`;
+        continue;
+      }
+      if (sample === null) {
+        continue;
+      }
+      met += 1;
+      umbra += visible < OCEAN_LIT_SHARE ? 1 : 0;
+      const sun = view.suns[0]?.directionBodyFixed ?? vec3(0, 0, 0);
+      const lit = dot(sample.hit.normal, sun) > 0 && visible > OCEAN_LIT_SHARE;
+      const off = [0, 1, 2].some((k) => {
+        const expected = sample.light.radiance[k] ?? 0;
+        return !(
+          Math.abs((sea[4 * p + k] ?? Number.NaN) - expected) <=
+          2e-3 * brightest + 2e-3 * expected
+        );
+      });
+      if (off || alpha !== (lit ? 2 : 3)) {
+        unlike += 1;
+        first ??= `pixel ${p}: (${[0, 1, 2, 3].map((k) => sea[4 * p + k]).join(", ")}) against (${sample.light.radiance.join(", ")}, ${lit ? 2 : 3})`;
+      }
+    }
+    const pixels = PASS_SIDE_PX * PASS_SIDE_PX;
+    checks.check(
+      "R11.T8.b the ocean pass draws the far sea as its twin does, through its own rays",
+      met > pixels / 10 && umbra > 0 && parted + unlike <= PASS_EDGE_SHARE * pixels,
+      `${met} pixels met the sea, ${umbra} of them in the moon's umbra, ${parted} parted from the twin, ${unlike} unlike it${first === null ? "" : `; first ${first}`}`,
+    );
+    // A wall at the median view depth of the sea, drawn after it, testing the sea's depth.
+    const depths = twins
+      .flatMap(({ sample, viewLength }) => (sample === null ? [] : [sample.hit.tM / viewLength]))
+      .toSorted((a, b) => a - b);
+    const wallM = depths[Math.floor(depths.length / 2)] ?? 2 * R;
+    const wall = engine.createMaterial(flatSpec("smoke ocean depth wall", { depthWrite: false }));
+    const wallMesh = fullScreenMesh(engine, "smoke ocean depth wall mesh", -wallM);
+    try {
+      target.render({
+        ...frameOf("smoke ocean depth wall", [drawOf(wallMesh, wall, [0, 0, 0, WALL_ALPHA])]),
+        colourLoad: "load",
+      });
+      const walled = halfTexels(await engine.readTexture(target.colour));
+      let wrong = 0;
+      let nearer = 0;
+      twins.forEach(({ sample, viewLength }, p) => {
+        const alpha = walled[4 * p + 3] ?? Number.NaN;
+        const z = sample === null ? Number.POSITIVE_INFINITY : sample.hit.tM / viewLength;
+        if (z < wallM * (1 - 1e-4)) {
+          nearer += 1;
+          wrong += alpha === WALL_ALPHA ? 1 : 0;
+        } else if (z > wallM * (1 + 1e-4)) {
+          wrong += alpha === WALL_ALPHA ? 0 : 1;
+        }
+      });
+      checks.check(
+        "R11.T8.b the ocean pass writes its sea's depth, which hides what lies behind it",
+        nearer > 0 && wrong <= PASS_EDGE_SHARE * pixels,
+        `the wall at ${wallM.toExponential(4)} m: ${nearer} pixels of sea nearer, ${wrong} wrong`,
+      );
+    } finally {
+      engine.releaseMaterial(wall);
+      engine.releaseMesh(wallMesh);
+    }
+  } finally {
+    target.dispose();
+    engine.releaseBuffer(eclipseRows);
+    engine.releaseMaterial(material);
+    engine.releaseMesh(triangle);
+    engine.releaseTexture(airless.body);
+    engine.releaseTexture(oceanMap);
+  }
 }

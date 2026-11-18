@@ -163,7 +163,7 @@ describe("PASS_ROWS", () => {
     expect(TIMED_PASSES.map(([label]) => [label, passStyleOf(label)])).toEqual(
       TIMED_PASSES.map(([label, style]) => [label, style]),
     );
-    expect(passStyleOf("ocean")).toBeNull();
+    expect(passStyleOf("rings")).toBeNull();
   });
 
   it("holds keys of known roles only", () => {
@@ -175,7 +175,7 @@ describe("PASS_ROWS", () => {
 
 describe("an unmapped pass", () => {
   it("throws, naming its role and label", () => {
-    expect(() => passRowOf("primary", "ocean")).toThrow(UnmappedPass);
+    expect(() => passRowOf("primary", "rings")).toThrow(UnmappedPass);
     expect(() => passRowOf("station", PHOTOREAL_PASS_LABELS.bodies)).toThrow(
       "station:bodies has no row",
     );

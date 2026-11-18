@@ -22,7 +22,8 @@
  *   again after each of its blocks that surveys a cell, starts the field afresh, or brings a cell
  *   while the map lacks a climate record, as R10's class-map store does; packs it in the frames'
  *   slices ({@link OceanMapStore.step}); remakes its texture after a device loss; and releases it
- *   with the body. No pass draws it yet: the `ocean` pass that reads it is wired later (wave 2).
+ *   with the body; a sea of no open water holds no texture. The terrain session holds the store
+ *   (`TerrainSession.oceans`), and the photorealistic renderer's `ocean` pass reads it.
  */
 import type { BodyIdHex } from "@hyperion/protocol";
 
@@ -380,7 +381,10 @@ export class OceanMapStore {
     }
   }
 
-  /** `body`'s sea as uploaded, or `null` where it has none or its texture is not made (the device lost). */
+  /**
+   * `body`'s sea as uploaded, or `null` where it has none, no open water, or its texture is not made
+   * (the device lost).
+   */
   oceanMapOf(body: BodyIdHex): HeldOceanMap | null {
     const held = this.#bodies.get(body);
     if (
@@ -528,11 +532,16 @@ export class OceanMapStore {
 
   /**
    * Writes `held`'s texels into its texture, making it first where there is none; nothing while the
-   * device is lost, the restore making it from the texels held.
+   * device is lost, the restore making it from the texels held. A sea of no open water holds no
+   * texture, a dry world's up to 3 MiB: its texture is released and none is made.
    */
   #upload(held: HeldBody): void {
     const texels = held.texels;
     if (texels === null) {
+      return;
+    }
+    if (held.mask?.openCells === 0) {
+      this.#releaseTexture(held);
       return;
     }
     if (held.texture === null) {

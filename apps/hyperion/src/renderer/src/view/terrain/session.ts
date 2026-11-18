@@ -10,7 +10,8 @@
  *   for each wanted body a {@link CoverageMask} (T10.c), fed from the pool's `onFieldChange` (each
  *   block's newly surveyed cells, at once) and from the store's coverage, and forgotten when the
  *   workers drop the body's field; T10.d's {@link ClassMapStore}, which asks for a body's map once
- *   its detail seed is held; and the detail seed itself.
+ *   its detail seed is held; the detail seed itself; and plan R11's {@link OceanMapStore}
+ *   (R11.T8.b), which asks for the ocean map of a body whose header names a main liquid.
  * - **The views.** Each view's loop tells the session what it drew each frame it draws
  *   ({@link TerrainSession.noteView}: its scene, pose, field of view, presented size, style, the
  *   setting, its budget's streaming priority and its last plan's regimes), and the primary's frame
@@ -27,8 +28,16 @@
  *   {@link TerrainSession.setLinkUp} the link's state: each asks the store for the new cells with the
  *   revision held.
  * - **What it gives the views**: {@link TerrainSession.classMaps} and {@link TerrainSession.reliefsFor},
- *   `PhotorealInputs`' `classMaps` and `reliefs`, for every view's frames.
- * - **Memory.** The masks and maps are under `coarse-field-gpu` (R12 Design note 6); the
+ *   `PhotorealInputs`' `classMaps` and `reliefs`, and {@link TerrainSession.oceans}, its `oceans`
+ *   (plan R11, R11.T8.b), for every view's frames.
+ * - **The seas (plan R11, R11.T8.b).** Each wanted body whose header names a main liquid has its ocean
+ *   map asked for, its winds blended at its seasonal orbit's mean anomaly at the scene's time, as the
+ *   readout's season is found ({@link TerrainSession.readoutSeasonRad}; periapsis where no orbit is
+ *   held), and packed in the frame's slice after the class maps' takes; it is released with the
+ *   body. {@link TerrainSession.oceans} gives each body's sea with its header's liquid, air, datum
+ *   and sea level and its class map's `Seabed` albedo.
+ * - **Memory.** The masks and maps are under `coarse-field-gpu` (R12 Design note 6), the ocean maps
+ *   under `ocean`; the
  *   session's report ({@link TerrainSession.memory}) gives the workers' copies of the fields, the
  *   pool's kept blocks and the session's own GPU bytes by category.
  * - **The shadow cascades (R10.T9.b; Design note 11; decision-r10-t9b-design D2, D3 and D9).** The
@@ -113,6 +122,7 @@ import {
   bodyDetailSeed,
   bodyRecordOrbit,
   bodyRecordSeasons,
+  bodyRecordSurfaceGravity,
   type RecordSeasons,
   toBodyDetailRequest,
 } from "../../lib/system/bodiesWire";
@@ -157,6 +167,8 @@ import {
   type TerrainFault,
 } from "./annunciation";
 import { type ClassMapSource, ClassMapStore } from "./classMap";
+import { type OceanSea, oceanSeaOf, type OceanSource } from "../ocean/oceanBody";
+import { OceanMapStore } from "../ocean/oceanMap";
 import {
   CoarseFieldStore,
   type FieldCandidate,
@@ -964,6 +976,11 @@ interface SessionBody {
   /** The orbit that sets its seasons, from the record its seed is read from (R10.T12). */
   season: SeasonState;
   /**
+   * Its bulk surface gravity, m/s², from the same record (plan R11, R11.T8.b), its sea's where its
+   * air is not drawn; `null` before the record, or for a kept scene's body.
+   */
+  surfaceGravityMps2: number | null;
+  /**
    * The store's latest coverage held back from the mask while its pass's rebakes are due, with the
    * blocks posted when it came, which the workers must take first.
    */
@@ -1028,6 +1045,19 @@ export class TerrainSession {
   readonly #pool: HeightWorkerPool;
   readonly #store: CoarseFieldStore;
   readonly #classMaps: ClassMapStore;
+  /** The bodies' ocean maps (plan R11, R11.T8.b), asked for where a header names a main liquid. */
+  readonly #oceanMaps: OceanMapStore;
+  /** Each body's sea as last handed out, with what it was made from (R11.T8.b). */
+  readonly #seas = new Map<
+    BodyIdHex,
+    {
+      readonly from: readonly [unknown, unknown, unknown, unknown, unknown];
+      readonly sea: OceanSea | null;
+    }
+  >();
+  readonly #oceanSource: OceanSource = { oceanOf: (body) => this.#oceanOf(body) };
+  /** The bodies whose sea's season could not be found, reported once each (R11.T8.b). */
+  readonly #seasonReported = new Set<BodyIdHex>();
   readonly #reliefs: HandoverReliefSource;
   readonly #engine: RenderEngine;
   /** The materials every pass draws with, compiled at its making on its setting (R10.T14.d). */
@@ -1123,6 +1153,7 @@ export class TerrainSession {
       ...(options.scope === undefined ? {} : { scope: options.scope }),
     });
     this.#classMaps = new ClassMapStore(this.#textures, pool);
+    this.#oceanMaps = new OceanMapStore(this.#textures, pool);
     this.#reliefs = storeReliefSource(this.#store);
     this.#unsubscribe = [
       pool.onFieldChange((change) => {
@@ -1160,6 +1191,15 @@ export class TerrainSession {
    */
   get classMaps(): ClassMapSource {
     return this.#classMaps;
+  }
+
+  /**
+   * The seas every view's photorealistic frames draw (plan R11, R11.T8.b; `PhotorealInputs.oceans`):
+   * a wanted body's once its header names a main liquid whose record it carries and its ocean map
+   * holds open water.
+   */
+  get oceans(): OceanSource {
+    return this.#oceanSource;
   }
 
   /**
@@ -1427,6 +1467,12 @@ export class TerrainSession {
     // switch.
     const sliceStartMs = sliceClock();
     this.#classMaps.step(CLASS_MAP_POINT_SLICE_MS, sliceClock);
+    // The seas' winds at the scene's season, then their packing in what is left (plan R11, R11.T8.b).
+    this.#seasonOceans();
+    this.#oceanMaps.step(
+      Math.max(0, CLASS_MAP_POINT_SLICE_MS - (sliceClock() - sliceStartMs)),
+      sliceClock,
+    );
     stepClassMapPoints(
       Math.max(0, CLASS_MAP_POINT_SLICE_MS - (sliceClock() - sliceStartMs)),
       sliceClock,
@@ -1449,6 +1495,7 @@ export class TerrainSession {
       this.#store.follow(candidates);
       this.#followWants();
     }
+    this.#followOceans();
     if (this.#computationFailed) {
       // Halted for good (R10.T16.e): no pass is stepped or made, and the fault follows the views.
       this.#followFaults(handingIds(this.#handingViews(), this.#wireHandingViews()));
@@ -1456,6 +1503,86 @@ export class TerrainSession {
     }
     this.#stepPasses();
     this.#stepDetailSets();
+  }
+
+  /**
+   * Asks for the ocean map of each held body whose header names a main liquid, and lets go of the
+   * map of one whose header no longer does (plan R11, R11.T8.b); a body dropped lets its map go with
+   * it ({@link TerrainSession}'s `#drop`).
+   */
+  #followOceans(): void {
+    for (const body of this.#bodies.keys()) {
+      const liquid = this.#store.header(body)?.main_liquid ?? null;
+      if (liquid === null) {
+        this.#oceanMaps.release(body);
+        this.#seas.delete(body);
+      } else {
+        this.#oceanMaps.want(body);
+      }
+    }
+  }
+
+  /**
+   * Sets each sea's winds at its seasonal orbit's mean anomaly at its scene's time (plan R11,
+   * R11.T8.b; Design note 19), periapsis where no orbit of it is held.
+   */
+  #seasonOceans(): void {
+    for (const body of this.#oceanMaps.bodies) {
+      const seen = this.#sceneBody(body);
+      if (seen === null) {
+        continue;
+      }
+      let meanAnomalyRad: number | undefined;
+      try {
+        meanAnomalyRad = this.readoutSeasonRad(body, seen.time);
+      } catch (error: unknown) {
+        if (!(error instanceof RangeError)) {
+          throw error;
+        }
+        if (!this.#seasonReported.has(body)) {
+          this.#seasonReported.add(body);
+          console.warn(
+            `the season of ${body}'s sea could not be found; it is taken at periapsis:`,
+            error,
+          );
+        }
+      }
+      this.#oceanMaps.season(body, meanAnomalyRad ?? 0);
+    }
+  }
+
+  /**
+   * `body`'s sea (plan R11, R11.T8.b; {@link TerrainSession.oceans}): the same object frame after
+   * frame until its map, texture, header or bed's albedo changes; `null` where it has none, and for
+   * a record the module cannot read, reported once.
+   */
+  #oceanOf(body: BodyIdHex): OceanSea | null {
+    if (this.#disposed) {
+      return null;
+    }
+    const map = this.#oceanMaps.oceanMapOf(body);
+    const header = this.#store.header(body);
+    if (map === null || header === null) {
+      return null;
+    }
+    const bed = this.#classMaps.seabedAlbedoOf(body);
+    const gravity = this.#bodies.get(body)?.surfaceGravityMps2 ?? null;
+    const from = [map.texels, map.texture, header, bed, gravity] as const;
+    const held = this.#seas.get(body);
+    if (held !== undefined && held.from.every((each, k) => each === from[k])) {
+      return held.sea;
+    }
+    let sea: OceanSea | null = null;
+    try {
+      sea = oceanSeaOf(header, map, bed, gravity);
+    } catch (error: unknown) {
+      if (!(error instanceof RangeError)) {
+        throw error;
+      }
+      console.error(`the sea of ${body} could not be drawn:`, error);
+    }
+    this.#seas.set(body, { from, sea });
+    return sea;
   }
 
   /**
@@ -1761,7 +1888,7 @@ export class TerrainSession {
   /**
    * Tears the session down, in order: its passes (their resources and meshes released, their lanes
    * ended), the terrain's materials (R10.T14.d), the shadow cascades and their placeholder
-   * (R10.T9.b), the class-map store, the masks (with the detail
+   * (R10.T9.b), the class-map and ocean-map stores, the masks (with the detail
    * seeds' requests and the session's listeners), the store (its requests cancelled and its fields
    * released) and the pool (its workers terminated). Nothing is left: no worker, request, timer,
    * listener or GPU handle.
@@ -1782,6 +1909,8 @@ export class TerrainSession {
     this.#wireHanded.clear();
     this.#faultListeners.clear();
     this.#classMaps.dispose();
+    this.#oceanMaps.dispose();
+    this.#seas.clear();
     for (const unsubscribe of this.#unsubscribe) {
       unsubscribe();
     }
@@ -2221,6 +2350,7 @@ export class TerrainSession {
       survey: new SurveyedCells(),
       seed: { kind: "none" },
       season: { kind: "none" },
+      surfaceGravityMps2: null,
       pendingCoverage: null,
       epoch: 0,
     };
@@ -2251,6 +2381,9 @@ export class TerrainSession {
       held.season.cancel();
     }
     this.#classMaps.release(body);
+    this.#oceanMaps.release(body);
+    this.#seas.delete(body);
+    this.#seasonReported.delete(body);
     held.mask.release();
   }
 
@@ -2300,6 +2433,7 @@ export class TerrainSession {
       }
       if (outcome.ok) {
         const { record } = outcome.response;
+        held.surfaceGravityMps2 = bodyRecordSurfaceGravity(record);
         const seed = bodyDetailSeed(record);
         if (seed === null) {
           held.seed = { kind: "none" };

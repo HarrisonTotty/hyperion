@@ -7,6 +7,13 @@ import { TEST_STILL_REQUEST } from "../../test/stillFixtures";
 import { type BodyFramePlan, planLitBodies } from "../bodies/draw";
 import { NEAR_PLANE_M, perspectiveReversedInfinite } from "../camera/projection";
 import { IDENTITY_QUATERNION } from "../camera/quaternion";
+import { sphereFootprint } from "../bodies/regime";
+import { IDENTITY_ROTATION } from "../coords/rotation";
+import { oceanSeaOf } from "../ocean/oceanBody";
+import { oceanMapTextureSpec, packOceanTexels } from "../ocean/oceanMap";
+import { oceanMaskOf } from "../ocean/oceanMask";
+import { GLARE_SOURCE_BYTES } from "../post/bloomChain";
+import { waterWorldAnswer, waterWorldHeader } from "../../test/oceanFixtures";
 import type { FrameSubmission, PassTimes, TexelRect, ViewSize } from "../engine/types";
 import { DISC_ANNULI_HIGH } from "../lighting/annuli";
 import { PLANETSHINE_SOURCES_HIGH } from "../lighting/planetshine";
@@ -300,6 +307,80 @@ describe("the photorealistic still renderer (R11.T10.b)", () => {
       engine.counts.materials - made.materials,
       engine.counts.kernels - made.kernels,
     ]).toEqual([true, true, 0, 0]);
+    renderer.dispose();
+  });
+
+  it("tone-maps a sea's glint past the threshold as a glare source, its buffer sized for it (R11.T8.b)", async () => {
+    const engine = await countingRenderEngine();
+    const lit = aLitBody();
+    const centreM = vec3(0, 0, -3e7);
+    const camera = { orientation: IDENTITY_QUATERNION, fovXRad: FOV_X_RAD };
+    // A depth writer over the planet, standing for terrain, so that it is drawn as a mesh.
+    const writer = sphereFootprint(centreM, lit.figure.equatorialRadiusM, camera, SIZE);
+    const answer = waterWorldAnswer(4000, 64, 152);
+    const mask = oceanMaskOf(answer);
+    const sea = oceanSeaOf(
+      {
+        ...waterWorldHeader(lit.body),
+        equatorial_radius_m: lit.figure.equatorialRadiusM,
+        polar_radius_m: lit.figure.polarRadiusM,
+      },
+      {
+        answer,
+        mask,
+        texels: packOceanTexels(answer, mask, { from: 0, to: 0, weight: 0 }),
+        texture: engine.createTexture(oceanMapTextureSpec(`ocean map ${lit.body}`, answer.level)),
+      },
+      null,
+    );
+    if (sea === null) {
+      throw new Error("the water world has a sea");
+    }
+    const base = viewFrame();
+    const [planet] = base.bodies;
+    if (planet === undefined) {
+      throw new Error("the view's frame has its body");
+    }
+    const frame: PhotorealFrame = {
+      ...base,
+      exposureScale: 1e-2,
+      lights: [{ disc: aHostDisc(), centreM: vec3(AU_M, 0, centreM.z) }],
+      bodies: [{ ...planet, centreM, rotation: IDENTITY_ROTATION }],
+      depthWriters: writer === null ? [] : [writer],
+      oceans: [
+        {
+          id: lit.body,
+          sea,
+          camera: {
+            positionM: vec3(0, 0, 3e7),
+            orientation: IDENTITY_QUATERNION,
+            fovXRad: FOV_X_RAD,
+            viewport: SIZE,
+          },
+          toBodyFixed: IDENTITY_QUATERNION,
+        },
+      ],
+    };
+    const made: Array<{ readonly name: string; readonly bytes: number }> = [];
+    engine.onAllocation((event) => {
+      if (event.kind === "created") {
+        made.push({ name: event.name, bytes: event.bytes });
+      }
+    });
+    const renderer = new PhotorealStillRenderer(engine, frame, {
+      tileLimitPx: 64,
+      samples: 1,
+      onUnitTimes: () => undefined,
+      onDispose: () => undefined,
+    });
+    await renderer.prepare();
+    submitAll(renderer);
+    const tone = stillPasses(engine).find((each) => each.label === "still tonemap");
+    expect(tone?.draws[0]?.uniforms["sourceCount"]?.[0]).toBe(1);
+    // The still's own buffer, beside its scene renderer's of eight: the frame's none and its sea's one.
+    expect(
+      made.filter((each) => each.name === "still glare sources").map((each) => each.bytes),
+    ).toEqual([8 * GLARE_SOURCE_BYTES, GLARE_SOURCE_BYTES]);
     renderer.dispose();
   });
 

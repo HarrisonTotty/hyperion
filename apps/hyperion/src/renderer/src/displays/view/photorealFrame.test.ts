@@ -54,6 +54,10 @@ import type { ViewRole } from "../../view/camera/state";
 import { IDENTITY_ROTATION } from "../../view/coords/rotation";
 import type { TextureHandle } from "../../view/engine/types";
 import type { ClassMapSource } from "../../view/terrain/classMap";
+import { type OceanSea, oceanSeaOf, type OceanSource } from "../../view/ocean/oceanBody";
+import { packOceanTexels } from "../../view/ocean/oceanMap";
+import { oceanMaskOf } from "../../view/ocean/oceanMask";
+import { waterWorldAnswer, waterWorldHeader } from "../../test/oceanFixtures";
 import { sceneHostDiscs } from "../../view/lighting/hostLights";
 import type { ViewRing, ViewScene } from "../../view/scene/model";
 import { aViewRing } from "../../test/ringFixtures";
@@ -91,6 +95,26 @@ const NO_TERRAIN = {
   opaqueDraws: () => [],
 };
 
+/** A water world's sea for `body`, its map's texture a stand-in handle. */
+function waterSeaOf(body: string): OceanSea {
+  const answer = waterWorldAnswer(4000, 64, 152);
+  const mask = oceanMaskOf(answer);
+  const sea = oceanSeaOf(
+    waterWorldHeader(body),
+    {
+      answer,
+      mask,
+      texels: packOceanTexels(answer, mask, { from: 0, to: 0, weight: 0 }),
+      texture: { kind: "texture", name: `ocean map ${body}` },
+    },
+    null,
+  );
+  if (sea === null) {
+    throw new Error("the water world has a sea");
+  }
+  return sea;
+}
+
 /** A lit body lit as a static scene's: by the frame's hosts and the bodies where drawn. */
 function drawnOnly(body: LitBodyInput): LitBodyInput {
   return { ...body, lighting: undefined };
@@ -116,7 +140,13 @@ async function frameOfPhaseScene(
   sources: Partial<
     Pick<
       PhotorealInputs,
-      "classMaps" | "reliefs" | "terrain" | "atmosphereFailed" | "setting" | "floorStepped"
+      | "classMaps"
+      | "reliefs"
+      | "terrain"
+      | "atmosphereFailed"
+      | "setting"
+      | "floorStepped"
+      | "oceans"
     >
   > = {},
   rotated = false,
@@ -208,6 +238,31 @@ describe("a photorealistic frame of the phase scene", () => {
     };
     await frameOfPhaseScene({ classMaps });
     expect(asked).toEqual([...PHASE_PLANETS, PHASE_GIANT]);
+  });
+
+  it("gives each lit body whose rotation is known its sea from the view's seas, its camera in its axes (R11.T8.b)", async () => {
+    const asked: string[] = [];
+    const giantSea = waterSeaOf(PHASE_GIANT);
+    const oceans: OceanSource = {
+      oceanOf: (body) => {
+        asked.push(body);
+        return body === PHASE_GIANT ? giantSea : null;
+      },
+    };
+    const turning = await frameOfPhaseScene({ oceans }, true);
+    expect(asked).toEqual([...PHASE_PLANETS, PHASE_GIANT]);
+    expect(turning.oceans?.map((ocean) => [ocean.id, ocean.sea])).toEqual([
+      [PHASE_GIANT, giantSea],
+    ]);
+    const [giant] = turning.oceans ?? [];
+    const body = turning.bodies.find((each) => each.id === PHASE_GIANT);
+    // The rotation is the identity: the camera from the body's centre is its centre negated.
+    expect(giant?.camera.positionM.x).toBeCloseTo(-(body?.centreM.x ?? 0), -1);
+    expect(giant?.toBodyFixed).toEqual(expect.objectContaining({ w: expect.any(Number) }));
+    // A body whose rotation is not known has no sea drawn: its map could not be placed.
+    asked.length = 0;
+    const still = await frameOfPhaseScene({ oceans }, false);
+    expect([asked, still.oceans]).toEqual([[], []]);
   });
 
   it("gives each lit body with a rotation its relief from the view's reliefs (R10.T10.e)", async () => {

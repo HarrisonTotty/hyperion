@@ -92,6 +92,18 @@ describe("photorealisticPasses", () => {
   });
 
   it.each(QUALITY_SETTINGS)(
+    "builds R11's ocean after the opaque passes and before the discs and the air, on %s (R11.T8.b)",
+    (setting) => {
+      const passes = photorealisticPasses(setting).passes;
+      const labels = passes.map((pass) => pass.label);
+      const at = labels.indexOf("ocean");
+      expect(passes[at]).toEqual({ label: "ocean", owner: "R11", built: true });
+      expect(labels.slice(at - 1, at + 2)).toEqual(["bodies late", "ocean", "discs"]);
+      expect(at).toBeLessThan(labels.indexOf("atmosphere"));
+    },
+  );
+
+  it.each(QUALITY_SETTINGS)(
     "builds R08's atmosphere after the discs and before R11's rings, with its passes' labels, on %s (R08.T10.b)",
     (setting) => {
       const passes = photorealisticPasses(setting).passes;

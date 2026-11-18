@@ -10,15 +10,18 @@
  * R10's terrain; or, by plan R14's visibility buffer (R14.T2.c to T2.e), in the bodies pass's place,
  * the terrain's ID raster and the resolve's pass, the figures after its shading; with plan R14's
  * two-pass occlusion (R14.T3.d) the depth pyramid of the first raster and the terrain's clusters it
- * leaves to a second, by IDs before the resolve (R14.T2.d); host discs, disc bodies and point bodies in one painter order (Design note 2);
+ * leaves to a second, by IDs before the resolve (R14.T2.d); R11's ocean, each sea over the opaque
+ * ground with its depth, so that the air is laid over it (R11.T8.b); host discs, disc bodies and
+ * point bodies in one painter order (Design note 2);
  * R08's atmosphere, each body's composite over everything drawn before it (R08.T10.b); R11's
- * rings, clouds and oceans; the histogram; bloom of the light above the
+ * rings and clouds; the histogram; bloom of the light above the
  * display's range; the tone-mapping pass; the symbology cased over the result. A style owns no
  * scene, camera or projection, so switching style is a change of pass list. The slots of R06, R08,
  * R10 and R11 are listed with the labels their plans give or (for R11's passes not yet built) the
  * lane's provisional names, marked `built: false` until those plans fill them (R06's sky, drawn
  * by R07.T8.a's frame, is; R08's atmosphere since R08.T10.b, its slot carrying its passes' labels;
- * R11's clouds since R11.T7.b, each body's after its composite); the settings share one order today, their differences being
+ * R11's clouds since R11.T7.b, each body's after its composite; R11's ocean since R11.T8.b); the
+ * settings share one order today, their differences being
  * each pass's parameters (Design note 18): on the high setting the terrain's cascade passes are
  * submitted before the bodies pass, while the low setting, which has no cascades, submits none in
  * their slot.
@@ -32,6 +35,7 @@ import { ATMOSPHERE_TABLES_PASS } from "../atmosphere/tables";
 import { CLOUD_LAYER_PASS } from "../clouds/cloudLayer";
 import { CLOUD_RESOLVE_PASS, CLOUD_VOLUME_PASS } from "../clouds/cloudVolumePass";
 import { DISC_CELLS_PASS } from "../bodies/draw";
+import { OCEAN_PASS_LABEL } from "../ocean/oceanPass";
 import { DEPTH_PYRAMID_LABEL } from "../clusters/hzb";
 import {
   VISIBILITY_LATE_RASTER_LABEL,
@@ -182,6 +186,9 @@ export function photorealisticPasses(setting: QualitySetting): PassList {
       slot(VISIBILITY_LATE_RASTER_LABEL, "R14", true),
       slot(VISIBILITY_RESOLVE_LABEL, "R14", true),
       own(PHOTOREAL_PASS_LABELS.bodiesLate),
+      // Each sea over the opaque ground, writing its depth, before the painter's sequence and the
+      // air laid over it (R11.T8.b).
+      slot(OCEAN_PASS_LABEL, "R11", true),
       own(PHOTOREAL_PASS_LABELS.discs),
       // Each body's air over everything opaque drawn before it (R08.T10.b).
       slot("atmosphere", "R08", true, ATMOSPHERE_PASS_LABELS),
@@ -189,7 +196,6 @@ export function photorealisticPasses(setting: QualitySetting): PassList {
       // Each body's clouds after its composite, into the target it drew (plan R11, R11.T7.b): the
       // volume's march and resolve where a body draws it (R11.T7.c), then the layer or its composite.
       slot(CLOUD_LAYER_PASS, "R11", true, CLOUD_PASS_LABELS),
-      slot("ocean", "R11", false),
       own(PHOTOREAL_PASS_LABELS.histogram),
       own(PHOTOREAL_PASS_LABELS.bloom),
       own(PHOTOREAL_PASS_LABELS.tonemap),

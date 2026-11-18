@@ -81,6 +81,7 @@ import {
   classRowLaw,
   MELT_CLASS_CODE,
   PHASE_LAW,
+  SEABED_CLASS_CODE,
 } from "./terrainMaterial";
 import type { ClassMapAnswer, ClassMapMaturityAnswer } from "./workers/messages";
 import { PHOTOMETRY_STRIDE } from "./workers/messages";
@@ -182,6 +183,36 @@ export function classMapMeltOf(answer: ClassMapAnswer): ReadonlyArray<boolean> {
     { length: classCount(answer) },
     (_, k) => answer.classes[2 * k] === MELT_CLASS_CODE,
   );
+}
+
+/**
+ * The albedo of an answered map's ground beneath its sea, per display channel, which plan R11's
+ * ocean shades its bed with (R11.T8.b): the mean A of its `Seabed` classes
+ * ({@link SEABED_CLASS_CODE}) whose palette names a substance, each class's A as its law takes it
+ * (its node K − 1 with a maturity); `null` for a map with none such.
+ *
+ * @throws Error as {@link classMapLawsOf}.
+ */
+export function classMapSeabedAlbedoOf(answer: ClassMapAnswer): Rgb | null {
+  return seabedAlbedoOf(answer, classLawSourcesOf(answer));
+}
+
+/** {@link classMapSeabedAlbedoOf} over the classes' sources made already. */
+function seabedAlbedoOf(
+  answer: ClassMapAnswer,
+  sources: ReadonlyArray<ClassLawSource | null>,
+): Rgb | null {
+  const sum: [number, number, number] = [0, 0, 0];
+  let count = 0;
+  sources.forEach((source, k) => {
+    if (source !== null && answer.classes[2 * k] === SEABED_CLASS_CODE) {
+      sum[0] += source.a[0];
+      sum[1] += source.a[1];
+      sum[2] += source.a[2];
+      count += 1;
+    }
+  });
+  return count === 0 ? null : [sum[0] / count, sum[1] / count, sum[2] / count];
 }
 
 /**
@@ -454,6 +485,8 @@ interface HeldMap {
   readonly sources: ReadonlyArray<ClassLawSource | null>;
   /** Whether each class's form is `Melt` (R08.T18.a). */
   readonly meltClasses: ReadonlyArray<boolean>;
+  /** Its `Seabed` classes' mean albedo, `null` for none (plan R11, R11.T8.b). */
+  readonly seabedAlbedo: Rgb | null;
   /** The normal map's texels, `null` for none (no surveyed cell answered). */
   readonly normals: NormalMapTexels | null;
   /** Whether every texel the survey touched, and every surveyed cell's normal, was answered. */
@@ -591,6 +624,15 @@ export class ClassMapStore implements ClassMapSource {
    */
   readsCellCorners(body: BodyIdHex): boolean {
     return this.#bodies.get(body)?.map?.cellCorners === true;
+  }
+
+  /**
+   * The albedo of `body`'s ground beneath its sea, per display channel, which plan R11's ocean
+   * shades its bed with (R11.T8.b; {@link classMapSeabedAlbedoOf}): `null` where the body holds no
+   * map or its map no `Seabed` class.
+   */
+  seabedAlbedoOf(body: BodyIdHex): Rgb | null {
+    return this.#bodies.get(body)?.map?.seabedAlbedo ?? null;
   }
 
   normalMapOf(body: BodyIdHex): NormalMapTexels | null {
@@ -771,10 +813,12 @@ export class ClassMapStore implements ClassMapSource {
     if (texels === null) {
       return;
     }
+    const sources = classLawSourcesOf(answer);
     const map: HeldMap = {
       texels,
-      sources: classLawSourcesOf(answer),
+      sources,
       meltClasses: classMapMeltOf(answer),
+      seabedAlbedo: seabedAlbedoOf(answer, sources),
       normals,
       complete: answer.complete && answer.normalsComplete,
       cellCorners: answer.cellCorners === true,

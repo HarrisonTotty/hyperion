@@ -49,8 +49,10 @@ import {
 } from "../../view/lighting/hostLights";
 import type { Occluder } from "../../view/lighting/annuli";
 import { isLitBody, type LitBodyLighting, lightingFramesOf } from "../../view/lighting/retarded";
+import type { OceanSource } from "../../view/ocean/oceanBody";
 import type {
   FrameAtmosphere,
+  FrameOcean,
   FrameTerrain,
   PhotorealFrame,
   PhotorealOverlay,
@@ -208,6 +210,11 @@ export interface PhotorealInputs {
    */
   readonly atmosphereFailed?:
     ((body: BodyIdHex, error: unknown, viewName: string) => void) | undefined;
+  /**
+   * The lit bodies' seas (plan R11, R11.T8.b; `TerrainSession.oceans`), each drawn by the `ocean`
+   * pass where its body's rotation is known; absent, no sea is drawn.
+   */
+  readonly oceans?: OceanSource | undefined;
 }
 
 /**
@@ -535,6 +542,30 @@ export function photorealFrame(inputs: PhotorealInputs): PhotorealFrame {
       }
     }
   }
+  // Each lit body's sea the session holds, with its camera in its body-fixed axes, its ocean map's,
+  // where its rotation is known (plan R11, R11.T8.b).
+  const oceans: FrameOcean[] = [];
+  const seaOf = inputs.oceans;
+  if (seaOf !== undefined) {
+    for (const body of scene.bodies.filter(isLitBody)) {
+      const sea = body.rotation === null ? null : seaOf.oceanOf(body.id);
+      const seaCamera =
+        sea === null
+          ? null
+          : bodyAtmosphereCamera(scene, body, pose, origins, {
+              fovXRad: camera.fovXRad,
+              viewport,
+            });
+      if (sea !== null && seaCamera !== null) {
+        oceans.push({
+          id: body.id,
+          sea,
+          camera: seaCamera,
+          toBodyFixed: atmosphereToBodyFixed(body),
+        });
+      }
+    }
+  }
   // A disc stands on its ground beneath a gas envelope's air only where the frame draws that air.
   const withAir = new Set(atmospheres.map((each) => each.id));
   const groundOf = inputs.discGrounds;
@@ -594,6 +625,7 @@ export function photorealFrame(inputs: PhotorealInputs): PhotorealFrame {
     meter: inputs.meter,
     present: inputs.present,
     atmospheres,
+    oceans,
     onAtmosphereFailed: inputs.atmosphereFailed,
   };
 }

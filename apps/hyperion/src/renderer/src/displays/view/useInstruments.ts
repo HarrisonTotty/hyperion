@@ -851,6 +851,8 @@ export function useInstruments(input: InstrumentsInput): Instruments {
           // The terrain session's class maps, as the primary's frame reads them (R10.T16.a), and
           // the instrument's own reliefs, by which it hands its bodies over (HANDOVER_AT_CELLS).
           classMaps: session?.classMaps,
+          // The session's seas, as the primary's frame draws them (plan R11, R11.T8.b).
+          oceans: session?.oceans,
           reliefs: session?.reliefsFor(instrumentViewId(slot)),
           // Its own terrain of the session's passes, from its own camera, and its survey edges
           // (R10.T16.c).

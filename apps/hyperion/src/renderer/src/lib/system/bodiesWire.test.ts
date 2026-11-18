@@ -57,6 +57,7 @@ import {
   bodyDetailSeed,
   bodyRecordOrbit,
   bodyRecordSeasons,
+  bodyRecordSurfaceGravity,
   EARTH_MASS_KG,
   toBodiesRequest,
   toBodyDetail,
@@ -737,6 +738,22 @@ describe("toBodyDetail", () => {
       bodyRecordOrbit({ orbit: { state: "not_applicable" } }),
       bodyRecordOrbit({ orbit: open }),
     ]).toEqual([null, null]);
+  });
+
+  it("reads a record's bulk surface gravity, and none where the section is not ok (R11.T8.b)", () => {
+    const { record } = earthDetail();
+    const { bulk } = record;
+    if (bulk.state !== "ok") {
+      throw new Error("the fixture's Earth has a bulk section");
+    }
+    expect([
+      bodyRecordSurfaceGravity(record),
+      bodyRecordSurfaceGravity({ bulk: { state: "not_modelled" } }),
+      bodyRecordSurfaceGravity({
+        bulk: { state: "ok", value: { ...bulk.value, surface_gravity_m_s2: 0 } },
+      }),
+    ]).toEqual([bulk.value.surface_gravity_m_s2, null, null]);
+    expect(bodyRecordSurfaceGravity(record)).toBeGreaterThan(9);
   });
 
   it("takes a moon's seasons from its planet, and every other body's from its own orbit", () => {

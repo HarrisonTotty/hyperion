@@ -62,6 +62,7 @@ import { CLOUD_PROBE_MATERIAL } from "../clouds/cloudProbe";
 import { CLOUD_VOLUME_MATERIALS } from "../clouds/cloudVolumePass";
 import { TERRAIN_LIT_CLOUD_MATERIALS } from "../terrain/cloudLight";
 import { OCEAN_FAR_PROBE } from "../ocean/oceanFarProbe";
+import { OCEAN_FAR_PASS_MATERIAL } from "../ocean/oceanPass";
 import {
   BODY_DISC_AIR_MATERIALS,
   BODY_DISC_CELLS_AIR_KERNEL,
@@ -595,11 +596,13 @@ export const MARCH_TABLE_ONLY_ENTRIES: ReadonlyArray<CatalogueEntry> = MARCH_TAB
 
 /**
  * Plan R11's ocean (R11.T8.b): `oceanFar.wgsl`, the far ocean's library, inside its probe kernel,
- * as R07's lit-body library is held. The smoke page compiles it in part 27 with its twin's check
- * (`smoke/ocean.ts`), not in part 1, for that part's watchdog.
+ * as R07's lit-body library is held, and the `ocean` pass's far sea (`oceanPass.wgsl`), which draws
+ * it. The smoke page compiles them in part 27 with their checks (`smoke/ocean.ts`), not in part 1,
+ * for that part's watchdog.
  */
 export const OCEAN_ENTRIES: ReadonlyArray<CatalogueEntry> = [
   { kind: "compute", spec: OCEAN_FAR_PROBE },
+  { kind: "material", spec: OCEAN_FAR_PASS_MATERIAL },
 ];
 
 /**

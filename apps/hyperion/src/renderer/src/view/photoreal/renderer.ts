@@ -52,10 +52,15 @@ import {
   type SunState,
   tablesFigureOf,
 } from "../atmosphere/hillaire";
+import type { AbsorberCurve } from "../atmosphere/absorbers";
 import type { DiscAir } from "../atmosphere/discReflectance";
 import { gravityRatio } from "../atmosphere/oblate";
 import { skySources } from "../atmosphere/sources";
-import { surfaceLightingTablesOf } from "../atmosphere/surfaceLighting";
+import {
+  createAirlessTables,
+  type SurfaceLightingTables,
+  surfaceLightingTablesOf,
+} from "../atmosphere/surfaceLighting";
 import { absorberCount, type AtmosphereTables } from "../atmosphere/tables";
 import { CORRECTION_ROUTED } from "../atmosphere/thick/routing";
 import {
@@ -95,7 +100,7 @@ import {
   planLitBodies,
 } from "../bodies/draw";
 import type { DiscRecord } from "../bodies/discShading";
-import type { LitRegime, ScreenCircle } from "../bodies/regime";
+import { drawnAsMesh, type LitRegime, type ScreenCircle } from "../bodies/regime";
 import {
   DEPTH_PYRAMID_KERNEL,
   DepthPyramid,
@@ -155,6 +160,19 @@ import {
   SETTINGS,
 } from "../quality/qualitySetting";
 import { HDR_COLOUR_FORMAT } from "../photometry/toneCurve";
+import { type OceanSea, STANDARD_GRAVITY_MPS2 } from "../ocean/oceanBody";
+import {
+  OCEAN_ECLIPSE_ROWS,
+  OCEAN_FAR_PASS_MATERIAL,
+  OCEAN_PASS_LABEL,
+  type OceanDrawView,
+  type OceanEclipse,
+  OceanGlare,
+  oceanPassDraw,
+  oceanPassUniforms,
+  oceanSourcesOfRecord,
+  packOceanEclipse,
+} from "../ocean/oceanPass";
 import { DEFAULT_EYE_OBSERVER } from "../sky/eye";
 import { toHalfArray } from "../sky/half";
 import { SKY_SPRITE_HDR_MATERIAL } from "../sky/spriteHdr";
@@ -314,6 +332,20 @@ export interface FrameAtmosphere {
 }
 
 /**
+ * One body's sea in a photorealistic frame (plan R11, R11.T8.b): the terrain session's
+ * (`TerrainSession.oceans`), and the body's camera, from its drawn centre in its body-fixed axes,
+ * which its ocean map is laid out in.
+ */
+export interface FrameOcean {
+  readonly id: BodyIdHex;
+  readonly sea: OceanSea;
+  /** The body's camera (`bodyAtmosphereCamera`), its axes the body's rotation's. */
+  readonly camera: AtmosphereCamera;
+  /** The rotation from the frame's galactic axes into the body-fixed ones. */
+  readonly toBodyFixed: Quaternion;
+}
+
+/**
  * The symbology's canvas pass over a photorealistic frame (`overlaySubmission`), built by
  * {@link PhotorealRenderer.render} once it has made the frame's plan (plan R10, R10.T16.f; R10's
  * Design note 12), from the datums of the bodies the plan hands over to terrain with a coverage mask
@@ -468,6 +500,13 @@ export interface PhotorealFrame {
    */
   readonly atmospheres?: ReadonlyArray<FrameAtmosphere> | undefined;
   /**
+   * The seas of the frame's lit bodies that have them drawn (plan R11, R11.T8.b): each drawn by the
+   * `ocean` pass where its body is drawn as a mesh or handed over to terrain, its glint's light past
+   * the bloom threshold a glare source beside {@link PhotorealFrame.glareSources}; none, or absent,
+   * draws no sea.
+   */
+  readonly oceans?: ReadonlyArray<FrameOcean> | undefined;
+  /**
    * Takes a throw from the drawing of a body's atmosphere, other than a lost device's
    * (`decision-r08-t10b-leans.md` §2), with the view's name: the view's handle on the cache, which
    * holds the body failed and logs it (`AtmosphereView.reportDrawFailure`). Absent, the renderer
@@ -479,6 +518,9 @@ export interface PhotorealFrame {
 
 /** Where a {@link PhotorealRenderer} stands. */
 export type PhotorealStatus = "idle" | "making" | "ready" | "failed";
+
+/** No light's curves: a sea's glare line through air whose tables hold none for its light. */
+const NO_CURVES: ReadonlyArray<AbsorberCurve> = [];
 
 /** The glare sources the buffer holds before it grows. */
 const GLARE_CAPACITY = 8;
@@ -601,6 +643,16 @@ interface Resources {
     readonly resolve: MaterialHandle;
     readonly composite: MaterialHandle;
   } | null;
+  /**
+   * The `ocean` pass's far sea (plan R11, R11.T8.b), made with the rest; `null` where its compiler
+   * refused it, when the frame draws no sea.
+   */
+  readonly ocean: MaterialHandle | null;
+  /**
+   * The tables a sea without its air drawn is lit through (`createAirlessTables`), made at the first
+   * frame that draws one.
+   */
+  airless: SurfaceLightingTables | null;
   /**
    * The targets the bodies' composites draw into in turn, the first reading the scene target and
    * each after it the one before (R08.T10.b): made at the first frame that draws an atmosphere.
@@ -848,6 +900,15 @@ export class PhotorealRenderer {
   >();
   /** The colour the latest frame's later passes read: its last composite's, or the scene's. */
   #drawnColour: TextureHandle | null = null;
+  /** The seas' glare sources, held across frames in their bodies' axes (plan R11, R11.T8.b). */
+  readonly #oceanGlare = new OceanGlare();
+  /**
+   * Each drawn sea's eclipse rows (plan R11, R11.T8.b; `packOceanEclipse`), under `ocean`, made at
+   * its first frame and let go at the first that draws it not; forgotten with a lost device.
+   */
+  readonly #oceanEclipses = new Map<BodyIdHex, BufferHandle>();
+  /** The latest frame's glare sources: its own and its seas' (R11.T8.b). */
+  #glareSources: ReadonlyArray<GlareSource> = [];
   /**
    * The clouds of the bodies this view draws them on (plan R11, R11.T7.b): the noise tile, made over
    * frames, and each body's rows and coverage; made again after a device loss.
@@ -914,6 +975,8 @@ export class PhotorealRenderer {
       this.#clouds = new CloudLayers(engine, viewName);
       this.#volumes.dispose();
       this.#volumes = new CloudVolumes(engine, viewName);
+      // The seas' eclipse rows died with it too.
+      this.#oceanEclipses.clear();
       this.#formCells = noFormCells();
       this.#histogram = undefined;
       this.#making = null;
@@ -984,6 +1047,7 @@ export class PhotorealRenderer {
     let atmosphere: AtmosphereFrameKernels;
     let cloudLayer: MaterialHandle | null;
     let cloudVolume: ReadonlyArray<MaterialHandle | null>;
+    let ocean: MaterialHandle | null;
     try {
       [
         tonemap,
@@ -995,6 +1059,7 @@ export class PhotorealRenderer {
         atmosphere,
         cloudLayer,
         cloudVolume,
+        ocean,
       ] = await Promise.all([
         engine.createMaterialAsync(TONEMAP_MATERIAL, ["canvas-in-pass"], [triangle]),
         engine.createMaterialAsync(OVERLAY_SCENE_DEPTH_MATERIAL, ["canvas"], [triangle]),
@@ -1053,6 +1118,13 @@ export class PhotorealRenderer {
               }),
           ),
         ),
+        // A refused sea leaves the view without one, its frame drawn on (plan R11, R11.T8.b).
+        engine
+          .createMaterialAsync(OCEAN_FAR_PASS_MATERIAL, ["rgba16float"], [triangle])
+          .catch((error: unknown) => {
+            console.warn(`the photorealistic view ${this.#name} draws no sea:`, error);
+            return null;
+          }),
       ]);
     } catch (error: unknown) {
       // A chain made before the refusal is released with it, and the meshes made for it.
@@ -1078,6 +1150,7 @@ export class PhotorealRenderer {
         atmosphere.composite,
         cloudLayer,
         ...cloudVolume,
+        ocean,
       ]) {
         if (material !== null) {
           engine.releaseMaterial(material);
@@ -1122,6 +1195,8 @@ export class PhotorealRenderer {
       atmosphere,
       cloudLayer,
       cloudVolume: volumeMaterialsOf(engine, cloudVolume),
+      ocean,
+      airless: null,
       airTargets: [],
       visibility: null,
       figureIds: null,
@@ -1468,6 +1543,12 @@ export class PhotorealRenderer {
         colourLoad: "load",
       });
     }
+    // Each body's sea over its opaque ground, with its depth, before the painter's sequence and the
+    // air composited over it (plan R11, R11.T8.b), its glint past the threshold a glare source.
+    const oceanGlares = this.#drawOceans(resources, frame, plan, bodies, viewRotation, projection);
+    const glareSources =
+      oceanGlares.length === 0 ? frame.glareSources : [...frame.glareSources, ...oceanGlares];
+    this.#glareSources = glareSources;
     resources.target.render({
       label: PHOTOREAL_PASS_LABELS.discs,
       viewRotation,
@@ -1491,16 +1572,16 @@ export class PhotorealRenderer {
     this.#drawnColour = hdrColour;
     // The glare sources are written before the histogram is dispatched, which weighs their veil
     // as the tone-mapping pass draws it.
-    if (frame.glareSources.length > resources.glareCapacity) {
+    if (glareSources.length > resources.glareCapacity) {
       this.#engine.releaseBuffer(resources.glare);
-      resources.glareCapacity = frame.glareSources.length;
+      resources.glareCapacity = glareSources.length;
       resources.glare = this.#glareBuffer(resources.glareCapacity);
     }
     const terms = glareSpreadTerms(frame.role, DEFAULT_EYE_OBSERVER);
     this.#engine.writeBuffer(
       resources.glare,
       0,
-      packGlareSources(frame.glareSources, frame.exposureScale, terms),
+      packGlareSources(glareSources, frame.exposureScale, terms),
     );
     if (frame.meter !== null) {
       resources.histograms.measure({
@@ -1511,7 +1592,7 @@ export class PhotorealRenderer {
         preExposure: frame.exposureScale,
         glare: {
           sources: resources.glare,
-          count: frame.glareSources.length,
+          count: glareSources.length,
           viewRotation,
           projection,
           terms,
@@ -1543,7 +1624,7 @@ export class PhotorealRenderer {
             threshold,
             levelZeroWeight: levelWeight(resources.bloom.kernel, 0),
             levelOneWeight: resources.bloom.levelOneWeight,
-            sourceCount: frame.glareSources.length,
+            sourceCount: glareSources.length,
             terms,
             dither: true,
             balance: frame.whiteBalance?.rows ?? null,
@@ -1594,6 +1675,14 @@ export class PhotorealRenderer {
     const resources = this.#resources;
     const drawn = this.#drawnColour;
     return resources === null || drawn === null ? null : { scene: resources.target, drawn };
+  }
+
+  /**
+   * The latest frame's glare sources: its own ({@link PhotorealFrame.glareSources}) and its seas'
+   * (plan R11, R11.T8.b), which a still's tone-mapping pass takes; none before the first frame.
+   */
+  get glareSources(): ReadonlyArray<GlareSource> {
+    return this.#glareSources;
   }
 
   /**
@@ -1681,6 +1770,173 @@ export class PhotorealRenderer {
     }
     occlusion.pyramid.build(depth, pyramidProjectionOf(frame.camera.fovXRad, frame.viewport));
     return frame.terrain.lateDraws();
+  }
+
+  /**
+   * Draws each body's sea the frame holds (plan R11, R11.T8.b; `oceanPass.ts`) into the scene target
+   * as the `ocean` pass, one draw a sea, over the opaque passes and before the `discs` pass and the
+   * composites: a body drawn as a mesh or handed over (`drawnAsMesh`) whose sources the plan holds,
+   * lit through its air's tables where the frame draws them and the airless ones elsewhere; no pass
+   * where none is drawn, or where the material was refused.
+   *
+   * @remarks
+   * A throw from a sea's draw, other than a lost device's, is logged and the sea left out of the
+   * frame, which is drawn on.
+   *
+   * @returns The seas' glare sources this frame, in the scene's camera-relative axes.
+   */
+  #drawOceans(
+    resources: Resources,
+    frame: PhotorealFrame,
+    plan: BodyFramePlan,
+    bodies: ReadonlyArray<LitBodyInput>,
+    viewRotation: Float32Array,
+    projection: Float32Array,
+  ): GlareSource[] {
+    const material = resources.ocean;
+    const oceans = frame.oceans ?? [];
+    const kept = new Set<BodyIdHex>();
+    const draws: DrawItem[] = [];
+    const glares: GlareSource[] = [];
+    if (material !== null && oceans.length > 0) {
+      const airOf = new Map((frame.atmospheres ?? []).map((each) => [each.id, each]));
+      const byId = new Map(bodies.map((body) => [body.id, body]));
+      const thresholdPreExposed = bloomThreshold(frame.exposureScale, frame.exposureScale);
+      const whitecaps = SETTINGS[frame.setting].whitecaps;
+      const pixelAngleRad = radPerPx(frame.camera, frame.viewport);
+      for (const ocean of oceans) {
+        const regime = plan.regimes.get(ocean.id);
+        const sources = plan.sources.get(ocean.id);
+        const lit = byId.get(ocean.id);
+        if (!drawnAsMesh(regime) || sources === undefined || lit === undefined) {
+          continue;
+        }
+        try {
+          const air = airOf.get(ocean.id) ?? null;
+          const tables = lit.atmosphere ?? (resources.airless ??= this.#airlessTables());
+          const lightSlots =
+            air !== null && absorberCount(air.tables.medium) > 0
+              ? air.tables.curves.length
+              : Infinity;
+          // The record's lights and their eclipses where the plan holds the body's record; else
+          // the sky's sources, uneclipsed.
+          const record = plan.discs.find((each) => each.body === ocean.id);
+          const fromRecord =
+            record === undefined || lit.rotation === undefined
+              ? null
+              : oceanSourcesOfRecord(
+                  record,
+                  lit.rotation,
+                  lit.figure.equatorialRadiusM,
+                  lightSlots,
+                );
+          const suns =
+            fromRecord?.suns ??
+            skySources(
+              sources.stars,
+              sources.planetshine,
+              ocean.camera,
+              air === null
+                ? {
+                    equatorialRadiusM: ocean.sea.equatorialRadiusM,
+                    polarRadiusM: ocean.sea.polarRadiusM,
+                  }
+                : tablesFigureOf(air.tables),
+              air?.tables.medium ?? { topHeightM: 0 },
+              ocean.toBodyFixed,
+            ).filter((sun) => sun.curveSlot < lightSlots);
+          const eclipse: OceanEclipse | null = fromRecord?.eclipse ?? null;
+          const view: OceanDrawView = {
+            sea: ocean.sea,
+            camera: ocean.camera,
+            // The air's reference gravity, else the record's surface gravity, else standard.
+            gravityMps2:
+              air?.tables.body?.gravity.referenceGravityMS2 ??
+              ocean.sea.surfaceGravityMps2 ??
+              STANDARD_GRAVITY_MPS2,
+            // Its figure stands whole on the datum as a mesh, or where its terrain takes none of
+            // its ground: no mask, or no terrain drawn (a still's).
+            figureOnDatum:
+              regime === "mesh" || lit.surveyCoverage === undefined || frame.terrain === undefined,
+            suns,
+            exposureScale: frame.exposureScale,
+            thresholdPreExposed,
+            pixelAngleRad,
+            whitecaps,
+            eclipse,
+          };
+          const rows = this.#oceanEclipseRows(ocean.id);
+          this.#engine.writeBuffer(rows, 0, packOceanEclipse(eclipse));
+          draws.push(
+            oceanPassDraw(
+              resources.triangle,
+              material,
+              ocean.sea.map.texture,
+              tables,
+              rows,
+              oceanPassUniforms(view),
+            ),
+          );
+          kept.add(ocean.id);
+          const brightest = suns[0];
+          const glare = this.#oceanGlare.sourceOf(
+            view,
+            ocean.toBodyFixed,
+            air === null || brightest === undefined
+              ? null
+              : {
+                  medium: air.tables.medium,
+                  curves: air.tables.curves[brightest.curveSlot ?? 0] ?? NO_CURVES,
+                },
+          );
+          if (glare !== null) {
+            glares.push(glare);
+          }
+        } catch (error: unknown) {
+          if (!lostDevice(error)) {
+            console.error(`the sea of ${ocean.id} could not be drawn in ${this.#name}:`, error);
+          }
+        }
+      }
+    }
+    this.#oceanGlare.keepOnly(kept);
+    for (const [id, rows] of this.#oceanEclipses) {
+      if (!kept.has(id)) {
+        this.#engine.releaseBuffer(rows);
+        this.#oceanEclipses.delete(id);
+      }
+    }
+    if (draws.length > 0) {
+      resources.target.render({
+        label: OCEAN_PASS_LABEL,
+        viewRotation,
+        projection,
+        draws,
+        postProcesses: [],
+        colourLoad: "load",
+      });
+    }
+    return glares;
+  }
+
+  /** `body`'s sea's eclipse rows, made at its first frame. */
+  #oceanEclipseRows(body: BodyIdHex): BufferHandle {
+    let rows = this.#oceanEclipses.get(body);
+    if (rows === undefined) {
+      rows = this.#engine.createBuffer({
+        name: `${this.#name} ocean eclipse ${body}`,
+        bytes: 16 * OCEAN_ECLIPSE_ROWS,
+        usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST,
+        category: "ocean",
+      });
+      this.#oceanEclipses.set(body, rows);
+    }
+    return rows;
+  }
+
+  /** The tables a sea without its air drawn is lit through, one texture of zeros. */
+  #airlessTables(): SurfaceLightingTables {
+    return createAirlessTables(this.#engine, `${this.#name} ocean: no air`);
   }
 
   /**
@@ -2171,6 +2427,17 @@ export class PhotorealRenderer {
       }
       this.#engine.releaseMaterial(resources.overlayDepth);
       this.#engine.releaseMesh(resources.atmosphere.triangle);
+      // The sea's material, its airless tables and its eclipse rows (plan R11, R11.T8.b).
+      for (const rows of this.#oceanEclipses.values()) {
+        this.#engine.releaseBuffer(rows);
+      }
+      this.#oceanEclipses.clear();
+      if (resources.ocean !== null) {
+        this.#engine.releaseMaterial(resources.ocean);
+      }
+      if (resources.airless !== null) {
+        this.#engine.releaseTexture(resources.airless.body);
+      }
       // Its own pipelines and meshes (plan R11, R11.T10.b: a still's renderer is made at each still).
       this.#engine.releaseMaterial(resources.tonemap);
       this.#engine.releaseMaterial(resources.sprite);
@@ -2552,7 +2819,9 @@ export class PhotorealStillRenderer implements StillRenderer {
     const glare = this.#hold(
       engine.createBuffer({
         name: `${STILL_NAME} glare sources`,
-        bytes: Math.max(1, frame.glareSources.length) * GLARE_SOURCE_BYTES,
+        // Its own and at most one a sea (plan R11, R11.T8.b), written at its tone mapping.
+        bytes:
+          Math.max(1, frame.glareSources.length + (frame.oceans?.length ?? 0)) * GLARE_SOURCE_BYTES,
         usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST,
         category: "other",
       }),
@@ -2666,11 +2935,23 @@ export class PhotorealStillRenderer implements StillRenderer {
     );
   }
 
-  /** R07's tone-mapping pass over the assembled image, its bloom and its glare, into the image. */
+  /**
+   * R07's tone-mapping pass over the assembled image, its bloom and its glare, into the image: the
+   * frame's glare sources and its seas', as its last sample drew them (plan R11, R11.T8.b).
+   */
   #toneMap(resources: StillResources): void {
     const frame = this.#frame;
     const terms = glareSpreadTerms(frame.role, DEFAULT_EYE_OBSERVER);
     const threshold = bloomThreshold(frame.exposureScale, frame.exposureScale);
+    const glareSources = this.#scene.glareSources.slice(
+      0,
+      frame.glareSources.length + (frame.oceans?.length ?? 0),
+    );
+    this.#engine.writeBuffer(
+      resources.glare,
+      0,
+      packGlareSources(glareSources, frame.exposureScale, terms),
+    );
     resources.image.render({
       label: `${STILL_NAME} ${TONEMAP_PASS}`,
       viewRotation: viewRotation4(frame.camera.orientation),
@@ -2688,7 +2969,7 @@ export class PhotorealStillRenderer implements StillRenderer {
             threshold,
             levelZeroWeight: levelWeight(resources.bloom.kernel, 0),
             levelOneWeight: resources.bloom.levelOneWeight,
-            sourceCount: frame.glareSources.length,
+            sourceCount: glareSources.length,
             terms,
             dither: true,
             balance: frame.whiteBalance?.rows ?? null,

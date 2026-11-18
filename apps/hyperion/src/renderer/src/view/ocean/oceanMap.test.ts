@@ -209,6 +209,26 @@ describe("the ocean-map store (R11.T8.b)", () => {
     expect(held?.texels.blend).toEqual(monthBlend(12, 0.0167, 0));
   });
 
+  it("makes no texture for a sea of no open water, and lets its texture go once the sea is dry", async () => {
+    const { engine, pool, store } = await wanted();
+    const dry = oceanAnswerOf([
+      { face: 2, i: 12, j: 10, depthM: 0, levelM: 800, ice: 0 },
+      { face: 2, i: 13, j: 10, depthM: 30, levelM: 0, ice: 255 },
+    ]);
+    pool.asked[0]?.resolve(dry);
+    await settle(store);
+    expect([store.oceanMapOf(MOON), engine.live.textures]).toEqual([null, 0]);
+    pool.change(MOON, 1, [3]);
+    pool.asked[1]?.resolve(seaAnswer());
+    await settle(store);
+    expect(engine.live.textures).toBe(1);
+    pool.change(MOON, 2, [4]);
+    pool.asked[2]?.resolve(dry);
+    await settle(store);
+    expect([store.oceanMapOf(MOON), engine.live.textures]).toEqual([null, 0]);
+    store.dispose();
+  });
+
   it("releases a body's texture, and every texture and listener at its disposal", async () => {
     const { engine, pool, store } = await wanted();
     pool.asked[0]?.resolve(seaAnswer());

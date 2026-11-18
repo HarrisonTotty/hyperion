@@ -62,6 +62,7 @@ import { HostDiscLayer } from "../../view/sky/disc";
 import { skySpriteStars } from "../../view/sky/sprites";
 import type { TerrainAnnunciation } from "../../view/terrain/annunciation";
 import type { ClassMapSource } from "../../view/terrain/classMap";
+import type { OceanSource } from "../../view/ocean/oceanBody";
 import { TerrainFailureGuard } from "../../view/terrain/failureGuard";
 import {
   LiveFrameTerrain,
@@ -193,6 +194,11 @@ export interface ViewFrameInputs {
    * engine: the terrain session's (R10.T16.a), every view's alike; absent, every disc is uniform.
    */
   readonly classMaps?: ClassMapSource | undefined;
+  /**
+   * The seas its photorealistic frames draw (plan R11, R11.T8.b): the terrain session's, every
+   * view's alike; absent, no sea is drawn.
+   */
+  readonly oceans?: OceanSource | undefined;
   /**
    * Its lit bodies' reliefs, by which a body hands over to terrain (plan R10, R10.T10.e): the
    * terrain session's (R10.T16.a), every view's alike; absent, none hands over.
@@ -834,6 +840,7 @@ export class ViewFrameDrawer {
         meter: inputs.meter,
         present: inputs.present,
         classMaps: inputs.classMaps,
+        oceans: inputs.oceans,
         reliefs: inputs.reliefs,
         terrain,
         // The marks cased over the tone-mapped image at the canvas's resolution (R07.T16.a), the

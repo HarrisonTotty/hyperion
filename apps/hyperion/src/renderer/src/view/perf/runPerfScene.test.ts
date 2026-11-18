@@ -452,12 +452,12 @@ describe("a perf run in the renderer", () => {
   });
 
   it("fails the run on a pass with no row, naming it", async () => {
-    const { main } = await ran({ label: "ocean" });
+    const { main } = await ran({ label: "rings" });
     expect(main.calls).not.toContain("endRepetition 1");
     expect(main.ends).toEqual([
       {
         status: "failed",
-        reason: "the timed pass primary:ocean has no row in PASS_ROWS (Design note 4)",
+        reason: "the timed pass primary:rings has no row in PASS_ROWS (Design note 4)",
       },
     ]);
   });

@@ -178,7 +178,7 @@ import { addCanvas, checkClearAndTriangle, checkDepthCullBias, checkThreeCanvase
 import { Checks } from "./harness";
 import { checkHeightWorker } from "./heightWorker";
 import { checkHistogram } from "./histogram";
-import { checkOceanFar } from "./ocean";
+import { checkOceanFar, checkOceanPass } from "./ocean";
 import { checkClassCurveSeam, checkLitBody } from "./litBody";
 import { checkLitTerrain } from "./litTerrain";
 import { checkClusterCull } from "./clusterCull";
@@ -623,6 +623,7 @@ async function run(
     checkCatalogue(engine, status, OCEAN_ENTRIES, checks),
   );
   await group(27, "R11.T8.b the far ocean against its twin", () => checkOceanFar(engine, checks));
+  await group(27, "R11.T8.b the ocean pass against its twin", () => checkOceanPass(engine, checks));
   // R08.T15.a.2's deck's marches, in part 14 with its twins, first.
   await group(14, "T9.b catalogue: the deck's marches", () =>
     checkCatalogue(engine, status, ATMOSPHERE_DECK_ENTRIES, checks),

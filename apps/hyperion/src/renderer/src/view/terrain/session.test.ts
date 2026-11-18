@@ -26,6 +26,7 @@ import {
 } from "../../test/coarseFieldFixtures";
 import { type CountingRenderEngine, countingRenderEngine } from "../../test/countingRenderEngine";
 import { FakeWebSocket } from "../../test/FakeWebSocket";
+import { oceanAnswerOf, waterWorldHeader } from "../../test/oceanFixtures";
 import { earthDetail } from "../../test/planetaryFixture";
 import { ScriptedHeightWorker } from "../../test/scriptedHeightWorker";
 import { ServerLinkHarness } from "../../test/ServerLinkHarness";
@@ -1292,5 +1293,145 @@ describe("the terrain session's fault for the terrain readout (R10.T12; decision
       fault: h.session.terrainFault,
       views: [...h.session.terrainFaults.keys()],
     }).toEqual({ fault: TERRAIN_COMPUTATION_FAILED, views: [] });
+  });
+});
+
+/** The Moon's field answered at revision 1 under a header that names a water sea, its main liquid. */
+async function answerWaterField(h: Harness): Promise<void> {
+  const { id } = latestFieldAsk(h.socket());
+  const bulk = sendBlocks(h);
+  const water = waterWorldHeader(MOON);
+  h.socket().serverResponds(
+    id,
+    readyField(
+      {
+        ...moonLikeHeader(MOON),
+        palette: water.palette,
+        main_liquid: water.main_liquid,
+        surface_pressure_pa: water.surface_pressure_pa,
+        reference_temperature_k: water.reference_temperature_k,
+      },
+      1,
+      fieldCover([0, 2, 30]),
+      bulk,
+    ),
+  );
+  await settle();
+}
+
+/** The ocean-map queries the workers hold unanswered, with the worker of each. */
+function oceanQueries(
+  h: Harness,
+): Array<{ readonly w: ScriptedHeightWorker; readonly id: number; readonly body: BodyIdHex }> {
+  return h.workers.flatMap((w) => w.pendingOceanMaps.map((q) => ({ w, id: q.id, body: q.body })));
+}
+
+/** How many times `body`'s ocean map was released. */
+function mapsReleased(h: Harness, body: BodyIdHex): number {
+  return h.allocations.filter((e) => e.kind === "destroyed" && e.name === `ocean map ${body}`)
+    .length;
+}
+
+describe("the terrain session's seas (plan R11, R11.T8.b)", () => {
+  it("asks for the ocean map of a body whose header names a main liquid, and of none whose header names none", async () => {
+    const dry = await harness();
+    await holdMoon(dry);
+    dry.session.step();
+    expect(oceanQueries(dry)).toEqual([]);
+    const wet = await harness();
+    wet.session.noteView(PRIMARY, viewAt(5e6));
+    wet.session.step();
+    await answerWaterField(wet);
+    wet.session.step();
+    wet.session.step();
+    expect(oceanQueries(wet).map((q) => q.body)).toEqual([MOON]);
+    dry.session.dispose();
+    wet.session.dispose();
+  });
+
+  it("gives the views its sea once the map is answered and taken in its steps: the header's liquid, air and sea level", async () => {
+    const h = await harness();
+    h.session.noteView(PRIMARY, viewAt(5e6));
+    h.session.step();
+    await answerWaterField(h);
+    h.session.step();
+    const [query] = oceanQueries(h);
+    query?.w.reply({
+      kind: "ocean-map",
+      id: query.id,
+      body: MOON,
+      map: oceanAnswerOf([{ face: 0, i: 0, j: 0, depthM: 3000, levelM: 0, ice: 0 }]),
+    });
+    await settle();
+    expect(h.session.oceans.oceanOf(MOON)).toBeNull();
+    tickingPerformance();
+    for (let k = 0; k < 100 && h.session.oceans.oceanOf(MOON) === null; k += 1) {
+      h.session.step();
+    }
+    const sea = h.session.oceans.oceanOf(MOON);
+    expect(sea).toMatchObject({
+      body: MOON,
+      substance: "H2O",
+      seaLevelM: moonLikeHeader(MOON).sea_level_m,
+      equatorialRadiusM: moonLikeHeader(MOON).equatorial_radius_m,
+      // No class map holds a Seabed yet: the bed is deep water.
+      bedAlbedo: null,
+    });
+    expect(sea?.air.densityKgM3).toBeCloseTo(1.225, 3);
+    // The same sea frame after frame.
+    expect(h.session.oceans.oceanOf(MOON)).toBe(sea);
+    // Its map under `ocean` in the session's memory report.
+    expect(h.session.memory().gpuBytes.get("ocean")).toBe(6 * 32 * 32 * 8);
+    h.session.dispose();
+  });
+
+  /** A session whose Moon's sea is answered and taken, as a frame would step it. */
+  async function heldSea(): Promise<Harness> {
+    const h = await harness();
+    h.session.noteView(PRIMARY, viewAt(5e6));
+    h.session.step();
+    await answerWaterField(h);
+    h.session.step();
+    const [query] = oceanQueries(h);
+    query?.w.reply({
+      kind: "ocean-map",
+      id: query.id,
+      body: MOON,
+      map: oceanAnswerOf([{ face: 0, i: 0, j: 0, depthM: 3000, levelM: 0, ice: 0 }]),
+    });
+    await settle();
+    tickingPerformance();
+    for (let k = 0; k < 100 && h.session.oceans.oceanOf(MOON) === null; k += 1) {
+      h.session.step();
+    }
+    if (h.session.oceans.oceanOf(MOON) === null) {
+      throw new Error("the Moon's sea was not taken");
+    }
+    return h;
+  }
+
+  it("releases its sea's map with a body no longer wanted", async () => {
+    const h = await heldSea();
+    h.session.noteView(PRIMARY, viewAt(7e7));
+    h.session.step();
+    expect([mapsReleased(h, MOON), h.session.oceans.oceanOf(MOON)]).toEqual([1, null]);
+    h.session.dispose();
+  });
+
+  it("releases its sea's map once the body's header names no main liquid", async () => {
+    const h = await heldSea();
+    // The field answered afresh under a dry header.
+    h.session.resync();
+    h.session.step();
+    await answerField(h, 2);
+    h.session.step();
+    expect([mapsReleased(h, MOON), h.session.oceans.oceanOf(MOON)]).toEqual([1, null]);
+    h.session.dispose();
+  });
+
+  it("releases every sea's map at its teardown", async () => {
+    const h = await heldSea();
+    h.session.dispose();
+    expect([mapsReleased(h, MOON), h.session.oceans.oceanOf(MOON)]).toEqual([1, null]);
   });
 });

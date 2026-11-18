@@ -1423,6 +1423,12 @@ export class TerrainPhaseRows {
  */
 export const MELT_CLASS_CODE = 6;
 
+/**
+ * The `Seabed` form's class code (`hyperion-surface`'s `MaterialClass::Seabed`, `material/class.rs`),
+ * the ground beneath a sea, whose albedo plan R11's ocean takes as its bed's (R11.T8.b).
+ */
+export const SEABED_CLASS_CODE = 12;
+
 /** `vec4f` rows of one slot's class laws in `class_layers`: two per palette slot. */
 export const CLASS_LAW_ROWS = 2 * TERRAIN_CLASSES;
 

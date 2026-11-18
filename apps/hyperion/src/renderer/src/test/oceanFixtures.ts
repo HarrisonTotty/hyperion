@@ -2,6 +2,8 @@
  * Ocean maps for the ocean's tests (plan R11, R11.T8.b): a worker's `OceanMapAnswer` built from a
  * few cells of a level-5 field, every other cell unsurveyed.
  */
+import type { BodyIdHex, LiquidDto, SurfaceHeaderDto } from "@hyperion/protocol";
+
 import { fieldCellIndex } from "../view/terrain/coverage";
 import { faceUvToXyz, stToUv, type Xyz } from "../view/terrain/cube";
 import type { Face } from "../view/terrain/patchKey";
@@ -119,4 +121,73 @@ function faceOf(n: number): Face {
     default:
       return 5;
   }
+}
+
+/** `testing/liquids.rs`' liquid water at 25 °C, as the surface payload carries it. */
+export const WATER_RECORD: LiquidDto = {
+  temperature_k: 298.15,
+  density_kg_m3: 997.047,
+  basis: "measured",
+  refractive_index: [
+    1.343789, 1.341476, 1.339564, 1.337962, 1.336599, 1.335422, 1.334396, 1.333487, 1.332676,
+    1.331946, 1.331283, 1.330673, 1.330109, 1.329581, 1.329086,
+  ],
+  absorption_per_m: [
+    0.001875, 0.00305405, 0.00624414, 0.0103012, 0.0177158, 0.039037, 0.0517617, 0.073031, 0.180294,
+    0.27759, 0.334405, 0.442138, 0.601402, 1.44247, 2.80088,
+  ],
+  scattering_per_m: [
+    0.005469387272826296, 0.004181643650890754, 0.0032546413241809694, 0.0025727588408902564,
+    0.002061546784888825, 0.001671864057626776, 0.0013704710557889293, 0.001134243878283069,
+    0.0009469343271450381, 0.0007968215862562356, 0.0006753565140614371, 0.0005761861743582379,
+    0.0004945704130290098, 0.00042689541857878524, 0.00037039794350413535,
+  ],
+  surface_tension_n_per_m: 0.07197,
+  viscosity_pa_s: 8.9e-4,
+};
+
+/**
+ * An Earth-like body's field header at the fixtures' level: WGS 84's semi-axes (6,378,137 m and
+ * 6,356,752.314245 m, NIMA TR8350.2 Table 3.1), the ISA's sea-level pressure and temperature
+ * (101,325 Pa, 288.15 K), a basalt crust and a water sea, its main liquid; its other figures
+ * plausible stand-ins, which no ocean test reads.
+ */
+export function waterWorldHeader(body: BodyIdHex): SurfaceHeaderDto {
+  return {
+    body,
+    level: OCEAN_FIXTURE_LEVEL,
+    radius_m: 6_371_000,
+    equatorial_radius_m: 6_378_137,
+    polar_radius_m: 6_356_752.314245,
+    boundary_diameter_m: 600_000,
+    sea_level_m: -120,
+    lapse_rate_k_per_m: 0.0065,
+    realised_sigma_h_m: 2_400,
+    realised_relief_m: 19_000,
+    months: 12,
+    season_eccentricity: 0.0167,
+    reference_temperature_k: 288.15,
+    surface_age_gyr: 4.5,
+    surface_pressure_pa: 101_325,
+    albedo_scale: null,
+    climate_model: "radiative_equilibrium",
+    precipitation: "heuristic",
+    palette: [
+      {
+        substance: "basalt",
+        role: "primary_crust",
+        normal_albedo_bvr: [0.1, 0.11, 0.12],
+        phase_row: 0,
+        liquid: null,
+      },
+      {
+        substance: "H2O",
+        role: "liquid",
+        normal_albedo_bvr: [0.05, 0.05, 0.05],
+        phase_row: 0,
+        liquid: WATER_RECORD,
+      },
+    ],
+    main_liquid: 1,
+  };
 }

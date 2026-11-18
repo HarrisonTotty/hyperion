@@ -92,9 +92,9 @@ function wireframeRows(
 
 /**
  * Every pass the harness times, by role and label, to its row (Design note 4): R12.T0's list of
- * timed pass labels (the plan's records, R12.T0) and R11's that have landed, R11.T2's `decoration`
- * and R11.T7's `clouds` (R12.T4.c), with the volume's march and resolve, `clouds volume` and
- * `clouds resolve` (R11.T7.c).
+ * timed pass labels (the plan's records, R12.T0) and R11's that have landed, R11.T2's `decoration`,
+ * R11.T7's `clouds` (R12.T4.c), with the volume's march and resolve, `clouds volume` and
+ * `clouds resolve` (R11.T7.c), and R11.T8.b's `ocean`.
  *
  * @remarks
  * A photorealistic view is a `primary`: R06's sky and its bake are the star field's row; R07's disc
@@ -140,6 +140,7 @@ export const PASS_ROWS: Readonly<Record<PassKey, BudgetRow>> = {
   "primary:clouds": "clouds",
   "primary:clouds volume": "clouds",
   "primary:clouds resolve": "clouds",
+  "primary:ocean": "ocean",
   ...wireframeRows("instrument", "cockpit-instruments"),
   ...wireframeRows("station", "station-wireframe"),
 };

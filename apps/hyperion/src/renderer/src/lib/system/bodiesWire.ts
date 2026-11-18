@@ -203,6 +203,20 @@ export function bodyRecordOrbit(record: Pick<BodyRecordDto, "orbit">): KeplerOrb
 }
 
 /**
+ * A body record's bulk surface gravity, m/s², without reading the rest of the record: `null` where
+ * the section is not `ok` or its gravity is not positive and finite (plan R11, R11.T8.b: the sea's
+ * dispersion and equivalent wind where its air is not drawn).
+ */
+export function bodyRecordSurfaceGravity(record: Pick<BodyRecordDto, "bulk">): number | null {
+  const { bulk } = record;
+  if (bulk.state !== "ok") {
+    return null;
+  }
+  const gravity = bulk.value.surface_gravity_m_s2;
+  return gravity > 0 && Number.isFinite(gravity) ? gravity : null;
+}
+
+/**
  * Whose orbit sets a body's seasons, by its record (R09's Design note 8; decision-r10-t12-leans §6
  * (b)): a moon's, one whose kind is `moon` about a body, its planet's, whose record holds it; every
  * other body's its own, a circumbinary planet's and a belt member's included.
