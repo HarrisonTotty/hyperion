@@ -1949,3 +1949,29 @@ function idSpec(owner: RenderTarget): RenderTargetSpec {
     category: "render-targets",
   };
 }
+
+describe("the queue a still's job is gated on (plan R11, R11.T10.b)", () => {
+  it("submits an empty list of command buffers, and nothing staged with it", async () => {
+    const { engine, gpu } = await engineOn();
+    const usage = BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST;
+    const buffer = engine.createBuffer({ name: "staged", bytes: 16, usage, category: "other" });
+    engine.stagedWrites("an upload", () => {
+      engine.writeBuffer(buffer, 0, new Float32Array(4));
+    });
+    const submit = vi.spyOn(gpu.queue, "submit");
+    engine.submitEmpty();
+    expect(submit.mock.calls.map(([buffers]) => Array.from(buffers))).toEqual([[]]);
+  });
+
+  it("resolves once the queue's submitted work is done, and refuses once disposed", async () => {
+    const { engine, gpu } = await engineOn();
+    const done = vi.spyOn(gpu.queue, "onSubmittedWorkDone");
+    await engine.submittedWorkDone();
+    engine.dispose();
+    await expect(engine.submittedWorkDone()).rejects.toThrow(/disposed/u);
+    expect(() => {
+      engine.submitEmpty();
+    }).toThrow(/disposed/u);
+    expect(done).toHaveBeenCalledOnce();
+  });
+});

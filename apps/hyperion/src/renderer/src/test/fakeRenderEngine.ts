@@ -133,6 +133,13 @@ export class FakeRenderEngine implements RenderEngine {
     this.#viewless = viewless;
   }
 
+  /** Raises `fault` to every listener, as the engine reports one (plan R11, R11.T10.b). */
+  raiseFault(fault: GraphicsFault): void {
+    for (const listener of this.#faultListeners) {
+      listener(fault);
+    }
+  }
+
   /** Raises a device loss, as the WebGPU engine reports one. */
   loseDevice(reason: GPUDeviceLostReason = "unknown"): void {
     const fault: GraphicsFault = { kind: "device-lost", reason, message: "fake loss" };
@@ -325,6 +332,14 @@ export class FakeRenderEngine implements RenderEngine {
   }
   readTexture(): Promise<never> {
     return Promise.reject(notFaked("readTexture"));
+  }
+  /** Empty submits made, for a still's baseline (plan R11, R11.T10.b). */
+  emptySubmits = 0;
+  submittedWorkDone(): Promise<void> {
+    return Promise.resolve();
+  }
+  submitEmpty(): void {
+    this.emptySubmits += 1;
   }
 }
 

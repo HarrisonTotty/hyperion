@@ -803,6 +803,14 @@ export class CountingRenderEngine implements RenderEngine {
     return Promise.resolve(new ArrayBuffer(0));
   }
 
+  submittedWorkDone(): Promise<void> {
+    return this.inner.submittedWorkDone();
+  }
+
+  submitEmpty(): void {
+    this.inner.submitEmpty();
+  }
+
   onPassTimes(_listener: (times: PassTimes) => void): () => void {
     return () => undefined;
   }

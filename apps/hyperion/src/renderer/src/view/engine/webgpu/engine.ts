@@ -992,6 +992,21 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
     }
   }
 
+  submittedWorkDone(): Promise<void> {
+    try {
+      this.#assertLive();
+      return this.device.queue.onSubmittedWorkDone();
+    } catch (error: unknown) {
+      return Promise.reject(asError(error));
+    }
+  }
+
+  submitEmpty(): void {
+    this.#assertLive();
+    // Nothing staged goes with it: the round trip it times is the queue's alone.
+    this.device.queue.submit([]);
+  }
+
   onPassTimes(listener: (times: PassTimes) => void): () => void {
     return this.#timer.listen(listener);
   }

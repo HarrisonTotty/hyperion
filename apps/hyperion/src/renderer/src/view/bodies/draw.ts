@@ -1983,6 +1983,8 @@ export type LitBodyEngine = Pick<
   | "onRestored"
   | "capabilities"
   | "prepareMaterial"
+  | "releaseMaterial"
+  | "releaseMesh"
 >;
 
 interface DeviceResources {
@@ -2219,6 +2221,8 @@ export class LitBodyRenderer {
   #geometry: GeometrySettings = SETTINGS.high.geometry;
   /** Settles once the current device's cull kernel is made, or could not be (R14.T4.a). */
   #cullReady: Promise<boolean> = Promise.resolve(false);
+  /** Settles once the regimes' pipelines the current device's resources asked for are made. */
+  #regimesPrepared: Promise<void> = Promise.resolve();
   /**
    * The figure's screen path's pipelines by their material (`figureShading` `screen`): absent
    * before the first ask, `true` once prepared, and `false` while preparing and after a failure,
@@ -2275,14 +2279,43 @@ export class LitBodyRenderer {
       [resources.limb, resources.quad],
     ];
     this.#readyCull(resources);
-    for (const [material, mesh] of prepared) {
-      void this.#engine.prepareMaterial(material, scene, [mesh]).catch((error: unknown) => {
-        // A loss meanwhile is no failure: the restore makes and prepares them again.
-        if (!(error instanceof EngineUnavailable)) {
-          console.error(`the pipelines of ${material.name} could not be prepared:`, error);
-        }
-      });
+    this.#regimesPrepared = Promise.all(
+      prepared.map(([material, mesh]) => this.#preparedOrReported(material, scene, mesh)),
+    ).then(() => undefined);
+  }
+
+  /** `material`'s pipelines for `scene` on `mesh` prepared; a failure reported, a loss's not. */
+  async #preparedOrReported(
+    material: MaterialHandle,
+    scene: ReadonlyArray<PreparedTarget>,
+    mesh: MeshHandle,
+  ): Promise<void> {
+    try {
+      await this.#engine.prepareMaterial(material, scene, [mesh]);
+    } catch (error: unknown) {
+      // A loss meanwhile is no failure: the restore makes and prepares them again; nor a disposal,
+      // which released the material.
+      if (!(error instanceof EngineUnavailable) && !this.#disposed) {
+        console.error(`the pipelines of ${material.name} could not be prepared:`, error);
+      }
     }
+  }
+
+  /**
+   * Makes every regime's pipelines for the scene target ahead of the first draw, and resolves once
+   * they are made, or could not be (plan R11, R11.T10.b): those its construction prepares, the
+   * point sprites', which a running view draws unprepared from its first frame with the stars, and
+   * the figures' cluster cull. A still's renderer, new at each still, waits for them before its
+   * first batch, so that none of its draws makes a pipeline.
+   */
+  async prepareAll(): Promise<void> {
+    const resources = this.#resources;
+    const scene = [{ colour: HDR_COLOUR_FORMAT, depth: true }] as const;
+    await Promise.all([
+      this.#regimesPrepared,
+      this.#cullReady,
+      this.#preparedOrReported(resources.sprite, scene, resources.quad),
+    ]);
   }
 
   /**
@@ -2437,8 +2470,9 @@ export class LitBodyRenderer {
       );
       made.ready = true;
     } catch (error: unknown) {
-      // A loss meanwhile is no failure: the restore makes the forms again at their next record.
-      if (!(error instanceof EngineUnavailable)) {
+      // A loss meanwhile is no failure: the restore makes the forms again at their next record;
+      // nor a disposal, which released their materials.
+      if (!(error instanceof EngineUnavailable) && !this.#disposed) {
         console.error(`${what} could not be prepared:`, error);
       }
     }
@@ -3182,5 +3216,27 @@ export class LitBodyRenderer {
     this.#engine.releaseTexture(resources.noCoverage);
     this.#engine.releaseTexture(resources.noDiscTable);
     this.#engine.releaseTexture(resources.noAtmosphere.body);
+    // Its materials and meshes too (plan R11, R11.T10.b: a still's renderer, made at each still,
+    // would hold them for the session otherwise), its forms' among them.
+    const forms = [resources.emissive, resources.air, resources.emissiveAir].flatMap((form) =>
+      form === null ? [] : [form.interior, form.limb, form.mesh, form.meshCluster, form.resolve],
+    );
+    const materials = [
+      resources.interior,
+      resources.limb,
+      resources.sprite,
+      resources.mesh,
+      resources.meshCluster,
+      resources.meshIds,
+      resources.meshClusterIds,
+      resources.resolve,
+      ...forms,
+    ];
+    for (const material of materials) {
+      this.#engine.releaseMaterial(material);
+    }
+    for (const mesh of [resources.quad, resources.patch, resources.clusterMesh]) {
+      this.#engine.releaseMesh(mesh);
+    }
   }
 }

@@ -8,10 +8,11 @@ import type { ReactNode } from "react";
 import type { ElementSize } from "../../lib/useElementSize";
 
 /**
- * `full`, the stage beside two side columns (`Instruments`, `Targets` and `Camera`; then the
+ * `full`, the stage beside two side columns (`Instruments`, `Targets` and `Camera`, with `Stills`
+ * folding in `Camera`'s place behind a row of two disclosure buttons where it stands; then the
  * `CONTROLS` view's `Style`, `Exposure` and `Exposure meter`, decision-r07-t19b-exposure-fit item
- * 2); or `compact`, one column whose `Camera`, `Style`, `Exposure` and `Exposure meter` panels fold
- * behind a row of disclosure buttons, one open at a time.
+ * 2); or `compact`, one column whose `Camera`, `Stills`, `Style`, `Exposure` and `Exposure meter`
+ * panels fold behind a row of disclosure buttons, one open at a time.
  */
 export type ViewLayout = "full" | "compact";
 
@@ -71,8 +72,13 @@ export const FULL_MIN_WIDTH_REM = 99;
  *   item 2): a task that adds to a side panel re-measures, and asks for a ruling rather than pass
  *   it. The row held back with a reason, its draft form, would have passed it at 852.5 px with a
  *   two-line reason, and a panel of its own would have stood at it, 839.5 px.
+ * - **`STILLS`** (plan R11, R11.T10.b; the UX ruling, 2026-11-18) shares the first column's last
+ *   place with `Camera` behind a row of two disclosure buttons, so the place is the taller of the
+ *   two: by estimate from the CSS and B612's metrics, not measured, the first column's tallest is
+ *   then 813.5 px, `Camera` at its tallest under the row and a two-line stills line, so 51 rem.
+ *   Laid out last in the second column, the panel would have taken it to 905 to 1,049 px.
  */
-export const FULL_MIN_HEIGHT_REM = 49.5;
+export const FULL_MIN_HEIGHT_REM = 51;
 
 /**
  * The bound on {@link FULL_MIN_HEIGHT_REM}, rem: a maximised 1920 × 1080 window's box, about
@@ -115,15 +121,17 @@ export function toggledFold(open: FoldPanel, panel: FoldPanel): FoldPanel {
 }
 
 /**
- * The row of disclosure buttons under the list, by the panels' own names, in the panels' order but
- * for `STILLS` (plan R11, R11.T10.c), whose panel stands after the meter's: `EXPOSURE METER`
- * stands only while its panel would, last, so that nothing moves.
+ * The row of disclosure buttons under the list, by the panels' own names, in the panels' order:
+ * `STILLS` (plan R11, R11.T10.c) after `CAMERA`, whose place it shares, and `EXPOSURE METER`, which
+ * stands only while its panel would, last, so that nothing moves. In the full layout the row holds
+ * `CAMERA` and `STILLS` alone, where `STILLS` stands (plan R11, R11.T10.b; the UX ruling,
+ * 2026-11-18).
  */
 export const FOLD_BUTTONS: ReadonlyArray<{ readonly panel: FoldPanel; readonly label: string }> = [
   { panel: "camera", label: "CAMERA" },
+  { panel: "stills", label: "STILLS" },
   { panel: "style", label: "STYLE" },
   { panel: "exposure", label: "EXPOSURE" },
-  { panel: "stills", label: "STILLS" },
   { panel: "meter", label: "EXPOSURE METER" },
 ];
 

@@ -253,9 +253,12 @@ export class BloomChain {
     this.#engine.renderTargets(renders);
   }
 
-  /** Releases the chain's targets. */
+  /** Releases the chain's targets, its materials and its triangle. */
   dispose(): void {
     this.#disposeTargets();
+    this.#engine.releaseMaterial(this.#downMaterial);
+    this.#engine.releaseMaterial(this.#upMaterial);
+    this.#engine.releaseMesh(this.#mesh);
   }
 
   #frame(

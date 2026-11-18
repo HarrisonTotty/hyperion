@@ -37,7 +37,11 @@ import {
   spritesAtScale,
 } from "../../view/photoreal/internalScale";
 import { overlayDrawsAt, overlaySubmission } from "../../view/photoreal/overlay";
-import { PhotorealRenderer, type PhotorealStatus } from "../../view/photoreal/renderer";
+import {
+  type DrawnPhotorealFrame,
+  PhotorealRenderer,
+  type PhotorealStatus,
+} from "../../view/photoreal/renderer";
 import { renderedTauScale } from "../../view/budget/selectionScale";
 import type { ViewBudget } from "../../view/budget/viewBudget";
 import type { Histogram } from "../../view/post/histogram";
@@ -467,6 +471,8 @@ export class ViewFrameDrawer {
    * before its first, and once a frame is drawn with no line of sight.
    */
   #lineOfSightYielded = false;
+  /** Its last frame where that was photorealistic, presented or held back (plan R11, R11.T10.b). */
+  #lastPhotoreal: DrawnPhotorealFrame | null = null;
   #sized: ViewSize | null = null;
   readonly #unsubscribe: () => void;
 
@@ -541,6 +547,15 @@ export class ViewFrameDrawer {
   /** Drops the histograms of frames drawn before a cut (`PhotorealRenderer.dropHistograms`). */
   dropHistograms(): void {
     this.#photoreal.dropHistograms();
+  }
+
+  /**
+   * Its last frame drawn, with its plan, where that was photorealistic, presented or held back; `null`
+   * before one and after a frame in the wireframe: what a still freezes at its request (plan R11,
+   * R11.T10.b; `PhotorealStills`).
+   */
+  get lastPhotoreal(): DrawnPhotorealFrame | null {
+    return this.#lastPhotoreal;
   }
 
   /** Draws one frame, or nothing (`null`) while the stage is not laid out. */
@@ -647,6 +662,8 @@ export class ViewFrameDrawer {
       drawn = photoreal.drawn;
       terrain = photoreal.terrain;
       decoration = photoreal.decorated;
+    } else {
+      this.#lastPhotoreal = null;
     }
     let contourIntervalM: number | null = null;
     if (drawn) {
@@ -784,68 +801,68 @@ export class ViewFrameDrawer {
         renderViewport(viewport, SETTINGS[inputs.setting].terrain.renderHeightPx),
         inputs.renderScale,
       );
-      const plan = this.#photoreal.render(
-        this.#view,
-        photorealFrame({
-          run,
-          pose: camera.pose,
-          viewport: internal,
-          // The hand-over's pixel, which the internal scale must not move (R10.T10.g), at the
-          // selection's CSS px.
-          presentedPx: viewport,
-          selectionPx,
-          setting: inputs.setting,
-          geometry: inputs.geometry,
-          atmosphereSetting: inputs.atmosphereSetting,
-          atmosphereLevers: inputs.atmosphereLevers,
-          floorLowest: inputs.floorLowest,
-          exposureScale: exposed,
-          white: inputs.white,
-          list: { ...list, sprites: spritesAtScale(list.sprites, viewport, internal) },
-          sky,
-          hostDiscs: inputs.hostDiscs,
-          band: sky === null ? null : this.#band,
-          discs: this.#discs,
-          cube: cube === null ? null : this.#cubes.draw(cube, "hdr", exposed),
-          previousRegimes: this.#regimes,
-          previousTabled: this.#tabled,
-          previousHandedOver: this.#handedOver,
-          meter: inputs.meter,
-          present: inputs.present,
-          classMaps: inputs.classMaps,
-          reliefs: inputs.reliefs,
-          terrain,
-          // The marks cased over the tone-mapped image at the canvas's resolution (R07.T16.a), the
-          // craft on their silhouettes (R07.T16.e), and each handed-over body's datum giving way
-          // over its surveyed ground, built once the renderer has the plan (R10.T16.f); at GRID OFF
-          // the stand-ins and survey edges alone, and no pass where there are none (the owner's
-          // request, 2026-11-05).
-          overlay: overlayDrawsAt(list, grid)
-            ? (surveyed, hiders) =>
-                overlaySubmission(
-                  this.#wireframe,
-                  list,
-                  tokens,
-                  camera,
-                  viewport,
-                  surveyed,
-                  grid,
-                  hiders,
-                )
-            : null,
-          atmospheres: inputs.atmosphere?.tablesOf,
-          // Each body's ground drawn emitting where its record's field is above the cut (R08.T18.a).
-          groundFields: inputs.atmosphere?.groundFieldOf,
-          // A disc beneath a gas envelope's air on that air's ground, not its 1-bar figure (R08.T16.a.2).
-          discGrounds: inputs.atmosphere?.discGroundOf,
-          // A body's air that throws as it is drawn is the cache's to hold failed (R08.T10.b;
-          // decision-r08-t10b-leans §2).
-          atmosphereFailed: reportAirFailure,
-        }),
-      );
+      const frame = photorealFrame({
+        run,
+        pose: camera.pose,
+        viewport: internal,
+        // The hand-over's pixel, which the internal scale must not move (R10.T10.g), at the
+        // selection's CSS px.
+        presentedPx: viewport,
+        selectionPx,
+        setting: inputs.setting,
+        geometry: inputs.geometry,
+        atmosphereSetting: inputs.atmosphereSetting,
+        atmosphereLevers: inputs.atmosphereLevers,
+        floorLowest: inputs.floorLowest,
+        exposureScale: exposed,
+        white: inputs.white,
+        list: { ...list, sprites: spritesAtScale(list.sprites, viewport, internal) },
+        sky,
+        hostDiscs: inputs.hostDiscs,
+        band: sky === null ? null : this.#band,
+        discs: this.#discs,
+        cube: cube === null ? null : this.#cubes.draw(cube, "hdr", exposed),
+        previousRegimes: this.#regimes,
+        previousTabled: this.#tabled,
+        previousHandedOver: this.#handedOver,
+        meter: inputs.meter,
+        present: inputs.present,
+        classMaps: inputs.classMaps,
+        reliefs: inputs.reliefs,
+        terrain,
+        // The marks cased over the tone-mapped image at the canvas's resolution (R07.T16.a), the
+        // craft on their silhouettes (R07.T16.e), and each handed-over body's datum giving way
+        // over its surveyed ground, built once the renderer has the plan (R10.T16.f); at GRID OFF
+        // the stand-ins and survey edges alone, and no pass where there are none (the owner's
+        // request, 2026-11-05).
+        overlay: overlayDrawsAt(list, grid)
+          ? (surveyed, hiders) =>
+              overlaySubmission(
+                this.#wireframe,
+                list,
+                tokens,
+                camera,
+                viewport,
+                surveyed,
+                grid,
+                hiders,
+              )
+          : null,
+        atmospheres: inputs.atmosphere?.tablesOf,
+        // Each body's ground drawn emitting where its record's field is above the cut (R08.T18.a).
+        groundFields: inputs.atmosphere?.groundFieldOf,
+        // A disc beneath a gas envelope's air on that air's ground, not its 1-bar figure (R08.T16.a.2).
+        discGrounds: inputs.atmosphere?.discGroundOf,
+        // A body's air that throws as it is drawn is the cache's to hold failed (R08.T10.b;
+        // decision-r08-t10b-leans §2).
+        atmosphereFailed: reportAirFailure,
+      });
+      const plan = this.#photoreal.render(this.#view, frame);
       if (plan === null) {
+        this.#lastPhotoreal = null;
         return { drawn: false, terrain: null, decorated: false };
       }
+      this.#lastPhotoreal = { frame, plan };
       this.#regimes = plan.regimes;
       const origins = sceneOrigins(run.scene);
       const fromCamera = new Map<BodyIdHex, Vec3>();
@@ -874,6 +891,7 @@ export class ViewFrameDrawer {
         console.error(`the photorealistic frame of ${this.#name} could not be drawn:`, error);
         this.#frameFailed = true;
       }
+      this.#lastPhotoreal = null;
       return { drawn: false, terrain: null, decorated: false };
     }
   }

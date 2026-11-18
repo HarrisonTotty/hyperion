@@ -610,6 +610,14 @@ export class ProbedEngine implements RenderEngine {
     return this.#inner.readTexture(texture, level, rect, access);
   }
 
+  submittedWorkDone(): Promise<void> {
+    return this.#inner.submittedWorkDone();
+  }
+
+  submitEmpty(): void {
+    this.#inner.submitEmpty();
+  }
+
   onPassTimes(listener: (times: PassTimes) => void): () => void {
     return this.#inner.onPassTimes(listener);
   }

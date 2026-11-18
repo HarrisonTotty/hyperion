@@ -316,6 +316,64 @@ describe("a client's stills for the session (R11.T10.b)", () => {
     ]);
   });
 
+  it("holds TAKE STILL back with the view's cause while it gives no still, starts nothing, and offers it again", async () => {
+    const { stills, source } = session();
+    source.cause = "the view draws no photorealistic image";
+    stills.refresh();
+    const held = stills.getSnapshot().heldBack;
+    const refused = await stills.request();
+    source.cause = null;
+    stills.refresh();
+    expect([held, refused, source.snapshots, stills.getSnapshot().heldBack]).toEqual([
+      "NOT AVAILABLE: the view draws no photorealistic image",
+      null,
+      0,
+      null,
+    ]);
+  });
+
+  it("holds TAKE STILL back from the start where the view gives no still as the session is made", () => {
+    const device = new FakeStillDevice("absent");
+    const source = new FakeStillSource(device, REQUEST);
+    source.cause = "the view is not drawn";
+    const stills = new StillSession({
+      source,
+      encode: rawEncoder,
+      save: recordingSave().save,
+      nowMs: () => 0,
+      reportError: () => undefined,
+    });
+    expect(stills.getSnapshot().heldBack).toBe("NOT AVAILABLE: the view is not drawn");
+  });
+
+  it("holds TAKE STILL back where the view gives no still at the request, starting no job", async () => {
+    const { stills, source } = session();
+    source.cause = "stills draw no terrain yet";
+    const outcome = await stills.request();
+    expect([outcome, source.renderers.length, stills.getSnapshot()]).toEqual([
+      null,
+      0,
+      {
+        standing: "available",
+        activity: { kind: "idle", last: null },
+        heldBack: "NOT AVAILABLE: stills draw no terrain yet",
+      },
+    ]);
+  });
+
+  it("runs a still on while the view comes to give none, and keeps TAKE STILL held back after it", async () => {
+    const { stills, saved, source } = session();
+    const running = stills.request();
+    source.cause = "the view draws no photorealistic image";
+    stills.refresh();
+    const outcome = await running;
+    expect([outcome?.kind, saved.length, stills.getSnapshot().heldBack]).toEqual([
+      "saved",
+      1,
+      "NOT AVAILABLE: the view draws no photorealistic image",
+    ]);
+  });
+
   it("makes one still at a time: a request while one runs starts nothing", async () => {
     const { stills, source } = session();
     const first = stills.request();

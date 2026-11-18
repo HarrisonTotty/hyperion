@@ -93,14 +93,13 @@ describe("the saved stills (R11.T10.c)", () => {
     ]);
   });
 
-  it("says NONE for a still with no survey and no annunciation", async () => {
+  it("gives no survey coverage for a still that held no survey, and NONE of its annunciations", async () => {
     const user = userEvent.setup();
     render(<StillList state={{ kind: "listed", stills: [OLDER] }} />);
     await user.click(screen.getByRole("button"));
     expect(shownLabel().slice(5)).toEqual([
       ["QUALITY", "LOW"],
       ["DECORATION", "OFF"],
-      ["SURVEY COVERAGE", "NONE"],
       ["ANNUNCIATIONS", "NONE"],
       ["SIZE", "16 × 8 px"],
     ]);

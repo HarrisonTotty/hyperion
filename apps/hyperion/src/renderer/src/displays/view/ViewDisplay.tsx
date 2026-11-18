@@ -7,6 +7,7 @@ import type {
 } from "@hyperion/protocol";
 import {
   type FocusEvent,
+  Fragment,
   type KeyboardEvent,
   memo,
   type ReactNode,
@@ -100,7 +101,7 @@ import {
 } from "../../view/lighting/hostLights";
 import { type HostDiscsAsk, useHostDiscs } from "../../view/lighting/useHostDiscs";
 import { SkyKeep } from "../../view/sky/useSky";
-import type { PhotorealStatus } from "../../view/photoreal/renderer";
+import { type PhotorealStatus, PhotorealStills } from "../../view/photoreal/renderer";
 import { AutoExposure, type Metering, meteringFor } from "../../view/post/autoExposure";
 import {
   type BalancedWhite,
@@ -199,6 +200,8 @@ import { BESIDE_CLASS, COLUMNS_CLASS, ViewRoomSizers } from "./ViewRoomSizers";
 import { ViewStills } from "./ViewStills";
 import { useStillsAwayLines, useViewStills, type ViewStillsModel } from "./useViewStills";
 import type { StillSource } from "../../view/stills/stillJob";
+import { stillRequestOf } from "./viewStillRequest";
+import { STILLS_DISABLED } from "../../view/stills/StillControl";
 import { useReasonFolds } from "./reasonFolds";
 import { surveyPassStatement } from "./surveyPassStatement";
 import type { InspectionSurvey } from "../../view/scenes/inspectionSurvey";
@@ -476,8 +479,9 @@ interface ViewDisplayProps {
   readonly onPlanetViewer?: (() => void) | undefined;
   /**
    * Where a still's scene and device come from (plan R11, R11.T10.b), read once at the mount: the
-   * photorealistic renderer's hook, which waits for perf-long-tasks-2's wave 2; none until then,
-   * when `VIEW` offers no still and its `STILLS` panel does not stand.
+   * photorealistic renderer's hook (`PhotorealStills`, `App`'s), which the stage's drawing loop
+   * attaches its view to; none, when `VIEW` offers no still and its `STILLS` panel does not stand,
+   * as in the `PLANET VIEWER`.
    */
   readonly stillSource?: StillSource | undefined;
 }
@@ -602,6 +606,18 @@ interface ViewStageProps {
    * still: its `STILLS` panel and fold stand only with them.
    */
   readonly stills: ViewStillsModel | null;
+  /**
+   * Their source, which the stage's drawing loop attaches its view to where it is the
+   * photorealistic renderer's hook (`PhotorealStills`), and whose cause, while the view gives no
+   * still, holds `TAKE STILL` back at each publish; `undefined` with no stills.
+   */
+  readonly stillSource: StillSource | undefined;
+  /**
+   * The display's status lines over the stage (`SCENE STALE: NO CARRIER`, a camera report's
+   * fault), stable in identity while their words are, which a still's label takes among its
+   * annunciations.
+   */
+  readonly sceneAnnunciations: ReadonlyArray<string>;
 }
 
 /** What the drawing loop reads of the several views' budgets, kept current by an effect. */
@@ -719,6 +735,18 @@ interface LoopInputs {
    */
   readonly grid: boolean;
 }
+
+/** The primary's label block as last rendered: what a still's label takes of it (plan R11). */
+interface StillLabelBlock {
+  readonly lines: ReadonlyArray<LabelLine>;
+  /** The display's status lines over the stage. */
+  readonly scene: ReadonlyArray<string>;
+  readonly faults: ReadonlyArray<string>;
+  readonly statements: ReadonlyArray<LabelStatement>;
+}
+
+/** No label block yet rendered. */
+const NO_STILL_LABEL_BLOCK: StillLabelBlock = { lines: [], scene: [], faults: [], statements: [] };
 
 /** What the loop publishes for the DOM, at most every {@link READOUT_INTERVAL_MS}. */
 interface Published {
@@ -978,6 +1006,8 @@ function ViewStage({
   linkUp,
   sceneStatements,
   stills,
+  stillSource,
+  sceneAnnunciations,
 }: ViewStageProps) {
   const legendId = useId();
   const stillsAway = useStillsAwayLines(stills);
@@ -1058,6 +1088,9 @@ function ViewStage({
   const cutRef = useRef(false);
   // The marks' labels by their target's key, which the loop moves with their marks every frame.
   const labelsRef = useRef(new Map<string, HTMLElement>());
+  // The primary's label block as last rendered, which a still's label takes at its request (plan
+  // R11, R11.T10.b).
+  const stillLabelRef = useRef<StillLabelBlock>(NO_STILL_LABEL_BLOCK);
   const inputsRef = useRef<LoopInputs>({
     exposure,
     whiteBalance,
@@ -1382,6 +1415,10 @@ function ViewStage({
     const releaseDrawer = makeViewFrameDrawer(engine, view, VIEW_NAME, (made) => {
       drawer = made;
     });
+    // The exposure the loop's frames are drawn at, its `AutoExposure`'s applied control, and
+    // whether its last frame drew decoration, as a still's label takes them (plan R11, R11.T10.b).
+    let appliedExposure = inputsRef.current.exposure;
+    let stillDecoration = false;
     // Each of the primary's frames with every view's GPU time in it, and its internal scale from
     // its budget and resolution controller (R07.T19; decision-r07-t18, item 1).
     const primaryTimes = new PrimaryFrameTimes(engine.passTimesFrame);
@@ -1475,6 +1512,35 @@ function ViewStage({
     // which the primary's frames give the instruments' with their own.
     const poseIntervals = new PoseIntervals();
     let frame = 0;
+    // The still hook freezes the primary's last photorealistic frame and its label's inputs at each
+    // request (plan R11, R11.T10.b), and holds TAKE STILL back while it gives none.
+    const detachStills =
+      stillSource instanceof PhotorealStills
+        ? stillSource.attach({
+            engine,
+            timer: () => budgetRef.current.timer,
+            frameIntervalNs: () => pacer.periodMs * 1e6,
+            setting: () => budgetRef.current.setting,
+            drawn: () => drawer?.lastPhotoreal ?? null,
+            request: () => {
+              const block = stillLabelRef.current;
+              const session = inputsRef.current.terrain;
+              return stillRequestOf({
+                run: runRef.current,
+                exposure: appliedExposure,
+                lines: block.lines,
+                scene: block.scene,
+                faults: block.faults,
+                statements: block.statements,
+                setting: budgetRef.current.setting,
+                decoration: stillDecoration,
+                coverage: (body) => session?.survey(body)?.coverage ?? null,
+              });
+            },
+          })
+        : () => undefined;
+    // TAKE STILL held back from the start, with the view's cause until it draws its image.
+    stills?.session.refresh();
     const tick = (nowMs: number): void => {
       pacer.frame(nowMs);
       const paced = budgetRef.current;
@@ -1714,6 +1780,7 @@ function ViewStage({
             imageDrawn && (renderScale < primaryBudget.renderScale || primaryScale.airStepped);
           terrainAnnunciation = drawn.terrain;
           decorationDrawn = drawn.decoration;
+          stillDecoration = drawn.decoration;
           surveyEdges = drawn.surveyEdges;
           contourIntervalM = drawn.contourIntervalM;
           atmosphereReport = drawn.atmosphere;
@@ -1741,6 +1808,7 @@ function ViewStage({
       // be drawn opens the window before its first histogram, and one gone has nothing to meter
       // (R07.T16.b).
       auto.noteImage(imageDrawn);
+      appliedExposure = reading.control;
       // The readouts change at 4 Hz, every view's in the same frame, so React renders them once:
       // a frame the instruments draw in too, at their 30 Hz, so that every view's block states
       // what it drew in that frame, one interval among them where they stand at one pose
@@ -1772,6 +1840,8 @@ function ViewStage({
       });
       if (publish) {
         publishedMs = nowMs;
+        // TAKE STILL held back while the view gives no still, with the cause, at the readout rate.
+        stills?.session.refresh();
         // The control the controller moved to reaches the display's state at the readout rate,
         // when its readout would change: its automation level with who inhibited it or why, or
         // its EV100 to the readout's 0.1.
@@ -1812,6 +1882,9 @@ function ViewStage({
     return () => {
       loopRunsRef.current = false;
       cancelAnimationFrame(frame);
+      detachStills();
+      // No view drawn: TAKE STILL held back until the loop runs again.
+      stills?.session.refresh();
       unsubscribeTimes();
       unsubscribeTimesRestored();
       reportedTo?.forgetView(VIEW_ID);
@@ -1819,7 +1892,7 @@ function ViewStage({
       // The drawer disposes of the view with itself.
       releaseDrawer();
     };
-  }, [engineState, canvas, framePacing]);
+  }, [engineState, canvas, framePacing, stills, stillSource]);
 
   const command = useCallback(
     (action: ViewKeyAction): void => {
@@ -2148,6 +2221,16 @@ function ViewStage({
   const bare = maximize === "hidden";
   const plateLines = bare ? NO_LINES : primaryLines;
   const plateStatements = bare ? failedRequests(primaryStatements) : primaryStatements;
+  // A still's label takes the block whole, whatever MAXIMIZE VIEW folds (plan R11, R11.T10.b), as
+  // each render made it.
+  useLayoutEffect(() => {
+    stillLabelRef.current = {
+      lines: primaryLines,
+      scene: sceneAnnunciations,
+      faults,
+      statements: primaryStatements,
+    };
+  });
   const plateCount = bare ? null : primaryCount;
 
   // The plates as laid out after each render, for the room's next decision (R10.T12.b): read from
@@ -2194,7 +2277,17 @@ function ViewStage({
   if (foldLayout !== layout) {
     setFoldLayout(layout);
   }
-  const folded = (panel: FoldPanel): boolean => compact && opened !== panel;
+  // In the full layout CAMERA and STILLS share the first column's last place, behind the same row of
+  // disclosure buttons, CAMERA open unless STILLS is the fold, so that the place is the taller of the
+  // two, never their sum (plan R11, R11.T10.b; the UX ruling, 2026-11-18).
+  const sharesPlace = (panel: FoldPanel): boolean =>
+    stills !== null && (panel === "camera" || panel === "stills");
+  const folded = (panel: FoldPanel): boolean => {
+    if (compact) {
+      return opened !== panel;
+    }
+    return sharesPlace(panel) && (panel === "stills") !== (opened === "stills");
+  };
   const foldIds: Readonly<Record<FoldPanel, string>> = {
     instruments: `${legendId}-instruments`,
     camera: `${legendId}-camera`,
@@ -2347,18 +2440,24 @@ function ViewStage({
   // The stills' standing, `STILLS SUSPENDED` or `STILLS DISABLED`, which lasts the session, and a
   // still's status, its step or how it ended: they stand under the row while their panel is folded,
   // and under MAXIMIZE VIEW, live regions as in the panel (plan R11, R11.T10.b).
-  const stillsLines = [stillsAway.standing, stillsAway.status].filter((line) => line !== null);
+  // Their standing and status run on as one line, the status left out while STILLS DISABLED says
+  // its cause, so that the line takes two at most (the UX ruling, 2026-11-18).
+  const stillsLines = [
+    stillsAway.standing,
+    stillsAway.standing?.startsWith(STILLS_DISABLED) === true ? null : stillsAway.status,
+  ].filter((line) => line !== null);
   const stillsStanding =
     stillsLines.length === 0 ? null : (
-      <>
-        {stillsLines.map((line) => (
-          <p className="view-stills__standing view-folds__standing" key={line}>
-            <output>
+      <p className="view-stills__standing view-folds__standing">
+        <output>
+          {stillsLines.map((line, index) => (
+            <Fragment key={line}>
+              {index === 0 ? null : " · "}
               <StatusText text={line} />
-            </output>
-          </p>
-        ))}
-      </>
+            </Fragment>
+          ))}
+        </output>
+      </p>
     );
   // The faults and statuses that stand for the panels hidden, folded in the compact layout or every
   // one under MAXIMIZE VIEW (decision-r07-t19-layout, item 1b); the limit reasons go with their
@@ -2409,35 +2508,41 @@ function ViewStage({
         </output>
       </p>
     );
-  // The compact layout's row of disclosure buttons, and under it the standing lines of the panels
-  // folded.
-  const foldRow = compact ? (
-    <>
-      <div className="view-folds">
-        {FOLD_BUTTONS.filter(({ panel }) => stands(panel)).map(({ panel, label }) => (
-          <button
-            key={panel}
-            ref={foldButtonRef(panel)}
-            type="button"
-            className="control disclosure view-folds__button"
-            aria-expanded={opened === panel}
-            aria-controls={foldIds[panel]}
-            onClick={() => {
-              setFold(toggledFold(opened, panel));
-            }}
-          >
-            <DisclosureGlyph expanded={opened === panel} />
-            {label}
-          </button>
-        ))}
-      </div>
-      {folded("camera") ? cameraStanding : null}
-      {folded("style") ? styleStanding : null}
-      {folded("exposure") ? exposureStandingLine : null}
-      {folded("exposure") ? keyedLine : null}
-      {folded("stills") ? stillsStanding : null}
-    </>
-  ) : null;
+  // The row of disclosure buttons, and under it the standing lines of the panels folded: the compact
+  // layout's, of every folding panel, and the full layout's, of CAMERA and STILLS, where STILLS
+  // stands.
+  const rowButtons = FOLD_BUTTONS.filter(
+    ({ panel }) => stands(panel) && (compact || sharesPlace(panel)),
+  );
+  const rowOpen: FoldPanel = compact || opened === "stills" ? opened : DEFAULT_FOLD;
+  const foldRow =
+    compact || stills !== null ? (
+      <>
+        <div className="view-folds">
+          {rowButtons.map(({ panel, label }) => (
+            <button
+              key={panel}
+              ref={foldButtonRef(panel)}
+              type="button"
+              className="control disclosure view-folds__button"
+              aria-expanded={rowOpen === panel}
+              aria-controls={foldIds[panel]}
+              onClick={() => {
+                setFold(toggledFold(rowOpen, panel));
+              }}
+            >
+              <DisclosureGlyph expanded={rowOpen === panel} />
+              {label}
+            </button>
+          ))}
+        </div>
+        {folded("camera") ? cameraStanding : null}
+        {folded("style") ? styleStanding : null}
+        {folded("exposure") ? exposureStandingLine : null}
+        {folded("exposure") ? keyedLine : null}
+        {folded("stills") ? stillsStanding : null}
+      </>
+    ) : null;
   // Under MAXIMIZE VIEW, after the key legend on its row, what the hidden panels would show (the
   // owner's request, 2026-11-01): the line naming its key, the hidden controls' keys, the CONTROLS
   // view where it is an instrument and that view's selection; then the slots held whole for want of room, as the
@@ -2792,6 +2897,15 @@ function ViewStage({
               groundNote={groundPage.groundNote}
             />
           )}
+          {/* In CAMERA's place, folding with it (the UX ruling, 2026-11-18). */}
+          {stills === null ? null : (
+            <ViewStills
+              designator={PRIMARY_NAME}
+              id={foldIds.stills}
+              hidden={folded("stills")}
+              model={stills}
+            />
+          )}
         </div>
         <div className="view__column view__column--b">
           <StyleControl
@@ -2859,14 +2973,6 @@ function ViewStage({
               hidden={folded("meter")}
             />
           ) : null}
-          {stills === null ? null : (
-            <ViewStills
-              designator={PRIMARY_NAME}
-              id={foldIds.stills}
-              hidden={folded("stills")}
-              model={stills}
-            />
-          )}
         </div>
       </div>
     </div>
@@ -3378,6 +3484,13 @@ function ViewPanels({
       ? [cameraAnnunciation(scene.cameraFault)]
       : []),
   ];
+  // Their words for a still's label, one array while they are the same, so that the memoised stage
+  // renders for no new identity (plan R11, R11.T10.b).
+  const sceneWords = lines.map((line) => line.text).join("\n");
+  const sceneAnnunciations = useMemo(
+    () => (sceneWords === "" ? [] : sceneWords.split("\n")),
+    [sceneWords],
+  );
   return (
     <div className="view-display">
       {!sceneBar && lines.length === 0 ? null : (
@@ -3490,6 +3603,8 @@ function ViewPanels({
         linkUp={link.status === "connected"}
         sceneStatements={sceneStatements}
         stills={stills}
+        stillSource={stillSource}
+        sceneAnnunciations={sceneAnnunciations}
       />
     </div>
   );

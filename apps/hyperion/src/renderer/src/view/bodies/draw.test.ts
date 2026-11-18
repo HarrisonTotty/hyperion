@@ -2186,7 +2186,7 @@ describe("the renderer", () => {
     renderer.dispose();
   });
 
-  it("releases the buffers and textures it made when disposed", async () => {
+  it("releases the buffers, textures, meshes and materials it made when disposed", async () => {
     const engine = await countingRenderEngine();
     const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
     renderer.draws(planOf());
@@ -2197,6 +2197,7 @@ describe("the renderer", () => {
       }
     });
     renderer.dispose();
+    expect(engine.live.materials).toBe(0);
     expect(released.toSorted()).toEqual(
       [
         "bodies:discs",
@@ -2217,6 +2218,13 @@ describe("the renderer", () => {
         "bodies:no disc table",
         // Plan R14's figures' cluster records (R14.T4.a); their buckets are made at a first cull.
         "bodies:figure cluster records",
+        // Its meshes' buffers (plan R11, R11.T10.b): the disc's quad, the figures' patch and their
+        // cluster template.
+        "bodies:quad:position",
+        "bodies:smooth patch:indices",
+        "bodies:smooth patch:position",
+        "figure clusters:indices",
+        "figure clusters:position",
       ].toSorted(),
     );
   });

@@ -12,6 +12,11 @@ import {
   type ViewDisplayHarness,
 } from "../../test/viewDisplayHarness";
 import { GraphicsStatusStore, initialGraphicsStatus } from "../../view/engine/status";
+import {
+  type PhotorealStillView,
+  PhotorealStills,
+  STILL_UNAVAILABLE,
+} from "../../view/photoreal/renderer";
 import type { StillSource } from "../../view/stills/stillJob";
 
 afterEach(() => {
@@ -44,6 +49,24 @@ function source(device = new FakeStillDevice("absent")): FakeStillSource {
   });
 }
 
+/**
+ * `TAKE STILL`'s held-back reason for `cause` as its accessible description reads: its state, set
+ * apart by `StatusText`, then the cause.
+ */
+function reason(cause: string): RegExp {
+  return new RegExp(`^NOT AVAILABLE: ?${cause}$`, "u");
+}
+
+/** The photorealistic renderer's hook, holding the view the stage attached. */
+class CapturingStills extends PhotorealStills {
+  attached: PhotorealStillView | null = null;
+
+  override attach(view: PhotorealStillView): () => void {
+    this.attached = view;
+    return super.attach(view);
+  }
+}
+
 /** VIEW's own disclosure buttons on show, by name, in their order. */
 function disclosures(): ReadonlyArray<string | null> {
   const display = document.querySelector<HTMLElement>(".view");
@@ -54,6 +77,11 @@ function disclosures(): ReadonlyArray<string | null> {
     .getAllByRole("button")
     .filter((button) => button.hasAttribute("aria-expanded"))
     .map((button) => button.textContent);
+}
+
+/** The stills panel opened by its disclosure, in either layout. */
+async function openStills(view: ViewDisplayHarness): Promise<void> {
+  await view.user.click(screen.getByRole("button", { name: "STILLS" }));
 }
 
 /** A still taken by `TAKE STILL`, its job run to its end. */
@@ -81,15 +109,79 @@ describe("VIEW's stills (R11.T10.b)", () => {
   });
 
   it("stands its stills panel with a still source, TAKE STILL offered", async () => {
-    await setup(source());
+    const view = await setup(source());
+    await openStills(view);
     expect(
       screen.getByRole("button", { name: "TAKE STILL" }).getAttribute("aria-disabled"),
     ).toBeNull();
   });
 
-  it("folds the stills behind STILLS, after EXPOSURE, in the compact layout", async () => {
+  it("holds TAKE STILL back through the photorealistic renderer's hook while the view draws its wireframe", async () => {
+    const view = await setup(new PhotorealStills());
+    view.advance(500);
+    await act(async () => {
+      await settle();
+    });
+    await openStills(view);
+    const take = screen.getByRole("button", { name: "TAKE STILL" });
+    expect(take).toHaveAttribute("aria-disabled", "true");
+    expect(take).toHaveAccessibleDescription(reason(STILL_UNAVAILABLE.noImage));
+  });
+
+  it("holds TAKE STILL back before the view is drawn, with no engine ready", async () => {
+    const view = renderViewDisplay({
+      store: new GraphicsStatusStore(initialGraphicsStatus("vulkan", false)),
+      source: {
+        requestAdapter: () => new Promise(() => undefined),
+        load: () => new Promise(() => undefined),
+      },
+      engines: [],
+      stillSource: new PhotorealStills(),
+    });
+    await settle();
+    await openStills(view);
+    expect(screen.getByRole("button", { name: "TAKE STILL" })).toHaveAccessibleDescription(
+      reason(STILL_UNAVAILABLE.noView),
+    );
+  });
+
+  it("gives a still's label the label block whole, whatever MAXIMIZE VIEW folds", async () => {
+    const stills = new CapturingStills();
+    const view = await setup(stills);
+    view.advance(500);
+    const whole = stills.attached?.request().readings.map(({ label }) => label) ?? [];
+    await view.user.click(screen.getByRole("button", { name: /MAXIMIZE VIEW/u }));
+    view.advance(500);
+    const maximized = stills.attached?.request().readings.map(({ label }) => label) ?? [];
+    expect([whole.includes("TIME"), maximized]).toEqual([true, whole]);
+  });
+
+  it("folds the stills behind STILLS, after CAMERA, whose place they share, in the compact layout", async () => {
     await setup(source(), COMPACT_VIEW_PX);
-    expect(disclosures()).toEqual(["Instruments", "CAMERA", "STYLE", "EXPOSURE", "STILLS"]);
+    expect(disclosures()).toEqual(["Instruments", "CAMERA", "STILLS", "STYLE", "EXPOSURE"]);
+  });
+
+  it("folds the stills with CAMERA in the full layout, behind their own two buttons, CAMERA open", async () => {
+    const view = await setup(source());
+    const before = [
+      disclosures(),
+      screen.queryByRole("region", { name: "Stills PRIMARY" }),
+      screen.getByRole("region", { name: "Camera PRIMARY" }) instanceof HTMLElement,
+    ];
+    await openStills(view);
+    expect([
+      ...before,
+      screen.getByRole("region", { name: "Stills PRIMARY" }) instanceof HTMLElement,
+      screen.queryByRole("region", { name: "Camera PRIMARY" }),
+    ]).toEqual([["CAMERA", "STILLS"], null, true, true, null]);
+  });
+
+  it("folds no panel in the full layout while it has no still source", async () => {
+    await setup(undefined);
+    expect([
+      disclosures(),
+      screen.getByRole("region", { name: "Camera PRIMARY" }) instanceof HTMLElement,
+    ]).toEqual([[], true]);
   });
 
   it("opens the stills alone, folding CAMERA", async () => {
@@ -109,11 +201,10 @@ describe("VIEW's stills (R11.T10.b)", () => {
     const view = await setup(source(device), COMPACT_VIEW_PX);
     await view.user.click(screen.getByRole("button", { name: "STILLS" }));
     await takeStill(view);
-    // Folding STILLS opens CAMERA again: the stills' lines go under the row.
+    // Folding STILLS opens CAMERA again: the stills' lines go under the row, as one.
     await view.user.click(screen.getByRole("button", { name: "STILLS" }));
     expect(awayLines()).toEqual([
-      "STILLS SUSPENDED",
-      "STILL ABANDONED: the graphics device was lost, TAKE STILL to retry",
+      "STILLS SUSPENDED · STILL ABANDONED: the graphics device was lost, TAKE STILL to retry",
     ]);
   });
 
@@ -121,18 +212,19 @@ describe("VIEW's stills (R11.T10.b)", () => {
     const device = new FakeStillDevice("absent");
     device.loseAtBatch = 0;
     const view = await setup(source(device));
+    await openStills(view);
     await takeStill(view);
     device.loseAtBatch = device.batches.length;
     await takeStill(view);
     await view.user.click(screen.getByRole("button", { name: /MAXIMIZE VIEW/u }));
-    expect(awayLines()).toEqual([
-      "STILLS DISABLED: a second device loss, relaunch to retry",
-      "STILL ABANDONED: the graphics device was lost, relaunch to retry",
-    ]);
+    // The cause and remedy alone, which say why the still was abandoned.
+    expect(awayLines()).toEqual(["STILLS DISABLED: a second device loss, relaunch to retry"]);
   });
 
   it("states nothing of the stills away from the panel while it stands open", async () => {
-    await setup(source());
+    const view = await setup(source());
+    await openStills(view);
+    await takeStill(view);
     expect(awayLines()).toEqual([]);
   });
 });

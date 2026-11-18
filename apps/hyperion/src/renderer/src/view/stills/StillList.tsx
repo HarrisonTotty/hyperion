@@ -57,25 +57,29 @@ interface LabelRow {
 /**
  * Every field of a still's label as the list shows it (Design note 17): the view's own readings at
  * the request, in its words and order (its frame, time, camera, field of view, exposure), then the
- * still's: its quality, its decoration, its survey coverage, its annunciations and its size. A
- * still's row a reading already gave is not given again.
+ * still's: its quality, its decoration, its survey coverage where any body's survey was held (none
+ * held is no value, so not `NONE`, the guide's "nothing surveyed"), its annunciations, set as the
+ * view sets them, and its size. A still's row a reading already gave is not given again.
  */
 function labelRows(label: StillLabel): ReadonlyArray<LabelRow> {
   const readings: LabelRow[] = label.readings.map(({ label: term, value }) => ({ term, value }));
-  const own: LabelRow[] = [
-    { term: "QUALITY", value: QUALITY_NAMES[label.setting] },
-    { term: "DECORATION", value: label.decoration ? "ON" : "OFF" },
-    {
-      term: "SURVEY COVERAGE",
-      value:
-        label.survey.length === 0
-          ? "NONE"
-          : label.survey.map((coverage) => (
+  const survey: LabelRow[] =
+    label.survey.length === 0
+      ? []
+      : [
+          {
+            term: "SURVEY COVERAGE",
+            value: label.survey.map((coverage) => (
               <span className="still-list__line" key={coverage.body}>
                 {coverageText(coverage)}
               </span>
             )),
-    },
+          },
+        ];
+  const own: LabelRow[] = [
+    { term: "QUALITY", value: QUALITY_NAMES[label.setting] },
+    { term: "DECORATION", value: label.decoration ? "ON" : "OFF" },
+    ...survey,
     {
       term: "ANNUNCIATIONS",
       value:
@@ -84,7 +88,9 @@ function labelRows(label: StillLabel): ReadonlyArray<LabelRow> {
         ) : (
           <ul className="still-list__annunciations">
             {label.annunciations.map((words) => (
-              <li key={words}>{words}</li>
+              <li key={words}>
+                <StatusText text={words} />
+              </li>
             ))}
           </ul>
         ),

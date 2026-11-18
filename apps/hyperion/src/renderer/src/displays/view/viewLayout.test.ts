@@ -72,20 +72,24 @@ describe("VIEW's full layout's least height (R07.T19.b's follow-up)", () => {
     expect(FULL_MIN_HEIGHT_BOUND_REM).toBe(52.5);
   });
 
-  it("takes the STYLE panel's BASELINE row: 752 px, its 0.5 rem margin and its 2 rem row, 49.5 rem (R10.T12.a; decision-r10-t12a-scope §3.3)", () => {
-    expect([FULL_MIN_HEIGHT_REM, (752 + 8 + 32) / 16]).toEqual([49.5, 49.5]);
+  it("takes the STYLE panel's BASELINE row: 752 px, its 0.5 rem margin and its 2 rem row, 49.5 rem in the second column (R10.T12.a; decision-r10-t12a-scope §3.3)", () => {
+    expect((752 + 8 + 32) / 16).toBe(49.5);
   });
 
-  it("keeps 49.5 rem with the BASELINE row beside an instrument's QUALITY LOW reason, the GRID row never beside it (R10.T12.d)", () => {
+  it("keeps the second column at 49.5 rem with the BASELINE row beside an instrument's QUALITY LOW reason, the GRID row never beside it (R10.T12.d)", () => {
     // The Style panel at 99.5 px: with the two-line reason (43 px) and BASELINE (40 px), or GRID and
     // BASELINE (40 px each).
-    expect([
-      columnPx(99.5 + 43 + 40) / 16,
-      columnPx(99.5 + 40 + 40) / 16 <= FULL_MIN_HEIGHT_REM,
-    ]).toEqual([FULL_MIN_HEIGHT_REM, true]);
+    expect([columnPx(99.5 + 43 + 40) / 16, columnPx(99.5 + 40 + 40) / 16 <= 49.5]).toEqual([
+      49.5,
+      true,
+    ]);
   });
 
-  it("keeps every named box's layout at 49.5 rem: 1920 × 1080 at 100% and maximised full, 1600 × 900 and 1280 × 720 compact", () => {
+  it("takes the first column with STILLS sharing CAMERA's place, 813.5 px by estimate, to 51 rem (plan R11, R11.T10.b)", () => {
+    expect([FULL_MIN_HEIGHT_REM, Math.ceil(813.5 / 16 / 0.25) * 0.25]).toEqual([51, 51]);
+  });
+
+  it("keeps every named box's layout at 51 rem: 1920 × 1080 at 100% and maximised full, 1600 × 900 and 1280 × 720 compact", () => {
     expect([
       viewLayout(box(1888, 923)),
       viewLayout(box(1888, 856)),

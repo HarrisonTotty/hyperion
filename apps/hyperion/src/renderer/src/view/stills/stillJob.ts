@@ -8,9 +8,8 @@
  * renderer supplies the real ones: the {@link StillDevice}, R01's queue and clock (its
  * `onSubmittedWorkDone()`, an empty submit, the animation frame, `onPassTimes` and its faults), and
  * the {@link StillRenderer}, the scene frozen at the request and drawn tile by tile into R01's
- * `createRenderTarget`. That draw, a hook in `photoreal/renderer.ts`, is not built here (it waits
- * for the lane perf-long-tasks-2's wave 2): until it is, `VIEW` has no {@link StillSource} and
- * offers no still.
+ * `createRenderTarget`. That draw is the hook in `photoreal/renderer.ts` (`PhotorealStills`), `VIEW`'s
+ * {@link StillSource}.
  *
  * In order: every pipeline the still needs is made asynchronously, before the first batch
  * ({@link StillRenderer.prepare}), since a synchronous compile of the high setting's pipelines on
@@ -415,8 +414,17 @@ export interface StillScene {
 }
 
 /**
+ * What a view gives at a still's request ({@link StillSource.snapshot}): its scene, frozen, or why
+ * it gives none now, its cause in the words `NOT AVAILABLE:` states it after its colon (`the view
+ * draws no photorealistic image`).
+ */
+export type StillSnapshot =
+  | { readonly kind: "scene"; readonly scene: StillScene }
+  | { readonly kind: "unavailable"; readonly cause: string };
+
+/**
  * Where a still's scene comes from: the view, frozen at the request, and its device; supplied by
- * the photorealistic renderer's hook (R11.T10.b's remainder), none until it is built.
+ * the photorealistic renderer's hook (`photoreal/renderer.ts`' `PhotorealStills`).
  */
 export interface StillSource {
   readonly device: StillDevice;
@@ -425,11 +433,23 @@ export interface StillSource {
   frameIntervalNs(): number;
   /**
    * What the view holds now, frozen: the label's inputs and whatever the renderer needs, the cells
-   * surveyed now among them, so that cells surveyed while the job runs are not used.
+   * surveyed now among them, so that cells surveyed while the job runs are not used; or why it
+   * gives no still now.
    */
-  snapshot(): StillScene;
+  snapshot(): StillSnapshot;
+  /**
+   * Why the view gives no still now, a {@link StillSnapshot}'s cause, or `null` where it gives
+   * one: what `TAKE STILL` is held back for, read as the session is made and at each
+   * {@link StillSession.refresh}. Absent, the view always gives one.
+   */
+  unavailable?(): string | null;
   /** A renderer of `scene`, which the job disposes. */
   renderer(scene: StillScene): StillRenderer;
+}
+
+/** `TAKE STILL`'s held-back reason for a view's cause, or `null` where it gives a still. */
+function heldBackOf(cause: string | null | undefined): string | null {
+  return cause === null || cause === undefined ? null : `NOT AVAILABLE: ${cause}`;
 }
 
 /** What a {@link StillSession} needs. */
@@ -451,7 +471,9 @@ export interface StillSessionOptions {
  * An external store for `useSyncExternalStore`, whose snapshot is the control's
  * {@link StillControlState}. A loss in flight while stills are `available` suspends them; the next
  * still, asked for explicitly, takes at most half the batch that was in flight; a loss in flight
- * while `suspended` disables them. A loss while no still runs changes nothing.
+ * while `suspended` disables them. A loss while no still runs changes nothing. While the view gives
+ * no still ({@link StillSource.unavailable}, read at {@link StillSession.refresh}, or a refused
+ * request), `TAKE STILL` is held back with the cause.
  */
 export class StillSession {
   readonly #options: StillSessionOptions;
@@ -463,6 +485,7 @@ export class StillSession {
 
   constructor(options: StillSessionOptions) {
     this.#options = options;
+    this.#state = { ...STILL_CONTROL_IDLE, heldBack: heldBackOf(options.source.unavailable?.()) };
   }
 
   /** Subscribes to the control's state; returns the unsubscription. */
@@ -477,20 +500,45 @@ export class StillSession {
   readonly getSnapshot = (): StillControlState => this.#state;
 
   /**
-   * Asks for a still of the view as it stands now: refused, doing nothing, while one runs or once
-   * stills are disabled.
+   * Holds `TAKE STILL` back while the view gives no still, for the cause its source states now
+   * ({@link StillSource.unavailable}), or offers it again where it gives one; a still in progress
+   * runs on. The view calls it as it starts and stops drawing and at its readouts' rate.
+   */
+  refresh(): void {
+    this.#hold(heldBackOf(this.#options.source.unavailable?.()));
+  }
+
+  #hold(heldBack: string | null): void {
+    if (heldBack !== this.#state.heldBack) {
+      this.#set({ ...this.#state, heldBack });
+    }
+  }
+
+  /**
+   * Asks for a still of the view as it stands now: refused, doing nothing, while one runs, once
+   * stills are disabled, or while `TAKE STILL` is held back; and where the view gives no still at
+   * the request, which then holds it back.
    *
    * @returns The job's end, or `null` where none was started.
    */
   async request(): Promise<StillJobOutcome | null> {
-    if (this.#state.activity.kind === "running" || this.#state.standing === "disabled") {
+    if (
+      this.#state.activity.kind === "running" ||
+      this.#state.standing === "disabled" ||
+      this.#state.heldBack !== null
+    ) {
       return null;
     }
     const { source } = this.#options;
     let outcome: StillJobOutcome;
     try {
       // Frozen now: what the view holds after this is not the still's.
-      const scene = source.snapshot();
+      const snapshot = source.snapshot();
+      if (snapshot.kind === "unavailable") {
+        this.#hold(heldBackOf(snapshot.cause));
+        return null;
+      }
+      const { scene } = snapshot;
       const renderer = source.renderer(scene);
       this.#step({ kind: "preparing", donePasses: 0, totalPasses: renderer.units.length });
       outcome = await runStillJob({
@@ -555,7 +603,7 @@ export class StillSession {
         this.#maxUnits = Math.max(1, Math.floor(outcome.batchUnits / 2));
         break;
     }
-    this.#set({ standing, activity: { kind: "idle", last }, heldBack: null });
+    this.#set({ standing, activity: { kind: "idle", last }, heldBack: this.#state.heldBack });
   }
 
   #set(state: StillControlState): void {

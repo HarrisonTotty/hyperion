@@ -46,6 +46,7 @@ import { ServerLinkContext, useServerLinkValue } from "./lib/serverLink";
 import { useDisplayKeys } from "./lib/useDisplayKeys";
 import { GraphicsStatusProvider } from "./view/engine/GraphicsStatusProvider";
 import { navigatorGpu } from "./view/engine/status";
+import { PhotorealStills } from "./view/photoreal/renderer";
 import type { QualitySetting } from "./view/quality/qualitySetting";
 import { selectionViewport } from "./view/terrain/handover";
 import type {
@@ -98,6 +99,12 @@ interface DisplayInputs {
    * R08, R08.T8.d), which `VIEW`'s atmospheres draw with; none on any other launch.
    */
   readonly atmosphereLevers: AtmosphereLeversOverride | undefined;
+  /**
+   * `VIEW`'s still source (plan R11, R11.T10.b), the photorealistic renderer's hook, made once:
+   * `VIEW`'s stills read it once, at the display's mount (`useViewStills`), and its stage attaches
+   * its view to it as it draws.
+   */
+  readonly stillSource: PhotorealStills;
 }
 
 /**
@@ -320,6 +327,7 @@ function displayContent(id: DisplayId, inputs: DisplayInputs): ReactElement {
           geometry={inputs.geometry}
           atmosphereLevers={inputs.atmosphereLevers}
           onPlanetViewer={inputs.inspectionToViewer}
+          stillSource={inputs.stillSource}
         />
       );
       break;
@@ -481,6 +489,8 @@ export function App() {
   // The body VIEW's inspection shows, which its OPEN IN PLANET VIEWER hands over (plan R15, T5).
   const [inspected, setInspected] = useState<BodyInspection | null>(null);
   const [planetOpening, setPlanetOpening] = useState<PlanetViewerOpening | null>(null);
+  // VIEW's stills, the photorealistic renderer's hook, which VIEW's stage attaches to as it draws.
+  const [stillSource] = useState(() => new PhotorealStills());
   const viewerOffered = displays.some(({ id }) => id === "planet");
   const openInViewer = useCallback((body: BodyInspection): void => {
     setPlanetOpening((previous) => ({ inspection: body, sequence: (previous?.sequence ?? 0) + 1 }));
@@ -545,6 +555,7 @@ export function App() {
     performanceThreads: window.hyperion.performanceThreads,
     geometry: window.hyperion.geometry,
     atmosphereLevers: viewsCheck?.launch.atmosphereLevers,
+    stillSource,
   };
   return (
     <GraphicsStatusProvider graphics={window.hyperion.graphics} gpu={navigatorGpu()}>

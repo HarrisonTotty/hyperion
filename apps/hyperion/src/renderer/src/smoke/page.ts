@@ -829,9 +829,10 @@ async function run(
   );
   await group(26, "R11.T7.b the cloud layer drawn", () => checkCloudLayerDraw(engine, checks));
   // In part 28, alone: R11.T10.c's PNG round trip through the harness's main process and VIEW's
-  // still mount, whose R11.T10.b job draws a small still of flat colours into targets of its own, so
-  // that no other part's frame moves (parts 25 to 27 are other lanes').
-  await group(28, "R11.T10.c the still mount, the job and the PNG round trip", () =>
+  // still mount, whose R11.T10.b job draws a small still of flat colours into targets of its own,
+  // then a small still of a lit body through the photorealistic renderer's hook (R11.T10.b), each
+  // into targets of its own, so that no other part's frame moves (parts 25 to 27 are other lanes').
+  await group(28, "R11.T10.c the still mount, the job, the hook and the PNG round trip", () =>
     checkStills(checks, smokeStills(), engine, device),
   );
   await group(17, "R08.T8.d the far limb's node rays packed in the general forms", () =>

@@ -450,6 +450,14 @@ export class ResilientEngine implements RenderEngine {
     );
   }
 
+  submittedWorkDone(): Promise<void> {
+    return this.#currentAsync("submittedWorkDone", (inner) => inner.submittedWorkDone());
+  }
+
+  submitEmpty(): void {
+    this.#inner?.submitEmpty();
+  }
+
   onPassTimes(listener: (times: PassTimes) => void): () => void {
     return this.#listen(this.#passTimeListeners, listener);
   }

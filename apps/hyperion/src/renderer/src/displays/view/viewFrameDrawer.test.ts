@@ -548,6 +548,30 @@ describe("what a view drew, for the terrain session (R10.T16.a)", () => {
     expect([planned.size > 0, kept === planned]).toEqual([true, true]);
   });
 
+  it("holds its last photorealistic frame and plan for a still, none before one (plan R11, R11.T10.b)", async () => {
+    const engine = await countingRenderEngine();
+    const fresh = new ViewFrameDrawer(engine, new RecordingView("view"), "view");
+    const before = fresh.lastPhotoreal;
+    fresh.dispose();
+    const drawer = await plannedDrawer();
+    const last = drawer.lastPhotoreal;
+    const planned = drawer.regimes;
+    drawer.dispose();
+    expect([before, last?.plan.regimes === planned, last?.frame.viewport]).toEqual([
+      null,
+      true,
+      { widthPx: 320, heightPx: 180 },
+    ]);
+  });
+
+  it("holds no frame for a still once it draws the wireframe (plan R11, R11.T10.b)", async () => {
+    const drawer = await plannedDrawer();
+    drawer.draw(inputsOf("wireframe"));
+    const last = drawer.lastPhotoreal;
+    drawer.dispose();
+    expect(last).toBeNull();
+  });
+
   it("reports its scene, pose, field of view, presented and selection sizes, styles, setting and priority", () => {
     const inputs = inputsOf("wireframe", 1.5);
     const regimes = new Map();

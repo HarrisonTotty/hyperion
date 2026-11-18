@@ -19,8 +19,8 @@ export interface ViewStillsModel {
 
 /**
  * `VIEW`'s stills (plan R11, R11.T10.b): its store and its session over `source`, each made once at
- * the mount, kept through every scene; `null` where `VIEW` has no still source, as until the
- * photorealistic renderer's hook supplies one, when it offers no still.
+ * the mount, kept through every scene; `null` where `VIEW` has no still source (the photorealistic
+ * renderer's hook, `PhotorealStills`), when it offers no still.
  *
  * @param source - Read once, at the mount: a new source takes a new mount.
  * @param stills - The preload's still functions (`window.hyperion.stills`), read once with it.

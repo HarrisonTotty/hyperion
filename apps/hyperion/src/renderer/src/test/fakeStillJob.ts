@@ -1,6 +1,12 @@
 import type { GpuTimer } from "../view/engine/status";
 import type { MeasuredPass } from "../view/stills/batchController";
-import type { StillDevice, StillRenderer, StillScene, StillSource } from "../view/stills/stillJob";
+import type {
+  StillDevice,
+  StillRenderer,
+  StillScene,
+  StillSnapshot,
+  StillSource,
+} from "../view/stills/stillJob";
 import type { StillRequest } from "../view/stills/stillLabel";
 import { planTiles, type StillTile, type StillTiling } from "../view/stills/stillPlan";
 
@@ -197,6 +203,8 @@ export class FakeStillSource implements StillSource {
   readonly setting = "low" as const;
   /** What the view holds now. */
   current: StillRequest;
+  /** Why the view gives no still now, where the test sets it; it gives one while `null`. */
+  cause: string | null = null;
   readonly renderers: FakeStillRenderer[] = [];
   snapshots = 0;
 
@@ -209,9 +217,15 @@ export class FakeStillSource implements StillSource {
     return FAKE_FRAME_NS;
   }
 
-  snapshot(): StillScene {
+  snapshot(): StillSnapshot {
     this.snapshots += 1;
-    return { request: this.current };
+    return this.cause === null
+      ? { kind: "scene", scene: { request: this.current } }
+      : { kind: "unavailable", cause: this.cause };
+  }
+
+  unavailable(): string | null {
+    return this.cause;
   }
 
   renderer(scene: StillScene): FakeStillRenderer {

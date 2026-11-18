@@ -90,24 +90,29 @@ import type { Quaternion } from "../camera/pose";
 import type { ViewRole } from "../camera/state";
 import { BUFFER_USAGE, TEXTURE_USAGE } from "../engine/gpuFlags";
 import { EngineUnavailable } from "../engine/resilientEngine";
+import type { GpuTimer, GraphicsFault } from "../engine/status";
 import type {
   BufferHandle,
+  ColourTargetFormat,
   ComputeHandle,
   DrawItem,
   FrameSubmission,
   MaterialHandle,
   MeshHandle,
+  PassTimes,
   RenderEngine,
   RenderTarget,
   RenderView,
   TexelRect,
   TextureHandle,
   ViewSize,
+  WgslMaterialSpec,
 } from "../engine/types";
 import type { KernelPair } from "../engine/kernels";
 import type { PlacedLight } from "../lighting/hostLights";
 import { bloomKernel, bloomThreshold, levelWeight } from "../post/bloom";
 import {
+  BLOOM_UP_MATERIAL,
   BloomChain,
   fullScreenTriangle,
   GLARE_SOURCE_BYTES,
@@ -143,6 +148,16 @@ import {
 } from "../clusters/visibility";
 import { createSceneTarget } from "./sceneTarget";
 import { log } from "../../lib/pinnedMath";
+import type { MeasuredPass } from "../stills/batchController";
+import type {
+  StillDevice,
+  StillRenderer,
+  StillScene,
+  StillSnapshot,
+  StillSource,
+} from "../stills/stillJob";
+import { isStillSide, type StillRequest } from "../stills/stillLabel";
+import { planTiles, type StillTile, type StillTiling, tileProjection } from "../stills/stillPlan";
 
 /**
  * What draws the terrain of a photorealistic frame's bodies handed over to it (plan R10, R10.T10.e;
@@ -341,6 +356,13 @@ export interface PhotorealFrame {
   readonly floorLowest?: boolean | undefined;
   /** The exposure scale the target is pre-exposed with (`exposureScale`), 1 ÷ (cd/m²). */
   readonly exposureScale: number;
+  /**
+   * The projection its passes draw through in P's place (plan R11, R11.T10.b): a still's sample's,
+   * `tileProjection` of the still with the sample's sub-pixel offset, which only what is projected
+   * through the whole matrix takes, the figures and R06's sky; absent, as for every view's frame,
+   * P of the camera and the viewport.
+   */
+  readonly projection?: Float32Array | undefined;
   /** R06's draws at infinity, in order: the band, then the baked cube. */
   readonly sky: ReadonlyArray<DrawItem>;
   /** The star sprites' records (stars, and host discs under three pixels), at depth 0. */
@@ -838,19 +860,28 @@ export class PhotorealRenderer {
           }),
         ]);
     } catch (error: unknown) {
-      // A chain made before the refusal is released with it.
+      // A chain made before the refusal is released with it, and the meshes made for it.
       void making
         .then((chain) => chain.dispose())
         .catch((cause: unknown) => {
           console.error(`the photorealistic view ${this.#name}'s bloom chain failed too:`, cause);
         });
+      engine.releaseMesh(triangle);
+      engine.releaseMesh(quad);
       throw error;
     }
     const bloom = await making;
     // A restore or a dispose while this was compiling abandons it: its handles are the lost
-    // device's, or nobody's.
+    // device's, or nobody's, and are released (plan R11, R11.T10.b: a still's renderer is made,
+    // and may be disposed, at each still).
     if (this.#disposed || generation !== this.#generation) {
       bloom.dispose();
+      for (const material of [tonemap, overlayDepth, sprite, atmosphere.composite]) {
+        engine.releaseMaterial(material);
+      }
+      for (const mesh of [triangle, quad, atmosphere.triangle]) {
+        engine.releaseMesh(mesh);
+      }
       return;
     }
     const blueNoise = engine.createTexture({
@@ -989,10 +1020,12 @@ export class PhotorealRenderer {
   /**
    * Draws one frame into `view`.
    *
+   * @param view - The view it is presented on; `null` for a still's sample (plan R11, R11.T10.b),
+   *   which draws the scene target alone, as a frame held back (`present: false`) does.
    * @returns The frame's lit-body plan (its regimes are the next frame's `previousRegimes`), or
    *   `null` while the resources are being made, when nothing was drawn.
    */
-  render(view: RenderView, frame: PhotorealFrame): BodyFramePlan | null {
+  render(view: RenderView | null, frame: PhotorealFrame): BodyFramePlan | null {
     const resources = this.#resources;
     if (resources === null) {
       if (this.#status !== "failed") {
@@ -1014,11 +1047,13 @@ export class PhotorealRenderer {
     }
     // The setting's forms of the histogram, the eclipse term and planetshine (Design note 18).
     const settings = SETTINGS[frame.setting].photoreal;
-    const projection = perspectiveReversedInfinite(
-      camera.fovXRad,
-      viewport.widthPx / viewport.heightPx,
-      NEAR_PLANE_M,
-    );
+    const projection =
+      frame.projection ??
+      perspectiveReversedInfinite(
+        camera.fovXRad,
+        viewport.widthPx / viewport.heightPx,
+        NEAR_PLANE_M,
+      );
     const viewRotation = viewRotation4(camera.orientation);
     // Each body whose air is drawn lights its surface through it, and is drawn with depth, so that
     // its composite lays the air over its ground (R08.T10.b).
@@ -1269,8 +1304,9 @@ export class PhotorealRenderer {
         },
       });
     }
-    if (frame.present === false) {
-      // Held back: no frame of a cut is shown at the exposure from before it.
+    if (frame.present === false || view === null) {
+      // Held back: no frame of a cut is shown at the exposure from before it. A still's sample is
+      // presented by its own passes.
       return plan;
     }
     // The pre-exposure is this frame's own exposure, so the pass's exposure over it is 1.
@@ -1691,6 +1727,31 @@ export class PhotorealRenderer {
   }
 
   /**
+   * Makes every pipeline its lit bodies draw with, ahead of the first frame (plan R11, R11.T10.b):
+   * every regime's (`LitBodyRenderer.prepareAll`), the emissive, air and emissive air forms with
+   * their `disc cells` kernels where `forms` says its frames take them, and the packed plain kernel
+   * where `way` packs the cells; resolves once all are made, or could not be. A still's renderer,
+   * new at each still, waits for them before its first batch, so that its draws make none; a view's
+   * frames never wait for them.
+   *
+   * @param way - The way of the `disc cells` kernel its frames take (`GeometrySettings.discCells`).
+   * @param forms - Whether its frames hold a body whose ground emits (R08.T18.a) and one drawn by
+   *   its air's disc table (R08.T16.b).
+   */
+  async prepareBodies(
+    way: CellWay,
+    forms: { readonly emissive: boolean; readonly air: boolean },
+  ): Promise<void> {
+    await Promise.all([
+      this.#bodies.prepareAll(),
+      ...(forms.emissive ? [this.prepareEmissive(way)] : []),
+      ...(forms.air ? [this.prepareAir(way)] : []),
+      ...(forms.emissive && forms.air ? [this.prepareEmissiveAir(way)] : []),
+      ...(way === "packed" ? [this.#cellsMaking(way, "plain").made] : []),
+    ]);
+  }
+
+  /**
    * Makes a way's form's `disc cells` kernel into `making`; a failure is reported, a loss's not,
    * and it never rejects.
    */
@@ -1736,6 +1797,11 @@ export class PhotorealRenderer {
       this.#engine.releaseMaterial(resources.atmosphere.composite);
       this.#engine.releaseMaterial(resources.overlayDepth);
       this.#engine.releaseMesh(resources.atmosphere.triangle);
+      // Its own pipelines and meshes (plan R11, R11.T10.b: a still's renderer is made at each still).
+      this.#engine.releaseMaterial(resources.tonemap);
+      this.#engine.releaseMaterial(resources.sprite);
+      this.#engine.releaseMesh(resources.triangle);
+      this.#engine.releaseMesh(resources.quad);
       resources.bloom.dispose();
       this.#engine.releaseBuffer(resources.glare);
       this.#engine.releaseBuffer(resources.stars);
@@ -1744,5 +1810,836 @@ export class PhotorealRenderer {
     }
     this.#pyramid?.dispose();
     this.#pyramid = null;
+  }
+}
+
+/**
+ * The last photorealistic frame a view drew and its plan (plan R11, R11.T10.b): what a still
+ * freezes at its request.
+ */
+export interface DrawnPhotorealFrame {
+  readonly frame: PhotorealFrame;
+  readonly plan: BodyFramePlan;
+}
+
+/**
+ * The jittered samples a still accumulates on each setting (plan R11, Design note 17: "sub-pixel
+ * jitter accumulates at full resolution"): 8 on the high setting, the Halton (2, 3) pattern of 8
+ * samples Unreal Engine 4's temporal anti-aliasing jitters its projection through (Karis 2014, "High
+ * Quality Temporal Supersampling", SIGGRAPH 2014 course Advances in Real-Time Rendering in Games,
+ * slides 13 and 14, checked 2026-11-18), and 4 on the low, half the samples' GPU time (lean,
+ * 2026-11-18). Each sample is one unit of the job, a whole frame of the view's passes.
+ */
+export const STILL_SAMPLES: Readonly<Record<QualitySetting, number>> = { high: 8, low: 4 };
+
+/** The name a still's GPU objects are made under, and its passes' labels begin with. */
+const STILL_NAME = "still";
+
+/**
+ * The passes of a still's units (`<pass> <tile>`, the label a unit's cost is learnt under): each
+ * jittered sample of the view's passes with its accumulation, the bloom chain over the assembled
+ * image, and the tone-mapping pass into the image read back.
+ */
+export const STILL_UNIT_PASSES = { scene: "scene", bloom: "bloom", tonemap: "tonemap" } as const;
+
+/**
+ * The accumulation of a still's samples (plan R11, R11.T10.b): R07's bloom upsample (`bloomUp.wgsl`,
+ * unchanged), its `coarse` input weighted 0, in an additive form, so that each draw adds its
+ * `level`, a sample's HDR colour read texel for texel, at its weight, and the destination's alpha,
+ * R07's meter class, is kept.
+ */
+export const STILL_ACCUMULATE_MATERIAL: WgslMaterialSpec = {
+  ...BLOOM_UP_MATERIAL,
+  name: "still accumulation",
+  displayName: "STILL ACCUMULATION",
+  blend: "additive",
+};
+
+/** The `NOT AVAILABLE:` causes of a view that gives no still now, with what lifts each. */
+export const STILL_UNAVAILABLE = {
+  /**
+   * No view is attached: the engine is not ready, the view could not be made, or the display is
+   * hidden or between scenes.
+   */
+  noView: "the view is not drawn",
+  /** The view's last frame is its wireframe, or none. */
+  noImage: "the view draws no photorealistic image",
+  /**
+   * The view's last frame was held back at a cut, drawn at the exposure from before it, which the
+   * view never shows (`PhotorealFrame.present`).
+   */
+  settling: "the view's exposure is settling after a cut",
+  /**
+   * A body is handed over to its terrain, which a still does not draw: the terrain is drawn for
+   * the view's own frames alone, and a still's own terrain view, frozen and streamed at bulk
+   * priority, is not built (lean, 2026-11-18).
+   */
+  terrain: "terrain is not yet drawn in stills, take one farther from the ground",
+  /** The view's image is over `STILL_MAX_SIDE_PX` on a side, which the main process refuses. */
+  oversized: "the view is over 8192 px on a side, the largest still",
+} as const;
+
+/** A {@link STILL_UNAVAILABLE} cause. */
+export type StillUnavailableCause = (typeof STILL_UNAVAILABLE)[keyof typeof STILL_UNAVAILABLE];
+
+/**
+ * The radical inverse of `index` in `base`, each coordinate of Halton's sequence (Halton 1960,
+ * Numerische Mathematik 2, 84–90, from memory; the sequence as Karis 2014's slide 14 takes it).
+ */
+function radicalInverse(index: number, base: number): number {
+  let inverse = 0;
+  let digit = 1 / base;
+  for (let n = index; n > 0; n = Math.floor(n / base)) {
+    inverse += (n % base) * digit;
+    digit /= base;
+  }
+  return inverse;
+}
+
+/**
+ * Sample `k`'s sub-pixel offset, px right and down: the first at the pixel's centre, so that a
+ * still of one sample is drawn through P itself, and each after it the Halton (2, 3) point `k`
+ * less ½ on each axis, in (−½, ½): the centre and points 1 to n − 1, Karis 2014's count but not
+ * Unreal Engine 4's own points.
+ */
+export function stillJitterPx(k: number): readonly [number, number] {
+  return k === 0 ? [0, 0] : [radicalInverse(k, 2) - 0.5, radicalInverse(k, 3) - 0.5];
+}
+
+/**
+ * Sample `k`'s projection: `tileProjection` of the still drawn as one tile whose origin is moved
+ * by the sample's offset, so that the image moves by it; P itself, bit for bit, for the first.
+ */
+function sampleProjection(fovXRad: number, size: ViewSize, k: number): Float32Array {
+  const [dx, dy] = stillJitterPx(k);
+  const tile: StillTile = {
+    column: 0,
+    row: 0,
+    rect: { x0Px: dx, y0Px: dy, x1Px: size.widthPx + dx, y1Px: size.heightPx + dy },
+    texture: size,
+    bytesPerRow: size.widthPx * 4,
+  };
+  return tileProjection(fovXRad, size, tile);
+}
+
+/**
+ * Each unit's resolves, by R01's `passTimesFrame`, summed into the unit's GPU time once all have
+ * resolved: a unit is a whole frame of passes, each render its own resolve.
+ */
+class UnitTimes {
+  readonly #byResolve = new Map<
+    number,
+    { readonly label: string; remaining: number; ns: number; valid: boolean }
+  >();
+
+  /** The unit `label` drew the resolves after `fromFrame` up to and with `toFrame`. */
+  note(label: string, fromFrame: number, toFrame: number): void {
+    if (toFrame <= fromFrame) {
+      return;
+    }
+    const tally = { label, remaining: toFrame - fromFrame, ns: 0, valid: true };
+    for (let frame = fromFrame + 1; frame <= toFrame; frame += 1) {
+      this.#byResolve.set(frame, tally);
+    }
+  }
+
+  /**
+   * The unit `times` completes, with its GPU time, or `null`: for a resolve of no unit, one the
+   * unit has more of, or a unit a negative pass time (a reset of the timestamp counter) leaves
+   * unmeasured.
+   */
+  take(times: PassTimes): MeasuredPass | null {
+    const tally = this.#byResolve.get(times.frame);
+    if (tally === undefined) {
+      return null;
+    }
+    this.#byResolve.delete(times.frame);
+    for (const pass of times.passes) {
+      if (pass.ns < 0) {
+        tally.valid = false;
+      }
+      tally.ns += pass.ns;
+    }
+    tally.remaining -= 1;
+    return tally.remaining === 0 && tally.valid ? { label: tally.label, ns: tally.ns } : null;
+  }
+}
+
+/** The identity, column-major: the still's full-screen passes read no camera. */
+const STILL_IDENTITY = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+
+/** What a {@link PhotorealStillRenderer} is made with. */
+export interface PhotorealStillOptions {
+  /** The tile limit the read-back is cut at, px: the device's `maxTextureDimension2D`. */
+  readonly tileLimitPx: number;
+  /** The jittered samples it accumulates: {@link STILL_SAMPLES} at the frame's setting. */
+  readonly samples: number;
+  /** Takes each unit's GPU time as it resolves, with timestamps; never called without. */
+  readonly onUnitTimes: (passes: ReadonlyArray<MeasuredPass>) => void;
+  /** Called once, at its disposal. */
+  readonly onDispose: () => void;
+}
+
+/** A still renderer's GPU objects, made in its `prepare()`. */
+interface StillResources {
+  readonly triangle: MeshHandle;
+  readonly accumulate: MaterialHandle;
+  readonly tonemap: MaterialHandle;
+  readonly bloom: BloomChain;
+  /** The samples' sum at their weights: the assembled HDR image. */
+  readonly accumulation: RenderTarget;
+  /** The tone-mapped image, `rgba8unorm`, read back by tiles. */
+  readonly image: RenderTarget;
+  readonly blueNoise: TextureHandle;
+  readonly glare: BufferHandle;
+}
+
+/**
+ * A still of a view's photorealistic frame (plan R11, R11.T10.b, Design note 17): the frame frozen
+ * at the request drawn through its own {@link PhotorealRenderer}, sample by sample with a sub-pixel
+ * jitter, each sample accumulated at full resolution into one HDR image at a fixed exposure, the
+ * frame's own; bloom and glare once over that assembled image; R07's tone-mapping pass into an
+ * `rgba8unorm` image; each tile of the still read back from it through R01's `readTexture`.
+ *
+ * @remarks
+ * It draws at the frame's own size, the view's scene target's, with the frame's own plan inputs, so
+ * that every screen-space footprint is the view's, and in one pass rather than tile by tile: R07's
+ * disc, point-sprite and host-disc passes place their CPU-made rectangles by `frame.viewport` and
+ * rebuild their rays as ndc ÷ P's diagonal, which holds for a centred projection alone, so a tile's
+ * off-axis M · P would draw them elsewhere; the tiles are the read-back's (lean, 2026-11-18). A
+ * sample's offset moves what is projected through the whole matrix (the figures, R06's sky); the
+ * passes placed in pixels keep their own anti-aliasing. It draws no terrain
+ * ({@link STILL_UNAVAILABLE}'s `terrain`), the symbology, the meter or the histogram.
+ *
+ * Its units are its samples (`scene 0`), then `bloom 0` and `tonemap 0`, each one submission of
+ * whole passes; with timestamps each unit's GPU time is the sum of its resolves', handed to
+ * {@link PhotorealStillOptions.onUnitTimes} under its label. A frame's resources taken by
+ * reference (the sky's cube, an atmosphere's tables) are the view's: a cache that lets one go while
+ * the still runs fails its draw.
+ */
+export class PhotorealStillRenderer implements StillRenderer {
+  readonly tiling: StillTiling;
+  readonly units: ReadonlyArray<string>;
+  readonly #engine: RenderEngine;
+  /** The frozen frame as each sample draws it, but its projection. */
+  readonly #frame: PhotorealFrame;
+  readonly #size: ViewSize;
+  readonly #samples: number;
+  readonly #scene: PhotorealRenderer;
+  readonly #times = new UnitTimes();
+  readonly #unsubscribeTimes: () => void;
+  readonly #onDispose: () => void;
+  /** What it made, released at its disposal, whether `prepare()` finished or not. */
+  readonly #made: Array<() => void> = [];
+  #resources: StillResources | null = null;
+  /** An atmosphere's failure in the last sample, which fails the still. */
+  #failure: { readonly error: unknown } | null = null;
+  #disposed = false;
+
+  /**
+   * @param frame - The view's frame frozen at the request, drawn at its own size.
+   * @throws RangeError for a frame whose size is not a still's, or a sample count under 1.
+   */
+  constructor(engine: RenderEngine, frame: PhotorealFrame, options: PhotorealStillOptions) {
+    if (!(Number.isSafeInteger(options.samples) && options.samples >= 1)) {
+      throw new RangeError("a still takes at least one sample");
+    }
+    this.#engine = engine;
+    this.#onDispose = options.onDispose;
+    this.#size = { widthPx: frame.viewport.widthPx, heightPx: frame.viewport.heightPx };
+    this.#samples = options.samples;
+    this.tiling = planTiles(this.#size, options.tileLimitPx, frame.setting);
+    this.units = [
+      ...Array.from({ length: options.samples }, () => `${STILL_UNIT_PASSES.scene} 0`),
+      `${STILL_UNIT_PASSES.bloom} 0`,
+      `${STILL_UNIT_PASSES.tonemap} 0`,
+    ];
+    // As the view drew it, its frame-rate floor's steps with it, so that every kernel its air asks
+    // for is one the view's frames made, in the device's records: none is compiled in a batch.
+    this.#frame = {
+      ...frame,
+      terrain: undefined,
+      overlay: null,
+      meter: null,
+      present: false,
+      onAtmosphereFailed: (_body, error) => {
+        this.#failure ??= { error };
+      },
+    };
+    this.#scene = new PhotorealRenderer(engine, STILL_NAME);
+    this.#made.push(() => {
+      this.#scene.dispose();
+    });
+    this.#unsubscribeTimes = engine.onPassTimes((times) => {
+      const unit = this.#times.take(times);
+      if (unit !== null) {
+        options.onUnitTimes([unit]);
+      }
+    });
+  }
+
+  /** Holds `made` for the disposal, or releases it at once where that has come. */
+  #hold<T>(made: T, release: (made: T) => void): T {
+    if (this.#disposed) {
+      release(made);
+    } else {
+      this.#made.push(() => {
+        release(made);
+      });
+    }
+    return made;
+  }
+
+  async prepare(): Promise<void> {
+    const engine = this.#engine;
+    const frame = this.#frame;
+    const size = this.#size;
+    const triangle = this.#hold(fullScreenTriangle(engine, `${STILL_NAME} triangle`), (mesh) => {
+      engine.releaseMesh(mesh);
+    });
+    const releaseMaterial = (material: MaterialHandle): void => {
+      engine.releaseMaterial(material);
+    };
+    const geometry = frame.geometry ?? SETTINGS[frame.setting].geometry;
+    const [accumulate, tonemap, bloom] = await Promise.all([
+      engine
+        .createMaterialAsync(STILL_ACCUMULATE_MATERIAL, [HDR_COLOUR_FORMAT], [triangle])
+        .then((made) => this.#hold(made, releaseMaterial)),
+      engine
+        .createMaterialAsync(TONEMAP_MATERIAL, ["rgba8unorm"], [triangle])
+        .then((made) => this.#hold(made, releaseMaterial)),
+      BloomChain.create(
+        engine,
+        STILL_NAME,
+        size,
+        bloomKernel(
+          SETTINGS[frame.setting].photoreal.bloom,
+          frame.role,
+          radPerPx(frame.camera, size),
+          DEFAULT_EYE_OBSERVER,
+        ),
+      ).then((made) =>
+        this.#hold(made, (chain) => {
+          chain.dispose();
+        }),
+      ),
+      this.#scene.prepare(size, frame.setting, frame.role, frame.camera, frame.atmosphereLevers),
+      this.#scene.prepareBodies(geometry.discCells, {
+        emissive: frame.bodies.some((body) => body.thermal !== undefined),
+        air:
+          frame.bodies.some((body) => body.air !== undefined) ||
+          (frame.atmospheres ?? []).some((each) => discAirOf(each.tables) !== null),
+      }),
+    ]);
+    if (this.#scene.status !== "ready") {
+      throw new Error("the still's photorealistic pipelines could not be made");
+    }
+    if (this.#disposed) {
+      return;
+    }
+    const target = (name: string, format: ColourTargetFormat): RenderTarget =>
+      this.#hold(
+        engine.createRenderTarget({
+          name: `${STILL_NAME} ${name}`,
+          size,
+          format,
+          mips: 1,
+          depth: false,
+          category: "render-targets",
+        }),
+        (made) => {
+          made.dispose();
+        },
+      );
+    const blueNoise = this.#hold(
+      engine.createTexture({
+        name: `${STILL_NAME} blue noise`,
+        size: [BLUE_NOISE_SIDE, BLUE_NOISE_SIDE],
+        dimension: "2d",
+        format: "r16float",
+        mips: 1,
+        usage: TEXTURE_USAGE.TEXTURE_BINDING | TEXTURE_USAGE.COPY_DST,
+        category: "other",
+      }),
+      (texture) => {
+        engine.releaseTexture(texture);
+      },
+    );
+    engine.writeTexture(
+      blueNoise,
+      { x: 0, y: 0 },
+      { width: BLUE_NOISE_SIDE, height: BLUE_NOISE_SIDE },
+      blueNoiseTexels(),
+    );
+    const glare = this.#hold(
+      engine.createBuffer({
+        name: `${STILL_NAME} glare sources`,
+        bytes: Math.max(1, frame.glareSources.length) * GLARE_SOURCE_BYTES,
+        usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST,
+        category: "other",
+      }),
+      (buffer) => {
+        engine.releaseBuffer(buffer);
+      },
+    );
+    engine.writeBuffer(
+      glare,
+      0,
+      packGlareSources(
+        frame.glareSources,
+        frame.exposureScale,
+        glareSpreadTerms(frame.role, DEFAULT_EYE_OBSERVER),
+      ),
+    );
+    this.#resources = {
+      triangle,
+      accumulate,
+      tonemap,
+      bloom,
+      accumulation: target("accumulation", HDR_COLOUR_FORMAT),
+      image: target("image", "rgba8unorm"),
+      blueNoise,
+      glare,
+    };
+  }
+
+  /** It draws no terrain, so it streams none: always streamed. */
+  streamed(): boolean {
+    return true;
+  }
+
+  submit(first: number, count: number): void {
+    const resources = this.#resources;
+    if (resources === null) {
+      throw new Error("a still's batch was submitted before its pipelines were made");
+    }
+    for (let unit = first; unit < first + count; unit += 1) {
+      const label = this.units[unit];
+      if (label === undefined) {
+        throw new RangeError(`a still has no unit ${String(unit)}`);
+      }
+      const fromFrame = this.#engine.passTimesFrame;
+      this.#drawUnit(resources, unit);
+      this.#times.note(label, fromFrame, this.#engine.passTimesFrame);
+    }
+  }
+
+  /** The atmosphere's failure since the last call, or `null`, which it leaves. */
+  #takeFailure(): { readonly error: unknown } | null {
+    const failure = this.#failure;
+    this.#failure = null;
+    return failure;
+  }
+
+  /** Draws unit `unit`: a sample and its accumulation, the bloom chain, or the tone-mapping pass. */
+  #drawUnit(resources: StillResources, unit: number): void {
+    const frame = this.#frame;
+    if (unit < this.#samples) {
+      this.#takeFailure();
+      const plan = this.#scene.render(null, {
+        ...frame,
+        projection: sampleProjection(frame.camera.fovXRad, this.#size, unit),
+      });
+      const failure = this.#takeFailure();
+      if (failure !== null) {
+        throw new Error("a still's atmosphere could not be drawn", { cause: failure.error });
+      }
+      const colours = this.#scene.frameColours;
+      if (plan === null || colours === null) {
+        throw new Error("a still's sample drew nothing");
+      }
+      this.#accumulate(resources, colours.drawn, unit);
+    } else if (unit === this.#samples) {
+      resources.bloom.run(
+        resources.accumulation.colour,
+        bloomThreshold(frame.exposureScale, frame.exposureScale),
+      );
+    } else {
+      this.#toneMap(resources);
+    }
+  }
+
+  /**
+   * Adds sample `k`'s colour to the accumulation at the weight 1 ÷ n: the first copied in whole,
+   * its meter class with it, and taken down to its weight by a draw of weight 1 ÷ n − 1 over it.
+   */
+  #accumulate(resources: StillResources, colour: TextureHandle, k: number): void {
+    const weight = 1 / this.#samples;
+    const draw = (sampleWeight: number): DrawItem => ({
+      mesh: resources.triangle,
+      material: resources.accumulate,
+      offsetFromCameraM: new Float32Array(3),
+      uniforms: {
+        levelWeight: new Float32Array([sampleWeight]),
+        coarseWeight: new Float32Array([0]),
+      },
+      textures: { level: colour, coarse: resources.blueNoise },
+    });
+    const pass = {
+      label: `${STILL_NAME} accumulation`,
+      viewRotation: STILL_IDENTITY,
+      projection: STILL_IDENTITY,
+      postProcesses: [],
+    };
+    resources.accumulation.render(
+      k === 0
+        ? { ...pass, draws: this.#samples > 1 ? [draw(weight - 1)] : [], colourFrom: colour }
+        : { ...pass, draws: [draw(weight)], colourLoad: "load" },
+    );
+  }
+
+  /** R07's tone-mapping pass over the assembled image, its bloom and its glare, into the image. */
+  #toneMap(resources: StillResources): void {
+    const frame = this.#frame;
+    const terms = glareSpreadTerms(frame.role, DEFAULT_EYE_OBSERVER);
+    const threshold = bloomThreshold(frame.exposureScale, frame.exposureScale);
+    resources.image.render({
+      label: `${STILL_NAME} ${TONEMAP_PASS}`,
+      viewRotation: viewRotation4(frame.camera.orientation),
+      projection: sampleProjection(frame.camera.fovXRad, this.#size, 0),
+      draws: [
+        tonemapDraw({
+          mesh: resources.triangle,
+          material: resources.tonemap,
+          hdrColour: resources.accumulation.colour,
+          bloomUp: resources.bloom.levelOne,
+          blueNoise: resources.blueNoise,
+          glareSources: resources.glare,
+          uniforms: {
+            exposure: 1,
+            threshold,
+            levelZeroWeight: levelWeight(resources.bloom.kernel, 0),
+            levelOneWeight: resources.bloom.levelOneWeight,
+            sourceCount: frame.glareSources.length,
+            terms,
+            dither: true,
+            balance: frame.whiteBalance?.rows ?? null,
+          },
+        }),
+      ],
+      postProcesses: [],
+      encoding: "in-pass",
+    });
+  }
+
+  async readTile(tile: StillTile): Promise<Uint8Array> {
+    const resources = this.#resources;
+    if (resources === null) {
+      throw new Error("a still's tile was read back before its pipelines were made");
+    }
+    const { x0Px, y0Px, x1Px, y1Px } = tile.rect;
+    const widthPx = x1Px - x0Px;
+    const rows = new Uint8Array(
+      await this.#engine.readTexture(resources.image.colour, 0, {
+        x: x0Px,
+        y: y0Px,
+        width: widthPx,
+        height: y1Px - y0Px,
+      }),
+    );
+    const rowBytes = widthPx * 4;
+    if (rowBytes === tile.bytesPerRow) {
+      return rows;
+    }
+    // The tile's texture is padded to its aligned rows; the columns past the still are cropped.
+    const padded = new Uint8Array(tile.bytesPerRow * tile.texture.heightPx);
+    for (let v = 0; v < y1Px - y0Px; v += 1) {
+      padded.set(rows.subarray(v * rowBytes, (v + 1) * rowBytes), v * tile.bytesPerRow);
+    }
+    return padded;
+  }
+
+  /**
+   * The assembled HDR image's texels, `rgba16float` rows from the top, read back once every unit is
+   * done: the smoke harness's "every texel finite".
+   *
+   * @throws Error, as a rejection, before its pipelines are made.
+   */
+  readHdr(): Promise<ArrayBuffer> {
+    const resources = this.#resources;
+    return resources === null
+      ? Promise.reject(new Error("a still's image was read back before it was made"))
+      : this.#engine.readTexture(resources.accumulation.colour);
+  }
+
+  dispose(): void {
+    if (this.#disposed) {
+      return;
+    }
+    this.#disposed = true;
+    this.#onDispose();
+    this.#unsubscribeTimes();
+    this.#resources = null;
+    for (const release of this.#made.splice(0).toReversed()) {
+      release();
+    }
+  }
+}
+
+/**
+ * What a view gives the still hook ({@link PhotorealStills.attach}): its engine, its timer, vsync
+ * period and setting, and at a request its last photorealistic frame and the label's inputs.
+ */
+export interface PhotorealStillView {
+  readonly engine: RenderEngine;
+  /** `GraphicsStatus.timer` now. */
+  timer(): GpuTimer;
+  /** T, the display's measured vsync period, ns. */
+  frameIntervalNs(): number;
+  /** The view's quality setting now. */
+  setting(): QualitySetting;
+  /** The last frame it drew where that was photorealistic, presented or held back; else `null`. */
+  drawn(): DrawnPhotorealFrame | null;
+  /**
+   * The label's inputs as the view states them now: its time, camera, exposure, readings, setting,
+   * decoration, survey and annunciations, all but the still's size.
+   */
+  request(): Omit<StillRequest, "size">;
+}
+
+/** A still's frozen scene, by its {@link StillScene}: the engine and timer its job runs on. */
+interface FrozenStill {
+  readonly engine: RenderEngine;
+  readonly timer: GpuTimer;
+  readonly frame: PhotorealFrame;
+  /** Whether its plan draws a figure, which alone the samples' jitter moves. */
+  readonly figures: boolean;
+}
+
+/** The engine and timer a still's device answers on: the job's, or the attached view's. */
+interface StillBinding {
+  readonly engine: RenderEngine;
+  readonly timer: GpuTimer;
+}
+
+/** What {@link PhotorealStills} may be made with: the smoke harness's, its defaults otherwise. */
+export interface PhotorealStillsOptions {
+  /** The tile limit the read-back is cut at, px: the device's `maxTextureDimension2D` if absent. */
+  readonly tileLimitPx?: number;
+  /** The samples a still takes: {@link STILL_SAMPLES} at the frame's setting if absent. */
+  readonly samples?: number;
+  /** Resolves at the next animation frame: `requestAnimationFrame` if absent. */
+  readonly nextFrame?: () => Promise<void>;
+  /** A monotonic clock, ns: `performance.now()` if absent. */
+  readonly nowNs?: () => number;
+}
+
+/** The vsync period a still is sized at before any view is attached, ns: 60 Hz. */
+const UNATTACHED_FRAME_INTERVAL_NS = 1e9 / 60;
+
+/** Whether `fault` is a loss a still in flight is abandoned at (Design note 17). */
+function lossOf(fault: GraphicsFault): boolean {
+  return fault.kind === "device-lost" || fault.kind === "gpu-process-gone";
+}
+
+/**
+ * A still's device on R01's engine: its queue's `submittedWorkDone()` and empty submits, the
+ * animation frame, the clock, the units' times the renderer hands it, and `onFault`'s losses; on the
+ * engine and timer of the still in progress, frozen at its request, so that a view detached
+ * meanwhile (its display hidden) leaves the still to run to its end; else on the attached view's.
+ */
+class ViewStillDevice implements StillDevice {
+  readonly #bindingOf: () => StillBinding | null;
+  readonly #passListeners: Set<(passes: ReadonlyArray<MeasuredPass>) => void>;
+  readonly nextFrame: () => Promise<void>;
+  readonly nowNs: () => number;
+
+  constructor(
+    bindingOf: () => StillBinding | null,
+    passListeners: Set<(passes: ReadonlyArray<MeasuredPass>) => void>,
+    options: PhotorealStillsOptions,
+  ) {
+    this.#bindingOf = bindingOf;
+    this.#passListeners = passListeners;
+    this.nextFrame = options.nextFrame ?? nextAnimationFrame;
+    this.nowNs = options.nowNs ?? (() => performance.now() * 1e6);
+  }
+
+  /** The engine it answers on. */
+  #engine(): RenderEngine {
+    const binding = this.#bindingOf();
+    if (binding === null) {
+      throw new Error("no still runs and no view is attached to the still source");
+    }
+    return binding.engine;
+  }
+
+  /** `GraphicsStatus.timer` as the still in progress froze it, `absent` with neither it nor a view. */
+  get timer(): GpuTimer {
+    return this.#bindingOf()?.timer ?? "absent";
+  }
+
+  async submittedWorkDone(): Promise<void> {
+    await this.#engine().submittedWorkDone();
+  }
+
+  submitEmpty(): void {
+    this.#engine().submitEmpty();
+  }
+
+  onPassTimes(listener: (passes: ReadonlyArray<MeasuredPass>) => void): () => void {
+    this.#passListeners.add(listener);
+    return () => {
+      this.#passListeners.delete(listener);
+    };
+  }
+
+  onLoss(listener: () => void): () => void {
+    return this.#engine().onFault((fault) => {
+      if (lossOf(fault)) {
+        listener();
+      }
+    });
+  }
+}
+
+/** Resolves at the next animation frame. */
+function nextAnimationFrame(): Promise<void> {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => {
+      resolve();
+    });
+  });
+}
+
+/**
+ * Why `drawn` gives no still, a {@link STILL_UNAVAILABLE} cause, or `null` where it gives one.
+ */
+function unavailableFor(drawn: DrawnPhotorealFrame | null): StillUnavailableCause | null {
+  if (drawn === null) {
+    return STILL_UNAVAILABLE.noImage;
+  }
+  const { frame, plan } = drawn;
+  if (frame.present === false) {
+    return STILL_UNAVAILABLE.settling;
+  }
+  if (frame.terrain !== undefined && [...plan.regimes.values()].includes("terrain")) {
+    return STILL_UNAVAILABLE.terrain;
+  }
+  const { widthPx, heightPx } = frame.viewport;
+  return isStillSide(widthPx) && isStillSide(heightPx) ? null : STILL_UNAVAILABLE.oversized;
+}
+
+/**
+ * `VIEW`'s still source (plan R11, R11.T10.b): the photorealistic renderer's hook, which a view
+ * attaches to as it draws, freezing its last photorealistic frame and its label's inputs at each
+ * request, and drawing it through a {@link PhotorealStillRenderer} on the view's engine.
+ *
+ * @remarks
+ * Its device is R01's: `submittedWorkDone()` and `submitEmpty()`, the animation frame, the clock,
+ * each unit's GPU time summed from `onPassTimes`' resolves under its `<pass> <tile>` label, and
+ * `onFault`'s `device-lost` and `gpu-process-gone` for the loss. One view is attached at a time; a
+ * still in progress keeps the engine, the timer and the frame it froze, whether its view stays
+ * attached or not. A scene whose plan draws no figure takes one sample, since the jitter moves
+ * only the figures and R06's sky, whose texels the band and cube filter themselves (lean,
+ * 2026-11-18).
+ */
+export class PhotorealStills implements StillSource {
+  readonly device: StillDevice;
+  readonly #options: PhotorealStillsOptions;
+  #view: PhotorealStillView | null = null;
+  /** The still in progress, from its renderer's making to its disposal. */
+  #job: FrozenStill | null = null;
+  readonly #scenes = new WeakMap<StillScene, FrozenStill>();
+  readonly #passListeners = new Set<(passes: ReadonlyArray<MeasuredPass>) => void>();
+
+  constructor(options: PhotorealStillsOptions = {}) {
+    this.#options = options;
+    this.device = new ViewStillDevice(
+      () => {
+        const view = this.#view;
+        return this.#job ?? (view === null ? null : { engine: view.engine, timer: view.timer() });
+      },
+      this.#passListeners,
+      options,
+    );
+  }
+
+  /**
+   * Attaches `view`, whose frames each still freezes from now on, in place of any attached before.
+   *
+   * @returns Its detachment, which leaves a later view attached.
+   */
+  attach(view: PhotorealStillView): () => void {
+    this.#view = view;
+    return () => {
+      if (this.#view === view) {
+        this.#view = null;
+      }
+    };
+  }
+
+  /** The attached view's setting, the high setting's while none is attached. */
+  get setting(): QualitySetting {
+    return this.#view?.setting() ?? "high";
+  }
+
+  frameIntervalNs(): number {
+    return this.#view?.frameIntervalNs() ?? UNATTACHED_FRAME_INTERVAL_NS;
+  }
+
+  /**
+   * Why the attached view gives no still now, a {@link STILL_UNAVAILABLE} cause, or `null` where it
+   * gives one: what `TAKE STILL` is held back for (`StillSession.refresh`).
+   */
+  unavailable(): StillUnavailableCause | null {
+    const view = this.#view;
+    return view === null ? STILL_UNAVAILABLE.noView : unavailableFor(view.drawn());
+  }
+
+  snapshot(): StillSnapshot {
+    const view = this.#view;
+    if (view === null) {
+      return { kind: "unavailable", cause: STILL_UNAVAILABLE.noView };
+    }
+    const drawn = view.drawn();
+    const cause = unavailableFor(drawn);
+    if (drawn === null || cause !== null) {
+      return { kind: "unavailable", cause: cause ?? STILL_UNAVAILABLE.noImage };
+    }
+    const { frame, plan } = drawn;
+    const scene: StillScene = {
+      request: {
+        ...view.request(),
+        setting: frame.setting,
+        size: { widthPx: frame.viewport.widthPx, heightPx: frame.viewport.heightPx },
+      },
+    };
+    this.#scenes.set(scene, {
+      engine: view.engine,
+      timer: view.timer(),
+      frame,
+      figures: plan.meshes.length > 0,
+    });
+    return { kind: "scene", scene };
+  }
+
+  /**
+   * A renderer of `scene`, whose engine and timer the device answers on until it is disposed.
+   *
+   * @throws Error for a scene that is not one of this source's snapshots.
+   */
+  renderer(scene: StillScene): PhotorealStillRenderer {
+    const frozen = this.#scenes.get(scene);
+    if (frozen === undefined) {
+      throw new Error("a still's scene is not the still source's snapshot");
+    }
+    const { engine, frame } = frozen;
+    const made = new PhotorealStillRenderer(engine, frame, {
+      tileLimitPx: this.#options.tileLimitPx ?? engine.capabilities.maxTextureDimension2D,
+      samples: this.#options.samples ?? (frozen.figures ? STILL_SAMPLES[frame.setting] : 1),
+      onUnitTimes: (passes) => {
+        for (const listener of this.#passListeners) {
+          listener(passes);
+        }
+      },
+      onDispose: () => {
+        if (this.#job === frozen) {
+          this.#job = null;
+        }
+      },
+    });
+    this.#job = frozen;
+    return made;
   }
 }

@@ -237,6 +237,12 @@ function keepingSums(engine: RenderEngine): {
       return engine.capabilities;
     },
     prepareMaterial: (...args) => engine.prepareMaterial(...args),
+    releaseMaterial: (...args) => {
+      engine.releaseMaterial(...args);
+    },
+    releaseMesh: (...args) => {
+      engine.releaseMesh(...args);
+    },
   };
   return { engine: kept, sums: () => sums };
 }

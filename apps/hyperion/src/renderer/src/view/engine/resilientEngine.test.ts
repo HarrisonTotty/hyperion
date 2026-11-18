@@ -572,6 +572,21 @@ describe("a device loss", () => {
     expect(nth(module, 0).depthLayers[0]?.renders).toEqual([{ owner: "view", passes: [] }]);
   });
 
+  it("gates a still on the current engine's queue, and refuses it while there is no device (plan R11, R11.T10.b)", async () => {
+    const gpu = new HeldGpu([adapter()]);
+    const { engine, module } = await load([], {}, gpu);
+    engine.submitEmpty();
+    await engine.submittedWorkDone();
+    const before = nth(module, 0).emptySubmits;
+    nth(module, 0).loseDevice();
+    await vi.waitFor(() => {
+      expect(gpu.waiting).toBe(1);
+    });
+    engine.submitEmpty();
+    await expect(engine.submittedWorkDone()).rejects.toThrow(EngineUnavailable);
+    expect([before, nth(module, 0).emptySubmits]).toEqual([1, 1]);
+  });
+
   it("refuses depth layers while there is no device (R10.T9.b)", async () => {
     const gpu = new HeldGpu([adapter()]);
     const { engine, module } = await load([], {}, gpu);

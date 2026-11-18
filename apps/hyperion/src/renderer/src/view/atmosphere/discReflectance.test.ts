@@ -540,6 +540,12 @@ describe("the lit bodies' renderer's emissive forms (R08.T18.a)", () => {
         material.name.endsWith("Emissive")
           ? Promise.reject(new Error(`${material.name} is refused`))
           : engine.prepareMaterial(material, targets, meshes),
+      releaseMaterial: (...args) => {
+        engine.releaseMaterial(...args);
+      },
+      releaseMesh: (...args) => {
+        engine.releaseMesh(...args);
+      },
     };
     const reported = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const renderer = new LitBodyRenderer(refusing, WIREFRAME_MATERIALS.starSprite);

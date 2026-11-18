@@ -5226,14 +5226,25 @@ select.form-field__input:not([aria-disabled="true"]):hover {
 }
 
 /*
- * VIEW's stills (plan R11, R11.T10.c): the still control, then the saved stills. The panel is the
- * second column's last and the first to give way: its list scrolls within the room left, so that
- * it never pushes the exposure's panels out of the column.
+ * VIEW's stills (plan R11, R11.T10.c): the still control, then the saved stills. The panel stands in
+ * the first column's camera place, folding with it (plan R11, R11.T10.b; the UX ruling,
+ * 2026-11-18), and shares the room left with the targets' list from a basis of 0, so that neither
+ * one's height follows the other's content: its list scrolls within its share.
  */
 .view-stills {
   display: flex;
+  flex: 1 1 0;
   flex-direction: column;
   min-height: 0;
+}
+
+.view--compact .view-stills {
+  flex: none;
+}
+
+/* Folded, its own display gives way to the attribute's. */
+.view-stills[hidden] {
+  display: none;
 }
 
 /* The stills' lines under the fold row and MAXIMIZE VIEW's, at the other folded lines' size. */

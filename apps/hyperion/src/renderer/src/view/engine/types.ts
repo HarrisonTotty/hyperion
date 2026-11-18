@@ -847,6 +847,20 @@ export interface RenderEngine {
     rect?: TexelRect,
     access?: "cpu" | "tolerance",
   ): Promise<ArrayBuffer>;
+  /**
+   * Resolves once every submission made so far is done on the GPU: the queue's
+   * `onSubmittedWorkDone()` (plan R11, R11.T10.b), by which a still's job keeps one batch in
+   * flight.
+   *
+   * @throws `EngineUnavailable`, as a rejection, while `ResilientEngine` has no device.
+   */
+  submittedWorkDone(): Promise<void>;
+  /**
+   * Submits an empty list of command buffers (plan R11, R11.T10.b): a still's job times five such
+   * round trips, with {@link RenderEngine.submittedWorkDone}, as its baseline without timestamps.
+   * Dropped while `ResilientEngine` has no device.
+   */
+  submitEmpty(): void;
   /** Per-pass GPU time for each frame, once its query set resolves; silent without the feature. */
   onPassTimes(listener: (times: PassTimes) => void): () => void;
   /**
