@@ -144,6 +144,8 @@ import {
   cloudCondensateOf,
   cloudDecksOf,
   layerDeckOf,
+  STAND_IN_CONDENSATES,
+  standInCondensate,
 } from "../clouds/condensates";
 import {
   type AerosolModeSpec,
@@ -1744,7 +1746,9 @@ function thickestModeOf(
 /**
  * The reason a deck R11's layer draws carries where it is drawn with a stand-in's optics or
  * optical depth (`condensates.ts`' `CloudCondensate.opticsSource` and `opticalDepthSource`), as
- * player text; `null` where both are the record's.
+ * player text naming the deck and the stand-in by their phases: a stated stand-in where the deck's
+ * condensate has one of its own, a stated convention where it takes liquid water's; `null` where
+ * both are the record's.
  */
 function standInCloudReason(deck: CloudDeck, surfacePressurePa: number): string | null {
   const condensate = cloudCondensateOf([deck], surfacePressurePa);
@@ -1753,14 +1757,22 @@ function standInCloudReason(deck: CloudDeck, surfacePressurePa: number): string 
   }
   const optics = condensate.opticsSource === "stand-in";
   const depth = condensate.opticalDepthSource === "stand-in";
-  const name = `${substanceName(deck.condensate)} clouds`;
+  const own = standInCondensate(deck.condensate, deck.phase, surfacePressurePa);
+  const standIn = phasedName(
+    (own ?? STAND_IN_CONDENSATES.liquidWater).condensate,
+    (own ?? STAND_IN_CONDENSATES.liquidWater).phase,
+  );
+  const tail = own === null ? "a stated convention" : "a stated stand-in";
+  const name = `${phasedName(deck.condensate, deck.phase)} clouds`;
   if (optics && depth) {
-    return `${name}: drawn with a stand-in's optics and optical depth`;
+    return `${name}: drawn with ${standIn}'s optics and typical optical depth in their place, ${tail}`;
   }
   if (optics) {
-    return `${name}: drawn with a stand-in's optics`;
+    return `${name}: drawn with ${standIn}'s optics in their place, ${tail}`;
   }
-  return depth ? `${name}: drawn at a stand-in's optical depth` : null;
+  return depth
+    ? `${name}: drawn at ${standIn}'s typical optical depth in its place, ${tail}`
+    : null;
 }
 
 // ---------------------------------------------------------------------------------------------

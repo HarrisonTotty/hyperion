@@ -223,7 +223,9 @@ describe("the reasons of the deck R11's clouds draw (R11.T7.b)", () => {
     const full = cloudyEarth(unmodelledDeck());
     const near = cloudyEarth(unmodelledDeck(), { cloudLayers: true });
     expect([full.reasons.some(notModelled), near.reasons.some(notModelled)]).toEqual([true, false]);
-    expect(near.reasons).toContain("H2O clouds: drawn with a stand-in's optics and optical depth");
+    expect(near.reasons).toContain(
+      "liquid H2O clouds: drawn with liquid H2O's optics and typical optical depth in their place, a stated stand-in",
+    );
   });
 
   it("says nothing of a deck the record's optics and optical depth draw", () => {
