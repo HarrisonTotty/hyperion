@@ -9,7 +9,7 @@
  * Its switches come from the `just test-render` recipe's command line, never from the client's
  * `graphicsSwitches`, which a test keeps free of the unsafe flag and the adapter override. The
  * page's variant and fixture arrive as `--smoke-variant=` and `--smoke-fixture=`, and the part of
- * its groups to run as `--smoke-part=1` to `30` or `ladder` (every group without it), the ladder's
+ * its groups to run as `--smoke-part=1` to `31` or `ladder` (every group without it), the ladder's
  * at the quality setting `--smoke-setting=high` or `low` names (plan R12, R12.T7.a), and
  * `--smoke-twin-workers=<n>` the atmosphere twins' workers, at most 4 (a quarter of the hardware
  * threads, at most 4, without it);
