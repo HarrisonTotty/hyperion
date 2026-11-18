@@ -23,8 +23,11 @@ Prettier.
   - Intel UHD Graphics 620 (`8086:3ea0`) on Mesa 26.2.7's ANV over i915;
   - Linux 6.18.64-1-lts, under Xorg;
   - Electron 45.1.0 (Chromium 156.0.8078.49).
-- **Power state.** On AC. `platform_profile` was `performance`, not the default profile that R12.T8
-  asks for. `intel_pstate` ran the `powersave` governor at EPP `balance_performance`.
+- **Power state.** On AC, at the machine's default profile, as R12.T8 asks.
+  - `platform_profile` was `performance`, which TLP 1.11 sets on AC by default
+    (`TLP_PROFILE_AC=PRF`; `tlp-stat -s` showed `performance/PRF`). `/etc/tlp.conf` does not
+    override it.
+  - `intel_pstate` ran the `powersave` governor at EPP `balance_performance`.
 - **Nothing else ran.** No lane, build, test or local LLM.
 - **Build.** `2fc93d05a`, a clean tree.
 - **Starts on a quiet machine.** A script waited for the 1-minute load average under 1 and the
