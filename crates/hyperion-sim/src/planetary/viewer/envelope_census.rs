@@ -30,40 +30,36 @@ const DARK_SUB_NEPTUNE: RawPlanetInputs = RawPlanetInputs {
     nitrogen_rank: None,
 };
 
-/// [`DARK_SUB_NEPTUNE`]'s disc as R08's disc twin draws it from 32 (the lane
-/// `fix-dark-sub-neptune-3`'s measurement, 2026-11-13): the client's `test/discAirCases.ts`
+/// [`DARK_SUB_NEPTUNE`]'s geometric albedo in B, V and R as R08's disc twin draws its disc at 33.
+///
+/// Measured by the landing lane of train 33 (2026-11-18), on R08's disc table that halves its view
+/// steps under a thin opaque slab (`thick/discBake.ts`): the client's `test/discAirCases.ts`
 /// (`bakedDiscAir`, `integratedRadianceAt` at phase 0 from 10⁹ m, `geometricAlbedoOf`, its table's
 /// disc) on the record's air as `body_detail` sends it, assembled by `assembleMedium` under the
 /// reference Sun, its upper medium drawn on its floor's datum. Its soot shares its column with the
 /// bright haze (its zero-albedo `T_eq` 672 K, s 0.72): soot τ(550) 2.35, the bright haze's slab
-/// 2.80 and its coagulated mode 12.41 beneath. Without that mode (the lane `fix-dark-sub-neptune-2`)
-/// the table gave 0.0342, 0.0483 and 0.0553; with it, though it lies under the slab, the table's
-/// floor rises from 6.8 bar to 390 Pa and it reads 0.38, 0.30 and 0.23 stops darker, where the
-/// full passes' march ([`DARK_SUB_NEPTUNE_MARCH`]) moves by under 0.1 stop and the closed form not
-/// at all. The same mode moved to 10–100 kPa, or of the slab's 0.1 µm particles, darkens the table
-/// alike: the table reads layers the slab hides (a finding). With the soot alone (the lane
-/// `fix-dark-sub-neptune`'s rules) it was 0.0224, 0.0166 and 0.0122, which the same harness gives
-/// to within 0.0001; at 31 0.0226, 0.0169 and 0.0124.
+/// 2.80 and its coagulated mode 12.41 beneath. Before that fix the table's 48 steps fell across the
+/// slab by chance, and with the mode, which lifts the table's floor from 6.8 bar to 390 Pa, it read
+/// 0.0263, 0.0393 and 0.0471 (the lane `fix-dark-sub-neptune-3`, 2026-11-13), 0.67 and 0.39 stops
+/// under the draw's p in B and V; it now meets the full passes' march inside the disc to about
+/// 0.005 stop, and the march's air beyond the datum's limb, which the table's disc does not draw,
+/// is the rest ([`DARK_SUB_NEPTUNE_MARCH`]). With the soot alone (the lane `fix-dark-sub-neptune`'s
+/// rules) the old table gave 0.0224, 0.0166 and 0.0122.
 const DARK_SUB_NEPTUNE_TWIN: Bands = Bands {
-    b: 0.0263,
-    v: 0.0393,
-    r: 0.0471,
+    b: 0.0409,
+    v: 0.0512,
+    r: 0.0555,
 };
 
 /// [`DARK_SUB_NEPTUNE`]'s disc as the client's full passes draw it from 32, routed through
-/// its thick table: [`DARK_SUB_NEPTUNE_TWIN`]'s harness's `routed` (the same measurement). Without
-/// the coagulated mode it gave 0.0424, 0.0569 and 0.0647.
+/// its thick table: [`DARK_SUB_NEPTUNE_TWIN`]'s harness's `routed` (measured by the lane
+/// `fix-dark-sub-neptune-3`, 2026-11-13, and reproduced unchanged at 33, 2026-11-18). Without the
+/// coagulated mode it gave 0.0424, 0.0569 and 0.0647.
 const DARK_SUB_NEPTUNE_MARCH: Bands = Bands {
     b: 0.0434,
     v: 0.0549,
     r: 0.0604,
 };
-
-/// How far above [`DARK_SUB_NEPTUNE_TWIN`] the draw's p lies in B and V, in stops, pinned as it
-/// stands (a lean, 2026-11-13, while a client lane fixes the disc table; a finding: the table reads
-/// the layers its slab hides): +0.67 and +0.39 measured, past the brief's third of a stop; R lies
-/// within a third.
-const TWIN_EXCESS_AS_IT_STANDS: [f64; 2] = [0.70, 0.42];
 
 /// The Bond albedo under which the owner's draw is still dark (research-leans-50: "stays dark
 /// (`A_B` under about 0.1)"): a GJ 436 b or GJ 3470 b analogue, not a GJ 1214 b one.
@@ -78,8 +74,8 @@ fn stops(p: Bands, twin: Bands) -> [f64; 3] {
 }
 
 /// The warm soot-hazed sub-Neptune's photometry meets its disc twin: each of B, V and R within a
-/// third of a stop of the client's full passes ([`DARK_SUB_NEPTUNE_MARCH`]), and its table's disc
-/// ([`DARK_SUB_NEPTUNE_TWIN`]) in R, in B and V as it stands ([`TWIN_EXCESS_AS_IT_STANDS`]); to 31
+/// third of a stop of the client's full passes ([`DARK_SUB_NEPTUNE_MARCH`]) and of its table's disc
+/// ([`DARK_SUB_NEPTUNE_TWIN`]; +0.03, +0.01 and −0.13 stops at 33); to 31
 /// its R lay a stop under the twin: its column started below its soot, which lies above 1 Pa, and
 /// the δ-Eddington held its dark layers at R = 0, so that its p was Neptune's row scaled by a Bond
 /// albedo of 0.027 that the gas alone returned. Its soot keeps 0.72 of its column and the bright
@@ -118,12 +114,11 @@ fn the_dark_sub_neptune_meets_its_full_passes_and_stays_dark() {
     for (band, stop) in ["B", "V", "R"].into_iter().zip(march) {
         assert!(stop.abs() <= THIRD_OF_A_STOP, "{band}: {stop:+.3} stops");
     }
-    for (stop, limit) in twin.into_iter().zip(
-        TWIN_EXCESS_AS_IT_STANDS
-            .into_iter()
-            .chain([THIRD_OF_A_STOP]),
-    ) {
-        assert!((-THIRD_OF_A_STOP..=limit).contains(&stop), "{twin:?}");
+    for (band, stop) in ["B", "V", "R"].into_iter().zip(twin) {
+        assert!(
+            stop.abs() <= THIRD_OF_A_STOP,
+            "{band}: {stop:+.3} stops over the table's disc"
+        );
     }
     assert!(bond < DARK, "{bond}");
     assert!((zero_albedo - 672.0).abs() < 1.0, "{zero_albedo}");

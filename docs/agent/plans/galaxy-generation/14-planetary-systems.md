@@ -34565,3 +34565,8 @@ ACTIVE HOST · HOST LEAVING MAIN SEQUENCE · EXTRAPOLATED ZONE · FROZEN SURFACE
 - **P14.T24.h.b's column folded at 32 (train 32):** the hold and its `_under` twins gone; mover
   census deleted; haze census renamed `the_warm_sub_neptunes_take_their_hazes_by_temperature`. Lean
   as recorded: the disc twin pinned as it stands (+0.67 stops in B) while a client lane fixes it.
+- **P14.T24.h.b's disc twin re-pinned at 33 (train 33, 2026-11-18):** on R08's disc table under a
+  thin opaque slab (`thick/discBake.ts`'s halved view steps), `DARK_SUB_NEPTUNE_TWIN` is 0.0409,
+  0.0512 and 0.0555 (B, V, R), the draw's p +0.03, +0.01 and −0.13 stops over it, so
+  `TWIN_EXCESS_AS_IT_STANDS` goes and each band is held within a third of a stop of the table, as
+  of the march. `DARK_SUB_NEPTUNE_MARCH` re-measured unchanged.
