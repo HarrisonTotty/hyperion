@@ -588,7 +588,7 @@ export async function checkSkyBake(engine: RenderEngine, checks: Checks): Promis
     jobs.forEach((job, index) => {
       if (stepped[index] === null) {
         // A clock already past the step's end: one step a call.
-        stepped[index] = job.step(-1, () => 0);
+        stepped[index] = job.step(-1, () => 0, true);
         stepsTaken += 1;
       }
     });

@@ -307,14 +307,36 @@ describe("startSkyBake: the bake in steps (lane perf-long-tasks-3)", () => {
     const job = startSkyBake(stepped.engine, bakeSourceOf(input));
     const now = expiring();
     let steps = 1;
-    while (job.step(0, now) === null) {
+    while (job.step(0, now, true) === null) {
       steps += 1;
     }
     expect(stepped.seen.calls).toEqual(atOnce.seen.calls);
     expect(stepped.seen.writes).toEqual(atOnce.seen.writes);
-    // Two steps of stars, an upload each of the points and the solid angles, the scratch's making,
-    // a step a tile in each pass, a face's last levels a step, and the last, which hands the cube.
-    expect(steps).toBe(2 + 1 + 1 + 1 + 6 * 9 + 6 * 9 + 6 + 1);
+    // Two steps of stars, one that hands over to a frame's, the frame's of the uploads and the
+    // scratch, a step a tile in each pass, a face's last levels a step, and the last, which hands
+    // the cube.
+    expect(steps).toBe(2 + 1 + 1 + 6 * 9 + 6 * 9 + 6 + 1);
+  });
+
+  it("makes its uploads in a frame's step, which a task's steps stop before", async () => {
+    const { engine, seen } = await gpuEngine();
+    const job = startSkyBake(
+      engine,
+      bakeSourceOf({ ...TILED, ...manyStars(BAKE_STARS_A_STEP + 5) }),
+    );
+    const now = expiring();
+    // The stars' steps in tasks; then nothing more, uploaded or made, outside a frame.
+    expect([job.step(Number.POSITIVE_INFINITY, now, false), job.awaitsFrame]).toEqual([null, true]);
+    expect(job.step(Number.POSITIVE_INFINITY, now, false)).toBeNull();
+    expect([seen.made, seen.writes]).toEqual([[], []]);
+    expect(job.step(0, now, true)).toBeNull();
+    expect(job.awaitsFrame).toBe(false);
+    expect(seen.writes.map((write) => write.name)).toEqual([
+      "sky cube: test points",
+      "sky cube: test solid angles",
+    ]);
+    // The rest in tasks.
+    expect(job.step(Number.POSITIVE_INFINITY, now, false)?.path).toBe("gpu");
   });
 
   it("splats at most one tile a step, and makes the cube once the peak pass has ended", async () => {
@@ -323,7 +345,7 @@ describe("startSkyBake: the bake in steps (lane perf-long-tasks-3)", () => {
     const now = expiring();
     let splats = 0;
     let most = 0;
-    for (let baked = job.step(0, now); ; baked = job.step(0, now)) {
+    for (let baked = job.step(0, now, true); ; baked = job.step(0, now, true)) {
       most = Math.max(most, seen.splats - splats);
       splats = seen.splats;
       if (baked !== null) {
@@ -344,7 +366,7 @@ describe("startSkyBake: the bake in steps (lane perf-long-tasks-3)", () => {
     const now = expiring();
     try {
       for (let step = 0; step < 70; step += 1) {
-        expect(job.step(0, now)).toBeNull();
+        expect(job.step(0, now, true)).toBeNull();
       }
     } finally {
       // The page's points array goes back whatever this test finds.
@@ -353,7 +375,7 @@ describe("startSkyBake: the bake in steps (lane perf-long-tasks-3)", () => {
     const calls = seen.calls.length;
     expect(seen.made.map((made) => made.name).toSorted()).toEqual(seen.released.toSorted());
     expect(seen.made.map((made) => made.name)).toContain("sky cube: test");
-    expect(() => job.step(0, now)).toThrow(/is over/);
+    expect(() => job.step(0, now, true)).toThrow(/is over/);
     job.cancel();
     expect(seen.calls).toHaveLength(calls);
   });
@@ -369,7 +391,7 @@ describe("startSkyBake: the bake in steps (lane perf-long-tasks-3)", () => {
     const held = startSkyBake(third.engine, bakeSourceOf(INPUT));
     const fourth = await gpuEngine();
     try {
-      expect(held.step(0, expiring())).toBeNull();
+      expect(held.step(0, expiring(), true)).toBeNull();
       bakeSkyCube(fourth.engine, INPUT);
     } finally {
       held.cancel();

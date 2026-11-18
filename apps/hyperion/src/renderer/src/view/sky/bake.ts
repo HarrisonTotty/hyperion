@@ -28,10 +28,11 @@
  * sums are the same in another order.
  *
  * A bake is made in steps ({@link startSkyBake}; lane perf-long-tasks-3): its stars laid out a
- * range at a time, each upload whole, then a tile's splat and levels or a face's last levels a
- * step, so that a view's bake runs in short tasks between its frames (`cache.ts`) rather than as one
- * long frame. Its commands are the same and come in the same order on resources of its own, so the
- * cube is the one {@link bakeSkyCube}, which runs every step at once, makes, to the bit.
+ * range at a time, then its uploads and scratch made in a frame, then a tile's splat and levels or
+ * a face's last levels a step, so that a view's bake runs in short tasks between its frames
+ * (`cache.ts`) rather than as one long frame. Its commands are the same and come in the same order
+ * on resources of its own, so the cube is the one {@link bakeSkyCube}, which runs every step at
+ * once, makes, to the bit.
  *
  * The cube counts under `MemoryCategory` `sky-cube`; every transient, the scratch face's levels (or
  * a tile's and the face's upper levels), the solid angles, the points and the staging, under
@@ -321,33 +322,30 @@ function givePoints(points: Float32Array): void {
  * after the header `splat.wgsl` reads: (face, size, tile side, tile), the face and tile written
  * before each draw.
  */
-function* layOutPoints(source: SkyBakeSource, points: Float32Array): Generator<void, void, void> {
+function* layOutPoints(
+  source: SkyBakeSource,
+  points: Float32Array,
+): Generator<BakeStepPlace, void, void> {
   points.fill(0, 0, BAKE_POINTS_HEADER);
   points[1] = source.faceSizePx;
   const { count } = source.stars;
   for (let from = 0; from < count; from += BAKE_STARS_A_STEP) {
     source.stars.writeInto(points, from, Math.min(count, from + BAKE_STARS_A_STEP));
-    yield;
+    yield "task";
   }
 }
 
 /**
- * Uploads `data` into `buffer` from its start, in one write, as a step of its own.
+ * Where a bake's next step runs: in a task of its own, or in a frame, as its uploads do.
  *
  * @remarks
- * One write, as the bake at once made it: in parts of 1 MiB, one task's after another, each part
- * waited on room in the page's command buffer to the GPU process, which a slow GPU process
- * (SwiftShader's, drawing a frame of some 10 s at high on a pod) frees only as it reads: one part's
- * write held the page 15 to 43 s there (lane perf-long-tasks-3). A large write is not held so.
+ * A frame's step is the bake's uploads, 9.6 MB of points and 18.9 MB of solid angles at high, made
+ * where the bake at once made them (lane perf-long-tasks-3): in parts, in tasks between the frames,
+ * each waited on room in the page's command buffer to the GPU process, which a slow one
+ * (SwiftShader's, drawing a frame of some 10 s at high on a pod) frees only as it reads, and one
+ * part's write held the page 15 to 43 s there; in a frame they took 13 to 23 ms.
  */
-function* upload(
-  engine: RenderEngine,
-  buffer: BufferHandle,
-  data: Float32Array,
-): Generator<void, void, void> {
-  engine.writeBuffer(buffer, 0, data);
-  yield;
-}
+export type BakeStepPlace = "task" | "frame";
 
 /** The `f32` bits of a value, as the peak buffer holds them. */
 function f32Bits(value: number): Uint32Array {
@@ -487,20 +485,24 @@ function placed(size: Uint32Array, origin: readonly [number, number, number, num
  * A bake under way, made a step at a time ({@link startSkyBake}).
  *
  * @remarks
- * A step is the stars' layout of {@link BAKE_STARS_A_STEP}, the points' or the solid angles'
- * upload, the scratch's making, a tile's splat and peak, a tile's splat and levels, or a face's
- * last levels; the CPU bake, the fallback, is one.
+ * A step is the stars' layout of {@link BAKE_STARS_A_STEP}; then a frame's, the uploads and the
+ * scratch's making; then a tile's splat and peak, a tile's splat and levels, or a face's last
+ * levels. The CPU bake, the fallback, lays its stars out, then bakes in a frame's step.
  */
 export interface SkyBakeJob {
   /**
-   * Runs the bake's next steps, at least one, until `now()` reaches `untilMs`.
+   * Runs the bake's next steps, at least one, until `now()` reaches `untilMs`, or until its next
+   * step is a frame's where `inFrame` is false ({@link BakeStepPlace}).
    *
+   * @param inFrame - Whether the caller is a frame's, which may run a frame's step.
    * @returns The cube once its last step is run, and `null` until then; what it made is then the
    *   caller's, to release with {@link releaseBakedCube}.
    * @throws Whatever a step throws (a lost device, a refused allocation), having released what
    *   the bake made; the job is then over.
    */
-  step(untilMs: number, now: () => number): BakedCube | null;
+  step(untilMs: number, now: () => number, inFrame: boolean): BakedCube | null;
+  /** Whether its next step is a frame's, which a task's call does not run. */
+  readonly awaitsFrame: boolean;
   /** Stops an unfinished bake and releases what it made; nothing once it has finished or failed. */
   cancel(): void;
 }
@@ -516,8 +518,13 @@ export function startSkyBake(engine: RenderEngine, source: SkyBakeSource): SkyBa
     ? bakeOnGpu(engine, source)
     : bakeOnCpu(engine, source);
   let over = false;
+  // Where the next step runs, as the last step said.
+  let place: BakeStepPlace = "task";
   return {
-    step: (untilMs, now) => {
+    get awaitsFrame(): boolean {
+      return !over && place === "frame";
+    },
+    step: (untilMs, now, inFrame) => {
       if (over) {
         throw new Error(`the bake of ${source.name} is over`);
       }
@@ -525,6 +532,10 @@ export function startSkyBake(engine: RenderEngine, source: SkyBakeSource): SkyBa
       let stepped = false;
       try {
         for (;;) {
+          if (place === "frame" && !inFrame) {
+            stepped = true;
+            return null;
+          }
           const next = steps.next();
           if (next.done === true) {
             over = true;
@@ -533,6 +544,7 @@ export function startSkyBake(engine: RenderEngine, source: SkyBakeSource): SkyBa
             }
             return next.value;
           }
+          place = next.value;
           if (now() >= untilMs) {
             stepped = true;
             return null;
@@ -564,7 +576,11 @@ const NO_CLOCK = (): number => 0;
  *   different counts.
  */
 export function bakeSkyCube(engine: RenderEngine, input: BakeInput): BakedCube {
-  const baked = startSkyBake(engine, bakeSourceOf(input)).step(Number.POSITIVE_INFINITY, NO_CLOCK);
+  const baked = startSkyBake(engine, bakeSourceOf(input)).step(
+    Number.POSITIVE_INFINITY,
+    NO_CLOCK,
+    true,
+  );
   if (baked === null) {
     throw new Error(`the bake of ${input.name} stopped before its end`);
   }
@@ -581,7 +597,7 @@ interface LevelOf {
 function* bakeOnGpu(
   engine: RenderEngine,
   source: SkyBakeSource,
-): Generator<void, BakedCube | null, void> {
+): Generator<BakeStepPlace, BakedCube | null, void> {
   const size = source.faceSizePx;
   const sizes = mipSizes(size);
   const { tilePx, tilesPerSide, upperLevel } = bakeTiling(size, source.tilePx);
@@ -599,6 +615,8 @@ function* bakeOnGpu(
   let headed: Float32Array | null = takePoints(count);
   try {
     yield* layOutPoints(source, headed);
+    // The uploads and the scratch, in a frame (`BakeStepPlace`).
+    yield "frame";
     const kernels: BakeKernels = {
       clear: engine.createCompute(BAKE_CLEAR_KERNEL),
       peak: engine.createCompute(BAKE_PEAK_KERNEL),
@@ -614,7 +632,7 @@ function* bakeOnGpu(
         category: "sky-scratch",
       }),
     );
-    yield* upload(engine, points, headed);
+    engine.writeBuffer(points, 0, headed);
     // Written into the queue's own copy: the page's array is free for the next bake.
     givePoints(headed);
     headed = null;
@@ -627,7 +645,7 @@ function* bakeOnGpu(
         category: "sky-scratch",
       }),
     );
-    yield* upload(engine, omega, solidAngles);
+    engine.writeBuffer(omega, 0, solidAngles);
     const usage =
       TEXTURE_USAGE.RENDER_ATTACHMENT | TEXTURE_USAGE.STORAGE_BINDING | TEXTURE_USAGE.COPY_SRC;
     // The face's levels from the upper level down, each flux and solid angle summed from its
@@ -730,7 +748,7 @@ function* bakeOnGpu(
         BAKE_PASS,
       );
     };
-    yield;
+    yield "task";
     for (let face = 0; face < CUBE_FACE_COUNT; face += 1) {
       for (let tile = 0; tile < tileCount; tile += 1) {
         splatTile(face, tile);
@@ -746,7 +764,7 @@ function* bakeOnGpu(
           groups(tilePx),
           BAKE_PASS,
         );
-        yield;
+        yield "task";
       }
     }
     // The cube is made once the peak is found: a re-bake's stand-in, the cube it replaces, is then
@@ -821,7 +839,7 @@ function* bakeOnGpu(
             originOf(tile, upperLevel),
           );
         }
-        yield;
+        yield "task";
       }
       for (let level = upperLevel; level < sizes.length; level += 1) {
         const side = sizes[level] ?? 1;
@@ -837,7 +855,7 @@ function* bakeOnGpu(
         }
         pack(face, { texture: upper, level: level - upperLevel }, level, side, null);
       }
-      yield;
+      yield "task";
     }
     result = { cube, peak, faceSizePx: size, path: "gpu" };
     return result;
@@ -866,14 +884,16 @@ function release(engine: RenderEngine, handle: BufferHandle | TextureHandle): vo
   }
 }
 
-/** The CPU bake, as steps: its stars laid out, then the rest as one. */
+/** The CPU bake, as steps: its stars laid out, then the rest as one, in a frame. */
 function* bakeOnCpu(
   engine: RenderEngine,
   source: SkyBakeSource,
-): Generator<void, BakedCube | null, void> {
+): Generator<BakeStepPlace, BakedCube | null, void> {
   const points = takePoints(source.stars.count);
   try {
     yield* layOutPoints(source, points);
+    // Its cube's levels are written whole, as the GPU bake's uploads are: in a frame.
+    yield "frame";
     return bakePointsOnCpu(engine, points.subarray(BAKE_POINTS_HEADER), source);
   } finally {
     givePoints(points);

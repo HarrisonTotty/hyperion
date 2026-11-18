@@ -13,12 +13,13 @@
  * takes it up again or another is baked ({@link SkyCubeCache.letGo}).
  *
  * A view's frames ask through {@link SkyCubeCache.want} (lane perf-long-tasks-3): a cube that must
- * be baked is baked in steps ({@link startSkyBake}), in tasks of their own of at most
- * {@link SKY_BAKE_SLICE_MS} between the frames, rather than in the frame that first draws its sky,
- * where a re-bake at high held the page's thread 260 to 540 ms on a pod. Until it is baked the view
- * keeps the cube it holds, which its frames draw with the sky they drew before (`ViewFrameDrawer`);
- * the two cubes are then held together, as a re-bake's were until the GPU had drawn the old one's
- * last frame. {@link SkyCubeCache.acquire} bakes at once, as the cache always did.
+ * be baked is baked in steps ({@link startSkyBake}), its stars laid out and then its splats and
+ * levels in tasks of their own that end past {@link SKY_BAKE_SLICE_MS}, between the frames, and its
+ * uploads in the next frame that asks for it, rather than all in the frame that first draws its
+ * sky, where a re-bake at high held the page's thread 260 to 540 ms on a pod. Until it is baked the
+ * view keeps the cube it holds, which its frames draw with the sky they drew before
+ * (`ViewFrameDrawer`); from the peak pass's end the two cubes are held together.
+ * {@link SkyCubeCache.acquire} bakes at once, as the cache always did.
  */
 
 import type { SkyStars } from "@hyperion/protocol";
@@ -82,6 +83,11 @@ interface Bake {
     | { readonly kind: "baked"; readonly cube: BakedCube }
     | { readonly kind: "failed"; readonly error: unknown }
     | null;
+}
+
+/** Whether a bake is under way and its next step is a frame's. */
+function waitsForFrame(bake: Bake): boolean {
+  return bake.outcome === null && bake.job.awaitsFrame;
 }
 
 /** Whether two index lists hold the same stars in the same order. */
@@ -248,27 +254,38 @@ export class SkyCubeCache {
   }
 
   /**
-   * Runs the bakes' steps, the oldest first, until `untilMs` (at least one step of the first),
-   * as each task does; the tests and harnesses step it themselves.
+   * Runs the bakes' steps a task may run, the oldest first, until `untilMs` (at least one step of
+   * the first that has one), as each task does; a bake whose next step is a frame's waits for a
+   * view's frame to ask ({@link SkyCubeCache.want}). The tests step it themselves.
    */
   step(untilMs: number): void {
     for (const bake of this.#bakes) {
-      if (bake.outcome !== null) {
+      if (bake.outcome !== null || bake.job.awaitsFrame) {
         continue;
       }
-      try {
-        const cube = bake.job.step(untilMs, this.#now);
-        if (cube !== null) {
-          bake.outcome = { kind: "baked", cube };
-        }
-      } catch (error: unknown) {
-        // A bake that fails (a lost device) is said by its views' next ask, which leave the
-        // sprites; tried again on another sky.
-        bake.outcome = { kind: "failed", error };
-      }
-      if (bake.outcome === null || this.#now() >= untilMs) {
+      const ended = this.#stepBake(bake, untilMs, false);
+      // A bake still under way in a task's steps had the task's time; one that ended, or now
+      // waits for a frame, leaves what is left to the next.
+      if ((!ended && !waitsForFrame(bake)) || this.#now() >= untilMs) {
         return;
       }
+    }
+  }
+
+  /** Runs a bake's steps, noting its end, its cube or why it failed; whether it ended. */
+  #stepBake(bake: Bake, untilMs: number, inFrame: boolean): boolean {
+    try {
+      const cube = bake.job.step(untilMs, this.#now, inFrame);
+      if (cube !== null) {
+        bake.outcome = { kind: "baked", cube };
+        return true;
+      }
+      return false;
+    } catch (error: unknown) {
+      // A bake that fails (a lost device) is said by its views' next ask, which leave the
+      // sprites; tried again on another sky.
+      bake.outcome = { kind: "failed", error };
+      return true;
     }
   }
 
@@ -333,6 +350,13 @@ export class SkyCubeCache {
     }
     bake.views.add(view);
     this.#waiting.set(view, bake);
+    if (waitsForFrame(bake)) {
+      // The frame's step, the uploads, in this view's frame; the rest in the tasks after it.
+      if (this.#stepBake(bake, this.#now(), true)) {
+        return this.want(view, request);
+      }
+      this.#queue();
+    }
     return { kind: "baking" };
   }
 
@@ -346,6 +370,7 @@ export class SkyCubeCache {
       const baked = startSkyBake(this.#engine, request.bakeSource()).step(
         Number.POSITIVE_INFINITY,
         this.#now,
+        true,
       );
       if (baked === null) {
         throw new Error("a sky bake run at once stopped before its end");
@@ -353,7 +378,7 @@ export class SkyCubeCache {
       cube = baked;
     } else {
       this.#forget(under);
-      const baked = under.job.step(Number.POSITIVE_INFINITY, this.#now);
+      const baked = under.job.step(Number.POSITIVE_INFINITY, this.#now, true);
       if (baked === null) {
         throw new Error("a sky bake run at once stopped before its end");
       }
@@ -433,7 +458,8 @@ export class SkyCubeCache {
     this.#schedule(() => {
       this.#queued = false;
       this.step(this.#now() + SKY_BAKE_SLICE_MS);
-      if (this.baking > 0) {
+      // A bake whose next step is a frame's queues the tasks again from that frame's ask.
+      if (this.#bakes.some((bake) => bake.outcome === null && !bake.job.awaitsFrame)) {
         this.#queue();
       }
     });

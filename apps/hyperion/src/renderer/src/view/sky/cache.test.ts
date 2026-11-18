@@ -3,8 +3,14 @@ import { describe, expect, it } from "vitest";
 import { FakeAdapter, INTEL_UHD_620_INFO } from "../../test/fakeGpu";
 import { FakeRenderEngine } from "../../test/fakeRenderEngine";
 import { decodedSky, skyPayload } from "../../test/skyFixtures";
-import type { BufferHandle, RenderEngine, TextureHandle } from "../engine/types";
-import type { BufferSpec } from "../engine/memory";
+import type {
+  BufferHandle,
+  ComputeHandle,
+  PointSplatHandle,
+  RenderEngine,
+  TextureHandle,
+} from "../engine/types";
+import type { BufferSpec, TextureSpec } from "../engine/memory";
 import { bakeSourceOf } from "./bake";
 import { type CubeRequest, SkyCubeCache } from "./cache";
 
@@ -58,6 +64,59 @@ async function countingCubes(): Promise<{
       }
     },
   };
+}
+
+/**
+ * An engine with float32-blendable that bakes on the GPU and records cubes made and released: its
+ * bakes' splats and levels run in tasks after their uploads' frame.
+ */
+async function gpuCubes(): Promise<{
+  engine: RenderEngine;
+  made: string[];
+  released: string[];
+}> {
+  const adapter = new FakeAdapter({ info: INTEL_UHD_620_INFO, features: ["float32-blendable"] });
+  await adapter.requestDevice({ requiredFeatures: ["float32-blendable"] });
+  const device = adapter.devices.at(0);
+  if (device === undefined) {
+    throw new Error("the fake adapter made no device");
+  }
+  const made: string[] = [];
+  const released: string[] = [];
+  let next = 0;
+  const engine = Object.assign(new FakeRenderEngine(device), {
+    createCompute: (pair: { readonly name: string }): ComputeHandle => ({
+      kind: "compute",
+      name: pair.name,
+      path: "reference",
+    }),
+    createPointSplat: (): PointSplatHandle => ({
+      draw: (): void => undefined,
+      dispose: (): void => undefined,
+    }),
+    createPackedCube: (): TextureHandle => {
+      next += 1;
+      const name = `cube ${String(next)}`;
+      made.push(name);
+      return { kind: "texture", name };
+    },
+    createTexture: (spec: TextureSpec): TextureHandle => ({ kind: "texture", name: spec.name }),
+    createBuffer: (spec: BufferSpec): BufferHandle => ({
+      kind: "buffer",
+      name: spec.name,
+      bytes: spec.bytes,
+    }),
+    writeBuffer: (): void => undefined,
+    dispatch: (): void => undefined,
+    writePackedCubeLevelFromBuffer: (): void => undefined,
+    releaseBuffer: (): void => undefined,
+    releaseTexture: (texture: TextureHandle): void => {
+      if (texture.name.startsWith("cube ")) {
+        released.push(texture.name);
+      }
+    },
+  });
+  return { engine, made, released };
 }
 
 /** A decoded sky of two stars, both baked; each call is another sky, as another arrival's is. */
@@ -236,29 +295,58 @@ function steppedCache(engine: RenderEngine): {
   };
 }
 
+/** Asks for a request at each frame, the tasks run between, until its cube is taken up. */
+function bakeThrough(
+  cache: SkyCubeCache,
+  view: string,
+  request: CubeRequest,
+  runTasks: () => number,
+): void {
+  for (let frame = 0; frame < 100; frame += 1) {
+    if (cache.want(view, request).kind !== "baking") {
+      return;
+    }
+    runTasks();
+  }
+  throw new Error("the bake did not end in 100 frames");
+}
+
 describe("SkyCubeCache's bakes in the tasks after a frame (lane perf-long-tasks-3)", () => {
-  it("bakes a view's first cube in tasks of its own, not in the frame that asks", async () => {
-    const { engine, made } = await countingCubes();
+  it("bakes a view's first cube in tasks of its own and its uploads in a frame after the one that asks", async () => {
+    const { engine, made } = await gpuCubes();
     const { cache, tasks, runTasks } = steppedCache(engine);
     expect(cache.want("cockpit", requestOf())).toEqual({ kind: "baking" });
     expect([made, tasks.length]).toEqual([[], 1]);
-    // The stars' layout, then the CPU bake: a task a step.
+    // The stars' layout, a task a step, and then nothing until a frame asks for the uploads.
     expect(runTasks()).toBe(2);
+    expect(cache.want("cockpit", requestOf())).toEqual({ kind: "baking" });
+    // Then its splats and levels in tasks: six faces' peaks, six faces' tiles and levels.
+    expect(runTasks()).toBeGreaterThanOrEqual(6 * 2);
     const state = cache.want("cockpit", requestOf());
     expect(state.kind === "baked" && state.cube !== null).toBe(true);
     expect([made, cache.baking]).toEqual([["cube 1"], 0]);
   });
 
-  it("keeps a view's cube while its new sky's is baked, and lets it go as the new one is taken up", async () => {
-    const { engine, made, released } = await countingCubes();
+  it("bakes on the CPU in the frame after its stars' layout, and draws it in that frame", async () => {
+    const { engine, made } = await countingCubes();
     const { cache, runTasks } = steppedCache(engine);
     cache.want("cockpit", requestOf());
     runTasks();
-    // The next frame's ask takes the cube up.
-    cache.want("cockpit", requestOf());
+    expect(made).toEqual([]);
+    const state = cache.want("cockpit", requestOf());
+    expect(state.kind === "baked" && state.cube !== null).toBe(true);
+    expect(made).toEqual(["cube 1"]);
+  });
+
+  it("keeps a view's cube while its new sky's is baked, and lets it go as the new one is taken up", async () => {
+    const { engine, made, released } = await gpuCubes();
+    const { cache, runTasks } = steppedCache(engine);
+    bakeThrough(cache, "cockpit", requestOf(), runTasks);
     const first = cache.held("cockpit");
     expect(first).not.toBeNull();
     const next = requestOf(aSky());
+    expect(cache.want("cockpit", next)).toEqual({ kind: "baking" });
+    runTasks();
     expect(cache.want("cockpit", next)).toEqual({ kind: "baking" });
     runTasks();
     // Baked, and not yet taken up: the view still holds the old cube, which its frames draw.
@@ -269,9 +357,11 @@ describe("SkyCubeCache's bakes in the tasks after a frame (lane perf-long-tasks-
   });
 
   it("shares one bake between two views of one sky", async () => {
-    const { engine, made } = await countingCubes();
+    const { engine, made } = await gpuCubes();
     const { cache, runTasks } = steppedCache(engine);
     cache.want("cockpit", requestOf());
+    cache.want("instrument", requestOf());
+    runTasks();
     cache.want("instrument", requestOf());
     runTasks();
     const a = cache.want("cockpit", requestOf());
@@ -306,19 +396,21 @@ describe("SkyCubeCache's bakes in the tasks after a frame (lane perf-long-tasks-
   });
 
   it("keeps a bake finished after its views moved on as the spare, which the next bake releases", async () => {
-    const { engine, made, released } = await countingCubes();
+    const { engine, made, released } = await gpuCubes();
     const { cache, runTasks } = steppedCache(engine);
-    cache.want("cockpit", requestOf());
+    bakeThrough(cache, "cockpit", requestOf(), runTasks);
+    const next = requestOf(aSky());
+    cache.want("cockpit", next);
     runTasks();
-    cache.want("cockpit", requestOf());
-    cache.want("cockpit", requestOf(aSky()));
+    cache.want("cockpit", next);
     runTasks();
     // Back to the sky it holds before taking the new cube up: the new one is the spare.
     expect(cache.want("cockpit", requestOf()).kind).toBe("baked");
     expect([released, cache.size]).toEqual([[], 2]);
-    cache.want("cockpit", requestOf(aSky()));
+    const last = requestOf(aSky());
+    cache.want("cockpit", last);
     expect(released).toEqual(["cube 2"]);
-    runTasks();
+    bakeThrough(cache, "cockpit", last, runTasks);
     expect(made).toEqual(["cube 1", "cube 2", "cube 3"]);
   });
 
@@ -360,12 +452,12 @@ describe("SkyCubeCache's bakes in the tasks after a frame (lane perf-long-tasks-
   });
 
   it("keeps a bake ended for a disposed view as its spare, in place of the cube it held", async () => {
-    const { engine, made, released } = await countingCubes();
+    const { engine, made, released } = await gpuCubes();
     const { cache, runTasks } = steppedCache(engine);
-    cache.want("view", requestOf());
-    runTasks();
-    cache.want("view", requestOf());
+    bakeThrough(cache, "view", requestOf(), runTasks);
     const next = requestOf(aSky());
+    cache.want("view", next);
+    runTasks();
     cache.want("view", next);
     runTasks();
     cache.letGo("view");

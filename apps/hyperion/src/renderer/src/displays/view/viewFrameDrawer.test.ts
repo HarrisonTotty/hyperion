@@ -1770,13 +1770,15 @@ describe("a view's sky while its cube is baked (lane perf-long-tasks-3)", () => 
     };
   }
 
-  it("draws a sky's first cube from the frame after its bake, which runs in the tasks between", async () => {
+  it("draws a sky's first cube once its stars are laid out in the tasks after its first frame and it is baked", async () => {
     const { frameWith, runTasks, cubes } = await bakingDrawer();
     const sky = drawnSky();
     expect([frameWith(sky), cubes]).toEqual([[], []]);
     runTasks();
-    expect(cubes).toHaveLength(1);
+    // On the CPU, the bake's last step is a frame's, which draws it.
+    expect(cubes).toEqual([]);
     expect(frameWith(sky)).toEqual(cubes);
+    expect(cubes).toHaveLength(1);
   });
 
   it("draws the cube it drew before while a new sky's is baked, and lets it go as the new one is drawn", async () => {
