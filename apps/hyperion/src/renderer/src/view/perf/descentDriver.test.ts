@@ -2,6 +2,7 @@ import { PERF_PINS, type PerfSceneId } from "@hyperion/perf";
 import { describe, expect, it } from "vitest";
 
 import type { PerfConfig } from "../../../../preload/api";
+import { moonLikeHeader } from "../../test/coarseFieldFixtures";
 import { countingRenderEngine } from "../../test/countingRenderEngine";
 import { goldenLevelTable } from "../../test/terrainFixtures";
 import type { MeasureDescent } from "../spike/bodyDescent";
@@ -10,18 +11,21 @@ import { DescentProfile, landingSiteOf, trackStretches } from "../spike/descentP
 import { contactRule, TEST_PLANET_FIGURE } from "../spike/spikeScene";
 import type { PreparedDescent, SpikeFrameSample } from "../spike/spikeRun";
 import { planetGeometry } from "../terrain/planet";
+import type { TerrainSurvey } from "../terrain/session";
+import { ARRIVAL_SETTLE_S } from "./arrivalHolds";
 import {
   capabilityFlags,
   DescentDriver,
-  faultFailure,
-  descentDriverFor,
   type DescentStage,
+  descentDriverFor,
   DescentStages,
+  faultFailure,
+  fieldResident,
   measuredOnce,
   PerfEngine,
   undisposable,
 } from "./descentDriver";
-import type { PerfFailure, PerfFrameSample, PerfSceneSink } from "./runPerfScene";
+import type { MeasuredSpan, PerfFailure, PerfFrameSample, PerfSceneSink } from "./runPerfScene";
 import { PERF_SCENES } from "./scenes";
 
 const PROFILE = new DescentProfile(TEST_PLANET_FIGURE, landingSiteOf(7n));
@@ -53,10 +57,14 @@ function config(scene: PerfSceneId): PerfConfig {
 class RecordingSink implements PerfSceneSink {
   readonly frames: PerfFrameSample[] = [];
   readonly failures: PerfFailure[] = [];
+  readonly spans: MeasuredSpan[] = [];
   frame(drawn: PerfFrameSample): void {
     this.frames.push(drawn);
   }
   patch(): void {}
+  spanEnded(span: MeasuredSpan): void {
+    this.spans.push(span);
+  }
   passTimes(): void {}
   allocation(): void {}
   failed(failure: PerfFailure): void {
@@ -84,12 +92,31 @@ function sample(scriptTimeS: number): SpikeFrameSample {
   };
 }
 
-/** A session whose lit pass holds `slots` patches. */
-function session(slots: number): SpikeDrawnSession {
+/** The world's survey with its field's answer held, or still asked for. */
+function survey(held: boolean, failure: TerrainSurvey["status"]["failure"] = null): TerrainSurvey {
   return {
-    workerMemory: [{ fieldBytes: 15_100_000, wasmBytes: 40_000_000 }],
+    status: { reason: "local-body", pending: !held, notModelled: null, failure },
+    coverage: null,
+    header: held ? moonLikeHeader(PERF_PINS.world) : null,
+    stale: false,
+  };
+}
+
+/**
+ * A session whose lit pass holds `slots` patches, its workers each holding `fieldBytes` of the
+ * world's field, its answer held and every block reported where any is.
+ */
+function session(
+  slots: number,
+  fieldBytes: ReadonlyArray<number> = [15_100_000],
+  surveyed: TerrainSurvey = survey(fieldBytes.some((bytes) => bytes > 0)),
+): SpikeDrawnSession {
+  return {
+    workerMemory: fieldBytes.map((bytes) => ({ fieldBytes: bytes, wasmBytes: 40_000_000 })),
     pass: () => ({ usedSlots: slots }),
     wirePass: () => null,
+    survey: () => surveyed,
+    levels: () => (surveyed.header === null ? null : new Float64Array(100)),
   };
 }
 
@@ -165,8 +192,11 @@ describe("the descent driver", () => {
       ["instrument", "wireframe", 240],
       ["instrument", "wireframe", 240],
     ]);
-    expect(drawn.spanS).toBe(1230);
-    expect(drawn.segments).toEqual(PROFILE.segmentSpans());
+    expect(drawn.span).toMatchObject({
+      kind: "script",
+      spanS: 1230,
+      segments: PROFILE.segmentSpans(),
+    });
     expect(drawn.heightWorkers).toBe(3);
     expect(sink.frames.map(({ scriptTimeS }) => scriptTimeS)).toEqual([0]);
   });
@@ -313,6 +343,128 @@ describe("the descent driver", () => {
   });
 });
 
+/** Draws one arrival frame at `rafMs` on `stage`, `streaming` or not, through `drawnOn`. */
+function drawAt(
+  stage: DescentStage,
+  rafMs: number,
+  drawnOn: SpikeDrawnSession,
+  streaming = false,
+): void {
+  stage.listeners.onFrame?.({ ...sample(0), rafTimestampMs: rafMs, streaming });
+  stage.perf.onDrawn?.({ session: drawnOn, sizes: SIZES });
+}
+
+/** `arrival-memory`'s repetition mounted, its descent measured, and the stage it shows. */
+function arrivalRepetition(sink: RecordingSink): { readonly stage: DescentStage } {
+  const { driver, stages } = driven("arrival-memory");
+  void driver
+    .mount(
+      {
+        phase: "repetition",
+        n: 1,
+        serverUrl: "ws://b/bridge",
+        arrival: config("arrival-memory").arrival,
+      },
+      sink,
+    )
+    .catch(() => undefined);
+  const stage = current(stages);
+  stage.listeners.onPrepared?.(PREPARED);
+  return { stage };
+}
+
+describe("arrival-memory's driver", () => {
+  const DEEPEST_MS = PROFILE.durationS * 1000;
+
+  it("describes a span it measures itself, with no script segments", async () => {
+    const { driver, stages } = driven("arrival-memory");
+    const mounted = driver.mount(
+      {
+        phase: "warm-up",
+        n: 0,
+        serverUrl: "ws://a/bridge",
+        arrival: config("arrival-memory").arrival,
+      },
+      new RecordingSink(),
+    );
+    const stage = current(stages);
+    expect(stage.perf.scriptNowMs?.(5_000)).toBe(0);
+    stage.listeners.onPrepared?.(PREPARED);
+    draw(stage, 0, session(0));
+    const drawn = await mounted;
+    expect([drawn.span, drawn.heightWorkers]).toEqual([{ kind: "measured" }, 3]);
+  });
+
+  it("holds the first pose until the field is whole in every worker, then the deepest", () => {
+    const { stage } = arrivalRepetition(new RecordingSink());
+    expect(stage.perf.scriptNowMs?.(1_000)).toBe(0);
+    drawAt(stage, 1_000, session(4, [15_100_000, 7_000_000]));
+    expect(stage.perf.scriptNowMs?.(1_016)).toBe(0);
+    drawAt(stage, 1_016, session(4, [15_100_000, 15_100_000]));
+    expect(stage.perf.scriptNowMs?.(1_033)).toBe(DEEPEST_MS);
+  });
+
+  it("times its frames from the span's first", () => {
+    const sink = new RecordingSink();
+    const { stage } = arrivalRepetition(sink);
+    drawAt(stage, 5_000, session(0, [0]));
+    drawAt(stage, 5_500, session(0, [0]));
+    expect(sink.frames.map(({ scriptTimeS }) => scriptTimeS)).toEqual([0, 0.5]);
+  });
+
+  it("ends the span a minute after the deepest pose's patches drew without streaming", () => {
+    const sink = new RecordingSink();
+    const { stage } = arrivalRepetition(sink);
+    drawAt(stage, 0, session(4));
+    drawAt(stage, 1_000, session(9), true);
+    const settledMs = 2_000 + ARRIVAL_SETTLE_S * 1000;
+    for (let ms = 2_000; ms <= settledMs + 60_000; ms += 1_000) {
+      drawAt(stage, ms, session(30));
+    }
+    expect(sink.spans).toEqual([
+      {
+        spanS: (settledMs + 60_000) / 1000,
+        segments: [
+          { name: "arrival", startS: 0, endS: 0 },
+          { name: "deepest", startS: 0, endS: settledMs / 1000 },
+          { name: "held", startS: settledMs / 1000, endS: (settledMs + 60_000) / 1000 },
+        ],
+      },
+    ]);
+  });
+
+  it("fails the run on a field the server refused, which would never arrive", () => {
+    const sink = new RecordingSink();
+    const { stage } = arrivalRepetition(sink);
+    const refused = survey(false, {
+      kind: "rejected",
+      code: "bad_request",
+      message: "no survey",
+      refusal: true,
+    });
+    drawAt(stage, 0, session(0, [0], refused));
+    expect(sink.failures).toEqual([
+      {
+        reason:
+          "arrival-memory: the world's coarse field was not received (refused, bad_request: no survey)",
+        shown: null,
+      },
+    ]);
+  });
+});
+
+describe("a field resident in the height workers", () => {
+  it("needs the field's answer held, every block reported and the same copy in every worker", () => {
+    expect(fieldResident(session(0, [10, 10]), PERF_PINS.world)).toBe(true);
+    const unreported = { ...session(0, [10, 10]), levels: () => null };
+    expect(fieldResident(unreported, PERF_PINS.world)).toBe(false);
+    expect(fieldResident(session(0, [10, 9]), PERF_PINS.world)).toBe(false);
+    expect(fieldResident(session(0, [10, 10], survey(false)), PERF_PINS.world)).toBe(false);
+    expect(fieldResident(session(0, [0, 0]), PERF_PINS.world)).toBe(false);
+    expect(fieldResident(null, PERF_PINS.world)).toBe(false);
+  });
+});
+
 describe("a graphics fault's failure", () => {
   it("keeps its kind and detail for the record and shows the guide's words alone", () => {
     expect(
@@ -353,13 +505,18 @@ describe("the driver for a scene", () => {
     defaultWorkers: () => 5,
   };
 
-  it("is the descent's for both descents", () => {
-    expect(descentDriverFor(config("cockpit-descent"), page).kind).toBe("driver");
-    expect(descentDriverFor(config("station-wireframe-descent"), page).kind).toBe("driver");
+  it("is the descent spike's for both descents and the arrival", () => {
+    for (const scene of [
+      "cockpit-descent",
+      "station-wireframe-descent",
+      "arrival-memory",
+    ] as const) {
+      expect(descentDriverFor(config(scene), page).kind).toBe("driver");
+    }
   });
 
-  it("is none yet for the scenes that fly no descent, saying so", () => {
-    for (const scene of ["ringed-giant-approach", "arrival-memory", "nuclear-disc-sky"] as const) {
+  it("is none yet for the scenes VIEW's camera flies, saying so", () => {
+    for (const scene of ["ringed-giant-approach", "nuclear-disc-sky"] as const) {
       expect(descentDriverFor(config(scene), page)).toEqual({
         kind: "refused",
         reason: `${scene}: no renderer driver yet (R12.T4.c)`,

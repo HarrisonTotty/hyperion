@@ -195,9 +195,13 @@ export interface DescentSpikeProps {
 
 /**
  * What a perf run reads of the terrain session a frame drew through (`TerrainSession`'s): its
- * passes' patch caches and its height workers' memory.
+ * passes' patch caches, its height workers' memory, and its bodies' surveys and fields' level
+ * tables, by which `arrival-memory` knows its field arrived.
  */
-export interface SpikeDrawnSession extends Pick<TerrainSession, "workerMemory"> {
+export interface SpikeDrawnSession extends Pick<
+  TerrainSession,
+  "workerMemory" | "survey" | "levels"
+> {
   pass(body: BodyIdHex): Pick<TerrainPass, "usedSlots"> | null;
   wirePass(body: BodyIdHex): Pick<TerrainPass, "usedSlots"> | null;
 }

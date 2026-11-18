@@ -1,8 +1,8 @@
 /**
- * The perf run's driver of the descent scenes (plan R12, R12.T4.c; Design notes 13 and 14):
- * `cockpit-descent` and `station-wireframe-descent`, drawn by R05's spike (`ServedDescentSpike`
- * over `DescentSpike`) on the served world each arrival names, and the measured engine they draw
- * on, kept across the repetitions.
+ * The perf run's driver of the scenes R05's spike draws (plan R12, R12.T4.c; Design notes 8, 13
+ * and 14): `cockpit-descent`, `station-wireframe-descent` and `arrival-memory`, drawn by the spike
+ * (`ServedDescentSpike` over `DescentSpike`) on the served world each arrival names, and the
+ * measured engine every scene draws on, kept across the repetitions.
  *
  * @remarks
  * Each mount is a stage `PerfApp` renders under its own `key`, so that a repetition's views, their
@@ -17,7 +17,9 @@
  * holds no state of the session it was measured through.
  *
  * The warm-up holds the script's first pose (`DescentSpikePerf.scriptNowMs` constant), and a
- * repetition flies it from its first frame. A frame is told to the run once it is drawn, with the
+ * descent's repetition flies it from its first frame. `arrival-memory`'s repetition holds the
+ * descent's first pose and then its deepest (`arrivalHolds.ts`), its frames timed from its first
+ * and its span ended by the holds once flown. A frame is told to the run once it is drawn, with the
  * session it drew through, so that the run reads the patch cache of the views it measures.
  */
 
@@ -49,6 +51,8 @@ import type {
   PerfStage,
 } from "./runPerfScene";
 import { PERF_LANDING_SEED, PERF_SCENES, type PerfScene } from "./scenes";
+import { ARRIVAL_SETTLE_S, ArrivalHolds } from "./arrivalHolds";
+import { ARRIVAL_HELD_S, arrivalHold } from "./scripts";
 
 /** An instrument's rate where the scene names none, Hz: R07's instruments' (Design note 14). */
 const INSTRUMENT_RATE_HZ = 30;
@@ -309,6 +313,27 @@ export interface DescentDriverOptions {
 /** A frame's sample, told to the run once the frame is drawn. */
 type HeldSample = Parameters<PerfSceneSink["frame"]>[0];
 
+/**
+ * Whether `body`'s coarse field is whole in every height worker of `session` (`arrivalHolds.ts`):
+ * the store holds its answer (its header, no request in flight), every block posted has been
+ * reported (its level table is settled), and every worker reports the same copy, not empty. A
+ * worker's copy only grows as it takes the blocks in order, so equal copies beside one that took
+ * them all are each the whole field.
+ */
+export function fieldResident(session: SpikeDrawnSession | null, body: string): boolean {
+  const survey = session?.survey(body) ?? null;
+  const workers = session?.workerMemory ?? [];
+  const bytes = workers[0]?.fieldBytes ?? 0;
+  return (
+    survey !== null &&
+    survey.header !== null &&
+    !survey.status.pending &&
+    (session?.levels(body) ?? null) !== null &&
+    bytes > 0 &&
+    workers.every(({ fieldBytes }) => fieldBytes === bytes)
+  );
+}
+
 /** The driver of a descent scene: R05's spike over the served world, remounted per repetition. */
 export class DescentDriver implements PerfSceneDriver {
   readonly #options: DescentDriverOptions;
@@ -340,15 +365,26 @@ export class DescentDriver implements PerfSceneDriver {
       sink.failed({ reason, shown: "the scene has no view at this quality setting" });
       return Promise.reject(new Error(reason));
     }
+    // `arrival-memory`'s repetitions hold its two poses and end once they are flown; its warm-up,
+    // and every descent's, holds or flies the script as R05's spike does.
+    const holds =
+      scene.script.kind === "arrival" && stage.phase === "repetition" ? new ArrivalHolds() : null;
     return new Promise<PerfDrawn>((resolve, reject) => {
       const current = (): boolean => this.#stage === made;
       let held: HeldSample | null = null;
       let drawn = false;
+      // The arrival's span is timed from its first frame, on the frames' clock.
+      let firstRafMs: number | null = null;
       const listeners: SpikeListeners = {
         onFrame: (sample) => {
           if (current()) {
             engine.scriptTimeS = sample.scriptTimeS;
-            held = { ...sample, engineFrame: engine.gpu.resolves.value };
+            let scriptTimeS = sample.scriptTimeS;
+            if (holds !== null) {
+              firstRafMs ??= sample.rafTimestampMs;
+              scriptTimeS = (sample.rafTimestampMs - firstRafMs) / 1000;
+            }
+            held = { ...sample, scriptTimeS, engineFrame: engine.gpu.resolves.value };
           }
         },
         onPatch: (event) => {
@@ -370,7 +406,21 @@ export class DescentDriver implements PerfSceneDriver {
         },
       };
       const perf: DescentSpikePerf = {
-        ...(stage.phase === "warm-up" ? { scriptNowMs: () => 0 } : {}),
+        ...(stage.phase === "warm-up"
+          ? { scriptNowMs: () => 0 }
+          : holds === null
+            ? {}
+            : {
+                // T5.a's two poses: the first until the field is resident, then the deepest.
+                scriptNowMs: () => {
+                  const prepared = this.#prepared;
+                  if (prepared === null) {
+                    return 0;
+                  }
+                  const poses = arrivalHold(prepared.profile);
+                  return (holds.deep ? poses.deepest.tS : poses.arrival.tS) * 1000;
+                },
+              }),
         onDrawn: (frame) => {
           if (!current()) {
             return;
@@ -380,6 +430,9 @@ export class DescentDriver implements PerfSceneDriver {
           held = null;
           if (sample !== null) {
             sink.frame(sample);
+            if (holds !== null) {
+              this.#holdArrival(holds, sample, frame.session, body, sink);
+            }
           }
           if (!drawn && this.#prepared !== null) {
             drawn = true;
@@ -411,6 +464,46 @@ export class DescentDriver implements PerfSceneDriver {
     this.#stage = null;
     this.#session = null;
     this.#options.stages.set(null);
+  }
+
+  /**
+   * Steps `arrival-memory`'s holds at a frame drawn, the span ended once they are flown; a field
+   * the server refused or could not compute, or one that failed the console's checks, ends the run,
+   * since none would arrive.
+   */
+  #holdArrival(
+    holds: ArrivalHolds,
+    sample: HeldSample,
+    session: SpikeDrawnSession | null,
+    body: string,
+    sink: PerfSceneSink,
+  ): void {
+    const status = session?.survey(body)?.status ?? null;
+    const failure = status?.failure ?? null;
+    if (failure !== null || (status?.notModelled ?? null) !== null) {
+      const why =
+        failure === null
+          ? "not modelled"
+          : failure.kind === "rejected"
+            ? `refused, ${failure.code}: ${failure.message}`
+            : `its answer failed the check ${failure.check}`;
+      // The spike's own survey line states the field's failure in the guide's words, and stays.
+      sink.failed({
+        reason: `${this.#options.scene.id}: the world's coarse field was not received (${why})`,
+        shown: null,
+      });
+      return;
+    }
+    const before = holds.stage;
+    const after = holds.frame({
+      spanS: sample.scriptTimeS,
+      fieldResident: fieldResident(session, body),
+      streaming: sample.streaming,
+      patches: this.cachedPatches(),
+    });
+    if (before !== "flown" && after === "flown") {
+      sink.spanEnded(holds.span());
+    }
   }
 
   cachedPatches(): number {
@@ -466,6 +559,7 @@ export class DescentDriver implements PerfSceneDriver {
     });
     const capabilities = engine.capabilities;
     const demand = this.#demandOf(prepared);
+    const arrival = scene.script.kind === "arrival";
     return {
       views: [
         {
@@ -484,11 +578,22 @@ export class DescentDriver implements PerfSceneDriver {
       capabilities: capabilities === null ? null : capabilityFlags(capabilities),
       kernelPaths: null,
       heightWorkers: workers,
-      spanS: prepared.profile.durationS,
-      segments: prepared.profile.segmentSpans(),
-      demandPerS: (segment) => demand.get(segment) ?? null,
+      // The arrival's span is its holds', measured as they run (`arrivalHolds.ts`).
+      span: arrival
+        ? { kind: "measured" }
+        : {
+            kind: "script",
+            spanS: prepared.profile.durationS,
+            segments: prepared.profile.segmentSpans(),
+            demandPerS: (segment) => demand.get(segment) ?? null,
+          },
       notes: [
         `The renderer drew ${scene.id} with R05's descent spike over the served world: its main view (${main.style}) and its two wireframe instruments every frame, unscaled; kernel paths are not read (R12.T4.c).`,
+        ...(arrival
+          ? [
+              `arrival-memory held the descent's first pose until the world's field was whole in every height worker, then its deepest until its patches drew for ${String(ARRIVAL_SETTLE_S)} s without TERRAIN: STREAMING, then ${String(ARRIVAL_HELD_S)} s; the field's and the sky's transfer bytes and times are not read (R12.T4.c).`,
+            ]
+          : []),
         ...(main.role === "station"
           ? [
               "The spike's two instruments draw beside the station's view, and their wireframe passes are counted in station-wireframe, since a resolve names no view (lean, R12.T4.c).",
@@ -532,17 +637,17 @@ export interface DescentDriverPage {
 }
 
 /**
- * The driver of the configured scene: a descent's, or why the renderer has none: a scene of no
- * descent has no driver yet (R12.T4.c), and the graphics safe mode and a renderer without WebGPU
- * draw no view.
+ * The driver of the configured scene: the spike's for a descent and the arrival, or why the
+ * renderer has none: the approach and the sweep have no driver yet (R12.T4.c), and the graphics
+ * safe mode and a renderer without WebGPU draw no view.
  */
 export function descentDriverFor(config: PerfConfig, page: DescentDriverPage): PerfDriverChoice {
   const scene = PERF_SCENES[config.launch.scene];
   switch (scene.script.kind) {
     case "descent":
+    case "arrival":
       break;
     case "approach":
-    case "arrival":
     case "sweep":
       return {
         kind: "refused",

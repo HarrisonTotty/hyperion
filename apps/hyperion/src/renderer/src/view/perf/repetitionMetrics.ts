@@ -52,8 +52,6 @@ const TIMER_RANK: Readonly<Record<PerfTimer, number>> = { full: 0, quantized: 1,
 export interface RepetitionMetricsOptions {
   /** The roles the scene's resolves are given (`passRolesOf`). */
   readonly roles: PassRoles;
-  /** The script's segments, s from the span's start. */
-  readonly segments: ReadonlyArray<SpikeSegmentSpan>;
   /** R05's predicted demand of a segment, patches a second, or `null` where it is not had. */
   readonly demandPerS: (segment: string) => number | null;
   /**
@@ -69,6 +67,11 @@ export interface RepetitionMetricsOptions {
 export interface RepetitionExtras {
   /** The span flown, s. */
   readonly spanS: number;
+  /**
+   * The span's segments, s from its start: the script's, or a measured span's as it ran
+   * (`arrival-memory`'s), which the streaming and the patches made resident are shared among.
+   */
+  readonly segments: ReadonlyArray<SpikeSegmentSpan>;
   /** The page's `performance.timeOrigin`, ms since the epoch. */
   readonly timeOriginMs: number;
   readonly memory: PerfRepetitionResult["memory"];
@@ -101,6 +104,12 @@ function figuresOf(values: ReadonlyArray<number>): {
   };
 }
 
+/** Each segment's patches made resident and its streaming time, s, by segment name. */
+interface SegmentTallies {
+  readonly resident: ReadonlyMap<string, number>;
+  readonly streamingS: ReadonlyMap<string, number>;
+}
+
 /** A pass's GPU time in each frame that timed it, ms, by frame index. */
 interface PassSeries {
   readonly row: BudgetRow;
@@ -120,8 +129,10 @@ export class RepetitionMetrics {
   readonly #reported: number[] = [];
   readonly #passes = new Map<PassKey, PassSeries>();
   readonly #releases: PerfTallyRelease[] = [];
-  readonly #resident = new Map<string, number>();
-  readonly #streamingS = new Map<string, number>();
+  /** The script time of each patch made resident, s: shared among the segments at the end. */
+  readonly #residentAtS: number[] = [];
+  /** Each streaming interval between two frames, `[from, to)` in script time, s. */
+  readonly #streamingIntervalsS: Array<readonly [number, number]> = [];
   #lastRafMs: number | null;
   #lastScriptS = 0;
   #timer: PerfTimer | null = null;
@@ -151,7 +162,7 @@ export class RepetitionMetrics {
     this.#lastEngineFrame.push(sample.engineFrame);
     this.#reported.push(0);
     if (sample.streaming && this.#scriptTimesS.length > 1) {
-      this.#addStreaming(this.#lastScriptS, sample.scriptTimeS);
+      this.#streamingIntervalsS.push([this.#lastScriptS, sample.scriptTimeS]);
     }
     this.#lastRafMs = sample.rafTimestampMs;
     this.#lastScriptS = sample.scriptTimeS;
@@ -191,10 +202,7 @@ export class RepetitionMetrics {
     if (event !== "resident") {
       return;
     }
-    const segment = this.#segmentAt(this.#lastScriptS);
-    if (segment !== undefined) {
-      this.#resident.set(segment, (this.#resident.get(segment) ?? 0) + 1);
-    }
+    this.#residentAtS.push(this.#lastScriptS);
   }
 
   /** Records a release of the tally's within the span. */
@@ -204,6 +212,7 @@ export class RepetitionMetrics {
 
   /** The repetition's result for `endRepetition`. */
   result(extras: RepetitionExtras): PerfRepetitionResult {
+    const { segments } = extras;
     const complete = this.#completeFrames();
     const passes: PassFigures[] = [];
     const rowsSeen = new Set<BudgetRow>();
@@ -235,14 +244,14 @@ export class RepetitionMetrics {
         callbackMs: [...this.#callbackMs],
         scriptTimesS: [...this.#scriptTimesS],
       },
-      segments: this.#options.segments.map(({ name, startS, endS }) => ({ name, startS, endS })),
+      segments: segments.map(({ name, startS, endS }) => ({ name, startS, endS })),
       passes,
       rows,
       timedPassesPerFrameMs: timed.meanMs,
       timer: this.#timerOf(),
       memory: extras.memory,
       releases: [...this.#releases],
-      streaming: this.#streaming(),
+      streaming: this.#streaming(segments),
       latePipelines: extras.latePipelines,
       heightPointUs: null,
       internalScale: extras.internalScale,
@@ -289,31 +298,37 @@ export class RepetitionMetrics {
     return lo < lasts.length ? lo : undefined;
   }
 
-  #segmentAt(scriptTimeS: number): string | undefined {
-    return this.#options.segments.find(
-      ({ startS, endS }) => scriptTimeS >= startS && scriptTimeS < endS,
-    )?.name;
-  }
-
-  /** Shares the streaming interval `[fromS, toS)` among the segments it overlaps, as R05's does. */
-  #addStreaming(fromS: number, toS: number): void {
-    for (const { name, startS, endS } of this.#options.segments) {
-      const overlapS = Math.min(toS, endS) - Math.max(fromS, startS);
-      if (overlapS > 0) {
-        this.#streamingS.set(name, (this.#streamingS.get(name) ?? 0) + overlapS);
+  /** Each segment's patches made resident, and its streaming time, s, as R05's shares them. */
+  #tallies(segments: ReadonlyArray<SpikeSegmentSpan>): SegmentTallies {
+    const resident = new Map<string, number>();
+    for (const atS of this.#residentAtS) {
+      const segment = segments.find(({ startS, endS }) => atS >= startS && atS < endS)?.name;
+      if (segment !== undefined) {
+        resident.set(segment, (resident.get(segment) ?? 0) + 1);
       }
     }
+    const streamingS = new Map<string, number>();
+    for (const [fromS, toS] of this.#streamingIntervalsS) {
+      for (const { name, startS, endS } of segments) {
+        const overlapS = Math.min(toS, endS) - Math.max(fromS, startS);
+        if (overlapS > 0) {
+          streamingS.set(name, (streamingS.get(name) ?? 0) + overlapS);
+        }
+      }
+    }
+    return { resident, streamingS };
   }
 
   /** Each segment's patches made resident a second, its predicted demand and its streaming time. */
-  #streaming(): ReadonlyArray<StreamingFigures> {
-    return this.#options.segments.map(({ name, startS, endS }) => {
+  #streaming(segments: ReadonlyArray<SpikeSegmentSpan>): ReadonlyArray<StreamingFigures> {
+    const { resident, streamingS } = this.#tallies(segments);
+    return segments.map(({ name, startS, endS }) => {
       const seconds = endS - startS;
       return {
         segment: name,
-        patchesPerS: seconds > 0 ? (this.#resident.get(name) ?? 0) / seconds : null,
+        patchesPerS: seconds > 0 ? (resident.get(name) ?? 0) / seconds : null,
         demandPerS: this.#options.demandPerS(name),
-        streamingSeconds: this.#streamingS.get(name) ?? 0,
+        streamingSeconds: streamingS.get(name) ?? 0,
       };
     });
   }

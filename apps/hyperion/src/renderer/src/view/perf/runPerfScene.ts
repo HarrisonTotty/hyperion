@@ -143,6 +143,11 @@ export interface PerfSceneSink {
   frame(sample: PerfFrameSample): void;
   /** A patch's progress (R05's `SpikeListeners.onPatch`). */
   patch(event: PatchEvent): void;
+  /**
+   * A measured span flown (`PerfDrawn.span` `measured`, `arrival-memory`'s): the repetition ends
+   * with the frames told so far, its length and segments as they ran.
+   */
+  spanEnded(span: MeasuredSpan): void;
   /** One resolve's pass times, numbered on the run's count (`ResolveCounter.runFrame`). */
   passTimes(times: PassTimes): void;
   /** One of the engine's allocation events. */
@@ -161,6 +166,29 @@ export interface PerfStage {
   readonly arrival: PerfArrival;
 }
 
+/** A span flown: its length and its segments, s from its first frame. */
+export interface MeasuredSpan {
+  readonly spanS: number;
+  readonly segments: ReadonlyArray<SpikeSegmentSpan>;
+}
+
+/**
+ * A scene's span (Design note 13) as its driver gives it: its script's, with R05's predicted demand
+ * of each segment, or one the driver measures as it runs and ends by `PerfSceneSink.spanEnded`
+ * (`arrival-memory`'s holds).
+ */
+export type PerfDrawnSpan =
+  | {
+      readonly kind: "script";
+      /** The script's length, s: a repetition ends at the first frame at or past it. */
+      readonly spanS: number;
+      /** The script's segments, s from its start. */
+      readonly segments: ReadonlyArray<SpikeSegmentSpan>;
+      /** R05's predicted demand of a segment, patches a second, or `null` where it is not had. */
+      readonly demandPerS: (segment: string) => number | null;
+    }
+  | { readonly kind: "measured" };
+
 /** A scene's views once made, and what its script is. */
 export interface PerfDrawn {
   /** The views drawn, as the record's `views` (less their internal scale), in the scene's order. */
@@ -170,12 +198,7 @@ export interface PerfDrawn {
   readonly kernelPaths: Readonly<Record<string, string>> | null;
   /** The height workers the views' terrain runs. */
   readonly heightWorkers: number;
-  /** The script's span, s: a repetition ends at the first frame at or past it. */
-  readonly spanS: number;
-  /** The script's segments, s from its start. */
-  readonly segments: ReadonlyArray<SpikeSegmentSpan>;
-  /** R05's predicted demand of a segment, patches a second, or `null` where it is not had. */
-  readonly demandPerS: (segment: string) => number | null;
+  readonly span: PerfDrawnSpan;
   /** What the record's notes say of how the renderer drew the scene. */
   readonly notes: ReadonlyArray<string>;
 }
@@ -319,12 +342,13 @@ type Phase =
       readonly kind: "repetition";
       readonly n: number;
       readonly metrics: RepetitionMetrics;
-      readonly spanS: number;
+      readonly span: PerfDrawnSpan;
       /** Whether its first frame has been seen, when the patch cache is read. */
       started: boolean;
       /** Whether its span's last frame has been seen: later frames hold the last pose. */
       flown: boolean;
-      readonly end: () => void;
+      /** Ends the span with its length and segments as flown. */
+      readonly end: (flown: MeasuredSpan) => void;
     };
 
 /** One run of the configured scene, and the sink its driver tells. */
@@ -445,17 +469,16 @@ export class PerfSceneRun implements PerfSceneSink {
     const lateBefore = driver.latePipelines();
     const metrics = new RepetitionMetrics({
       roles,
-      segments: warm.segments,
-      demandPerS: warm.demandPerS,
+      demandPerS: warm.span.kind === "script" ? warm.span.demandPerS : () => null,
       firstEngineFrame: driver.resolveCount(),
       previousRafMs: this.#lastRafMs,
     });
-    const flown = new Promise<void>((resolve) => {
+    const flown = new Promise<MeasuredSpan>((resolve) => {
       this.#phase = {
         kind: "repetition",
         n,
         metrics,
-        spanS: warm.spanS,
+        span: warm.span,
         started: false,
         flown: false,
         end: resolve,
@@ -467,12 +490,13 @@ export class PerfSceneRun implements PerfSceneSink {
         this,
       ),
     );
-    await this.#step(flown);
+    const span = await this.#step(flown);
     await this.#step(clock.wait(PASS_TIMES_SETTLE_MS, signal));
     const ledger = driver.memory()?.figures() ?? null;
     const workers = driver.workerMemory();
     const result = metrics.result({
-      spanS: warm.spanS,
+      spanS: span.spanS,
+      segments: span.segments,
       timeOriginMs: clock.timeOriginMs(),
       memory: {
         itemPeakBytes: ledger === null ? {} : heldItems(ledger.peakBytes),
@@ -557,9 +581,24 @@ export class PerfSceneRun implements PerfSceneSink {
       }
     }
     phase.metrics.frame(sample);
-    if (sample.scriptTimeS >= phase.spanS) {
+    const { span } = phase;
+    if (span.kind === "script" && sample.scriptTimeS >= span.spanS) {
       phase.flown = true;
-      phase.end();
+      phase.end({ spanS: span.spanS, segments: span.segments });
+    }
+  }
+
+  /** A measured span flown: its repetition ends with the frames told so far. */
+  spanEnded(span: MeasuredSpan): void {
+    const phase = this.#phase;
+    if (
+      phase.kind === "repetition" &&
+      phase.span.kind === "measured" &&
+      phase.started &&
+      !phase.flown
+    ) {
+      phase.flown = true;
+      phase.end(span);
     }
   }
 

@@ -15,6 +15,7 @@ import type { WorkerMemory } from "../terrain/workers/pool";
 import type { LedgerFigures } from "./ledger";
 import { RELEASE_MIN_BYTES } from "./repetitionMetrics";
 import {
+  type MeasuredSpan,
   type PerfClock,
   type PerfDrawn,
   type PerfDriverChoice,
@@ -57,12 +58,15 @@ const DRAWN: PerfDrawn = {
   capabilities: { timestampQuery: true },
   kernelPaths: null,
   heightWorkers: 3,
-  spanS: SPAN_S,
-  segments: [
-    { name: "high", startS: 0, endS: 5 },
-    { name: "low", startS: 5, endS: SPAN_S },
-  ],
-  demandPerS: () => null,
+  span: {
+    kind: "script",
+    spanS: SPAN_S,
+    segments: [
+      { name: "high", startS: 0, endS: 5 },
+      { name: "low", startS: 5, endS: SPAN_S },
+    ],
+    demandPerS: () => null,
+  },
   notes: ["The fake's views."],
 };
 
@@ -110,6 +114,11 @@ interface FakeOptions {
   readonly refuses?: PerfFailure;
   /** The tally's releases at each repetition's mount, bytes. */
   readonly releases?: ReadonlyArray<number>;
+  /**
+   * The span the driver measures itself (`arrival-memory`'s), ended once its frames are drawn with
+   * this length and these segments; absent, the script's.
+   */
+  readonly measured?: MeasuredSpan;
 }
 
 /** A scene that draws its frames when mounted, and its warm-up's at each of the clock's waits. */
@@ -158,8 +167,13 @@ class FakeDriver implements PerfSceneDriver {
       for (let tS = 0; tS <= SPAN_S; tS += 0.5) {
         this.#frame(tS, FRAME_MS, this.#options.label ?? "bodies", 2_000_000);
       }
+      if (this.#options.measured !== undefined) {
+        sink.spanEnded(this.#options.measured);
+      }
     }
-    return Promise.resolve(DRAWN);
+    return Promise.resolve(
+      this.#options.measured === undefined ? DRAWN : { ...DRAWN, span: { kind: "measured" } },
+    );
   }
 
   /** The warm-up's frames: slow, and their passes long, at script time 0. */
@@ -431,6 +445,28 @@ describe("a perf run in the renderer", () => {
       });
       expect(result.rows.find(({ row }) => row === "cockpit-instruments")?.p99Ms).toBe(0.5);
       expect(result.timedPassesPerFrameMs).toBe(2.5);
+    }
+  });
+
+  it("ends a span its driver measures when the driver says, its length and segments as they ran", async () => {
+    const measured: MeasuredSpan = {
+      spanS: 4,
+      segments: [
+        { name: "arrival", startS: 0, endS: 2 },
+        { name: "held", startS: 2, endS: 4 },
+      ],
+    };
+    const { main } = await ran({ measured });
+    expect(main.calls).toContain("endRepetition 2");
+    for (const result of main.results) {
+      // Every frame was drawn before the end: a measured span has no script time to stop at.
+      expect(result.frames.scriptTimesS).toHaveLength(2 * SPAN_S + 1);
+      expect([result.spanS, result.segments]).toEqual([4, measured.segments]);
+      // The fake streams below 5 s, its patches resident at every frame.
+      expect(result.streaming).toEqual([
+        { segment: "arrival", patchesPerS: 2, demandPerS: null, streamingSeconds: 2 },
+        { segment: "held", patchesPerS: 2, demandPerS: null, streamingSeconds: 2 },
+      ]);
     }
   });
 

@@ -64,9 +64,12 @@ const DRAWN: PerfDrawn = {
   capabilities: null,
   kernelPaths: null,
   heightWorkers: 1,
-  spanS: SPAN_S,
-  segments: [{ name: "all", startS: 0, endS: SPAN_S }],
-  demandPerS: () => null,
+  span: {
+    kind: "script",
+    spanS: SPAN_S,
+    segments: [{ name: "all", startS: 0, endS: SPAN_S }],
+    demandPerS: () => null,
+  },
   notes: [],
 };
 

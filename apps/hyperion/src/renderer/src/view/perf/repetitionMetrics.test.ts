@@ -11,6 +11,10 @@ const ROLES = passRolesOf([
 
 const EXTRAS = {
   spanS: 2,
+  segments: [
+    { name: "first", startS: 0, endS: 1 },
+    { name: "second", startS: 1, endS: 2 },
+  ],
   timeOriginMs: 0,
   memory: { itemPeakBytes: {}, tallyPeakBytes: null, workerFieldBytes: [], workerWasmBytes: [] },
   latePipelines: 0,
@@ -20,10 +24,6 @@ const EXTRAS = {
 function metrics(firstEngineFrame = 0): RepetitionMetrics {
   return new RepetitionMetrics({
     roles: ROLES,
-    segments: [
-      { name: "first", startS: 0, endS: 1 },
-      { name: "second", startS: 1, endS: 2 },
-    ],
     demandPerS: (segment) => (segment === "first" ? 12 : null),
     firstEngineFrame,
     previousRafMs: 990,
