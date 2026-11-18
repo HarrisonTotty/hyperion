@@ -1684,16 +1684,26 @@ describe("a view's sky while its cube is baked (lane perf-long-tasks-3)", () => 
    * A drawer on an engine without float32-blendable whose bakes' tasks wait to be run, each one
    * step, and the cubes the bakes made.
    */
-  async function bakingDrawer(): Promise<{
+  async function bakingDrawer(failing = false): Promise<{
     readonly frameWith: (sky: DrawnSky | null) => ReadonlyArray<TextureHandle>;
     readonly runTasks: () => void;
+    readonly restore: () => void;
+    readonly tasks: Array<() => void>;
     readonly cubes: TextureHandle[];
     readonly released: TextureHandle[];
+    readonly errors: unknown[];
   }> {
     const engine = await countingRenderEngine();
     const cubes: TextureHandle[] = [];
     const released: TextureHandle[] = [];
+    const errors: unknown[] = [];
+    vi.spyOn(console, "error").mockImplementation((...said: unknown[]) => {
+      errors.push(said);
+    });
     vi.spyOn(engine, "createPackedCube").mockImplementation(() => {
+      if (failing) {
+        throw new Error("out of memory for the cube");
+      }
       const cube: TextureHandle = { kind: "texture", name: `cube ${String(cubes.length + 1)}` };
       cubes.push(cube);
       return cube;
@@ -1750,8 +1760,13 @@ describe("a view's sky while its cube is baked (lane perf-long-tasks-3)", () => 
           task();
         }
       },
+      restore: () => {
+        engine.restore();
+      },
+      tasks,
       cubes,
       released,
+      errors,
     };
   }
 
@@ -1776,6 +1791,46 @@ describe("a view's sky while its cube is baked (lane perf-long-tasks-3)", () => 
     // Baked: the new sky's frame draws its cube, and the old one goes.
     expect(frameWith(next)).toEqual([cubes[1]]);
     expect(released).toEqual([cubes[0]]);
+  });
+
+  it("draws a sky's own stars with no cube once its bake fails, and bakes it no more", async () => {
+    const { frameWith, runTasks, tasks, cubes, errors } = await bakingDrawer(true);
+    const sky = drawnSky();
+    frameWith(sky);
+    runTasks();
+    expect([frameWith(sky), errors]).toEqual([
+      [],
+      [["the sky's cube could not be baked:", expect.any(Error)]],
+    ]);
+    frameWith(sky);
+    expect([tasks, cubes, errors.length]).toEqual([[], [], 1]);
+  });
+
+  it("draws a sky that comes while another's bake runs only after that bake's sky is drawn", async () => {
+    const { frameWith, tasks, runTasks, cubes } = await bakingDrawer();
+    const first = drawnSky();
+    frameWith(first);
+    // The first bake under way, a step taken: a newer reply comes.
+    tasks.shift()?.();
+    const newer = drawnSky();
+    expect(frameWith(newer)).toEqual([]);
+    runTasks();
+    // The first sky's cube, then the newer's bake in the tasks after.
+    expect(frameWith(newer)).toEqual([cubes[0]]);
+    runTasks();
+    expect([frameWith(newer), cubes.length]).toEqual([[cubes[1]], 2]);
+  });
+
+  it("draws no cube after a device loss's restore until its sky's is baked again", async () => {
+    const { frameWith, runTasks, restore, cubes } = await bakingDrawer();
+    const sky = drawnSky();
+    frameWith(sky);
+    runTasks();
+    expect(frameWith(sky)).toEqual([cubes[0]]);
+    restore();
+    expect(frameWith(sky)).toEqual([]);
+    runTasks();
+    expect(frameWith(sky)).toEqual([cubes[1]]);
   });
 
   it("drops a bake under way where the frame's sky goes", async () => {

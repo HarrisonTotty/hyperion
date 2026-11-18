@@ -126,6 +126,27 @@ describe("bakeSkyCube on the CPU", () => {
     expect(recorded.released).toEqual(["sky cube: test", "sky cube: test peak"]);
   });
 
+  it("releases the cube it made when it fails partway (lane perf-long-tasks-3)", async () => {
+    const { engine, recorded } = await recordingEngine();
+    const failing = Object.assign(engine, {
+      writePackedCubeLevel: (): void => {
+        throw new Error("the device was lost");
+      },
+    });
+    expect(() =>
+      bakeSkyCube(failing, {
+        directions: DIRECTIONS,
+        illuminanceLx: LIGHT,
+        faceSizePx: 4,
+        name: "sky cube: test",
+      }),
+    ).toThrow(/lost/);
+    expect([recorded.cubes.map((cube) => cube.name), recorded.released]).toEqual([
+      ["sky cube: test"],
+      ["sky cube: test"],
+    ]);
+  });
+
   it("refuses directions and light of different counts", async () => {
     const { engine } = await recordingEngine();
     expect(() =>

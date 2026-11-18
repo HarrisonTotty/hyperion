@@ -28,7 +28,7 @@
  * sums are the same in another order.
  *
  * A bake is made in steps ({@link startSkyBake}; lane perf-long-tasks-3): its stars laid out a
- * range at a time, its uploads in parts, then a tile's splat and levels or a face's last levels a
+ * range at a time, each upload whole, then a tile's splat and levels or a face's last levels a
  * step, so that a view's bake runs in short tasks between its frames (`cache.ts`) rather than as one
  * long frame. Its commands are the same and come in the same order on resources of its own, so the
  * cube is the one {@link bakeSkyCube}, which runs every step at once, makes, to the bit.
@@ -281,9 +281,6 @@ export function bakeTiling(faceSizePx: number, maxTilePx: number = BAKE_TILE_PX)
 /** The stars a bake's step lays out (lane perf-long-tasks-3): 16,384, about 5 ms on a pod. */
 export const BAKE_STARS_A_STEP = 16_384;
 
-/** The floats of the points or solid angles a bake's step uploads: 1 MiB. */
-export const BAKE_UPLOAD_FLOATS = 262_144;
-
 /**
  * The page's one array of splat points, kept from bake to bake (lane perf-long-tasks-3): a
  * re-bake's 300,000 stars took a new 9.6 MB array each time, beside the garbage it set off.
@@ -334,20 +331,22 @@ function* layOutPoints(source: SkyBakeSource, points: Float32Array): Generator<v
   }
 }
 
-/** Uploads `data` into `buffer` from its start, {@link BAKE_UPLOAD_FLOATS} floats a step. */
-function* uploadInParts(
+/**
+ * Uploads `data` into `buffer` from its start, in one write, as a step of its own.
+ *
+ * @remarks
+ * One write, as the bake at once made it: in parts of 1 MiB, one task's after another, each part
+ * waited on room in the page's command buffer to the GPU process, which a slow GPU process
+ * (SwiftShader's, drawing a frame of some 10 s at high on a pod) frees only as it reads: one part's
+ * write held the page 15 to 43 s there (lane perf-long-tasks-3). A large write is not held so.
+ */
+function* upload(
   engine: RenderEngine,
   buffer: BufferHandle,
   data: Float32Array,
 ): Generator<void, void, void> {
-  for (let at = 0; at < data.length; at += BAKE_UPLOAD_FLOATS) {
-    engine.writeBuffer(
-      buffer,
-      at * Float32Array.BYTES_PER_ELEMENT,
-      data.subarray(at, Math.min(data.length, at + BAKE_UPLOAD_FLOATS)),
-    );
-    yield;
-  }
+  engine.writeBuffer(buffer, 0, data);
+  yield;
 }
 
 /** The `f32` bits of a value, as the peak buffer holds them. */
@@ -488,9 +487,9 @@ function placed(size: Uint32Array, origin: readonly [number, number, number, num
  * A bake under way, made a step at a time ({@link startSkyBake}).
  *
  * @remarks
- * A step is the stars' layout of {@link BAKE_STARS_A_STEP}, an upload of
- * {@link BAKE_UPLOAD_FLOATS}, the scratch's making, a tile's splat and peak, a tile's splat and
- * levels, or a face's last levels; the CPU bake, the fallback, is one.
+ * A step is the stars' layout of {@link BAKE_STARS_A_STEP}, the points' or the solid angles'
+ * upload, the scratch's making, a tile's splat and peak, a tile's splat and levels, or a face's
+ * last levels; the CPU bake, the fallback, is one.
  */
 export interface SkyBakeJob {
   /**
@@ -522,6 +521,8 @@ export function startSkyBake(engine: RenderEngine, source: SkyBakeSource): SkyBa
       if (over) {
         throw new Error(`the bake of ${source.name} is over`);
       }
+      // A step that throws ends the job, its `finally` having released what it made.
+      let stepped = false;
       try {
         for (;;) {
           const next = steps.next();
@@ -533,12 +534,14 @@ export function startSkyBake(engine: RenderEngine, source: SkyBakeSource): SkyBa
             return next.value;
           }
           if (now() >= untilMs) {
+            stepped = true;
             return null;
           }
         }
-      } catch (error: unknown) {
-        over = true;
-        throw error;
+      } finally {
+        if (!stepped) {
+          over = true;
+        }
       }
     },
     cancel: () => {
@@ -611,7 +614,7 @@ function* bakeOnGpu(
         category: "sky-scratch",
       }),
     );
-    yield* uploadInParts(engine, points, headed);
+    yield* upload(engine, points, headed);
     // Written into the queue's own copy: the page's array is free for the next bake.
     givePoints(headed);
     headed = null;
@@ -624,7 +627,7 @@ function* bakeOnGpu(
         category: "sky-scratch",
       }),
     );
-    yield* uploadInParts(engine, omega, solidAngles);
+    yield* upload(engine, omega, solidAngles);
     const usage =
       TEXTURE_USAGE.RENDER_ATTACHMENT | TEXTURE_USAGE.STORAGE_BINDING | TEXTURE_USAGE.COPY_SRC;
     // The face's levels from the upper level down, each flux and solid angle summed from its
@@ -905,28 +908,41 @@ function bakePointsOnCpu(
   }
   const exponent = peakScaleExponent(faces);
   const cube = engine.createPackedCube(size, sizes.length, "sky-cube", source.name);
-  const levels: Uint32Array[] = sizes.map(
-    (levelSize) => new Uint32Array(levelSize * levelSize * 6),
-  );
-  faces.forEach((face, faceIndex) => {
-    scaleByPowerOfTwo(face, exponent);
-    faceMipChain(face, size).forEach((level, index) => {
-      const levelSize = sizes[index] ?? 1;
-      levels[index]?.set(packRgb9e5Texels(level), faceIndex * levelSize * levelSize);
+  let peak: BufferHandle | null = null;
+  let made = false;
+  try {
+    const levels: Uint32Array[] = sizes.map(
+      (levelSize) => new Uint32Array(levelSize * levelSize * 6),
+    );
+    faces.forEach((face, faceIndex) => {
+      scaleByPowerOfTwo(face, exponent);
+      faceMipChain(face, size).forEach((level, index) => {
+        const levelSize = sizes[index] ?? 1;
+        levels[index]?.set(packRgb9e5Texels(level), faceIndex * levelSize * levelSize);
+      });
     });
-  });
-  levels.forEach((packed, level) => {
-    engine.writePackedCubeLevel(cube, level, packed);
-  });
-  const peak = engine.createBuffer({
-    name: `${source.name} peak`,
-    bytes: 4,
-    usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST | BUFFER_USAGE.COPY_SRC,
-    category: "sky-cube",
-  });
-  // A peak whose `scaleExponent` is the exponent applied: 2^(15 − k).
-  engine.writeBuffer(peak, 0, f32Bits(2 ** (15 - exponent)));
-  return { cube, peak, faceSizePx: size, path: "cpu" };
+    levels.forEach((packed, level) => {
+      engine.writePackedCubeLevel(cube, level, packed);
+    });
+    peak = engine.createBuffer({
+      name: `${source.name} peak`,
+      bytes: 4,
+      usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST | BUFFER_USAGE.COPY_SRC,
+      category: "sky-cube",
+    });
+    // A peak whose `scaleExponent` is the exponent applied: 2^(15 − k).
+    engine.writeBuffer(peak, 0, f32Bits(2 ** (15 - exponent)));
+    made = true;
+    return { cube, peak, faceSizePx: size, path: "cpu" };
+  } finally {
+    // What a bake that fails partway made is released with it, as the GPU bake's is.
+    if (!made) {
+      engine.releaseTexture(cube);
+      if (peak !== null) {
+        engine.releaseBuffer(peak);
+      }
+    }
+  }
 }
 
 /** Releases a baked cube and its peak (T14's view release). */

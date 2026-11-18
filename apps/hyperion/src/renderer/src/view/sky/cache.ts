@@ -53,8 +53,10 @@ export type CubeState =
   | { readonly kind: "failed"; readonly error: unknown };
 
 /**
- * The longest a task of bake steps runs, ms (lane perf-long-tasks-3): a step is at most a tile's
- * splat and levels or 16,384 stars' layout, a few ms on a pod, so a task ends within some 10 ms.
+ * The time after which a task of bake steps ends, at the end of its step, ms (lane
+ * perf-long-tasks-3): most steps, a tile's splat and levels or 16,384 stars' layout, take a few ms
+ * on a pod. The kernels' and the scratch's making take one step each, and so does a face size's
+ * solid angles where a bake comes before the worker forming them has answered.
  */
 export const SKY_BAKE_SLICE_MS = 6;
 
@@ -227,20 +229,22 @@ export class SkyCubeCache {
    * releases it, but kept as the device's one spare until a view asks for it again, another cube is
    * baked, or the device is lost. A stage remounted for a new scene of the same sky (the `PLANET
    * VIEWER`'s next planet, plan R15) then takes its cube up again rather than bake it anew; the
-   * spare it replaces is released. Its wait on a bake stops.
+   * spare it replaces is released. Its wait on a bake stops: one under way is stopped, and one
+   * ended is the spare in the held cube's place.
    */
   letGo(view: string): void {
-    this.#stopWaiting(view);
     const entry = this.#byView.get(view);
-    if (entry === undefined) {
-      return;
+    if (entry !== undefined) {
+      this.#byView.delete(view);
+      entry.views.delete(view);
+      if (entry.views.size === 0) {
+        this.#entries.splice(this.#entries.indexOf(entry), 1);
+        this.#keepAsSpare(entry);
+      }
     }
-    this.#byView.delete(view);
-    entry.views.delete(view);
-    if (entry.views.size === 0) {
-      this.#entries.splice(this.#entries.indexOf(entry), 1);
-      this.#keepAsSpare(entry);
-    }
+    // After the held cube: a bake it waited on that has ended is the newer, kept as the spare in
+    // its place.
+    this.#stopWaiting(view);
   }
 
   /**
@@ -304,8 +308,11 @@ export class SkyCubeCache {
     let bake = this.#bakes.find((each) => fits(each, request));
     if (bake?.outcome?.kind === "failed") {
       const { error } = bake.outcome;
+      // Forgotten once no view waits to be told: each view that waited is told at its next ask.
       this.#stopWaiting(view);
-      this.#forget(bake);
+      if (bake.views.size === 0) {
+        this.#forget(bake);
+      }
       return { kind: "failed", error };
     }
     if (bake === undefined) {

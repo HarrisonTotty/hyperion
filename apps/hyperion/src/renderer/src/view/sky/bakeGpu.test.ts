@@ -342,10 +342,14 @@ describe("startSkyBake: the bake in steps (lane perf-long-tasks-3)", () => {
     const { engine, seen } = await gpuEngine();
     const job = startSkyBake(engine, bakeSourceOf(TILED));
     const now = expiring();
-    for (let step = 0; step < 70; step += 1) {
-      expect(job.step(0, now)).toBeNull();
+    try {
+      for (let step = 0; step < 70; step += 1) {
+        expect(job.step(0, now)).toBeNull();
+      }
+    } finally {
+      // The page's points array goes back whatever this test finds.
+      job.cancel();
     }
-    job.cancel();
     const calls = seen.calls.length;
     expect(seen.made.map((made) => made.name).toSorted()).toEqual(seen.released.toSorted());
     expect(seen.made.map((made) => made.name)).toContain("sky cube: test");
@@ -363,10 +367,13 @@ describe("startSkyBake: the bake in steps (lane perf-long-tasks-3)", () => {
     // A bake under way holds it: one made meanwhile lays its stars out in an array of its own.
     const third = await gpuEngine();
     const held = startSkyBake(third.engine, bakeSourceOf(INPUT));
-    expect(held.step(0, expiring())).toBeNull();
     const fourth = await gpuEngine();
-    bakeSkyCube(fourth.engine, INPUT);
-    held.cancel();
+    try {
+      expect(held.step(0, expiring())).toBeNull();
+      bakeSkyCube(fourth.engine, INPUT);
+    } finally {
+      held.cancel();
+    }
     expect(pointsOf(fourth.seen)).not.toBe(pointsOf(first.seen));
   });
 });

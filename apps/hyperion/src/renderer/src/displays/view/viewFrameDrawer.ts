@@ -55,7 +55,7 @@ import {
 import { sceneOrigins, type ViewScene, type ViewStar } from "../../view/scene/model";
 import { BandLayer } from "../../view/sky/band";
 import { type BakedCube, warmTexelSolidAngles } from "../../view/sky/bake";
-import { skyCubeCacheOf } from "../../view/sky/cache";
+import { type CubeState, skyCubeCacheOf } from "../../view/sky/cache";
 import { cameraFromObserverM } from "../../view/sky/camera";
 import { SkyCubeLayer } from "../../view/sky/cubeLayer";
 import { HostDiscLayer } from "../../view/sky/disc";
@@ -456,9 +456,11 @@ export class ViewFrameDrawer {
   /**
    * The sky the view's frames draw (lane perf-long-tasks-3): the frame's own once its cube is
    * baked, and until then the one they drew before, with the cube it holds, or none; `null` before
-   * the first.
+   * the first and after a restore.
    */
   #shown: DrawnSky | null = null;
+  /** The sky whose cube is being baked for the view, which a newer one waits on; `null` with none. */
+  #baking: DrawnSky | null = null;
   #frameFailed = false;
   /**
    * The guards of the survey edges (S5) and of the wireframe's terrain (R10.T11), R10.T16.e's: a
@@ -526,6 +528,9 @@ export class ViewFrameDrawer {
       this.#bandFor = null;
       this.#failedFor = null;
       this.#frameFailed = false;
+      // The cubes died with the device: the sky and its stars arrive together again once baked.
+      this.#shown = null;
+      this.#baking = null;
     });
   }
 
@@ -608,6 +613,9 @@ export class ViewFrameDrawer {
     // The sky drawn, with its cube: the frame's once its cube is baked, until then the one drawn
     // before (lane perf-long-tasks-3).
     const { sky, cube } = this.#skyFor(inputs.sky, inputs.setting);
+    // The frame's lights are the arrived sky's hosts, whatever stars it draws (lane
+    // perf-long-tasks-3): the label block states them.
+    const lightingSky = inputs.sky;
     const sceneStars = sceneStarsStandIn(run.scene.stars, inputs.stars, sky !== null);
     // The style this frame is foreseen to draw in, the one its list is built for: a frame that
     // falls back to the wireframe within its draw keeps that style's survey edges and inside datum.
@@ -671,7 +679,7 @@ export class ViewFrameDrawer {
     if (triesPhotoreal) {
       const photoreal = this.#drawPhotoreal(
         inputs,
-        sky,
+        { drawn: sky, lighting: lightingSky },
         tokens,
         { presentedPx: viewport, selectionPx: selection },
         camera,
@@ -774,7 +782,7 @@ export class ViewFrameDrawer {
 
   #drawPhotoreal(
     inputs: ViewFrameInputs,
-    sky: DrawnSky | null,
+    skies: { readonly drawn: DrawnSky | null; readonly lighting: DrawnSky | null },
     tokens: ColourTokens,
     sizes: { readonly presentedPx: ViewSize; readonly selectionPx: ViewSize },
     camera: { readonly pose: CameraPose; readonly fovXRad: number },
@@ -787,6 +795,7 @@ export class ViewFrameDrawer {
     readonly decorated: boolean;
   } {
     const { run } = inputs;
+    const sky = skies.drawn;
     const grid = inputs.grid ?? true;
     const { presentedPx: viewport, selectionPx } = sizes;
     const airView = inputs.atmosphere?.view;
@@ -839,7 +848,7 @@ export class ViewFrameDrawer {
         exposureScale: exposed,
         white: inputs.white,
         list: { ...list, sprites: spritesAtScale(list.sprites, viewport, internal) },
-        sky,
+        sky: skies.lighting,
         hostDiscs: inputs.hostDiscs,
         band: sky === null ? null : this.#band,
         discs: this.#discs,
@@ -953,7 +962,9 @@ export class ViewFrameDrawer {
    * The sky a frame draws and its cube (lane perf-long-tasks-3): the frame's sky where its cube is
    * held, or baked, or has none; while its cube is baked, in the tasks after the frame
    * (`SkyCubeCache.want`), the sky drawn before with the cube the view holds, or none before the
-   * first, so that a sky's stars, band and cube arrive together, a few frames later.
+   * first, so that a sky's sprites, band and cube arrive together, a bake later. A sky that
+   * arrives while another's bake runs waits for that bake to end and be drawn, so that a stream of
+   * replies quicker than a bake is drawn reply by reply, never held back to its last.
    */
   #skyFor(
     sky: DrawnSky | null,
@@ -967,9 +978,34 @@ export class ViewFrameDrawer {
     }
     if (sky === null || sky === this.#failedFor) {
       cache.release(this.#name);
+      this.#baking = null;
       this.#shown = sky;
       return { sky, cube: null };
     }
+    const earlier = this.#baking;
+    if (earlier !== null && earlier !== sky && earlier !== this.#failedFor) {
+      // The earlier sky's bake first: drawn once it ends, then this sky's begun.
+      if (this.#want(cache, earlier, setting) === "baking") {
+        return this.#held(cache);
+      }
+    }
+    if (this.#want(cache, sky, setting) === "baking") {
+      this.#baking = sky;
+      return this.#held(cache);
+    }
+    // Baked, or failed and released: the view holds the sky's cube, or none.
+    return { sky, cube: cache.held(this.#name) };
+  }
+
+  /**
+   * Asks the cache for a sky's cube: the sky is then the one drawn where it is baked, or where its
+   * bake failed (said once, and the sky drawn with no cube, as before a cube is baked).
+   */
+  #want(
+    cache: ReturnType<typeof skyCubeCacheOf>,
+    sky: DrawnSky,
+    setting: QualitySetting,
+  ): CubeState["kind"] {
     const state = cache.want(this.#name, {
       stars: sky.model.stars,
       baked: sky.selection.baked,
@@ -978,18 +1014,26 @@ export class ViewFrameDrawer {
         skyBakeSource(sky, skyFaceSizePx(setting, this.#engine.capabilities.float32Blendable)),
     });
     if (state.kind === "baking") {
-      const shown = this.#shown;
-      return { sky: shown, cube: shown === null ? null : cache.held(this.#name) };
+      return state.kind;
     }
-    this.#shown = sky;
     if (state.kind === "failed") {
       // A bake that fails (a lost device) leaves the sprites; tried again on another sky.
       console.error("the sky's cube could not be baked:", state.error);
       this.#failedFor = sky;
       cache.release(this.#name);
-      return { sky, cube: null };
     }
-    return { sky, cube: state.cube };
+    this.#baking = null;
+    this.#shown = sky;
+    return state.kind;
+  }
+
+  /** The sky drawn while a cube is baked: the one drawn before, with the cube the view holds. */
+  #held(cache: ReturnType<typeof skyCubeCacheOf>): {
+    readonly sky: DrawnSky | null;
+    readonly cube: BakedCube | null;
+  } {
+    const shown = this.#shown;
+    return { sky: shown, cube: shown === null ? null : cache.held(this.#name) };
   }
 
   /**

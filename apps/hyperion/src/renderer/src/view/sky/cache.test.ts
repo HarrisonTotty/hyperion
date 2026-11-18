@@ -338,6 +338,43 @@ describe("SkyCubeCache's bakes in the tasks after a frame (lane perf-long-tasks-
     expect([cache.baking, cache.size]).toEqual([0, 0]);
   });
 
+  it("tells each view that waited on a failed bake at its next ask, and bakes it once", async () => {
+    const { engine } = await countingCubes();
+    let attempts = 0;
+    const failing = Object.assign(engine, {
+      createPackedCube: (): TextureHandle => {
+        attempts += 1;
+        throw new Error("out of memory for the cube");
+      },
+    });
+    const { cache, runTasks } = steppedCache(failing);
+    cache.want("cockpit", requestOf());
+    cache.want("instrument", requestOf());
+    runTasks();
+    expect([
+      cache.want("cockpit", requestOf()).kind,
+      cache.want("instrument", requestOf()).kind,
+    ]).toEqual(["failed", "failed"]);
+    runTasks();
+    expect([attempts, cache.baking]).toEqual([1, 0]);
+  });
+
+  it("keeps a bake ended for a disposed view as its spare, in place of the cube it held", async () => {
+    const { engine, made, released } = await countingCubes();
+    const { cache, runTasks } = steppedCache(engine);
+    cache.want("view", requestOf());
+    runTasks();
+    cache.want("view", requestOf());
+    const next = requestOf(aSky());
+    cache.want("view", next);
+    runTasks();
+    cache.letGo("view");
+    // The newer cube, of the sky the view last asked for, is the spare a remounted stage takes up.
+    expect([released, cache.size]).toEqual([["cube 1"], 1]);
+    const taken = cache.acquire("remounted", next);
+    expect([taken?.cube.name, made]).toEqual(["cube 2", ["cube 1", "cube 2"]]);
+  });
+
   it("forgets a bake under way at a device loss's restore and bakes again at the next ask", async () => {
     const { engine, made, restore } = await countingCubes();
     const { cache, tasks, runTasks } = steppedCache(engine);
