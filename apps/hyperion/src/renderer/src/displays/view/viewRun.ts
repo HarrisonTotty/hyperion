@@ -178,7 +178,15 @@ export interface ViewRun {
    * a wheel's zoom between frames holds its floor over; none for the datum.
    */
   readonly orbitGround?: OrbitGround | undefined;
+  /**
+   * Whether a perf run's script flies its camera (plan R12, R12.T4.c; `viewPerf.ts`'s
+   * `scriptedRun`), so that its `CAMERA` reads {@link SCRIPTED_CAMERA}; absent for every other run.
+   */
+  readonly scripted?: true;
 }
+
+/** The camera's mode where a script flies it: the guide's `SCRIPTED`, never a preset's name. */
+export const SCRIPTED_CAMERA = "SCRIPTED";
 
 /**
  * The drawn ground an `ORBIT` camera's floor stands over (plan R15, T4), handed to the run each
@@ -995,7 +1003,7 @@ export function labelLines(
     { label: "FRAME", value: frameName(camera.pose.frame, scene) },
     stale ? { label: "TIME", value: time, stale: true } : { label: "TIME", value: time },
     { label: "STYLE", value: styleName(camera.style) },
-    { label: "CAMERA", value: cameraReading(camera) },
+    { label: "CAMERA", value: run.scripted === true ? SCRIPTED_CAMERA : cameraReading(camera) },
     { label: "FOV", value: `${String(camera.fovDeg)}°` },
     ...(contourIntervalM === null ? [] : [contourIntervalLine(contourIntervalM)]),
     { label: "EXPOSURE", value: exposureReading(exposure) },

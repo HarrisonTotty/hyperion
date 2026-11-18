@@ -2,11 +2,17 @@ import { METRES_PER_LIGHT_YEAR } from "@hyperion/protocol";
 
 import { add, norm, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
 import { clampToTidalRadius } from "./frames";
-import { isTurn, type ViewTurn } from "./look";
+import { isTurn, NO_LOOK_OFFSET, type ViewTurn } from "./look";
 import type { CameraPose } from "./pose";
 import { multiply, quaternionFromAxisAngle, rotate } from "./quaternion";
 import { type FrameChange, rebase } from "./rebase";
-import { type CameraScene, type CameraState, rebaseState, sceneFrameFor } from "./state";
+import {
+  type CameraScene,
+  type CameraState,
+  rebaseState,
+  type RenderStyle,
+  sceneFrameFor,
+} from "./state";
 
 /**
  * The operator's commands to a free camera at one moment, each component in [−1, 1] along the
@@ -126,6 +132,36 @@ export function turnFreeCamera(state: CameraState, turn: ViewTurn): CameraState 
     quaternionFromAxisAngle(CAMERA_RIGHT, turn.pitchRad),
   );
   return { ...state, pose: { ...state.pose, orientation } };
+}
+
+/**
+ * A free camera set at `pose` in `style` and at rest (plan R12, R12.T4.c): a perf run's scripted
+ * camera, whose pose its script gives at every frame, so that it neither coasts, eases nor keeps a
+ * look offset; its target, role, field of view and rate step stand.
+ *
+ * @remarks
+ * The script is a display control, not a flight (`view/perf/scripts.ts`): the pose is set, not
+ * integrated, and nothing clamps it to the scene's tidal radius or moves it to another frame.
+ */
+export function scriptedFreeCamera(
+  state: CameraState,
+  pose: CameraPose,
+  style: RenderStyle,
+): CameraState {
+  return {
+    ...state,
+    preset: "free",
+    style,
+    pose,
+    free: {
+      ...state.free,
+      velocityMPerS: vec3(0, 0, 0),
+      angularRateRadPerS: vec3(0, 0, 0),
+      pendingS: 0,
+    },
+    offset: NO_LOOK_OFFSET,
+    move: null,
+  };
 }
 
 /** One free camera tick's result. */

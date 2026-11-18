@@ -191,6 +191,7 @@ import {
   type ViewFrameInputs,
 } from "./viewFrameDrawer";
 import { ViewLabelBlock } from "./ViewLabelBlock";
+import { scriptedRun, type ViewPerfHooks } from "./viewPerf";
 import { ViewLowerPlate } from "./ViewLowerPlate";
 import { InstrumentStub } from "./InstrumentStub";
 import { measureRoom, NOT_MEASURED, type RoomMeasures, sameRoomMeasures } from "./plateMeasures";
@@ -295,6 +296,7 @@ import {
   type MarkRow,
   markRows,
   PRESET_NAMES,
+  SCRIPTED_CAMERA,
   rangesFromCamera,
   runPose,
   SCENE_OPTIONS,
@@ -513,6 +515,13 @@ interface ViewDisplayProps {
    * as in the `PLANET VIEWER`.
    */
   readonly stillSource?: StillSource | undefined;
+  /**
+   * A perf run's hooks on the drawing loop (plan R12, R12.T4.c; `viewPerf.ts`), read at each frame:
+   * the primary's free scripted camera over the server's scene, and each frame it drew, told to the
+   * run; with them `MAXIMIZE VIEW` is on as the display mounts, its label block hidden. Absent, as
+   * on every launch but a `--perf-run`'s, `VIEW` is as it always is.
+   */
+  readonly perf?: ViewPerfHooks | undefined;
 }
 
 /** What a view of the server's scene reads of `useScene`, kept current by its stage. */
@@ -647,6 +656,8 @@ interface ViewStageProps {
    * annunciations.
    */
   readonly sceneAnnunciations: ReadonlyArray<string>;
+  /** A perf run's hooks on the drawing loop (`ViewDisplayProps.perf`), or `undefined`. */
+  readonly perf: ViewPerfHooks | undefined;
 }
 
 /** What the drawing loop reads of the several views' budgets, kept current by an effect. */
@@ -763,6 +774,8 @@ interface LoopInputs {
    * photorealistic image takes the symbology over it, read at each frame.
    */
   readonly grid: boolean;
+  /** A perf run's hooks (`ViewDisplayProps.perf`), read at each frame, or `undefined`. */
+  readonly perf: ViewPerfHooks | undefined;
 }
 
 /** The primary's label block as last rendered: what a still's label takes of it (plan R11). */
@@ -1037,6 +1050,7 @@ function ViewStage({
   stills,
   stillSource,
   sceneAnnunciations,
+  perf,
 }: ViewStageProps) {
   const legendId = useId();
   const stillsAway = useStillsAwayLines(stills);
@@ -1141,6 +1155,7 @@ function ViewStage({
     lineOfSightPoint: undefined,
     grid: GRID_AT_OPEN,
     slopeBaselineM,
+    perf,
   });
 
   // The sky replaces the interim field once it arrives, asked on the published run (R06.T13.c).
@@ -1342,6 +1357,7 @@ function ViewStage({
       lineOfSightPoint: hasPoint === undefined ? undefined : { hasPoint, rangeM: pointRangeM },
       slopeBaselineM,
       grid,
+      perf,
     };
   }, [
     exposure,
@@ -1365,6 +1381,7 @@ function ViewStage({
     pointRangeM,
     slopeBaselineM,
     grid,
+    perf,
   ]);
 
   // The drawing loop reads the server's scene, as the latest render holds it, through a ref.
@@ -1594,6 +1611,8 @@ function ViewStage({
         frame = requestAnimationFrame(tick);
         return;
       }
+      // A perf run times the callback of each frame the primary draws (plan R12, R12.T4.c).
+      const callbackStartMs = inputsRef.current.perf === undefined ? 0 : performance.now();
       // The previous primary frame's resolves end here, every view's counted in; the frames whose
       // passes have all resolved since the last are the controller's.
       primaryTimes.startFrame(engine.passTimesFrame);
@@ -1619,7 +1638,7 @@ function ViewStage({
         cutRef.current = false;
         cutExposure();
       }
-      const run = stepRun(runRef.current, {
+      const stepped = stepRun(runRef.current, {
         // The server's scene where the ship sees it at this frame's time (R03's `frameAt`).
         serverScene: current === null ? null : serverSceneAtFrame(current, nowMs),
         dtS,
@@ -1629,6 +1648,11 @@ function ViewStage({
         // The ground drawn under an ORBIT camera, its floor (plan R15, T4).
         orbitGround: orbitGroundOf(runRef.current, inputs.terrain),
       });
+      // A perf run's free scripted camera, at its script's pose for this frame, over the server's
+      // scene alone, before anything reads the run (plan R12, R12.T4.c).
+      const scripted =
+        stepped.source.kind === "server" ? (inputs.perf?.cameraAt(stepped, nowMs) ?? null) : null;
+      const run = scripted === null ? stepped : scriptedRun(stepped, scripted);
       turnRef.current = NO_TURN;
       runRef.current = run;
       // A kept scene's terrain fixture is told how far its script has played: its field's revision
@@ -1805,9 +1829,12 @@ function ViewStage({
       // Guarded: no throw of the step stops this loop or the instruments' (S5), and one that lasts
       // faults the terrain (R10.T16.e).
       stepTerrainSession(session, stepGuard, nowMs);
+      // The style this frame drew in, for a perf run's report; `null` where it drew nothing.
+      let drewStyle: RenderStyle | null = null;
       if (drawer !== null && frameInputs !== null) {
         const drawn = drawer.draw(frameInputs);
         if (drawn !== null && inputs.size !== null) {
+          drewStyle = drawn.drawnStyle;
           imageDrawn = drawn.drawnStyle === "photorealistic";
           imageLimited =
             imageDrawn && (renderScale < primaryBudget.renderScale || primaryScale.airStepped);
@@ -1907,6 +1934,19 @@ function ViewStage({
         // A choice of BASELINE is asked at once, and its answer stands as it comes, out of the
         // readouts' turn (R10.T12.c); the other readouts keep theirs.
         setGround(grounds.publish(session, run, nowMs, inputs.slopeBaselineM));
+      }
+      // A frame drawn at a perf run's scripted camera, told once its callback's work is done.
+      if (scripted !== null && drewStyle !== null && inputs.size !== null) {
+        inputs.perf?.onDrawn({
+          rafTimestampMs: nowMs,
+          callbackStartMs,
+          callbackMs: performance.now() - callbackStartMs,
+          size: presentedViewport(inputs.size),
+          drawnStyle: drewStyle,
+          photoreal: drawer?.photorealStatus ?? "idle",
+          renderScale,
+          streaming: terrainAnnunciation === "TERRAIN: STREAMING",
+        });
       }
       frame = requestAnimationFrame(tick);
     };
@@ -2773,7 +2813,9 @@ function ViewStage({
                 "VIEW",
                 styleName(shown.drawnStyle),
                 PRIMARY_NAME,
-                PRESET_NAMES[shown.run.camera.preset],
+                shown.run.scripted === true
+                  ? SCRIPTED_CAMERA
+                  : PRESET_NAMES[shown.run.camera.preset],
               ].join(", ")}
               describedBy={
                 lowerParts.length === 0
@@ -3395,6 +3437,7 @@ function ViewPanels({
   hostStatements = NO_SCENE_STATEMENTS,
   onPlanetViewer,
   stillSource,
+  perf,
 }: ViewDisplayProps) {
   const statusId = useId();
   const host = use(ViewSceneContext);
@@ -3421,8 +3464,10 @@ function ViewPanels({
   const [placePage, setPlacePage] = useState<PlacePage>("camera");
   // MAXIMIZE VIEW (the owner's request, 2026-11-01): off as the display mounts, VIEW's own, and kept
   // while it stays mounted, through every scene and while another display is shown; on, with the
-  // primary's upper label block hidden, as each time it is turned on, or shown whole by its key.
-  const [maximize, setMaximize] = useState<Maximize>("off");
+  // primary's upper label block hidden, as each time it is turned on, or shown whole by its key. A
+  // perf run's display mounts with it on, its label block whole, so that its primary stands at the
+  // most of the window and still states its setting (plan R12, R12.T4.c; a lean).
+  const [maximize, setMaximize] = useState<Maximize>(() => (perf === undefined ? "off" : "block"));
   // Its keys act from anywhere on the display but a text field, as the view's single keys do; the
   // label block's only while it is on.
   useEffect(() => {
@@ -3760,6 +3805,7 @@ function ViewPanels({
         stills={stills}
         stillSource={stillSource}
         sceneAnnunciations={sceneAnnunciations}
+        perf={perf}
       />
     </div>
   );

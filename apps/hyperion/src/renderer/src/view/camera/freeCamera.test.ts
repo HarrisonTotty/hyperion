@@ -18,6 +18,7 @@ import {
   freeRateMPerS,
   maxFreeRateStep,
   NO_FREE_INPUT,
+  scriptedFreeCamera,
   stepFreeCamera,
 } from "./freeCamera";
 import { rebase } from "./rebase";
@@ -208,5 +209,40 @@ describe("the commanded rate", () => {
     expect(top).toBe(maxFreeRateStep(scene));
     expect(freeRateMPerS(top)).toBeLessThanOrEqual(0.2 * FIXTURE_TIDAL_RADIUS_M);
     expect(freeRateMPerS(top + 1)).toBeGreaterThan(0.2 * FIXTURE_TIDAL_RADIUS_M);
+  });
+});
+
+describe("a scripted free camera", () => {
+  it("stands free at the script's pose at rest in its style, its offset and ease dropped", () => {
+    const scene = aCameraScene();
+    const seat = newCameraState(scene, "camera");
+    const turned: CameraState = {
+      ...seat,
+      offset: { azimuthRad: 0.3, elevationRad: -0.1 },
+      move: { from: seat.pose, elapsedS: 0.1 },
+      free: {
+        ...seat.free,
+        rateStep: 9,
+        velocityMPerS: vec3(5, 0, 0),
+        angularRateRadPerS: vec3(0, 1, 0),
+        pendingS: 1e-4,
+      },
+    };
+    const pose = aCameraPose({ positionM: vec3(0, 0, 7e11) });
+    expect(seat.preset).toBe("seat");
+    expect(scriptedFreeCamera(turned, pose, "photorealistic")).toEqual({
+      ...turned,
+      preset: "free",
+      style: "photorealistic",
+      pose,
+      free: {
+        ...turned.free,
+        velocityMPerS: vec3(0, 0, 0),
+        angularRateRadPerS: vec3(0, 0, 0),
+        pendingS: 0,
+      },
+      offset: { azimuthRad: 0, elevationRad: 0 },
+      move: null,
+    });
   });
 });

@@ -164,10 +164,21 @@ export interface RingedGiant {
 }
 
 /**
+ * Whether `giant`'s annulus can be approached: its inner radius above 0 and below its outer, which
+ * lies inside the 10⁹ m boundary the approach crosses ({@link APPROACH_BOUNDARY_M}).
+ */
+export function approachableRing(giant: RingedGiant): boolean {
+  const { ringInnerM, ringOuterM } = giant;
+  return ringInnerM > 0 && ringInnerM < ringOuterM && ringOuterM < APPROACH_BOUNDARY_M;
+}
+
+/**
  * The approach to a ringed giant (`ringed-giant-approach`): from {@link APPROACH_START_DISTANCE_M}
  * at {@link APPROACH_START_ELEVATION_RAD} above the ring plane to the annulus's middle radius
  * {@link APPROACH_END_HEIGHT_M} above it in {@link APPROACH_DURATION_S}, in the giant's body-fixed
- * frame (z its spin axis, the rings in its equator), along the prime meridian.
+ * frame (z its spin axis, the rings in its equator), along the prime meridian. A perf run stands
+ * that frame as the giant's widest ring's in the served scene, z its normal toward the host star
+ * and x toward the star in its plane (`scriptedCamera.ts`'s `ringedGiantIn`).
  *
  * @remarks
  * The distance from the centre falls geometrically, r = r₀ (r₁ ÷ r₀)^s, with s the smoothstep of
@@ -176,12 +187,11 @@ export interface RingedGiant {
  * The segments are `far` above 10⁹ m, `near` down to the annulus's outer radius, and `annulus`
  * inside it.
  *
- * @throws RangeError if the annulus is not inside the start distance with its inner radius below
- *   its outer.
+ * @throws RangeError for an annulus that is not {@link approachableRing}.
  */
 export function ringedGiantApproach(giant: RingedGiant): PerfScript {
   const { ringInnerM, ringOuterM } = giant;
-  if (!(ringInnerM > 0 && ringInnerM < ringOuterM && ringOuterM < APPROACH_BOUNDARY_M)) {
+  if (!approachableRing(giant)) {
     throw new RangeError("a giant's rings lie inside 10⁹ m, their inner radius below their outer");
   }
   const middleM = (ringInnerM + ringOuterM) / 2;

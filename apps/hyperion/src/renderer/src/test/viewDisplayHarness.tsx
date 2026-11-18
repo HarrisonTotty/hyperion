@@ -49,6 +49,7 @@ import { ServerLinkHarness } from "./ServerLinkHarness";
 import type { WorkerLike } from "../view/terrain/workers/pool";
 import type { OpticsWorkerLike } from "../view/atmosphere/opticsPool";
 import type { TerrainSession } from "../view/terrain/session";
+import type { ViewPerfHooks } from "../displays/view/viewPerf";
 import type { SceneOption } from "../displays/view/viewRun";
 import type { StillSource } from "../view/stills/stillJob";
 
@@ -474,6 +475,8 @@ export function renderViewDisplay(options: {
   readonly framePacing?: FramePacingName;
   /** Where a still's scene comes from (plan R11, R11.T10.b): none by default, as in the client. */
   readonly stillSource?: StillSource;
+  /** A perf run's hooks on the loop (plan R12, R12.T4.c): none by default, as in the client. */
+  readonly perf?: ViewPerfHooks;
 }): ViewDisplayHarness {
   const advanceTimers = fakeFramesAndTimeouts();
   let viewPx: LaidOutPx = options.viewPx ?? FULL_VIEW_PX;
@@ -516,6 +519,7 @@ export function renderViewDisplay(options: {
                     watchTerrain={options.watchTerrain}
                     atmosphereLevers={options.atmosphereLevers}
                     stillSource={options.stillSource}
+                    perf={options.perf}
                   />
                 </main>
               </Activity>
