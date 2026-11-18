@@ -10,6 +10,7 @@ import { type PatchKey, parentKey, patchKeyString } from "./patchKey";
 import { planetGeometry, surfacePoint } from "./planet";
 import { seededRandom } from "../../test/seededRandom";
 import {
+  BULK_VIEW_WEIGHT,
   compareRequests,
   fillsHole,
   joinDemand,
@@ -254,5 +255,55 @@ describe("a hole in a pass's drawn set (R10.T14.b)", () => {
     for (const r of requests) {
       expect(fillsHole(r)).toBe(!r.forced && !bakedOver(r.key));
     }
+  });
+});
+
+describe("a still's own terrain view, at bulk priority (R11.T10.e)", () => {
+  const low = above(3_000);
+  const bulk = (positionM: Vec3, tiltRad = 1.0): ViewSelectionInput => ({
+    ...view(positionM, BULK_VIEW_WEIGHT, tiltRad),
+    bulk: true,
+  });
+
+  it("puts a bulk request after every ordinary one, whatever their priorities, forced first", () => {
+    const forced = { key: KEY(0), priority: 0.1, forced: true };
+    const ordinary = { key: KEY(1), priority: 0.2, forced: false };
+    const heavy = { key: KEY(2), priority: 90, forced: false, bulk: true };
+    const light = { key: KEY(3), priority: 1, forced: false, bulk: true };
+    expect([light, heavy, ordinary, forced].toSorted(compareRequests)).toEqual([
+      forced,
+      ordinary,
+      heavy,
+      light,
+    ]);
+  });
+
+  it("asks at bulk priority only what a bulk view alone wants, at its weight", () => {
+    const alone = demand([bulk(low)]);
+    const secondary = byKey(demand([view(low, BULK_VIEW_WEIGHT)]));
+    expect(alone.length).toBeGreaterThan(0);
+    // Roots are ordinary requests whoever sees them; every other is the bulk view's, at its weight.
+    const unrooted = alone.filter((r) => r.key.level > 0);
+    expect(unrooted.length).toBeGreaterThan(0);
+    for (const r of unrooted) {
+      expect([r.bulk, r.priority]).toEqual([true, secondary.get(patchKeyString(r.key))?.priority]);
+    }
+  });
+
+  it("asks an ordinary view's patches at its own priority, a bulk view beside it or not", () => {
+    const primary = view(low, PRIMARY_VIEW_WEIGHT);
+    expect(demand([primary, bulk(low)])).toEqual(demand([primary]));
+  });
+
+  it("joins a bulk request and an ordinary one of a patch as the ordinary one", () => {
+    const own = [{ key: KEY(0), priority: 1, forced: false }];
+    const ahead = [
+      { key: KEY(0), priority: 7, forced: false, bulk: true },
+      { key: KEY(1), priority: 3, forced: false, bulk: true },
+    ];
+    expect(joinDemand(own, ahead, () => 0)).toEqual([
+      { key: KEY(0), priority: 1, forced: false, needS: 0 },
+      { key: KEY(1), priority: 3, forced: false, needS: 0, bulk: true },
+    ]);
   });
 });

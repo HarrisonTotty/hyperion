@@ -1424,6 +1424,7 @@ on it.
   equals an untiled still of the same size within the projection test's tolerance; test-render's
   captures are byte-identical; no synchronous pipeline is created in a batch; the renderer test pins
   8 samples on both settings.
+  Records: [11-surface-detail-clouds-oceans-rings-stills/records/R11.T10.e.md](11-surface-detail-clouds-oceans-rings-stills/records/R11.T10.e.md).
 
 - **R11.T10.d The soak, by hand, recorded.** On the otherwise idle development machine (RTX 3080)
   and, by the owner, on an otherwise idle UHD 620, whose i915 preemption limit is the one the cap

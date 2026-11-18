@@ -231,7 +231,7 @@ import { styleName } from "../../view/photoreal/style";
 import { isTerrainFault, type TerrainAnnunciation } from "../../view/terrain/annunciation";
 import { surveyReadingStands } from "../../view/terrain/readouts";
 import { TerrainFailureGuard } from "../../view/terrain/failureGuard";
-import type { TerrainSession } from "../../view/terrain/session";
+import type { TerrainSession, TerrainViewReport } from "../../view/terrain/session";
 import type { SlopeBaselineM } from "../../view/terrain/workers/messages";
 import type { WorkerLike } from "../../view/terrain/workers/pool";
 import { useServerLink } from "../../lib/serverLink";
@@ -1528,6 +1528,9 @@ function ViewStage({
     const labelStates = new WeakMap<HTMLElement, MarkLabelState>();
     // The terrain session the view last told what it drew, which forgets it when it goes.
     let reportedTo: TerrainSession | null = null;
+    // What the view last told it, from which a still makes its own terrain view (plan R11,
+    // R11.T10.e); `null` before, and once a session is let go.
+    let reportedTerrain: TerrainViewReport | null = null;
     // The view's handle on the stage's atmosphere cache, and what the cache said of its last frame
     // drawn (R08.T10.b).
     const air = new ViewAtmosphereHandle();
@@ -1583,6 +1586,12 @@ function ViewStage({
                 coverage: (body) => session?.survey(body)?.coverage ?? null,
               });
             },
+            // The still's own terrain view, in the session the view last told what it drew
+            // (R11.T10.e); the frozen frame gives its slope term.
+            terrain: () =>
+              reportedTo === null || reportedTerrain === null
+                ? null
+                : { session: reportedTo, report: reportedTerrain, occluderSlopePx: 0 },
           })
         : () => undefined;
     // TAKE STILL held back from the start, with the view's cause until it draws its image.
@@ -1692,6 +1701,7 @@ function ViewStage({
       if (reportedTo !== session) {
         reportedTo?.forgetView(VIEW_ID);
         reportedTo = session;
+        reportedTerrain = null;
         stepGuard = new TerrainFailureGuard();
       }
       terrainAnnunciation = null;
@@ -1824,6 +1834,7 @@ function ViewStage({
             readoutBody: readoutBodyOf(run),
             floorStepped: primaryScale.airStepped,
           });
+          reportedTerrain = report;
         }
       }
       // Guarded: no throw of the step stops this loop or the instruments' (S5), and one that lasts

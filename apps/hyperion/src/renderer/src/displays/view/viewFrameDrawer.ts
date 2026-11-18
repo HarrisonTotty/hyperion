@@ -896,7 +896,7 @@ export class ViewFrameDrawer {
         this.#lastPhotoreal = null;
         return { drawn: false, terrain: null, decorated: false };
       }
-      this.#lastPhotoreal = { frame, plan };
+      this.#lastPhotoreal = { frame, plan, occluderSlopePx: list.occluderSlopePx };
       this.#regimes = plan.regimes;
       const origins = sceneOrigins(run.scene);
       const fromCamera = new Map<BodyIdHex, Vec3>();

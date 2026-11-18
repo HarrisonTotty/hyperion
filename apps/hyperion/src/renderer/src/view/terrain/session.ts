@@ -201,7 +201,7 @@ import { SELECTION_RULE } from "./levelBounds";
 import { TerrainMaterialSet } from "./materialSet";
 import { unreachable } from "./patchKey";
 import { bandLimitM, type BodyFigure, type BodyFixedVec3, planetGeometry } from "./planet";
-import { PRIMARY_VIEW_WEIGHT, SECONDARY_VIEW_WEIGHT } from "./priority";
+import { BULK_VIEW_WEIGHT, PRIMARY_VIEW_WEIGHT, SECONDARY_VIEW_WEIGHT } from "./priority";
 import { MAX_SELECTION_VIEWS } from "./select";
 import { type ShadowCasters, TerrainShadows } from "./shadows/terrainShadows";
 import { SurveyedCells } from "./surveyLookup";
@@ -362,8 +362,12 @@ export interface TerrainViewReport {
   readonly drawnStyle: RenderStyle;
   /** The quality setting it draws at, whose τ the photorealistic style takes. */
   readonly setting: QualitySetting;
-  /** Its budget's terrain streaming priority (`ViewBudget.streamPriority`), for R10.T16.b's weights. */
-  readonly streamPriority: ViewBudget["streamPriority"];
+  /**
+   * Its budget's terrain streaming priority (`ViewBudget.streamPriority`), for R10.T16.b's weights;
+   * `bulk` for a still's own terrain view (plan R11, R11.T10.e), which streams after every other
+   * view's demand.
+   */
+  readonly streamPriority: ViewBudget["streamPriority"] | "bulk";
   /**
    * Its last photorealistic plan's regimes (`ViewFrameDrawer.regimes`), by which R10.T16.b's passes
    * take the bodies it hands over (T10.e's `terrain`, and under `HANDOVER_AT_CELLS` the discs and
@@ -544,7 +548,8 @@ export function viewFieldCandidates(
  * in the body's non-rotating axes (the galactic axes, the body frame's), at its style's τ
  * (`handoverTauPx`), times its {@link TerrainViewReport.litTauScale} in a lit pass, its selection
  * size ({@link TerrainViewReport.selectionPx}) and its weight (`PRIMARY_VIEW_WEIGHT` or
- * `SECONDARY_VIEW_WEIGHT`, from its budget's `streamPriority`); `null` for a body whose rotation is
+ * `SECONDARY_VIEW_WEIGHT`, from its budget's `streamPriority`, or a still's `BULK_VIEW_WEIGHT` at
+ * bulk priority, plan R11, R11.T10.e); `null` for a body whose rotation is
  * not known, which is never handed over.
  *
  * @param shading - The pass's: a lit pass's τ takes the view's lit τ scale, a wireframe pass's
@@ -578,8 +583,27 @@ export function terrainPassViewOf(
       shading === "lit" && report.litTauScale !== undefined
         ? handoverTauPx(report.style, report.setting) * report.litTauScale
         : handoverTauPx(report.style, report.setting),
-    weight: report.streamPriority === "primary" ? PRIMARY_VIEW_WEIGHT : SECONDARY_VIEW_WEIGHT,
+    ...streamWeightOf(report.streamPriority),
   };
+}
+
+/** A view's streaming weight and tier by its stream priority (Design note 24; R11.T10.e). */
+function streamWeightOf(
+  priority: TerrainViewReport["streamPriority"],
+): Pick<TerrainPassView, "weight" | "bulk"> {
+  let weight: Pick<TerrainPassView, "weight" | "bulk">;
+  switch (priority) {
+    case "primary":
+      weight = { weight: PRIMARY_VIEW_WEIGHT };
+      break;
+    case "secondary":
+      weight = { weight: SECONDARY_VIEW_WEIGHT };
+      break;
+    case "bulk":
+      weight = { weight: BULK_VIEW_WEIGHT, bulk: true };
+      break;
+  }
+  return weight;
 }
 
 /**
@@ -1072,6 +1096,21 @@ export class TerrainSession {
   readonly #shadows: TerrainShadows;
   readonly #bodies = new Map<BodyIdHex, SessionBody>();
   readonly #reports = new Map<ViewId, TerrainViewReport>();
+  /**
+   * The bodies whose survey a still holds as it stood at its request ({@link
+   * TerrainSession.holdSurvey}; plan R11, R11.T10.e): the holds on each, and the field's blocks and
+   * the store's coverage kept back meanwhile, in the order they came.
+   */
+  readonly #heldSurvey = new Map<
+    BodyIdHex,
+    {
+      holds: number;
+      readonly kept: Array<
+        | { readonly kind: "block"; readonly block: ArrayBuffer }
+        | { readonly kind: "coverage"; readonly coverage: CoverageView }
+      >;
+    }
+  >();
   /** Each handed-over body's pass (R10.T16.b), from its first hand-over to its field's release. */
   readonly #passes = new Map<BodyIdHex, TerrainPass>();
   /**
@@ -1138,9 +1177,16 @@ export class TerrainSession {
         pool.fieldInit(body, block);
       },
       fieldChunk: (body, block) => {
-        pool.fieldChunk(body, block);
+        const held = this.#heldSurvey.get(body);
+        if (held === undefined) {
+          pool.fieldChunk(body, block);
+        } else {
+          held.kept.push({ kind: "block", block });
+        }
       },
       fieldRelease: (body) => {
+        // A field let go is not held: what was kept back of it is for a field that is gone.
+        this.#heldSurvey.delete(body);
         this.#fieldReleased(body);
         pool.fieldRelease(body);
       },
@@ -1161,7 +1207,12 @@ export class TerrainSession {
         this.#blockTaken(change);
       }),
       this.#store.onRevision((body, coverage) => {
-        this.#coverageTaken(body, coverage);
+        const held = this.#heldSurvey.get(body);
+        if (held === undefined) {
+          this.#coverageTaken(body, coverage);
+        } else {
+          held.kept.push({ kind: "coverage", coverage });
+        }
       }),
       this.#textures.onRestored(() => {
         this.#restored();
@@ -1458,6 +1509,77 @@ export class TerrainSession {
     this.#reports.delete(id);
     this.#wireHanded.delete(id);
     this.#frameReliefs.delete(id);
+  }
+
+  /**
+   * Holds the survey of `bodies` as it stands (plan R11, R11.T10.e; ruling 4a of decision-leans-54:
+   * a still's cells frozen at its request): each block of their fields the store posts from now on,
+   * and each coverage it revises them to, is kept back from the workers, the survey and the masks
+   * until the hold's release, when they are given in the order they came. So no bake, selection or
+   * mask meets a cell surveyed after the hold, in the still or in any view meanwhile, the price of a
+   * still that draws only the cells surveyed at its request. Blocks posted before the hold reach the
+   * workers as ever. A field let go meanwhile is held no more.
+   *
+   * @returns The release, which a second call does nothing for.
+   */
+  holdSurvey(bodies: Iterable<BodyIdHex>): () => void {
+    const held = [...new Set(bodies)];
+    for (const body of held) {
+      const was = this.#heldSurvey.get(body);
+      if (was === undefined) {
+        this.#heldSurvey.set(body, { holds: 1, kept: [] });
+      } else {
+        was.holds += 1;
+      }
+    }
+    let released = false;
+    return () => {
+      if (released) {
+        return;
+      }
+      released = true;
+      for (const body of held) {
+        this.#releaseSurvey(body);
+      }
+    };
+  }
+
+  /** Lets go of one hold of `body`'s survey, giving what was kept back once none holds it. */
+  #releaseSurvey(body: BodyIdHex): void {
+    const held = this.#heldSurvey.get(body);
+    if (held === undefined) {
+      return;
+    }
+    held.holds -= 1;
+    if (held.holds > 0) {
+      return;
+    }
+    this.#heldSurvey.delete(body);
+    if (this.#disposed) {
+      return;
+    }
+    for (const each of held.kept) {
+      if (each.kind === "block") {
+        this.#pool.fieldChunk(body, each.block);
+      } else {
+        this.#coverageTaken(body, each.coverage);
+      }
+    }
+  }
+
+  /**
+   * Whether view `id`'s frustum has streamed to the level its pixels warrant over each of `bodies`
+   * at the last step (plan R11, R11.T10.e; `TerrainPass.streamedFor`): `false` where a body has no
+   * lit pass, which draws none of its terrain yet.
+   */
+  streamedFor(id: ViewId, bodies: Iterable<BodyIdHex>): boolean {
+    for (const body of bodies) {
+      const pass = this.#passes.get(body);
+      if (pass === undefined || !pass.streamedFor(id)) {
+        return false;
+      }
+    }
+    return true;
   }
 
   /**

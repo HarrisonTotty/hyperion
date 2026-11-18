@@ -678,9 +678,14 @@ export interface TerrainPassView {
   readonly tauPx: number;
   /**
    * Its streaming weight (R05 Design note 24): `PRIMARY_VIEW_WEIGHT` or `SECONDARY_VIEW_WEIGHT`,
-   * from its budget's `streamPriority`.
+   * from its budget's `streamPriority`; `BULK_VIEW_WEIGHT` for a still's own terrain view.
    */
   readonly weight: number;
+  /**
+   * Whether it streams at bulk priority (plan R11, R11.T10.e; `ViewSelectionInput.bulk`): a still's
+   * own terrain view, whose demand comes after every other view's. Absent, `false`.
+   */
+  readonly bulk?: boolean;
 }
 
 /** A view as a step takes it: a {@link TerrainPassView}, or the spike's default view. */
@@ -3473,6 +3478,35 @@ export class TerrainPass {
   }
 
   /**
+   * Whether view `id`'s frustum has streamed to the level its pixels warrant at the last step (plan
+   * R11, R11.T10.e; Design note 17's streaming wait): no fault, the view taken by that step, nothing
+   * it sees missing or stood in for by a coarser patch (its `TERRAIN: STREAMING` held off), every
+   * block's rebakes landed ({@link TerrainPass.settled}), no drafted bake's refinement still asked
+   * ({@link TerrainPass.refining}) and its morph bands at their τ′ ({@link TerrainPass.bandsAtTarget}).
+   * A view whose patch budget binds may stand streamed at a coarser τ′, which its `DETAIL LIMITED`
+   * says.
+   */
+  streamedFor(id: TerrainViewId): boolean {
+    const selected = this.#selected;
+    if (this.#faulted || this.#disposed || selected === null || !this.#views.has(id)) {
+      return false;
+    }
+    const bit = selected.views.findIndex((view) => view.id === id);
+    if (bit < 0) {
+      return false;
+    }
+    const mask = 1 << bit;
+    const { drawSet } = selected;
+    return (
+      (drawSet.missingViews & mask) === 0 &&
+      (drawSet.standingInViews & mask) === 0 &&
+      this.settled &&
+      this.refining === 0 &&
+      this.bandsAtTarget(id)
+    );
+  }
+
+  /**
    * Whether view `id` sees a drawn patch at the last step: no fault, the view taken by that step,
    * and some patch of the draw set in its view. Where it holds, the view's draw draws the terrain
    * once its material is made; where it does not, the view sees no surveyed ground the pass draws
@@ -4244,6 +4278,7 @@ export class TerrainPass {
       fovXRad: view.view.fovXRad,
       viewport: view.view.viewport,
       weight: view.weight,
+      ...(view.bulk === true ? { bulk: true } : {}),
       tauPx: selectionTolerancePx(view.tauPx),
     };
   }
@@ -4385,6 +4420,7 @@ export class TerrainPass {
           fovXRad,
           viewport,
           weight,
+          bulk,
           tauPx,
           frustumMarginRad: margin,
         }): ViewSelectionInput => ({
@@ -4392,6 +4428,7 @@ export class TerrainPass {
           fovXRad,
           viewport,
           weight,
+          ...(bulk === true ? { bulk } : {}),
           tauPx,
           ...(margin === undefined ? {} : { frustumMarginRad: margin }),
         }),

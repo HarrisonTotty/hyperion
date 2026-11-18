@@ -221,6 +221,11 @@ import type {
 } from "../stills/stillJob";
 import { isStillSide, type StillRequest } from "../stills/stillLabel";
 import { planTiles, type StillTile, type StillTiling, tileProjection } from "../stills/stillPlan";
+import {
+  type StillCoverage,
+  type StillTerrainCapture,
+  StillTerrainView,
+} from "../stills/stillTerrain";
 
 /**
  * What draws the terrain of a photorealistic frame's bodies handed over to it (plan R10, R10.T10.e;
@@ -2786,6 +2791,11 @@ export class PhotorealRenderer {
 export interface DrawnPhotorealFrame {
   readonly frame: PhotorealFrame;
   readonly plan: BodyFramePlan;
+  /**
+   * The symbology's slope term its terrain drew with (`LiveFrameTerrainInput.occluderSlopePx`),
+   * which a still's own terrain view carries (plan R11, R11.T10.e); 0 where absent.
+   */
+  readonly occluderSlopePx?: number | undefined;
 }
 
 /**
@@ -2836,11 +2846,10 @@ export const STILL_UNAVAILABLE = {
    */
   settling: "the view's exposure is settling after a cut",
   /**
-   * A body is handed over to its terrain, which a still does not draw: the terrain is drawn for
-   * the view's own frames alone, and a still's own terrain view, frozen and streamed at bulk
-   * priority, is not built (lean, 2026-11-18).
+   * A body is handed over to its terrain, and the view gives the still no terrain session to draw
+   * it from (`PhotorealStillView.terrain`): none in a view without one (plan R11, R11.T10.e).
    */
-  terrain: "terrain is not yet drawn in stills, take one farther from the ground",
+  terrain: "the view's terrain cannot be drawn in a still now",
   /** The view's image is over `STILL_MAX_SIDE_PX` on a side, which the main process refuses. */
   oversized: "the view is over 8192 px on a side, the largest still",
 } as const;
@@ -2944,6 +2953,12 @@ export interface PhotorealStillOptions {
   readonly onUnitTimes: (passes: ReadonlyArray<MeasuredPass>) => void;
   /** Called once, at its disposal. */
   readonly onDispose: () => void;
+  /**
+   * The still's own terrain view (plan R11, R11.T10.e), which its samples draw the terrain of the
+   * bodies handed over through, its streaming the job's wait, disposed with the renderer; absent,
+   * it draws no terrain and is always streamed.
+   */
+  readonly terrain?: StillTerrainView | undefined;
 }
 
 /** A still renderer's GPU objects, made in its `prepare()`. */
@@ -2974,8 +2989,9 @@ interface StillResources {
  * rebuild their rays as ndc ÷ P's diagonal, which holds for a centred projection alone, so a tile's
  * off-axis M · P would draw them elsewhere; the tiles are the read-back's (lean, 2026-11-18). A
  * sample's offset moves what is projected through the whole matrix (the figures, R06's sky); the
- * passes placed in pixels keep their own anti-aliasing. It draws no terrain
- * ({@link STILL_UNAVAILABLE}'s `terrain`), the symbology, the meter or the histogram.
+ * passes placed in pixels keep their own anti-aliasing. The terrain of a body handed over is its own
+ * terrain view's (plan R11, R11.T10.e; {@link PhotorealStillOptions.terrain}), drawn by each
+ * sample at the time it is drawn. It draws no symbology, meter or histogram.
  *
  * Its units are its samples (`scene 0`), then `bloom 0` and `tonemap 0`, each one submission of
  * whole passes; with timestamps each unit's GPU time is the sum of its resolves', handed to
@@ -2992,6 +3008,7 @@ export class PhotorealStillRenderer implements StillRenderer {
   readonly #size: ViewSize;
   readonly #samples: number;
   readonly #scene: PhotorealRenderer;
+  readonly #terrain: StillTerrainView | null;
   readonly #times = new UnitTimes();
   readonly #unsubscribeTimes: () => void;
   readonly #onDispose: () => void;
@@ -3012,6 +3029,10 @@ export class PhotorealStillRenderer implements StillRenderer {
     }
     this.#engine = engine;
     this.#onDispose = options.onDispose;
+    this.#terrain = options.terrain ?? null;
+    this.#made.push(() => {
+      this.#terrain?.dispose();
+    });
     this.#size = { widthPx: frame.viewport.widthPx, heightPx: frame.viewport.heightPx };
     this.#samples = options.samples;
     this.tiling = planTiles(this.#size, options.tileLimitPx, frame.setting);
@@ -3175,9 +3196,12 @@ export class PhotorealStillRenderer implements StillRenderer {
     };
   }
 
-  /** It draws no terrain, so it streams none: always streamed. */
+  /**
+   * Whether its terrain view's frustum has streamed to the level the still's pixels warrant
+   * (`StillTerrainView.streamed`); always, where it draws no terrain.
+   */
   streamed(): boolean {
-    return true;
+    return this.#terrain?.streamed() ?? true;
   }
 
   submit(first: number, count: number): void {
@@ -3211,6 +3235,8 @@ export class PhotorealStillRenderer implements StillRenderer {
       const plan = this.#scene.render(null, {
         ...frame,
         projection: sampleProjection(frame.camera.fovXRad, this.#size, unit),
+        // Its own terrain view's draws at the time the sample is drawn (R11.T10.e).
+        terrain: this.#terrain?.frameTerrain(),
       });
       const failure = this.#takeFailure();
       if (failure !== null) {
@@ -3379,6 +3405,12 @@ export interface PhotorealStillView {
    * decoration, survey and annunciations, all but the still's size.
    */
   request(): Omit<StillRequest, "size">;
+  /**
+   * The view's terrain session and its last report to it, from which a still makes its own terrain
+   * view (plan R11, R11.T10.e), or `null` where it has none; absent, a view with no terrain, of
+   * which no still is taken while a body is handed over.
+   */
+  terrain?(): StillTerrainCapture | null;
 }
 
 /** A still's frozen scene, by its {@link StillScene}: the engine and timer its job runs on. */
@@ -3388,6 +3420,38 @@ interface FrozenStill {
   readonly frame: PhotorealFrame;
   /** Whether its plan draws a figure, which alone the samples' jitter moves. */
   readonly figures: boolean;
+  /**
+   * Its terrain at the request, where its plan hands a body over (plan R11, R11.T10.e): the view's
+   * session and report, the bodies handed over, the plan's regimes and the masks its frame took.
+   */
+  readonly terrain: {
+    readonly capture: StillTerrainCapture;
+    readonly bodies: ReadonlyArray<BodyIdHex>;
+    readonly regimes: BodyFramePlan["regimes"];
+    readonly coverage: StillCoverage;
+  } | null;
+}
+
+/** The bodies `plan` hands over to their terrain, in its order. */
+function handedOverOf(plan: BodyFramePlan): BodyIdHex[] {
+  return [...plan.regimes].flatMap(([body, regime]) => (regime === "terrain" ? [body] : []));
+}
+
+/** The coverage masks `frame`'s bodies took, each body's as its figure gives way over it. */
+function coverageOf(frame: PhotorealFrame): StillCoverage {
+  const masks = new Map(
+    frame.bodies.flatMap((body) =>
+      body.surveyCoverage === undefined
+        ? []
+        : [
+            [
+              body.id,
+              { mask: body.surveyCoverage.mask, whole: body.surveyCoverage.whole },
+            ] as const,
+          ],
+    ),
+  );
+  return (body) => masks.get(body) ?? null;
 }
 
 /** The engine and timer a still's device answers on: the job's, or the attached view's. */
@@ -3488,8 +3552,13 @@ function nextAnimationFrame(): Promise<void> {
 
 /**
  * Why `drawn` gives no still, a {@link STILL_UNAVAILABLE} cause, or `null` where it gives one.
+ *
+ * @param terrain - Whether its view gives a still its terrain (`PhotorealStillView.terrain`).
  */
-function unavailableFor(drawn: DrawnPhotorealFrame | null): StillUnavailableCause | null {
+function unavailableFor(
+  drawn: DrawnPhotorealFrame | null,
+  terrain: boolean,
+): StillUnavailableCause | null {
   if (drawn === null) {
     return STILL_UNAVAILABLE.noImage;
   }
@@ -3497,7 +3566,7 @@ function unavailableFor(drawn: DrawnPhotorealFrame | null): StillUnavailableCaus
   if (frame.present === false) {
     return STILL_UNAVAILABLE.settling;
   }
-  if (frame.terrain !== undefined && [...plan.regimes.values()].includes("terrain")) {
+  if (!terrain && frame.terrain !== undefined && handedOverOf(plan).length > 0) {
     return STILL_UNAVAILABLE.terrain;
   }
   const { widthPx, heightPx } = frame.viewport;
@@ -3568,7 +3637,9 @@ export class PhotorealStills implements StillSource {
    */
   unavailable(): StillUnavailableCause | null {
     const view = this.#view;
-    return view === null ? STILL_UNAVAILABLE.noView : unavailableFor(view.drawn());
+    return view === null
+      ? STILL_UNAVAILABLE.noView
+      : unavailableFor(view.drawn(), (view.terrain?.() ?? null) !== null);
   }
 
   snapshot(): StillSnapshot {
@@ -3577,11 +3648,13 @@ export class PhotorealStills implements StillSource {
       return { kind: "unavailable", cause: STILL_UNAVAILABLE.noView };
     }
     const drawn = view.drawn();
-    const cause = unavailableFor(drawn);
+    const capture = view.terrain?.() ?? null;
+    const cause = unavailableFor(drawn, capture !== null);
     if (drawn === null || cause !== null) {
       return { kind: "unavailable", cause: cause ?? STILL_UNAVAILABLE.noImage };
     }
     const { frame, plan } = drawn;
+    const handedOver = frame.terrain === undefined ? [] : handedOverOf(plan);
     const scene: StillScene = {
       request: {
         ...view.request(),
@@ -3594,6 +3667,18 @@ export class PhotorealStills implements StillSource {
       timer: view.timer(),
       frame,
       figures: plan.meshes.length > 0,
+      terrain:
+        capture === null || handedOver.length === 0
+          ? null
+          : {
+              capture:
+                drawn.occluderSlopePx === undefined
+                  ? capture
+                  : { ...capture, occluderSlopePx: drawn.occluderSlopePx },
+              bodies: handedOver,
+              regimes: plan.regimes,
+              coverage: coverageOf(frame),
+            },
     });
     return { kind: "scene", scene };
   }
@@ -3609,7 +3694,23 @@ export class PhotorealStills implements StillSource {
       throw new Error("a still's scene is not the still source's snapshot");
     }
     const { engine, frame } = frozen;
+    const held = frozen.terrain;
+    // The still's own terrain view, noted with its view's session at the request (R11.T10.e).
+    const terrain =
+      held === null
+        ? undefined
+        : new StillTerrainView(held.capture, {
+            camera: frame.camera,
+            size: frame.viewport,
+            exposureScale: frame.exposureScale,
+            bodies: held.bodies,
+            regimes: held.regimes,
+            coverage: held.coverage,
+            // The device's clock, `performance.now()`'s as the views' frames take it.
+            nowMs: () => this.device.nowNs() / 1e6,
+          });
     const made = new PhotorealStillRenderer(engine, frame, {
+      terrain,
       tileLimitPx: this.#options.tileLimitPx ?? engine.capabilities.maxTextureDimension2D,
       samples: this.#options.samples ?? (frozen.figures ? STILL_SAMPLES[frame.setting] : 1),
       onUnitTimes: (passes) => {

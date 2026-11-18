@@ -1046,6 +1046,27 @@ describe("the shared pass for a view's frame (R10.T16.c)", () => {
     });
   });
 
+  describe("a view's frustum, streamed (plan R11, R11.T10.e)", () => {
+    const view = northPole(2_000_000);
+
+    it("has not streamed while what it sees is missing, nor for a view the pass does not draw", async () => {
+      const made = await sharedPass("low", { source: BODY });
+      made.lane().layers = layers();
+      made.pass.step({ views: [passView(PRIMARY, view)], grounded: [] });
+      expect([made.pass.streamedFor(PRIMARY), made.pass.streamedFor(INSTRUMENT)]).toEqual([
+        false,
+        false,
+      ]);
+    });
+
+    it("has streamed once every patch it sees is baked at the level its pixels warrant", async () => {
+      const made = await sharedPass("low", { source: BODY });
+      made.lane().layers = layers();
+      settledOver(made, [passView(PRIMARY, view)]);
+      expect(made.pass.streamedFor(PRIMARY)).toBe(true);
+    });
+  });
+
   it("keeps the heights of its resident bakes that hold the edge, and forgets them at a restore", async () => {
     const made = await sharedPass("low", { source: BODY });
     const edge = layers();

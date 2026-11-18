@@ -2,6 +2,11 @@ import { describe, expect, it, vi } from "vitest";
 
 import { vec3 } from "../../geometry/vec3";
 import { countingRenderEngine, type CountingRenderEngine } from "../../test/countingRenderEngine";
+import {
+  type FakeStillTerrainSession,
+  fakeStillTerrainSession,
+  stillTerrainCapture,
+} from "../../test/fakeStillTerrain";
 import { aHostDisc, aLitBody } from "../../test/litFixtures";
 import { TEST_STILL_REQUEST } from "../../test/stillFixtures";
 import { type BodyFramePlan, planLitBodies } from "../bodies/draw";
@@ -21,7 +26,8 @@ import { AU_M } from "../scenes/kept";
 import type { MeasuredPass } from "../stills/batchController";
 import { formatNumber } from "../../lib/format";
 import { runStillJob, type StillRenderer, type StillScene } from "../stills/stillJob";
-import { STILL_MAX_SIDE_PX } from "../stills/stillLabel";
+import { STILL_MAX_SIDE_PX, STILL_TERRAIN_STREAMING } from "../stills/stillLabel";
+import { STILL_TERRAIN_VIEW_ID } from "../stills/stillTerrain";
 import { planTiles } from "../stills/stillPlan";
 import { TONEMAP_MATERIAL } from "../post/tonemap";
 import { timedPass } from "../../test/passTimes";
@@ -126,6 +132,21 @@ function viewOver(
   };
 }
 
+/** A view attached to the hook that gives `session` for a still's terrain. */
+function viewWithTerrain(
+  engine: CountingRenderEngine,
+  drawn: () => DrawnPhotorealFrame | null,
+  session: FakeStillTerrainSession,
+): PhotorealStillView {
+  return { ...viewOver(engine, drawn), terrain: () => stillTerrainCapture(session) };
+}
+
+/** The view's frame with its one body handed over to a terrain that draws nothing. */
+function handedOver(): DrawnPhotorealFrame {
+  const frame = { ...viewFrame(), terrain: NO_TERRAIN };
+  return { frame, plan: planOf(frame, new Map([[aLitBody().body, "terrain"]])) };
+}
+
 /** The engine's target frames into the still's targets, by label. */
 function stillPasses(engine: CountingRenderEngine): ReadonlyArray<FrameSubmission> {
   return engine.targetFrames.filter((frame) => frame.label.startsWith("still"));
@@ -181,6 +202,83 @@ describe("the photorealistic still source (R11.T10.b)", () => {
     const plan = planOf(frame, new Map([[aLitBody().body, "terrain"]]));
     stills.attach(viewOver(engine, () => ({ frame, plan })));
     expect(stills.snapshot()).toEqual({ kind: "unavailable", cause: STILL_UNAVAILABLE.terrain });
+  });
+
+  it("gives a still of a view handing a body over where it gives its terrain, the still's own view noted at bulk priority", async () => {
+    const engine = await countingRenderEngine();
+    const session = fakeStillTerrainSession();
+    const stills = new PhotorealStills();
+    stills.attach(viewWithTerrain(engine, handedOver, session));
+    const unavailable = stills.unavailable();
+    const renderer = stills.renderer(sceneOf(stills));
+    const [noted] = session.noted;
+    expect([
+      unavailable,
+      session.holds,
+      noted?.[0],
+      noted?.[1].streamPriority,
+      noted?.[1].selectionPx,
+    ]).toEqual([null, [[aLitBody().body]], STILL_TERRAIN_VIEW_ID, "bulk", SIZE]);
+    renderer.dispose();
+    expect([session.forgotten, session.releases.count]).toEqual([[STILL_TERRAIN_VIEW_ID], 1]);
+  });
+
+  it("has a still with terrain streamed as its own terrain view has, and one with none always", async () => {
+    const engine = await countingRenderEngine();
+    const session = fakeStillTerrainSession();
+    const stills = new PhotorealStills();
+    stills.attach(viewWithTerrain(engine, handedOver, session));
+    const renderer = stills.renderer(sceneOf(stills));
+    const before = renderer.streamed();
+    session.streamed = true;
+    const after = renderer.streamed();
+    renderer.dispose();
+    const plain = new PhotorealStills();
+    plain.attach(viewWithTerrain(engine, () => drawnOf(viewFrame()), fakeStillTerrainSession()));
+    const without = plain.renderer(sceneOf(plain));
+    expect([before, after, without.streamed()]).toEqual([false, true, true]);
+    without.dispose();
+  });
+
+  it("labels a still TERRAIN: STREAMING whose frustum has not streamed within the timeout, and one that has not", async () => {
+    const engine = await countingRenderEngine();
+    vi.spyOn(engine, "readTexture").mockImplementation((...args: unknown[]) => {
+      const rect = args[2];
+      return Promise.resolve(new ArrayBuffer(isTexelRect(rect) ? rect.width * rect.height * 4 : 0));
+    });
+    const labels = async (streamed: boolean): Promise<ReadonlyArray<string>> => {
+      const session = fakeStillTerrainSession();
+      session.streamed = streamed;
+      let nowNs = 0;
+      const stills = new PhotorealStills({
+        samples: 1,
+        // A second an animation frame: the 20 s wait ends at its twentieth.
+        nextFrame: () => {
+          nowNs += 1e9;
+          return Promise.resolve();
+        },
+        nowNs: () => nowNs,
+      });
+      stills.attach(viewWithTerrain(engine, handedOver, session));
+      const scene = sceneOf(stills);
+      const outcome = await runStillJob({
+        device: stills.device,
+        renderer: stills.renderer(scene),
+        request: scene.request,
+        setting: stills.setting,
+        frameIntervalNs: stills.frameIntervalNs(),
+        encode: () => Promise.resolve(new Uint8Array([1])),
+        save: (_png, label) =>
+          Promise.resolve({ kind: "saved", still: { id: "20261118T000000000Z-00000000", label } }),
+        onStep: () => undefined,
+      });
+      return outcome.kind === "saved" ? outcome.still.label.annunciations : ["not saved"];
+    };
+    const held = TEST_STILL_REQUEST.annunciations;
+    expect([await labels(false), await labels(true)]).toEqual([
+      [...held, STILL_TERRAIN_STREAMING],
+      held,
+    ]);
   });
 
   it("gives no still of a frame held back at a cut, drawn at the exposure from before it", async () => {

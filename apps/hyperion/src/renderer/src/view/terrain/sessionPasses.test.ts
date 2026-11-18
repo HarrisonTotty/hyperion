@@ -73,7 +73,7 @@ import { childKeys, type PatchKey, patchKeyString } from "./patchKey";
 import { MAX_CONTACTS } from "./gpu/uniforms";
 import { CASCADE_BYTES, casterReachM } from "./shadows/cascades";
 import { SHADOW_PLACEHOLDER, SHADOW_PLACEHOLDER_NAME } from "./shadows/terrainShadows";
-import { PRIMARY_VIEW_WEIGHT, SECONDARY_VIEW_WEIGHT } from "./priority";
+import { BULK_VIEW_WEIGHT, PRIMARY_VIEW_WEIGHT, SECONDARY_VIEW_WEIGHT } from "./priority";
 import {
   photorealRangeRatio,
   REGIME_HOLD_SHARE,
@@ -1094,6 +1094,18 @@ describe("the scene's craft as a pass's contacts (R10.T16.b; R05 Design note 9)"
     expect([view?.view.viewport, view]).toEqual([
       SESSION_PRESENTED,
       terrainPassViewOf(PRIMARY, handing(6e6), moon, "lit"),
+    ]);
+  });
+
+  it("takes a still's own view into the pass at the bulk weight and priority, and every other view as before (R11.T10.e)", () => {
+    const of = (streamPriority: TerrainViewReport["streamPriority"]) => {
+      const view = terrainPassViewOf(PRIMARY, handing(6e6, { streamPriority }), moon, "lit");
+      return [view?.weight, view?.bulk];
+    };
+    expect([of("primary"), of("secondary"), of("bulk")]).toEqual([
+      [PRIMARY_VIEW_WEIGHT, undefined],
+      [SECONDARY_VIEW_WEIGHT, undefined],
+      [BULK_VIEW_WEIGHT, true],
     ]);
   });
 

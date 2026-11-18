@@ -113,6 +113,12 @@ export interface PatchRequest {
    * own demand gives none, which orders as 0.
    */
   readonly needS?: number;
+  /**
+   * Whether only bulk views want it (plan R11, R11.T10.e; {@link ViewSelectionInput.bulk}): a
+   * still's own terrain view's, whose patches stream at bulk priority, after every request a view
+   * that is not bulk wants. Absent, `false`, as every request was before.
+   */
+  readonly bulk?: boolean;
 }
 
 /** What selection returns: the patches to draw, by `patchKeyString`, and the demand to bake. */
@@ -227,6 +233,13 @@ export interface ViewSelectionInput {
   readonly viewport: ViewSize;
   /** The view's streaming weight: 1 for the primary view, 0.25 for a secondary (Design note 24). */
   readonly weight: number;
+  /**
+   * Whether the view streams at bulk priority (plan R11, R11.T10.e; ruling 4a of
+   * decision-leans-54): a still's own terrain view, whose demand comes after every request a view
+   * that is not bulk wants ({@link PatchRequest.bulk}), its weight acting among bulk requests
+   * alone. Absent or `false`, as every view was before, bit for bit.
+   */
+  readonly bulk?: boolean;
   /** The view's tolerance τ, pixels: the setting's, or a style's own (the wireframe's 4 px). */
   readonly tauPx: number;
   /**
@@ -1092,17 +1105,24 @@ export const MAX_SELECTION_VIEWS = 31;
 
 /**
  * A request's priority (Design note 24): the largest over the views that want it of
- * w_view × ρ ÷ τ of `standIn`, the patch drawn in its place. The views that want it are those that
- * see the request and want `standIn` split; where none does (a split the 2:1 balance made), those
- * that see both.
+ * w_view × ρ ÷ τ of `standIn`, the patch drawn in its place, and whether every view that wants it
+ * is bulk ({@link ViewSelectionInput.bulk}), when it is a bulk request, its priority then the bulk
+ * views'. The views that want it are those that see the request and want `standIn` split; where
+ * none does (a split the 2:1 balance made), those that see both.
  */
-function requestPriority(t: Traversal, target: TraversalNode, standIn: TraversalNode): number {
+function requestPriority(
+  t: Traversal,
+  target: TraversalNode,
+  standIn: TraversalNode,
+): { readonly priority: number; readonly bulk: boolean } {
   let views = standIn.wantedBy & target.seenBy;
   if (views === 0) {
     views = standIn.seenBy & target.seenBy;
   }
   const errorM = t.errorM[standIn.key.level] ?? 0;
   let priority = 0;
+  let bulkPriority = 0;
+  let wanted = false;
   for (let n = 0; n < t.views.length; n += 1) {
     const v = t.views[n];
     if (v === undefined || (views & (1 << n)) === 0) {
@@ -1111,10 +1131,18 @@ function requestPriority(t: Traversal, target: TraversalNode, standIn: Traversal
     // Negative where the view cannot see the patch.
     const e = excessOf(v.geometry, standIn.cell.packed, errorM);
     if (!(e < 0)) {
-      priority = Math.max(priority, v.input.weight * e);
+      if (v.input.bulk === true) {
+        bulkPriority = Math.max(bulkPriority, v.input.weight * e);
+      } else {
+        wanted = true;
+        priority = Math.max(priority, v.input.weight * e);
+      }
     }
   }
-  return priority;
+  // Wanted by a bulk view alone, it is a bulk request; by none it is as it was, an ordinary one.
+  return !wanted && bulkPriority > 0
+    ? { priority: bulkPriority, bulk: true }
+    : { priority, bulk: false };
 }
 
 /**
@@ -1609,12 +1637,17 @@ function demandOf(t: Traversal, leaves: ReadonlyArray<TraversalNode>): PatchRequ
       continue;
     }
     const standIn = target.parent ?? undefined;
+    // A forced request outranks every other, so among forced ones its own error orders it; a root
+    // is an ordinary request whoever sees it.
+    const ranked =
+      forced || standIn === undefined
+        ? { priority: target.weighted, bulk: false }
+        : requestPriority(t, target, standIn);
     requests.set(target, {
       key: target.key,
-      // A forced request outranks every other, so among forced ones its own error orders it.
-      priority:
-        forced || standIn === undefined ? target.weighted : requestPriority(t, target, standIn),
+      priority: ranked.priority,
       forced,
+      ...(ranked.bulk ? { bulk: true } : {}),
     });
   }
   return [...requests.values()].toSorted(compareRequests);

@@ -1435,3 +1435,79 @@ describe("the terrain session's seas (plan R11, R11.T8.b)", () => {
     expect([mapsReleased(h, MOON), h.session.oceans.oceanOf(MOON)]).toEqual([1, null]);
   });
 });
+
+/** The field messages each worker has had. */
+function fieldMessagesOf(h: Harness): number[] {
+  return h.workers.map((worker) => worker.fieldMessages.length);
+}
+
+describe("a still's hold on the survey (R11.T10.e)", () => {
+  /** The moon's delta at revision 2: one block, and cells 0 to 4 covered. */
+  async function delta(h: Harness): Promise<void> {
+    h.session.noteSurfaceRevisions([{ body: MOON, revision: 2 }]);
+    const { id } = latestFieldAsk(h.socket());
+    const bulk = sendBlocks(h, [fieldBlock(50, 2)]);
+    h.socket().serverResponds(
+      id,
+      readyField(moonLikeHeader(MOON), 2, fieldCover([0, 5, 30]), bulk),
+    );
+    await settle();
+  }
+
+  it("keeps a held body's later blocks from the workers and its coverage from its mask until the release", async () => {
+    const h = await harness();
+    await holdMoon(h);
+    const release = h.session.holdSurvey([MOON]);
+    const before = fieldMessagesOf(h);
+    await delta(h);
+    const held = fieldMessagesOf(h);
+    const heldMask = maskWritten(h, MOON);
+    release();
+    const mask = maskWritten(h, MOON);
+    expect([
+      held,
+      [3, 4].map((cell) => heldMask?.[maskTexelOf(5, cell)] ?? 0),
+      fieldMessagesOf(h).map((count, n) => count - (before[n] ?? 0)),
+      [3, 4].map((cell) => mask?.[maskTexelOf(5, cell)]),
+    ]).toEqual([before, [0, 0], before.map(() => 1), [255, 255]]);
+  });
+
+  it("gives what it kept back once the last of two holds is released, and once only", async () => {
+    const h = await harness();
+    await holdMoon(h);
+    const first = h.session.holdSurvey([MOON]);
+    const second = h.session.holdSurvey([MOON, MOON]);
+    const before = fieldMessagesOf(h);
+    await delta(h);
+    first();
+    first();
+    const afterFirst = fieldMessagesOf(h);
+    second();
+    second();
+    expect([afterFirst, fieldMessagesOf(h).map((count, n) => count - (before[n] ?? 0))]).toEqual([
+      before,
+      before.map(() => 1),
+    ]);
+  });
+
+  it("holds nothing of a body it was not asked to hold", async () => {
+    const h = await harness();
+    await holdMoon(h);
+    const release = h.session.holdSurvey([PLANET]);
+    const before = fieldMessagesOf(h);
+    await delta(h);
+    release();
+    expect(fieldMessagesOf(h).map((count, n) => count - (before[n] ?? 0))).toEqual(
+      before.map(() => 1),
+    );
+  });
+
+  it("says a view has not streamed over a body with no lit pass", async () => {
+    const h = await harness();
+    await holdMoon(h);
+    expect([h.session.streamedFor(PRIMARY, [MOON]), h.session.streamedFor(PRIMARY, [])]).toEqual([
+      false,
+      true,
+    ]);
+  });
+});

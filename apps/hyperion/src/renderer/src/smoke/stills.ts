@@ -61,6 +61,7 @@ import {
 } from "../view/stills/stillLabel";
 import { planTiles, type StillTile, type StillTiling } from "../view/stills/stillPlan";
 import { StillStore } from "../view/stills/stillStore";
+import { checkTerrainStill } from "./stillTerrain";
 import {
   type Checks,
   drawOf,
@@ -718,7 +719,10 @@ async function checkHookStill(checks: Checks, engine: RenderEngine): Promise<voi
  */
 const STILL_WHOLE_LIMIT_PX = 8192;
 
-/** Part 28's checks (R11.T10.c, T10.b): the PNG round trip, then the mount and the job. */
+/**
+ * Part 28's checks (R11.T10.c, T10.b and T10.e): the PNG round trip, then the mount and the job,
+ * the hook's still, and a still of a body handed over to its terrain.
+ */
 export async function checkStills(
   checks: Checks,
   stills: StillsApi | null,
@@ -757,4 +761,5 @@ export async function checkStills(
   await checkRoundTrip(checks, stills, encoded, pixels, label);
   await checkMount(checks, stills, label, engine, device);
   await checkHookStill(checks, engine);
+  await checkTerrainStill(checks, engine);
 }

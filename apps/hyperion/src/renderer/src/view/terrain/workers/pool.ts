@@ -388,15 +388,21 @@ interface Candidate {
 }
 
 /**
- * Orders requests: forced first, then higher priority whatever the lane, then the sooner needed
- * (`PatchRequest.needS`, a pass's lookahead's, 0 where absent; R10.T14.b), then the older lane's,
- * then by key string. With one lane and no lookahead it is R05's order.
+ * Orders requests: forced first, then those a view that is not bulk wants before the bulk ones
+ * (`PatchRequest.bulk`, a still's own terrain view's; plan R11, R11.T10.e), then higher priority
+ * whatever the lane, then the sooner needed (`PatchRequest.needS`, a pass's lookahead's, 0 where
+ * absent; R10.T14.b), then the older lane's, then by key string. With one lane, no lookahead and
+ * no still it is R05's order.
  */
 function before(a: Candidate, b: Candidate): boolean {
   const ra = a.queued.request;
   const rb = b.queued.request;
   if (ra.forced !== rb.forced) {
     return ra.forced;
+  }
+  const bulkA = ra.bulk === true;
+  if (bulkA !== (rb.bulk === true)) {
+    return !bulkA;
   }
   if (ra.priority !== rb.priority) {
     return ra.priority > rb.priority;

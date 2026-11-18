@@ -37,13 +37,27 @@ export const SECONDARY_VIEW_WEIGHT = 0.25;
 export const LOOKAHEAD_DEMAND_WEIGHT = 0.5;
 
 /**
- * Orders requests for the pool: forced first, then the higher priority, then the sooner needed
- * (`PatchRequest.needS`, 0 where absent), then by `patchKeyString`, so that equal priorities keep
- * one order however the views were given.
+ * The streaming weight of a still's own terrain view among the bulk requests (plan R11, R11.T10.e;
+ * ruling 4a of decision-leans-54): a secondary's, 0.25, so that its selection is as fine as a
+ * second camera's, while its demand streams at bulk priority, after every request a view that is
+ * not bulk wants ({@link compareRequests}; `PatchRequest.bulk`). A hand value, a lean
+ * (2026-11-18).
+ */
+export const BULK_VIEW_WEIGHT = SECONDARY_VIEW_WEIGHT;
+
+/**
+ * Orders requests for the pool: forced first, then those a view that is not bulk wants before the
+ * bulk ones (`PatchRequest.bulk`, plan R11, R11.T10.e), then the higher priority, then the sooner
+ * needed (`PatchRequest.needS`, 0 where absent), then by `patchKeyString`, so that equal priorities
+ * keep one order however the views were given.
  */
 export function compareRequests(a: PatchRequest, b: PatchRequest): number {
   if (a.forced !== b.forced) {
     return a.forced ? -1 : 1;
+  }
+  const bulkA = a.bulk === true;
+  if (bulkA !== (b.bulk === true)) {
+    return bulkA ? 1 : -1;
   }
   if (a.priority !== b.priority) {
     return b.priority - a.priority;
@@ -77,8 +91,9 @@ export function fillsHole(request: PatchRequest): boolean {
 
 /**
  * A selection's demand joined by its lookahead's (`lookahead.ts`): each patch once, at the larger
- * of its priorities, forced where either asks it forced, with `needS` its time to need, ordered by
- * {@link compareRequests}.
+ * of its priorities, forced where either asks it forced, bulk where both ask it at bulk priority
+ * (`PatchRequest.bulk`), an ordinary request's priority where one is, with `needS` its time to
+ * need, ordered by {@link compareRequests}.
  *
  * @remarks
  * The lookahead's views carry {@link LOOKAHEAD_DEMAND_WEIGHT} of their weights, so its priorities
@@ -96,18 +111,32 @@ export function joinDemand(
   for (const request of [...own, ...ahead]) {
     const keyString = patchKeyString(request.key);
     const was = joined.get(keyString);
-    joined.set(
-      keyString,
-      was === undefined
-        ? request
-        : {
-            key: was.key,
-            priority: Math.max(was.priority, request.priority),
-            forced: was.forced || request.forced,
-          },
-    );
+    joined.set(keyString, was === undefined ? request : joinedRequest(was, request));
   }
   return [...joined.values()]
-    .map(({ key, priority, forced }) => ({ key, priority, forced, needS: needS(key) }))
+    .map(({ key, priority, forced, bulk }): PatchRequest =>
+      bulk === true
+        ? { key, priority, forced, needS: needS(key), bulk }
+        : { key, priority, forced, needS: needS(key) },
+    )
     .toSorted(compareRequests);
+}
+
+/**
+ * Two requests of one patch as one: forced where either is, bulk where both are, at the larger
+ * priority of those of its tier (an ordinary request's over a bulk one's).
+ */
+function joinedRequest(was: PatchRequest, request: PatchRequest): PatchRequest {
+  const forced = was.forced || request.forced;
+  const wasBulk = was.bulk === true;
+  const isBulk = request.bulk === true;
+  if (wasBulk === isBulk) {
+    return {
+      key: was.key,
+      priority: Math.max(was.priority, request.priority),
+      forced,
+      ...(wasBulk ? { bulk: true } : {}),
+    };
+  }
+  return { key: was.key, priority: wasBulk ? request.priority : was.priority, forced };
 }
