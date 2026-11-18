@@ -720,11 +720,7 @@ async function checkHookStill(checks: Checks, engine: RenderEngine): Promise<voi
  */
 const STILL_WHOLE_LIMIT_PX = 8192;
 
-/**
- * Part 28's checks (R11.T10.c, T10.b and T10.e): the PNG round trip, then the mount and the job,
- * the hook's still, a still of a body handed over to its terrain, one larger than its view, and
- * that still tiled.
- */
+/** Part 28's checks (R11.T10.c, T10.b): the PNG round trip, then the mount and the job. */
 export async function checkStills(
   checks: Checks,
   stills: StillsApi | null,
@@ -763,6 +759,13 @@ export async function checkStills(
   await checkRoundTrip(checks, stills, encoded, pixels, label);
   await checkMount(checks, stills, label, engine, device);
   await checkHookStill(checks, engine);
+}
+
+/**
+ * Part 31's checks (R11.T10.e): a still of a body handed over to its terrain, whole and tiled, one
+ * larger than its view, and that still tiled.
+ */
+export async function checkStillsAtSize(checks: Checks, engine: RenderEngine): Promise<void> {
   await checkTerrainStill(checks, engine);
   await checkLargerStill(checks, engine);
   await checkTiledStill(checks, engine);

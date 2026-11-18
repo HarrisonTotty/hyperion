@@ -219,7 +219,13 @@ import type {
   StillSnapshot,
   StillSource,
 } from "../stills/stillJob";
-import { isStillSide, type StillRequest } from "../stills/stillLabel";
+import {
+  isStillSide,
+  STILL_TERRAIN_DETAIL_LIMITED,
+  STILL_TERRAIN_STREAMING,
+  type StillRequest,
+} from "../stills/stillLabel";
+import { IMAGE_DETAIL_LIMITED } from "../budget/viewBudget";
 import { STILL_TILE_ADD_MATERIAL, STILL_TILE_FIRST_MATERIAL } from "../stills/stillAccumulate";
 import { planTiles, type StillTile, type StillTiling, tileProjection } from "../stills/stillPlan";
 import { stillSizeAt } from "../stills/stillSize";
@@ -2902,7 +2908,7 @@ export const STILL_UNAVAILABLE = {
    * A body is handed over to its terrain, and the view gives the still no terrain session to draw
    * it from (`PhotorealStillView.terrain`): none in a view without one (plan R11, R11.T10.e).
    */
-  terrain: "the view's terrain cannot be drawn in a still now",
+  terrain: "until the view's terrain has started",
   /** The view's image is over `STILL_MAX_SIDE_PX` on a side, which the main process refuses. */
   oversized: "the view is over 8192 px on a side, the largest still",
 } as const;
@@ -3019,6 +3025,12 @@ const STILL_IDENTITY = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 
 export interface PhotorealStillOptions {
   /** The tile limit the read-back is cut at, px: the device's `maxTextureDimension2D`. */
   readonly tileLimitPx: number;
+  /**
+   * The setting whose `STILL_TILE_MAX_PX` the tiles are cut at (plan R11, R11.T10.e.2; Design note
+   * 17, chosen by memory): the view's, the client's machine's, whatever setting's passes the still
+   * draws; the frame's where absent.
+   */
+  readonly tileSetting?: QualitySetting | undefined;
   /** The jittered samples it accumulates: {@link STILL_SAMPLES} at the frame's setting. */
   readonly samples: number;
   /** Takes each unit's GPU time as it resolves, with timestamps; never called without. */
@@ -3116,7 +3128,7 @@ export class PhotorealStillRenderer implements StillRenderer {
     });
     this.#size = { widthPx: frame.viewport.widthPx, heightPx: frame.viewport.heightPx };
     this.#samples = options.samples;
-    this.tiling = planTiles(this.#size, options.tileLimitPx, frame.setting);
+    this.tiling = planTiles(this.#size, options.tileLimitPx, options.tileSetting ?? frame.setting);
     // A frame with air is drawn whole: R08's passes take no off-axis projection.
     const whole: StillTile = {
       column: 0,
@@ -3547,6 +3559,8 @@ interface FrozenStill {
   readonly engine: RenderEngine;
   readonly timer: GpuTimer;
   readonly frame: PhotorealFrame;
+  /** The view's setting at the request, whose tile limit the still is cut at (R11.T10.e.2). */
+  readonly viewSetting: QualitySetting;
   /** Whether its plan draws a figure, which alone the samples' jitter moves. */
   readonly figures: boolean;
   /**
@@ -3559,6 +3573,41 @@ interface FrozenStill {
     readonly regimes: BodyFramePlan["regimes"];
     readonly coverage: StillCoverage;
   } | null;
+}
+
+/**
+ * The still's request from what the view states at it, every annunciation true of the still (the UX
+ * ruling, 2026-11-18; the guide's honest data): a frame made again at the still's size and the high
+ * setting leaves out the view's `IMAGE: DETAIL LIMITED`, its own resolution and air full; a still
+ * with its own terrain view leaves out the view's terrain annunciations for its own, adding
+ * `TERRAIN: DETAIL LIMITED` where its terrain is drawn with the low setting's materials under the
+ * high setting it states (its `TERRAIN: STREAMING` is the job's, `stillLabel`'s).
+ */
+function honestRequest(
+  stated: Omit<StillRequest, "size">,
+  still: {
+    readonly remade: boolean;
+    readonly terrain: boolean;
+    readonly terrainSetting: QualitySetting;
+    readonly setting: QualitySetting;
+    readonly size: ViewSize;
+  },
+): StillRequest {
+  const annunciations = stated.annunciations.filter(
+    (words) =>
+      !(still.remade && words === IMAGE_DETAIL_LIMITED) &&
+      !(
+        still.terrain &&
+        (words === STILL_TERRAIN_STREAMING || words === STILL_TERRAIN_DETAIL_LIMITED)
+      ),
+  );
+  const coarser = still.terrain && still.terrainSetting === "low" && still.setting === "high";
+  return {
+    ...stated,
+    annunciations: coarser ? [...annunciations, STILL_TERRAIN_DETAIL_LIMITED] : annunciations,
+    setting: still.setting,
+    size: still.size,
+  };
 }
 
 /** The bodies `plan` hands over to their terrain, in its order. */
@@ -3842,12 +3891,19 @@ export class PhotorealStills implements StillSource {
       }) ?? viewFrame;
     const handedOver = viewFrame.terrain === undefined ? [] : handedOverOf(plan);
     const scene: StillScene = {
-      request: { ...view.request(), setting: frame.setting, size },
+      request: honestRequest(view.request(), {
+        remade: remake !== undefined,
+        terrain: capture !== null && handedOver.length > 0,
+        terrainSetting: viewFrame.setting,
+        setting: frame.setting,
+        size,
+      }),
     };
     this.#scenes.set(scene, {
       engine: view.engine,
       timer: view.timer(),
       frame,
+      viewSetting: viewFrame.setting,
       figures: plan.meshes.length > 0,
       terrain:
         capture === null || handedOver.length === 0
@@ -3891,21 +3947,29 @@ export class PhotorealStills implements StillSource {
             // The device's clock, `performance.now()`'s as the views' frames take it.
             nowMs: () => this.device.nowNs() / 1e6,
           });
-    const made = new PhotorealStillRenderer(engine, frame, {
-      terrain,
-      tileLimitPx: this.#options.tileLimitPx ?? engine.capabilities.maxTextureDimension2D,
-      samples: this.#options.samples ?? (frozen.figures ? STILL_SAMPLES[frame.setting] : 1),
-      onUnitTimes: (passes) => {
-        for (const listener of this.#passListeners) {
-          listener(passes);
-        }
-      },
-      onDispose: () => {
-        if (this.#job === frozen) {
-          this.#job = null;
-        }
-      },
-    });
+    let made: PhotorealStillRenderer;
+    try {
+      made = new PhotorealStillRenderer(engine, frame, {
+        terrain,
+        tileLimitPx: this.#options.tileLimitPx ?? engine.capabilities.maxTextureDimension2D,
+        tileSetting: frozen.viewSetting,
+        samples: this.#options.samples ?? (frozen.figures ? STILL_SAMPLES[frame.setting] : 1),
+        onUnitTimes: (passes) => {
+          for (const listener of this.#passListeners) {
+            listener(passes);
+          }
+        },
+        onDispose: () => {
+          if (this.#job === frozen) {
+            this.#job = null;
+          }
+        },
+      });
+    } catch (error: unknown) {
+      // Its terrain view holds the survey and streams: it goes with the renderer that failed.
+      terrain?.dispose();
+      throw error;
+    }
     this.#job = frozen;
     return made;
   }

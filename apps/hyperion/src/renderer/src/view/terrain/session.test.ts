@@ -1490,6 +1490,19 @@ describe("a still's hold on the survey (R11.T10.e)", () => {
     ]);
   });
 
+  it("gives nothing it kept back of a field let go while held", async () => {
+    const h = await harness();
+    await holdMoon(h);
+    const release = h.session.holdSurvey([MOON]);
+    await delta(h);
+    // Far off: the moon is not wanted, and the workers let its field go.
+    h.session.noteView(PRIMARY, viewAt(7e7));
+    h.session.step();
+    const afterRelease = fieldMessagesOf(h);
+    release();
+    expect(fieldMessagesOf(h)).toEqual(afterRelease);
+  });
+
   it("holds nothing of a body it was not asked to hold", async () => {
     const h = await harness();
     await holdMoon(h);

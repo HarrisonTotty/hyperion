@@ -16,13 +16,21 @@ import { ViewStills } from "./ViewStills";
 const PNG_ENCODER: StillEncoder = (rgba, size) =>
   Promise.resolve(rgbaPng(size.widthPx, size.heightPx, new Uint8Array(rgba.buffer)));
 
-/** `VIEW`'s stills over the fakes: a still of 100 × 70 px, and a store holding `saved`. */
-function model(stills: FakeStillsApi, device = new FakeStillDevice("absent")): ViewStillsModel {
+/**
+ * `VIEW`'s stills over the fakes: a still of 100 × 70 px, and a store holding `saved`; the view's
+ * output size `output` where given.
+ */
+function model(
+  stills: FakeStillsApi,
+  device = new FakeStillDevice("absent"),
+  output: { readonly widthPx: number; readonly heightPx: number } | null = null,
+): ViewStillsModel {
   const store = new StillStore(stills);
   const source = new FakeStillSource(device, {
     ...TEST_STILL_REQUEST,
     size: { widthPx: 100, heightPx: 70 },
   });
+  source.output = output;
   const session = new StillSession({
     source,
     encode: PNG_ENCODER,
@@ -50,6 +58,19 @@ describe("VIEW's stills (R11.T10.c, R11.T10.b)", () => {
     render(<ViewStills designator="PRIMARY" model={model(oneSaved())} />);
     const list = await screen.findByRole("list", { name: "Saved stills" });
     expect(within(list).getAllByRole("button")).toHaveLength(1);
+  });
+
+  it("takes the next still at the size chosen in its panel (R11.T10.e.1)", async () => {
+    const user = userEvent.setup();
+    render(
+      <ViewStills
+        designator="PRIMARY"
+        model={model(new FakeStillsApi(), undefined, { widthPx: 1920, heightPx: 1080 })}
+      />,
+    );
+    const choice = screen.getByRole("combobox", { name: "SIZE" });
+    await user.selectOptions(choice, "3840 × 2160 px");
+    expect(choice).toHaveValue("2");
   });
 
   it("stands in a panel of its own, titled with its view", () => {

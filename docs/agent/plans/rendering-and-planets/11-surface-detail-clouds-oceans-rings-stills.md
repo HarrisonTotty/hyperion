@@ -1423,7 +1423,7 @@ on it.
   larger than the view has its disc and sprites on T10.a's predicted pixels; a 2 × 2-tiled still
   equals an untiled still of the same size within the projection test's tolerance; test-render's
   captures are byte-identical; no synchronous pipeline is created in a batch; the renderer test pins
-  8 samples on both settings.
+  8 samples on both settings. _Built 2026-11-18, to the leans in its record._
   Records: [11-surface-detail-clouds-oceans-rings-stills/records/R11.T10.e.md](11-surface-detail-clouds-oceans-rings-stills/records/R11.T10.e.md).
 
 - **R11.T10.d The soak, by hand, recorded.** On the otherwise idle development machine (RTX 3080)

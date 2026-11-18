@@ -28,7 +28,12 @@ import { PLANETSHINE_SOURCES_HIGH } from "../lighting/planetshine";
 import { AU_M } from "../scenes/kept";
 import type { MeasuredPass } from "../stills/batchController";
 import { formatNumber } from "../../lib/format";
-import { runStillJob, type StillRenderer, type StillScene } from "../stills/stillJob";
+import {
+  runStillJob,
+  type StillAsk,
+  type StillRenderer,
+  type StillScene,
+} from "../stills/stillJob";
 import { STILL_MAX_SIDE_PX, STILL_TERRAIN_STREAMING } from "../stills/stillLabel";
 import { STILL_TERRAIN_VIEW_ID } from "../stills/stillTerrain";
 import { STILL_TILE_ADD_MATERIAL, STILL_TILE_FIRST_MATERIAL } from "../stills/stillAccumulate";
@@ -170,9 +175,9 @@ function isTexelRect(value: unknown): value is TexelRect {
   );
 }
 
-/** The scene `stills` freezes now, which must give one. */
-function sceneOf(stills: PhotorealStills): StillScene {
-  const snapshot = stills.snapshot();
+/** The scene `stills` freezes now, at `ask`'s size, which must give one. */
+function sceneOf(stills: PhotorealStills, ask?: StillAsk): StillScene {
+  const snapshot = stills.snapshot(ask);
   if (snapshot.kind === "unavailable") {
     throw new Error(`no still: ${snapshot.cause}`);
   }
@@ -314,6 +319,34 @@ describe("the photorealistic still source (R11.T10.b)", () => {
     renderer?.dispose();
   });
 
+  it("cuts a low view's still into the low setting's tiles, whatever setting's passes it draws (R11.T10.e.2)", async () => {
+    const engine = await countingRenderEngine();
+    const stills = new PhotorealStills();
+    const drawn: DrawnPhotorealFrame = {
+      ...drawnOf({
+        ...viewFrame(),
+        setting: "low",
+        presentedPx: { widthPx: 1100, heightPx: 600 },
+      }),
+      remake: (ask) => ({ ...viewFrame(ask.viewport), setting: ask.setting }),
+    };
+    stills.attach(viewOver(engine, () => drawn));
+    const renderer = stills.renderer(sceneOf(stills, { scale: 2 }));
+    // 2,200 px across: two columns under the low setting's 2,048, one under the high's 4,096.
+    expect([renderer.tiling.tileLimitPx, renderer.tiling.columns]).toEqual([2048, 2]);
+    renderer.dispose();
+  });
+
+  it("lets its terrain view go where its renderer cannot be made", async () => {
+    const engine = await countingRenderEngine();
+    const session = fakeStillTerrainSession();
+    const stills = new PhotorealStills({ samples: 0 });
+    stills.attach(viewWithTerrain(engine, handedOver, session));
+    const scene = sceneOf(stills);
+    expect(() => stills.renderer(scene)).toThrow(RangeError);
+    expect([session.forgotten, session.releases.count]).toEqual([[STILL_TERRAIN_VIEW_ID], 1]);
+  });
+
   it("gives no still past the largest still's side at the multiple asked (R11.T10.e.1)", async () => {
     const engine = await countingRenderEngine();
     const stills = new PhotorealStills();
@@ -325,6 +358,40 @@ describe("the photorealistic still source (R11.T10.b)", () => {
     expect([stills.unavailable(), stills.snapshot({ scale: 3 })]).toEqual([
       null,
       { kind: "unavailable", cause: STILL_UNAVAILABLE.oversized },
+    ]);
+  });
+
+  it("states only what is true of the still: no IMAGE: DETAIL LIMITED once made again, its own terrain's lines in the view's (R11.T10.e.3)", async () => {
+    const engine = await countingRenderEngine();
+    const { size: _size, ...request } = TEST_STILL_REQUEST;
+    const stated = {
+      ...request,
+      annunciations: ["ATMOSPHERE: APPROXIMATE", "IMAGE: DETAIL LIMITED", "TERRAIN: STREAMING"],
+    };
+    const low = handedOver();
+    const drawn: DrawnPhotorealFrame = {
+      ...low,
+      frame: { ...low.frame, setting: "low" },
+      remake: (ask) => ({ ...viewFrame(ask.viewport), setting: ask.setting, terrain: NO_TERRAIN }),
+    };
+    const annunciationsOf = (view: PhotorealStillView): ReadonlyArray<string> => {
+      const stills = new PhotorealStills();
+      stills.attach(view);
+      return sceneOf(stills).request.annunciations;
+    };
+    const away: DrawnPhotorealFrame = {
+      ...drawnOf({ ...viewFrame(), setting: "low" }),
+      remake: (ask) => ({ ...viewFrame(ask.viewport), setting: ask.setting }),
+    };
+    expect([
+      annunciationsOf({ ...viewOver(engine, () => away), request: () => stated }),
+      annunciationsOf({
+        ...viewWithTerrain(engine, () => drawn, fakeStillTerrainSession()),
+        request: () => stated,
+      }),
+    ]).toEqual([
+      ["ATMOSPHERE: APPROXIMATE", "TERRAIN: STREAMING"],
+      ["ATMOSPHERE: APPROXIMATE", "TERRAIN: DETAIL LIMITED"],
     ]);
   });
 

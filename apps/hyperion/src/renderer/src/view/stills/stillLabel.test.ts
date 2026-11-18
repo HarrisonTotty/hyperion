@@ -7,6 +7,7 @@ import {
   STILL_ANNUNCIATIONS_MAX,
   STILL_LABEL_SCHEMA,
   STILL_MAX_SIDE_PX,
+  STILL_TERRAIN_DETAIL_LIMITED,
   STILL_TERRAIN_STREAMING,
   stillLabel,
   stillLabelText,
@@ -76,6 +77,18 @@ describe("a still's label (R11.T10.c, Design note 17)", () => {
   it("says TERRAIN: STREAMING in the view's own words", () => {
     const streaming: TerrainAnnunciation = STILL_TERRAIN_STREAMING;
     expect(streaming).toBe("TERRAIN: STREAMING");
+  });
+
+  it("puts TERRAIN: STREAMING in TERRAIN: DETAIL LIMITED's place where its frustum had not streamed (R11.T10.e.3)", () => {
+    const limited: TerrainAnnunciation = STILL_TERRAIN_DETAIL_LIMITED;
+    const annunciations = ["ATMOSPHERE: APPROXIMATE", limited];
+    expect([
+      testStillLabel({ annunciations }, false).annunciations,
+      testStillLabel({ annunciations }, true).annunciations,
+    ]).toEqual([
+      ["ATMOSPHERE: APPROXIMATE", "TERRAIN: STREAMING"],
+      ["ATMOSPHERE: APPROXIMATE", "TERRAIN: DETAIL LIMITED"],
+    ]);
   });
 
   it("states each annunciation once, as the view stated them", () => {

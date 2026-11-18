@@ -8,7 +8,7 @@
  * `no-subgroups` requests it with subgroups and `depth-clip-control` withheld (T9.c; R10.T9.b's
  * pulled-back cascades). A fixture adds a broken shader to the
  * catalogue or makes external requests, either of which must fail the run. The part does too: the
- * groups are in twenty-nine parts, 1 to 28 and 30, each a run of its own under the harness's
+ * groups are in thirty-one parts, 1 to 31, each a run of its own under the harness's
  * watchdog (perf-smoke, 2026-10-13), parts 2 to 6, 8 to 14 and 30 the atmosphere's CPU-twin groups
  * (R08.T6, R08.T7,
  * R08.T9.b, R08.T8.a, R08.T8.b, R08.T8.c, R08.T8.e, R08.T11, R08.T14.c, R08.T14.f, R08.T15.a.2),
@@ -47,7 +47,9 @@
  * R14's levers' frames on it, and part 20 its surfaces on the datum and its symbology; part 27
  * plan R11's far ocean (R11.T8.b), its kernels and its twin; part 28 R11.T10.c's PNG round trip
  * through the harness's main process and VIEW's still mount, whose R11.T10.b job draws a small
- * still of flat colours into render targets of its own. Three groups of part 1 run only when asked:
+ * still of flat colours into render targets of its own; part 31 R11.T10.e's stills of a body handed
+ * over to its terrain, at twice the view's size and 2 × 2-tiled. Three groups of part 1 run only
+ * when asked:
  * R08.T8.c's far limb's timings and, after them, R08.T11's photorealistic frame's timings
  * (`frameTiming.ts`), after the low pick, when the run lifted timestamp quantization (`gpuTiming`,
  * the hardware runs of R01.T11), and R08.T8.c's far limb captures, after R07.T10.c's eclipse
@@ -219,7 +221,7 @@ import { checkDecorationTwin } from "./decoration";
 import { checkDetailSets } from "./detailSets";
 import { checkSpatialStrokeContrast } from "./spatial";
 import { checkStrokeContrast } from "./strokeContrast";
-import { checkStills, smokeStills } from "./stills";
+import { checkStills, checkStillsAtSize, smokeStills } from "./stills";
 import { checkWireframe } from "./wireframe";
 import { checkShadowCascades, checkSharedPass, checkVisibilityCascades } from "./sharedPass";
 import {
@@ -402,6 +404,7 @@ type PagePart =
   | 28
   | 29
   | 30
+  | 31
   // Plan R12's ladder (R12.T7.a): a run per setting, which its query names (`ladder.ts`).
   | "ladder";
 
@@ -471,6 +474,8 @@ function partOf(value: string | null): PagePart | "all" | null {
       return 29;
     case "30":
       return 30;
+    case "31":
+      return 31;
     case "ladder":
       return "ladder";
     default:
@@ -535,7 +540,7 @@ async function run(
     setupError,
   });
   if (part === null) {
-    return failed("the part asked for is not 1 to 30, ladder or all");
+    return failed("the part asked for is not 1 to 31, ladder or all");
   }
   if (part === "ladder" && ladderSetting === null) {
     return failed("the ladder's part runs at a setting, high or low, and none was given");
@@ -890,6 +895,12 @@ async function run(
   // into targets of its own, so that no other part's frame moves (parts 25 to 27 are other lanes').
   await group(28, "R11.T10.c the still mount, the job, the hook and the PNG round trip", () =>
     checkStills(checks, smokeStills(), engine, device),
+  );
+  // Plan R11's stills of R11.T10.e in part 31, alone, for part 28's watchdog: a still of a body
+  // handed over to its terrain, its own terrain view streamed, whole and 2 × 2-tiled, then a still
+  // at twice its view's size on T10.a's pixels, and that still tiled.
+  await group(31, "R11.T10.e a still's terrain, its size and its tiles", () =>
+    checkStillsAtSize(checks, engine),
   );
   // Plan R14's instance path (R14.T5.d) in part 29, alone: its kernels' catalogue, the instance
   // cull against its twin over 10⁶ instances and their SwiftShader frame, a particle's faces, and

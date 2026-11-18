@@ -14,7 +14,7 @@
  * mapping puts its centroid on a still of the view's own size, twice it. Black elsewhere: no sky.
  */
 
-import type { HostDiscDto } from "@hyperion/protocol";
+import type { HostDiscDto, SkyBand } from "@hyperion/protocol";
 
 import { normalise, scale, type Vec3, vec3 } from "../geometry/vec3";
 import { PROVISIONAL_PHOTOMETRY } from "../view/appearance/fromWire";
@@ -31,6 +31,7 @@ import {
   PhotorealStills,
 } from "../view/photoreal/renderer";
 import { AU_M } from "../view/scenes/kept";
+import { BandLayer } from "../view/sky/band";
 import { HostDiscLayer } from "../view/sky/disc";
 import { encodeStillPng, runStillJob, type StillRenderer } from "../view/stills/stillJob";
 import { spriteRecord } from "../view/wireframe/drawList";
@@ -116,11 +117,34 @@ function litBody(): { readonly body: LitBodyInput; readonly lights: PhotorealFra
   };
 }
 
+/** The band's face side in the tiled check, texels: enough that its rays vary across a pixel. */
+const BAND_FACE = 16;
+
+/**
+ * A band of a different white luminance at every texel, 100 to 1,000 cd/m² (0.01 to 0.1
+ * pre-exposed), so that a tile's sky drawn off its place differs from the untiled still's.
+ */
+function patternedBand(): SkyBand {
+  const count = 6 * BAND_FACE * BAND_FACE;
+  return {
+    count,
+    luminanceCdM2: Float32Array.from({ length: count }, (_, i) => 100 + ((i * 37) % 97) * 9.3),
+    chroma: new Float32Array(count * 2).fill(1 / 3),
+    eyeLimitMag: new Float32Array(count).fill(Number.NaN),
+    spRatio: new Float32Array(count).fill(2.26),
+  };
+}
+
 /**
  * The view's frame at `viewport`, as `VIEW`'s drawer makes it again (`photorealFrame`): R06's disc
- * from `layer` and the sprites projected at the viewport, the hand-over at the view's own size.
+ * from `layer` and the sprites projected at the viewport, the hand-over at the view's own size,
+ * and R06's band from `band` where given.
  */
-function frameAt(layer: HostDiscLayer, viewport: Viewport): PhotorealFrame {
+function frameAt(
+  layer: HostDiscLayer,
+  viewport: Viewport,
+  band: BandLayer | null = null,
+): PhotorealFrame {
   const { body, lights } = litBody();
   const discs = layer.frame(
     [{ host: HOST, direction: HOST_DIRECTION, distanceM: HOST_DISTANCE_M }],
@@ -160,7 +184,7 @@ function frameAt(layer: HostDiscLayer, viewport: Viewport): PhotorealFrame {
     role: "eye",
     setting: "high",
     exposureScale: EXPOSURE_SCALE,
-    sky: [],
+    sky: [band?.draw(EXPOSURE_SCALE) ?? null].filter((draw) => draw !== null),
     starSprites: sprites,
     hostDraws,
     glareSources: [],
@@ -174,8 +198,8 @@ function frameAt(layer: HostDiscLayer, viewport: Viewport): PhotorealFrame {
 }
 
 /** The view's last frame, with its making again at a still's size. */
-function viewDrawn(layer: HostDiscLayer): DrawnPhotorealFrame {
-  const frame = frameAt(layer, VIEW_SIZE);
+function viewDrawn(layer: HostDiscLayer, band: BandLayer | null): DrawnPhotorealFrame {
+  const frame = frameAt(layer, VIEW_SIZE, band);
   const plan = planLitBodies(
     frame.bodies,
     frame.lights,
@@ -190,7 +214,7 @@ function viewDrawn(layer: HostDiscLayer): DrawnPhotorealFrame {
     },
     new Map(),
   );
-  return { frame, plan, remake: ({ viewport }) => frameAt(layer, viewport) };
+  return { frame, plan, remake: ({ viewport }) => frameAt(layer, viewport, band) };
 }
 
 /** What a still of the view gave: its size, its tiles and its assembled HDR texels. */
@@ -208,10 +232,18 @@ export interface TakenStill {
  */
 export async function takeViewStill(
   engine: RenderEngine,
-  options: { readonly stillScale: number; readonly tileLimitPx: number; readonly samples: number },
+  options: {
+    readonly stillScale: number;
+    readonly tileLimitPx: number;
+    readonly samples: number;
+    /** Whether the view draws R06's band behind its scene. */
+    readonly band?: boolean;
+  },
 ): Promise<TakenStill> {
   const layer = new HostDiscLayer(engine);
-  const drawn = viewDrawn(layer);
+  const band = options.band === true ? new BandLayer(engine) : null;
+  band?.update(patternedBand(), BAND_FACE, new Float64Array(6 * BAND_FACE * BAND_FACE * 3));
+  const drawn = viewDrawn(layer, band);
   const { size: _size, ...request } = TEST_STILL_REQUEST;
   const stills = new PhotorealStills({
     tileLimitPx: options.tileLimitPx,
@@ -268,6 +300,7 @@ export async function takeViewStill(
   } finally {
     await Promise.allSettled(held.hdr === null ? [] : [held.hdr]);
     detach();
+    band?.dispose();
   }
 }
 
@@ -400,19 +433,23 @@ function texelDifferences(
 }
 
 /**
- * Part 28's tiled still (R11.T10.e.2): the still at twice the view's size, 2 × 2-tiled through each
- * tile's M · P and its origin, against the same still drawn as one tile, texel for texel.
+ * Part 28's tiled still (R11.T10.e.2): the still at twice the view's size, over R06's band and in
+ * two jittered samples, 2 × 2-tiled through each tile's M · P and its origin, against the same still
+ * drawn as one tile, texel for texel.
  */
 export async function checkTiledStill(checks: Checks, engine: RenderEngine): Promise<void> {
+  // Two samples, so that the jitter's moved origins are drawn across the seams, over R06's band.
   const whole = await takeViewStill(engine, {
     stillScale: STILL_SCALE,
     tileLimitPx: 8192,
-    samples: 1,
+    samples: 2,
+    band: true,
   });
   const tiled = await takeViewStill(engine, {
     stillScale: STILL_SCALE,
     tileLimitPx: TWO_BY_TWO_LIMIT_PX,
-    samples: 1,
+    samples: 2,
+    band: true,
   });
   const comparable =
     whole.outcome === "saved" &&

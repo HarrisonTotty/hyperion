@@ -1,4 +1,4 @@
-import { useId } from "react";
+import { useEffect, useId, useRef } from "react";
 
 import { StatusText } from "../../components/StatusText";
 import { formatNumber } from "../../lib/format";
@@ -62,7 +62,7 @@ export interface StillControlProps {
   readonly state: StillControlState;
   /** Called by `TAKE STILL` where it is offered: the request for a still. */
   readonly onTake: () => void;
-  /** Called by a `SIZE` button: the next still's multiple of the view's output size. */
+  /** Called by the `SIZE` choice: the next still's multiple of the view's output size. */
   readonly onSize: (scale: number) => void;
 }
 
@@ -74,7 +74,10 @@ export const STILL_CONTROL_IDLE: StillControlState = {
   size: null,
 };
 
-/** A still's size as its `SIZE` button and the still's label state it: `3,840 × 2,160 px`. */
+/**
+ * A still's size as its `SIZE` choice and the still's label state it: `3840 × 2160 px`, its digits
+ * grouped only from five figures.
+ */
 export function stillSizeWords(size: ViewSize): string {
   return `${formatNumber(size.widthPx, 0)} × ${formatNumber(size.heightPx, 0)} px`;
 }
@@ -181,37 +184,6 @@ export function takeStillHeldBack(state: StillControlState): string | null {
   return state.activity.kind === "running" ? IN_PROGRESS : state.heldBack;
 }
 
-interface StillSizeRowProps {
-  readonly choice: StillSizeChoice;
-  readonly onSize: (scale: number) => void;
-}
-
-/**
- * The `SIZE` row (plan R11, R11.T10.e.1): its legend on the left of each size offered, in the style
- * panel's row form, the chosen one pressed and underlined as a preset is; a display control, acting
- * at once on the next still, with no key.
- */
-function StillSizeRow({ choice, onSize }: StillSizeRowProps) {
-  return (
-    <fieldset className="preset-buttons view-style__baseline still-control__size">
-      <legend className="field__label view-style__baseline-label">SIZE</legend>
-      {choice.options.map((option) => (
-        <button
-          key={option.scale}
-          type="button"
-          className="control preset-buttons__button view-style__baseline-button"
-          aria-pressed={option.scale === choice.scale}
-          onClick={() => {
-            onSize(option.scale);
-          }}
-        >
-          {stillSizeWords(option.size)}
-        </button>
-      ))}
-    </fieldset>
-  );
-}
-
 interface StillProgressProps {
   readonly step: StillStep;
 }
@@ -253,7 +225,10 @@ function StillProgress({ step }: StillProgressProps) {
  *
  * @remarks
  * Keyboard-operable as a native button: held back rather than disabled, so that it keeps focus and
- * says why, as the exposure's commands do. Suspended, it is still offered, the explicit request the
+ * says why, as the exposure's commands do. `SIZE` is one native `select` on the command row after
+ * it, in its reason's place, standing only while `TAKE STILL` is offered (the UX ruling,
+ * 2026-11-18): a display control, it adds no line in any state, and where it goes with the focus
+ * on it the focus goes to `TAKE STILL`. Suspended, it is still offered, the explicit request the
  * suspension allows. The progress stands only while a still runs, never indeterminate, since the
  * guide has no spinners. The status line is a live region.
  */
@@ -262,6 +237,16 @@ export function StillControl({ state, onTake, onSize }: StillControlProps) {
   const held = takeStillHeldBack(state);
   const line = stillStatusLine(state);
   const standing = stillsStandingLine(state.standing, "panel");
+  const size = held === null ? state.size : null;
+  const takeRef = useRef<HTMLButtonElement>(null);
+  // Whether the size choice held the focus, which goes to TAKE STILL where the choice goes.
+  const sizeFocused = useRef(false);
+  useEffect(() => {
+    if (size === null && sizeFocused.current) {
+      sizeFocused.current = false;
+      takeRef.current?.focus();
+    }
+  }, [size]);
   return (
     <div className="still-control">
       {standing === null ? null : (
@@ -271,9 +256,9 @@ export function StillControl({ state, onTake, onSize }: StillControlProps) {
           </output>
         </p>
       )}
-      {state.size === null ? null : <StillSizeRow choice={state.size} onSize={onSize} />}
       <div className="still-control__command">
         <button
+          ref={takeRef}
           type="button"
           className="control"
           aria-disabled={held === null ? undefined : "true"}
@@ -286,6 +271,28 @@ export function StillControl({ state, onTake, onSize }: StillControlProps) {
         >
           {TAKE_STILL}
         </button>
+        {size === null ? null : (
+          <select
+            className="form-field__input form-field__input--number still-control__size"
+            aria-label="SIZE"
+            value={String(size.scale)}
+            onFocus={() => {
+              sizeFocused.current = true;
+            }}
+            onBlur={() => {
+              sizeFocused.current = false;
+            }}
+            onChange={(event) => {
+              onSize(Number(event.target.value));
+            }}
+          >
+            {size.options.map((option) => (
+              <option key={option.scale} value={String(option.scale)}>
+                {stillSizeWords(option.size)}
+              </option>
+            ))}
+          </select>
+        )}
         {held === null ? null : (
           <span className="still-control__reason" id={reasonId}>
             <StatusText text={held} />

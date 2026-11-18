@@ -25,7 +25,7 @@ function optionsOf(bodies: ReadonlyArray<BodyIdHex> = [BODY]): StillTerrainOptio
 }
 
 describe("a still's own terrain view (R11.T10.e)", () => {
-  it("notes the still's view at bulk priority, at its own size and plan, drawn photorealistic", () => {
+  it("notes the still's view at bulk priority, at its own size and plan and the high setting's τ, drawn photorealistic", () => {
     const session = fakeStillTerrainSession();
     const capture = stillTerrainCapture(session);
     const view = new StillTerrainView(capture, optionsOf());
@@ -37,7 +37,7 @@ describe("a still's own terrain view (R11.T10.e)", () => {
         pose: capture.report.pose,
         fovXRad: capture.report.fovXRad,
         style: capture.report.style,
-        setting: capture.report.setting,
+        setting: "high",
         regimesFromM: capture.report.regimesFromM,
         presentedPx: SIZE,
         selectionPx: SIZE,

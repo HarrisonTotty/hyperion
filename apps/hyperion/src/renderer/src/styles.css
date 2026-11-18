@@ -5270,11 +5270,11 @@ select.form-field__input:not([aria-disabled="true"]):hover {
 }
 
 /*
- * The next still's SIZE row (plan R11, R11.T10.e.1): the style panel's BASELINE row form
- * (`.view-style__baseline`), first in the control, 0.5rem over the command.
+ * The next still's SIZE choice (plan R11, R11.T10.e.1; the UX ruling, 2026-11-18): a number field's
+ * select on the command row after TAKE STILL, at its own width, in the reason's place.
  */
-.still-control .still-control__size {
-  margin: 0 0 0.5rem;
+.still-control__size {
+  flex: none;
 }
 
 .still-control__command {

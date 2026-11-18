@@ -39,6 +39,14 @@ export const STILL_LABEL_SCHEMA = "hyperion-still/1";
 export const STILL_TERRAIN_STREAMING = "TERRAIN: STREAMING";
 
 /**
+ * The annunciation a still carries whose terrain is drawn coarser than the high setting it states
+ * (plan R11, R11.T10.e.3): the view's own `TERRAIN: DETAIL LIMITED`, the quality setting holding it
+ * there (`terrain/annunciation.ts`' `TerrainAnnunciation`); {@link STILL_TERRAIN_STREAMING} stands
+ * in its place where both hold.
+ */
+export const STILL_TERRAIN_DETAIL_LIMITED = "TERRAIN: DETAIL LIMITED";
+
+/**
  * The longest side of a still, px: 8,192, WebGPU's default `maxTextureDimension2D` (the
  * specification's Limits table), which holds an 8K UHD still of 7,680 × 4,320.
  *
@@ -459,7 +467,9 @@ export interface StillRequest {
 
 /**
  * The label of a still made at `request`: its annunciations those that held, each once, with
- * {@link STILL_TERRAIN_STREAMING} after them where its frustum had not streamed in time.
+ * {@link STILL_TERRAIN_STREAMING} after them where its frustum had not streamed in time, in
+ * {@link STILL_TERRAIN_DETAIL_LIMITED}'s place where that held (one terrain annunciation, as the
+ * view's own line shows the more pressing).
  *
  * @throws RangeError where the label is not one of the schema's ({@link parseStillLabel}): the
  *   caller's bug, since everything in it is the view's own.
@@ -467,8 +477,12 @@ export interface StillRequest {
 export function stillLabel(request: StillRequest, streamed: boolean): StillLabel {
   // Each once, in the order the view stated them.
   const held = [...new Set(request.annunciations)];
-  const annunciations =
-    streamed || held.includes(STILL_TERRAIN_STREAMING) ? held : [...held, STILL_TERRAIN_STREAMING];
+  const annunciations = streamed
+    ? held
+    : [
+        ...held.filter((words) => words !== STILL_TERRAIN_DETAIL_LIMITED),
+        ...(held.includes(STILL_TERRAIN_STREAMING) ? [] : [STILL_TERRAIN_STREAMING]),
+      ];
   const label = parseStillLabel({
     schema: STILL_LABEL_SCHEMA,
     time: request.time,

@@ -105,12 +105,14 @@ export class StillTerrainView {
       floorStepped: _floorStepped,
       ...report
     } = capture.report;
-    // Its pixels are the still's: counted at its own size, its τ the setting's own.
+    // Its pixels are the still's: counted at its own size, at the high setting's τ, whose passes a
+    // still draws (R11.T10.e.3); its materials are the session's own.
     capture.session.noteView(STILL_TERRAIN_VIEW_ID, {
       ...report,
       presentedPx: options.size,
       selectionPx: options.size,
       drawnStyle: "photorealistic",
+      setting: "high",
       streamPriority: "bulk",
       regimes: options.regimes,
     });

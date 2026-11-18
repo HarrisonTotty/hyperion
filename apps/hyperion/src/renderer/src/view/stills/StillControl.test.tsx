@@ -154,24 +154,49 @@ describe("the still control's SIZE (R11.T10.e.1)", () => {
     },
   };
 
-  it("offers each size in its pixels, the chosen one pressed, in a group named SIZE", () => {
+  it("offers each size in its pixels in one choice named SIZE, the chosen one selected", () => {
     renderControl(sized);
-    const group = screen.getByRole("group", { name: "SIZE" });
-    const pressed = screen
-      .getAllByRole("button", { pressed: true })
-      .map((button) => button.textContent);
-    expect([group, pressed]).toEqual([expect.anything(), ["3840 × 2160 px"]]);
+    const choice = screen.getByRole("combobox", { name: "SIZE" });
+    const options = screen.getAllByRole("option").map((option) => option.textContent);
+    expect(options).toEqual(["1920 × 1080 px", "3840 × 2160 px", "7680 × 4320 px"]);
+    expect(choice).toHaveValue("2");
   });
 
   it("chooses the next still's size from the keyboard", async () => {
     const { onSize, user } = renderControl(sized);
-    screen.getByRole("button", { name: "7680 × 4320 px" }).focus();
-    await user.keyboard("{Enter}");
+    await user.selectOptions(screen.getByRole("combobox", { name: "SIZE" }), "7680 × 4320 px");
     expect(onSize.mock.calls).toEqual([[4]]);
+  });
+
+  it("stands only while TAKE STILL is offered, its reason in its place while a still runs", () => {
+    renderControl({
+      ...sized,
+      activity: {
+        kind: "running",
+        step: { kind: "rendering", donePasses: 1, totalPasses: 4 },
+      },
+    });
+    expect([
+      screen.queryByRole("combobox", { name: "SIZE" }),
+      describedText(screen.getByRole("button", { name: "TAKE STILL" })),
+    ]).toEqual([null, "NOT AVAILABLE: a still is in progress"]);
+  });
+
+  it("gives the focus to TAKE STILL where it goes with the focus on it", () => {
+    const { view } = renderControl(sized);
+    screen.getByRole("combobox", { name: "SIZE" }).focus();
+    view.rerender(
+      <StillControl
+        state={{ ...sized, heldBack: "NOT AVAILABLE: the view is not drawn" }}
+        onTake={() => undefined}
+        onSize={() => undefined}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "TAKE STILL" })).toHaveFocus();
   });
 
   it("offers no size while the view's output size is not known", () => {
     renderControl(STILL_CONTROL_IDLE);
-    expect(screen.queryByRole("group", { name: "SIZE" })).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "SIZE" })).toBeNull();
   });
 });

@@ -255,7 +255,18 @@ export async function checkTerrainStill(checks: Checks, engine: RenderEngine): P
       },
       previousRegimes,
     );
-    const drawn: DrawnPhotorealFrame = { frame, plan, occluderSlopePx: 0 };
+    // Made again at a still's size, as VIEW's drawer makes it, for the tiled comparison.
+    const drawn: DrawnPhotorealFrame = {
+      frame,
+      plan,
+      occluderSlopePx: 0,
+      remake: (ask) => ({
+        ...frame,
+        viewport: ask.viewport,
+        setting: ask.setting,
+        terrain: ask.terrain,
+      }),
+    };
     const { size: _size, ...request } = TEST_STILL_REQUEST;
     const hook = new PhotorealStills({ samples: SAMPLES });
     detach = hook.attach({
@@ -351,6 +362,44 @@ export async function checkTerrainStill(checks: Checks, engine: RenderEngine): P
       infinite === 0 && lit > pixels / 2,
       `${String(infinite)} pixels not finite, ${String(lit)} of ${String(pixels)} lit`,
     );
+
+    // The still at twice the view's size, drawn whole and 2 × 2-tiled, its terrain's clusters culled
+    // by each tile's frustum (R11.T10.e.2): first one to stream the finer patches, then the two.
+    const takeAt = async (tileLimitPx: number): Promise<TerrainStillTaken> => {
+      const source = new PhotorealStills({ samples: 1, tileLimitPx });
+      const off = source.attach({
+        engine,
+        timer: () => "absent",
+        frameIntervalNs: () => 16_683_350,
+        setting: () => "low",
+        drawn: () => drawn,
+        request: () => request,
+        terrain: () => ({ session, report: viewAt(5e6), occluderSlopePx: 0 }),
+      });
+      try {
+        return await takeStill(source, TILED_SCALE);
+      } finally {
+        off();
+      }
+    };
+    await takeAt(8192);
+    const whole = await takeAt(8192);
+    const tiled = await takeAt(TILED_LIMIT_PX);
+    const comparable =
+      whole.streamed &&
+      tiled.streamed &&
+      whole.tiles === 1 &&
+      tiled.tiles === 4 &&
+      whole.hdr.length > 0 &&
+      whole.hdr.length === tiled.hdr.length;
+    const { largest, over } = comparable
+      ? relativeDifferences(whole.hdr, tiled.hdr)
+      : { largest: Number.NaN, over: Number.NaN };
+    checks.check(
+      "R11.T10.e a 2 × 2-tiled still of a body handed over equals its untiled still, its terrain culled by each tile's frustum",
+      comparable && over === 0,
+      `streamed ${String(whole.streamed)} and ${String(tiled.streamed)} in ${String(whole.tiles)} and ${String(tiled.tiles)} tiles; ${String(over)} channels over ${TILED_TOLERANCE.toExponential(2)}, the largest relative difference ${largest.toExponential(3)}`,
+    );
   } finally {
     stepping = false;
     detach?.();
@@ -359,4 +408,91 @@ export async function checkTerrainStill(checks: Checks, engine: RenderEngine): P
     pool.terminate();
     mask.release();
   }
+}
+
+/** The terrain still's multiple of the view's size in the tiled comparison: 128 × 96 px. */
+const TILED_SCALE = 2;
+
+/** The tile limit that cuts the 128 × 96 px still into 2 × 2 tiles, px. */
+const TILED_LIMIT_PX = 64;
+
+/**
+ * The most a texel of the tiled terrain still may differ from the untiled one's, relative to the
+ * larger: two units in the last place of `rgba16float`, as the tiled still's check holds
+ * (`stillSize.ts`).
+ */
+const TILED_TOLERANCE = 2 ** -9;
+
+/** What a still of the terrain view gave: whether it streamed, its tiles and its HDR texels. */
+interface TerrainStillTaken {
+  readonly streamed: boolean;
+  readonly tiles: number;
+  readonly hdr: Float32Array;
+}
+
+/** A still of `source`'s view at `multiple` times its size, run through the job to its end. */
+async function takeStill(source: PhotorealStills, multiple: number): Promise<TerrainStillTaken> {
+  const snapshot = source.snapshot({ scale: multiple });
+  if (snapshot.kind === "unavailable") {
+    return { streamed: false, tiles: 0, hdr: new Float32Array(0) };
+  }
+  const inner = source.renderer(snapshot.scene);
+  const seen: { hdr: Promise<ArrayBuffer> | null } = { hdr: null };
+  const renderer: StillRenderer = {
+    tiling: inner.tiling,
+    units: inner.units,
+    prepare: () => inner.prepare(),
+    streamed: () => inner.streamed(),
+    submit: (first, count) => {
+      inner.submit(first, count);
+    },
+    readTile: (tile) => {
+      seen.hdr ??= inner.readHdr();
+      return inner.readTile(tile);
+    },
+    dispose: () => {
+      inner.dispose();
+    },
+  };
+  const outcome = await runStillJob({
+    device: source.device,
+    renderer,
+    request: snapshot.scene.request,
+    setting: source.setting,
+    frameIntervalNs: source.frameIntervalNs(),
+    encode: encodeStillPng,
+    save: (_png, label) =>
+      Promise.resolve({ kind: "saved", still: { id: "terrain still", label } }),
+    onStep: () => undefined,
+  });
+  return {
+    streamed:
+      outcome.kind === "saved" &&
+      !outcome.still.label.annunciations.includes(STILL_TERRAIN_STREAMING),
+    tiles: inner.tiling.tiles.length,
+    hdr: seen.hdr === null ? new Float32Array(0) : halfTexels(await seen.hdr),
+  };
+}
+
+/** The colour channels' differences: the largest relative one, and how many pass the tolerance. */
+function relativeDifferences(
+  a: Float32Array,
+  b: Float32Array,
+): { readonly largest: number; readonly over: number } {
+  let largest = 0;
+  let over = 0;
+  for (let i = 0; i < a.length; i += 1) {
+    if (i % 4 === 3) {
+      continue;
+    }
+    const x = a[i] ?? Number.NaN;
+    const y = b[i] ?? Number.NaN;
+    const larger = Math.max(Math.abs(x), Math.abs(y));
+    const relative = larger === 0 ? 0 : Math.abs(x - y) / larger;
+    if (!(relative <= TILED_TOLERANCE)) {
+      over += 1;
+    }
+    largest = Math.max(largest, Number.isNaN(relative) ? Number.POSITIVE_INFINITY : relative);
+  }
+  return { largest, over };
 }
