@@ -902,12 +902,16 @@ export class ViewFrameDrawer {
         plan,
         occluderSlopePx: list.occluderSlopePx,
         // A still's frame (plan R11, R11.T10.e): the same inputs at its size and setting, its sprites
-        // carried to its viewport, with no symbology or meter, presented.
+        // carried to its viewport, with no symbology or meter, presented; its air at its setting's
+        // sizes, no frame-rate floor stepping a still down.
         remake: ({ viewport: still, setting, terrain: stillTerrain }) =>
           photorealFrame({
             ...frameInputs,
             viewport: still,
             setting,
+            atmosphereSetting: undefined,
+            floorLowest: undefined,
+            floorStepped: undefined,
             list: { ...list, sprites: spritesAtScale(list.sprites, viewport, still) },
             terrain: stillTerrain,
             overlay: null,

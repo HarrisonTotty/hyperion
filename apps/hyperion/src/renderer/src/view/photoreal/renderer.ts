@@ -47,6 +47,7 @@ import {
   AtmosphereRetired,
   type AtmosphereFrameKernels,
   createAtmosphereFrameKernels,
+  type FrameKernelsAhead,
   geodeticOf,
   HillaireAtmosphere,
   type SourceTransmittance,
@@ -1078,6 +1079,8 @@ export class PhotorealRenderer {
    *
    * @param levers - A frame profile's atmosphere levers over the settings' (R08.T8.d), whose tile
    *   cull's kernels are made up front beside the settings' own; none where absent.
+   * @param ahead - The atmospheres' kernels made up front beyond a view's (plan R11, R11.T10.e.3):
+   *   a still's, whose batches make none; none where absent.
    */
   prepare(
     size: ViewSize,
@@ -1085,11 +1088,12 @@ export class PhotorealRenderer {
     role: ViewRole,
     camera: ProjectionCamera,
     levers?: AtmosphereLeversOverride,
+    ahead?: FrameKernelsAhead,
   ): Promise<void> {
     if (this.#making === null) {
       const generation = this.#generation;
       this.#status = "making";
-      this.#making = this.#make(size, setting, role, camera, generation, levers).catch(
+      this.#making = this.#make(size, setting, role, camera, generation, levers, ahead).catch(
         (error: unknown) => {
           if (generation === this.#generation && !this.#disposed) {
             this.#status = "failed";
@@ -1113,6 +1117,7 @@ export class PhotorealRenderer {
     camera: ProjectionCamera,
     generation: number,
     levers: AtmosphereLeversOverride | undefined,
+    ahead: FrameKernelsAhead | undefined,
   ): Promise<void> {
     // The making's own work, its bloom kernel's fit and then its pipelines' creation, each in a
     // task after the frame that asks for it (lane perf-long-tasks-3): on a pod the two held that
@@ -1194,6 +1199,7 @@ export class PhotorealRenderer {
           tiles: QUALITY_SETTINGS.some(
             (each) => ({ ...SETTINGS[each].atmosphereLevers, ...levers }).marchCover === "tiles",
           ),
+          ...ahead,
         }),
         // A refused cloud layer leaves the view without clouds, as a refused pyramid leaves it
         // one raster (plan R11, R11.T7.b).
@@ -2850,13 +2856,23 @@ export interface DrawnPhotorealFrame {
 
 /**
  * The jittered samples a still accumulates on each setting (plan R11, Design note 17: "sub-pixel
- * jitter accumulates at full resolution"): 8 on the high setting, the Halton (2, 3) pattern of 8
- * samples Unreal Engine 4's temporal anti-aliasing jitters its projection through (Karis 2014, "High
- * Quality Temporal Supersampling", SIGGRAPH 2014 course Advances in Real-Time Rendering in Games,
- * slides 13 and 14, checked 2026-11-18), and 4 on the low, half the samples' GPU time (lean,
- * 2026-11-18). Each sample is one unit of the job, a whole frame of the view's passes.
+ * jitter accumulates at full resolution"): 8 on both, the Halton (2, 3) pattern of 8 samples Unreal
+ * Engine 4's temporal anti-aliasing jitters its projection through (Karis 2014, "High Quality
+ * Temporal Supersampling", SIGGRAPH 2014 course Advances in Real-Time Rendering in Games, slides 13
+ * and 14, checked 2026-11-18), averaged in linear HDR (decision-leans-54, ruling 5: the low
+ * setting's still takes the high setting's passes, Design note 18's "the same passes as on the high
+ * setting, slower", the cost time alone). Each sample is a unit of the job a tile, a whole frame of
+ * the still's passes.
  */
-export const STILL_SAMPLES: Readonly<Record<QualitySetting, number>> = { high: 8, low: 4 };
+export const STILL_SAMPLES: Readonly<Record<QualitySetting, number>> = { high: 8, low: 8 };
+
+/**
+ * The atmospheres' kernels a still makes up front where its frame draws air (plan R11,
+ * R11.T10.e.3), beyond those a view's renderer makes: the far limb's packed kernels, the thick
+ * read's, and the thermal forms, which a view makes at the first frame that takes them, so that no
+ * pipeline is made in a still's batch whatever the view drew.
+ */
+const STILL_AIR_AHEAD: FrameKernelsAhead = { packed: true, thickPacked: true, thermal: true };
 
 /** The name a still's GPU objects are made under, and its passes' labels begin with. */
 const STILL_NAME = "still";
@@ -3123,8 +3139,8 @@ export class PhotorealStillRenderer implements StillRenderer {
       `${STILL_UNIT_PASSES.bloom} 0`,
       `${STILL_UNIT_PASSES.tonemap} 0`,
     ];
-    // As the view drew it, its frame-rate floor's steps with it, so that every kernel its air asks
-    // for is one the view's frames made, in the device's records: none is compiled in a batch.
+    // At the high setting's passes (R11.T10.e.3), every pipeline and kernel they ask for made in
+    // `prepare()`: none is compiled in a batch.
     this.#frame = {
       ...frame,
       terrain: undefined,
@@ -3201,6 +3217,7 @@ export class PhotorealStillRenderer implements StillRenderer {
         frame.role,
         frame.camera,
         frame.atmosphereLevers,
+        (frame.atmospheres ?? []).length > 0 ? STILL_AIR_AHEAD : undefined,
       ),
       this.#scene.prepareBodies(geometry.discCells, {
         emissive: frame.bodies.some((body) => body.thermal !== undefined),
@@ -3815,11 +3832,12 @@ export class PhotorealStills implements StillSource {
       return { kind: "unavailable", cause: STILL_UNAVAILABLE.oversized };
     }
     const coverage = coverageOf(viewFrame);
-    // Made again at once, at the still's size, while the view's layers hold its frame's state.
+    // Made again at once, at the still's size and the high setting's passes (R11.T10.e.3), while
+    // the view's layers hold its frame's state.
     const frame =
       remake?.({
         viewport: size,
-        setting: viewFrame.setting,
+        setting: "high",
         terrain: viewFrame.terrain === undefined ? undefined : coverageTerrain(coverage),
       }) ?? viewFrame;
     const handedOver = viewFrame.terrain === undefined ? [] : handedOverOf(plan);

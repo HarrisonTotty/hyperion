@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { vec3 } from "../../geometry/vec3";
 import { R05_EARTH_REFERENCE } from "../atmosphere/earth";
+import { ATMOSPHERE_COMPOSITE_PASS } from "../atmosphere/hillaire";
 import { AtmosphereTables } from "../atmosphere/tables";
 import { countingRenderEngine, type CountingRenderEngine } from "../../test/countingRenderEngine";
 import {
@@ -34,11 +35,13 @@ import { STILL_TILE_ADD_MATERIAL, STILL_TILE_FIRST_MATERIAL } from "../stills/st
 import { planTiles, tileProjection } from "../stills/stillPlan";
 import { TONEMAP_MATERIAL } from "../post/tonemap";
 import { timedPass } from "../../test/passTimes";
+import type { QualitySetting } from "../quality/qualitySetting";
 import {
   type DrawnPhotorealFrame,
   type FrameTerrain,
   type PhotorealFrame,
   type PhotorealStillView,
+  PhotorealRenderer,
   PhotorealStillRenderer,
   type StillFrameAsk,
   PhotorealStills,
@@ -402,8 +405,8 @@ describe("the photorealistic still source (R11.T10.b)", () => {
     renderer.dispose();
   });
 
-  it("takes eight samples on the high setting and four on the low", () => {
-    expect(STILL_SAMPLES).toEqual({ high: 8, low: 4 });
+  it("takes eight samples on both settings, averaged in linear HDR (R11.T10.e.3; ruling 5)", () => {
+    expect(STILL_SAMPLES).toEqual({ high: 8, low: 8 });
   });
 
   it("jitters each sample after the first by a Halton (2, 3) offset within half a pixel", () => {
@@ -606,6 +609,63 @@ describe("the photorealistic still renderer (R11.T10.b)", () => {
       ),
     );
     renderer.dispose();
+  });
+
+  it("draws a low view's still at the high setting's passes, its air's every kernel made before its first batch and none in a batch (R11.T10.e.3)", async () => {
+    const engine = await countingRenderEngine();
+    const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, 6.371e6);
+    const airAt = (setting: QualitySetting): PhotorealFrame => ({
+      ...viewFrame(),
+      setting,
+      meter: null,
+      atmospheres: [
+        {
+          id: aLitBody().body,
+          tables,
+          camera: {
+            positionM: vec3(0, 0, 1e8),
+            orientation: IDENTITY_QUATERNION,
+            fovXRad: FOV_X_RAD,
+            viewport: SIZE,
+          },
+          toBodyFixed: IDENTITY_QUATERNION,
+        },
+      ],
+    });
+    // The view, on the low setting, has drawn its frame, its air's tables built.
+    const view = new PhotorealRenderer(engine, "view");
+    const low = airAt("low");
+    await view.prepare(SIZE, "low", low.role, low.camera);
+    view.render(null, low);
+    const asked: QualitySetting[] = [];
+    const drawn: DrawnPhotorealFrame = {
+      ...drawnOf(low),
+      remake: (ask) => {
+        asked.push(ask.setting);
+        return airAt(ask.setting);
+      },
+    };
+    const stills = new PhotorealStills();
+    stills.attach(viewOver(engine, () => drawn));
+    const scene = sceneOf(stills);
+    const renderer = stills.renderer(scene);
+    await renderer.prepare();
+    const made = { ...engine.counts };
+    const before = engine.targetFrames.length;
+    submitAll(renderer);
+    const composites = engine.targetFrames
+      .slice(before)
+      .filter((frame) => frame.label === ATMOSPHERE_COMPOSITE_PASS).length;
+    expect([
+      asked,
+      scene.request.setting,
+      composites > 0,
+      engine.counts.materials - made.materials,
+      engine.counts.kernels - made.kernels,
+    ]).toEqual([["high"], "high", true, 0, 0]);
+    renderer.dispose();
+    view.dispose();
+    tables.dispose();
   });
 
   it("draws a frame with air whole, in one tile of the still's size, its read-back tiles its own (R11.T10.e.2)", async () => {
