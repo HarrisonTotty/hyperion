@@ -14,6 +14,7 @@ import {
 import { describe, expect, it, vi } from "vitest";
 
 import { vec3 } from "../../geometry/vec3";
+import { untilNextTask } from "../../lib/nextTask";
 import { sphereFootprint } from "../bodies/regime";
 import {
   earthBody,
@@ -63,7 +64,7 @@ import type {
   ViewSize,
 } from "../engine/types";
 import { AU_M } from "../scenes/kept";
-import { BloomChain } from "../post/bloomChain";
+import { BLOOM_DOWN_MATERIAL, BLOOM_UP_MATERIAL, BloomChain } from "../post/bloomChain";
 import { HISTOGRAM_KERNEL, histogramParams, histogramWorkgroups } from "../post/histogram";
 import {
   GEOMETRY_BEFORE_R14,
@@ -163,7 +164,7 @@ import {
   type PhotorealOverlay,
   PhotorealRenderer,
 } from "./renderer";
-import { TONEMAP_PASS } from "../post/tonemap";
+import { TONEMAP_MATERIAL, TONEMAP_PASS } from "../post/tonemap";
 import { whiteBalanceRows } from "../post/whiteBalance";
 import { starColour } from "../photometry/starColour";
 import { PHOTOREAL_PASS_LABELS, SKY_PASS_LABEL } from "./passes";
@@ -239,6 +240,87 @@ describe("the photorealistic renderer", () => {
     expect(renderer.render(view, frameWith([]))).toBeNull();
     renderer.dispose();
   });
+
+  it("makes its bloom kernel and its pipelines in tasks after the frame that asks for them (lane perf-long-tasks-3)", async () => {
+    const engine = await countingRenderEngine();
+    const view = new RecordingView();
+    const renderer = new PhotorealRenderer(engine, "test view");
+    engine.resetCounts();
+    expect(renderer.render(view, frameWith([]))).toBeNull();
+    // Nothing made in the frame's task, and nothing yet in the next: the bloom kernel's fit.
+    const inFrame = { ...engine.counts };
+    await untilNextTask();
+    const fitted = { ...engine.counts };
+    await untilNextTask();
+    expect([inFrame.materials, inFrame.kernels, fitted.materials, fitted.kernels]).toEqual([
+      0, 0, 0, 0,
+    ]);
+    expect(engine.counts.materials + engine.counts.kernels).toBeGreaterThan(0);
+    renderer.dispose();
+  });
+
+  // A still's renderer is made, and may be disposed, at each still (plan R11, R11.T10.b): each of
+  // the split making's awaits, the tasks after its frame (lane perf-long-tasks-3) and its pipelines'
+  // compiles, is a point a dispose abandons it at.
+  const makingSteps = [
+    { step: "the bloom kernel's fit", tasks: 0, held: [] },
+    { step: "the pipelines' task", tasks: 1, held: [] },
+    { step: "the pipelines' compile", tasks: 2, held: [TONEMAP_MATERIAL.name] },
+    {
+      step: "the bloom chain's compile",
+      tasks: 2,
+      held: [BLOOM_DOWN_MATERIAL.name, BLOOM_UP_MATERIAL.name],
+    },
+  ] as const;
+  it.each(makingSteps)(
+    "leaks no material or mesh when disposed while its making waits on $step",
+    async ({ tasks, held }) => {
+      const engine = await countingRenderEngine();
+      const before = engine.live;
+      const create = engine.createMaterialAsync.bind(engine);
+      const holds: ReadonlySet<string> = new Set(held);
+      const compiles: Array<() => void> = [];
+      vi.spyOn(engine, "createMaterialAsync").mockImplementation((spec, targets, meshes) => {
+        const made = create(spec, targets, meshes);
+        return holds.has(spec.name)
+          ? new Promise((resolve) => {
+              compiles.push(() => {
+                resolve(made);
+              });
+            })
+          : made;
+      });
+      const renderer = new PhotorealRenderer(engine, "test view");
+      const making = renderer.prepare(VIEWPORT, "high", "eye", {
+        orientation: IDENTITY_QUATERNION,
+        fovXRad: Math.PI / 3,
+      });
+      for (let task = 0; task < tasks; task += 1) {
+        // Each task in turn, as the making's own come one after another.
+        // oxlint-disable-next-line no-await-in-loop
+        await untilNextTask();
+      }
+      const asked: ReadonlySet<string> = new Set(engine.compiles.map((each) => each.name));
+      const waiting = renderer.status;
+      renderer.dispose();
+      for (const compile of compiles) {
+        compile();
+      }
+      await making;
+      const { materials, meshes } = engine.live;
+      expect({
+        waiting,
+        asked: held.every((name) => asked.has(name)),
+        materials,
+        meshes,
+      }).toEqual({
+        waiting: "making",
+        asked: true,
+        materials: before.materials,
+        meshes: before.meshes,
+      });
+    },
+  );
 
   it("draws the sky and the stars, then the bodies over them, then tones onto the canvas", async () => {
     const engine = await countingRenderEngine();

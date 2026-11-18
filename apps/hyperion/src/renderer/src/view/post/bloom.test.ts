@@ -23,7 +23,13 @@ import {
   roundToHalf,
   spreadPixelEE,
 } from "./bloom";
-import { glareSourceVeil, sphereIntegral, type GlareSource } from "./glare";
+import {
+  type EyeObserver,
+  glareSourceVeil,
+  glareSpreadFunction,
+  sphereIntegral,
+  type GlareSource,
+} from "./glare";
 import { METER_CLASS } from "./meter";
 import { SETTINGS } from "../quality/qualitySetting";
 
@@ -147,6 +153,81 @@ describe("bloomKernel", () => {
       });
     }
   });
+});
+
+/**
+ * `spreadPixelEE` as it was before perf-long-tasks-3: every spread value formed where it is summed,
+ * and each pixel's energy added to the radii it lies within by a closure a radius.
+ */
+function spreadPixelEEBefore(role: "eye" | "camera", radPerPx: number, eye: EyeObserver): number[] {
+  const spread = glareSpreadFunction(role, eye);
+  const psf = (dPx: number): number => spread(dPx * radPerPx);
+  const area = radPerPx * radPerPx;
+  const intervals = 2000;
+  const low = Math.log(1e-7);
+  const step = (Math.log(0.5) - low) / intervals;
+  let discSum = 0;
+  for (let i = 0; i <= intervals; i += 1) {
+    const r = Math.exp(low + i * step);
+    const weight = i === 0 || i === intervals ? 1 : i % 2 === 1 ? 4 : 2;
+    discSum += weight * psf(r) * 2 * Math.PI * r * r;
+  }
+  const disc = ((discSum * step) / 3) * area;
+  const maxR = FIT_RADII_PX[FIT_RADII_PX.length - 1] ?? 0;
+  const reach = Math.ceil(maxR);
+  const sums = FIT_RADII_PX.map(() => 0);
+  for (let j = -reach; j <= reach; j += 1) {
+    for (let i = -reach; i <= reach; i += 1) {
+      const d = Math.hypot(i, j);
+      if (d > maxR) {
+        continue;
+      }
+      let energy = 0;
+      if (d < 3) {
+        const n = 32;
+        for (let b = 0; b < n; b += 1) {
+          for (let a = 0; a < n; a += 1) {
+            const r = Math.hypot(i - 0.5 + (a + 0.5) / n, j - 0.5 + (b + 0.5) / n);
+            if (i === 0 && j === 0 && r < 0.5) {
+              continue;
+            }
+            energy += psf(r);
+          }
+        }
+        energy *= area / (n * n);
+        if (i === 0 && j === 0) {
+          energy += disc;
+        }
+      } else {
+        energy = psf(d) * area;
+      }
+      FIT_RADII_PX.forEach((r, k) => {
+        if (d <= r) {
+          sums[k] = (sums[k] ?? 0) + energy;
+        }
+      });
+    }
+  }
+  return sums;
+}
+
+describe("spreadPixelEE, each value formed once for its mirror images (lane perf-long-tasks-3)", () => {
+  it.each([
+    { role: "eye", radPerPx: RAD_PER_PX_1080P },
+    { role: "eye", radPerPx: RAD_PER_PX_1080P / 0.815 },
+    { role: "eye", radPerPx: 2.7e-4 },
+    { role: "camera", radPerPx: RAD_PER_PX_1080P },
+    { role: "camera", radPerPx: 1.3e-3 },
+  ] as const)(
+    "gives the sums it gave before, to the bit: $role at $radPerPx rad a pixel",
+    ({ role, radPerPx }) => {
+      expect(
+        new BigUint64Array(Float64Array.from(spreadPixelEE(role, radPerPx, EYE)).buffer),
+      ).toStrictEqual(
+        new BigUint64Array(Float64Array.from(spreadPixelEEBefore(role, radPerPx, EYE)).buffer),
+      );
+    },
+  );
 });
 
 describe("bloomExcessOf (fix-view-light)", () => {

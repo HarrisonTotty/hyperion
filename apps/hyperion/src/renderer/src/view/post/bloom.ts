@@ -423,6 +423,9 @@ export function computedLevelResponseEE(level: number): ReadonlyArray<number> {
 /** The side, sub-samples, of the grid integrating the spread function over pixels near the centre. */
 const PIXEL_SUBSAMPLES = 32;
 
+/** The distance from the centre, px, within which a pixel's share is sub-sampled. */
+const SUBSAMPLED_WITHIN_PX = 3;
+
 /**
  * ∫ PSF dA over the disc of radius ½ px about the source, px² × sr⁻¹, by Simpson's rule in ln r:
  * the CIE function's core is far narrower than a pixel, so it is integrated radially rather than
@@ -446,15 +449,33 @@ function centreDiscEnergy(psf: (dPx: number) => number): number {
  * The encircled energy at {@link FIT_RADII_PX} of a view's spread function as its pixels hold it:
  * each pixel's share integrated over its square (sub-sampled within 3 px of the centre; the centre
  * pixel's inscribed disc taken in closed form by radial quadrature), small-angle.
+ *
+ * @remarks
+ * Each spread value is formed once for the four mirror images that take it, and summed where and
+ * in the order each was (lane perf-long-tasks-3: at high its 81,000 evaluations, and a closure a
+ * radius at each pixel, held the renderer's first frame 20 to 90 ms on a pod), so the sums are the
+ * same to the bit: `Math.hypot` and so the spread are even in each coordinate, and a grid
+ * coordinate's mirror image is its negation exactly (each a small dyadic fraction).
  */
 export function spreadPixelEE(role: ViewRole, radPerPx: number, eye: EyeObserver): number[] {
   const spread = glareSpreadFunction(role, eye);
   const psf = (dPx: number): number => spread(dPx * radPerPx);
   const area = radPerPx * radPerPx;
   const disc = centreDiscEnergy(psf) * area;
-  const maxR = FIT_RADII_PX[FIT_RADII_PX.length - 1] ?? 0;
+  const radii = FIT_RADII_PX;
+  const maxR = radii[radii.length - 1] ?? 0;
   const reach = Math.ceil(maxR);
-  const sums = FIT_RADII_PX.map(() => 0);
+  const sums = radii.map(() => 0);
+  const n = PIXEL_SUBSAMPLES;
+  // The sub-sampled pixels lie within `near` pixels of the centre on each axis, their sub-samples
+  // on a grid of `subsamples` a side, whose index i and its mirror image subsamples − 1 − i fold
+  // onto one; the far pixels' values fold onto |i| and |j|. NaN: not yet formed.
+  const near = Math.ceil(SUBSAMPLED_WITHIN_PX) - 1;
+  const subsamples = (2 * near + 1) * n;
+  const folded = subsamples / 2;
+  const nearValues = new Float64Array(folded * folded).fill(Number.NaN);
+  const farSide = reach + 1;
+  const farValues = new Float64Array(farSide * farSide).fill(Number.NaN);
   for (let j = -reach; j <= reach; j += 1) {
     for (let i = -reach; i <= reach; i += 1) {
       const d = Math.hypot(i, j);
@@ -462,17 +483,25 @@ export function spreadPixelEE(role: ViewRole, radPerPx: number, eye: EyeObserver
         continue;
       }
       let energy = 0;
-      if (d < 3) {
-        const n = PIXEL_SUBSAMPLES;
+      if (d < SUBSAMPLED_WITHIN_PX) {
         for (let b = 0; b < n; b += 1) {
+          const y = j - 0.5 + (b + 0.5) / n;
+          const rowIndex = (j + near) * n + b;
+          const row = Math.min(rowIndex, subsamples - 1 - rowIndex);
           for (let a = 0; a < n; a += 1) {
             const x = i - 0.5 + (a + 0.5) / n;
-            const y = j - 0.5 + (b + 0.5) / n;
             const r = Math.hypot(x, y);
             if (i === 0 && j === 0 && r < 0.5) {
               continue;
             }
-            energy += psf(r);
+            const columnIndex = (i + near) * n + a;
+            const at = row * folded + Math.min(columnIndex, subsamples - 1 - columnIndex);
+            let value = nearValues[at] ?? Number.NaN;
+            if (Number.isNaN(value)) {
+              value = psf(r);
+              nearValues[at] = value;
+            }
+            energy += value;
           }
         }
         energy *= area / (n * n);
@@ -480,13 +509,19 @@ export function spreadPixelEE(role: ViewRole, radPerPx: number, eye: EyeObserver
           energy += disc;
         }
       } else {
-        energy = psf(d) * area;
+        const at = Math.abs(j) * farSide + Math.abs(i);
+        let value = farValues[at] ?? Number.NaN;
+        if (Number.isNaN(value)) {
+          value = psf(d);
+          farValues[at] = value;
+        }
+        energy = value * area;
       }
-      FIT_RADII_PX.forEach((r, k) => {
-        if (d <= r) {
+      for (let k = 0; k < radii.length; k += 1) {
+        if (d <= (radii[k] ?? 0)) {
           sums[k] = (sums[k] ?? 0) + energy;
         }
-      });
+      }
     }
   }
   return sums;

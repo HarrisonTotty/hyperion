@@ -23,6 +23,7 @@
 
 import type { SkyStars } from "@hyperion/protocol";
 
+import { nextTask } from "../../lib/nextTask";
 import type { RenderEngine } from "../engine/types";
 import {
   type BakedCube,
@@ -60,24 +61,6 @@ export const SKY_BAKE_SLICE_MS = 6;
 /** Runs `task` in a task of its own, after what the page has queued (a frame among them). */
 export type BakeTaskScheduler = (task: () => void) => void;
 
-/**
- * The page's scheduler: a message on a channel of its own, which a hidden page does not throttle as
- * it throttles timers.
- */
-function nextTask(task: () => void): void {
-  const channel = new MessageChannel();
-  channel.port1.addEventListener(
-    "message",
-    () => {
-      channel.port1.close();
-      task();
-    },
-    { once: true },
-  );
-  channel.port1.start();
-  channel.port2.postMessage(null);
-}
-
 /** One cube and the views that draw it. */
 interface Entry {
   readonly stars: SkyStars;
@@ -111,7 +94,7 @@ function fits(held: Pick<Entry, "stars" | "baked">, request: CubeRequest): boole
 
 /** The options of a cache, for the tests. */
 export interface SkyCubeCacheOptions {
-  /** Runs the bake steps' tasks; a channel's message by default. */
+  /** Runs the bake steps' tasks; `nextTask`, a channel's message, by default. */
   readonly schedule?: BakeTaskScheduler;
   /** The clock a task's steps are timed by, ms; `performance.now` by default. */
   readonly now?: () => number;

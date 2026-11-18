@@ -40,6 +40,7 @@ import type { AtmosphereLeversOverride } from "../../../../preload/api";
 import type { BodyIdHex, UniverseTime } from "@hyperion/protocol";
 
 import { norm } from "../../geometry/vec3";
+import { untilNextTask } from "../../lib/nextTask";
 import {
   ATMOSPHERE_COMPOSITE_PASS,
   type AtmosphereCamera,
@@ -1078,6 +1079,11 @@ export class PhotorealRenderer {
     return this.#making;
   }
 
+  /** Whether a dispose, or a restore since `generation`, has abandoned a making under way. */
+  #abandoned(generation: number): boolean {
+    return this.#disposed || generation !== this.#generation;
+  }
+
   async #make(
     size: ViewSize,
     setting: QualitySetting,
@@ -1086,16 +1092,29 @@ export class PhotorealRenderer {
     generation: number,
     levers: AtmosphereLeversOverride | undefined,
   ): Promise<void> {
+    // The making's own work, its bloom kernel's fit and then its pipelines' creation, each in a
+    // task after the frame that asks for it (lane perf-long-tasks-3): on a pod the two held that
+    // frame 80 to 130 ms of its 220. Its frames draw the wireframe until it is made, as they do
+    // while its pipelines compile.
+    await untilNextTask();
+    if (this.#abandoned(generation)) {
+      return;
+    }
+    const radPx = radPerPx(camera, { widthPx: size.widthPx, heightPx: size.heightPx });
+    const bloomFit = bloomKernel(
+      SETTINGS[setting].photoreal.bloom,
+      role,
+      radPx,
+      DEFAULT_EYE_OBSERVER,
+    );
+    await untilNextTask();
+    if (this.#abandoned(generation)) {
+      return;
+    }
     const engine = this.#engine;
     const triangle = fullScreenTriangle(engine, `${this.#name} tonemap triangle`);
     const quad = engine.createMesh({ ...WIREFRAME_MESHES.quad, name: `${this.#name} sprite quad` });
-    const radPx = radPerPx(camera, { widthPx: size.widthPx, heightPx: size.heightPx });
-    const making = BloomChain.create(
-      engine,
-      this.#name,
-      size,
-      bloomKernel(SETTINGS[setting].photoreal.bloom, role, radPx, DEFAULT_EYE_OBSERVER),
-    );
+    const making = BloomChain.create(engine, this.#name, size, bloomFit);
     let tonemap: MaterialHandle;
     let overlayDepth: MaterialHandle;
     let sprite: MaterialHandle;
@@ -1219,7 +1238,7 @@ export class PhotorealRenderer {
     // A restore or a dispose while this was compiling abandons it: its handles are the lost
     // device's, or nobody's, and are released (plan R11, R11.T10.b: a still's renderer is made,
     // and may be disposed, at each still).
-    if (this.#disposed || generation !== this.#generation) {
+    if (this.#abandoned(generation)) {
       bloom.dispose();
       for (const material of [
         tonemap,
