@@ -410,6 +410,11 @@ export interface LiveFrameTerrainInput {
   readonly occluderSlopePx: number;
   /** The frame's monotonic time, ms. */
   readonly nowMs: number;
+  /**
+   * The tile of a still the frame draws (plan R11, R11.T10.e.2; `TerrainViewFrameInput.tile`), its
+   * clusters culled by the tile's frustum; absent, the view's whole.
+   */
+  readonly tile?: TerrainViewFrameInput["tile"];
 }
 
 /** No body's first index: a frame drawn forward. */
@@ -518,7 +523,7 @@ export class LiveFrameTerrain implements FrameTerrain {
     bodies: ReadonlyArray<LitBodyInput>,
     occlusion?: FrameOcclusion,
   ): ReadonlyArray<DrawItem> {
-    const { view, camera, presentedPx, selectionPx, exposureScale, occluderSlopePx, nowMs } =
+    const { view, camera, presentedPx, selectionPx, exposureScale, occluderSlopePx, nowMs, tile } =
       this.#input;
     const byId = new Map(bodies.map((body) => [body.id, body]));
     const draws: DrawItem[] = [];
@@ -575,6 +580,7 @@ export class LiveFrameTerrain implements FrameTerrain {
         takesCascades: index === cascades,
         nowMs,
         ...(occlusion === undefined ? {} : { occlusion }),
+        ...(tile === undefined ? {} : { tile }),
       });
       if (frame === null) {
         continue;

@@ -189,10 +189,26 @@ fn to_view(v : vec3f) -> vec3f {
   return (frame.viewRotation * vec4f(v, 0.0)).xyz;
 }
 
-// The ray through a point of the view, px, in view space (looking down −z), unit.
+// The ray through a point of the image, px, in view space (looking down −z), unit: the point less
+// the tile's origin is the output's, and the projection's third column holds M's off-axis terms
+// (plan R11, R11.T10.e.2), so that a still's tile takes the still's ray; both 0 for every view's
+// frame, whose ray is as it was, bit for bit.
 fn view_ray(px : vec2f) -> vec3f {
-  let ndc = vec2f(px.x / frame.viewport.x * 2.0 - 1.0, 1.0 - px.y / frame.viewport.y * 2.0);
-  return normalize(vec3f(ndc.x / frame.clipProjection[0][0], ndc.y / frame.clipProjection[1][1], -1.0));
+  let at = px - frame.tile.xy;
+  let ndc = vec2f(at.x / frame.viewport.x * 2.0 - 1.0, 1.0 - at.y / frame.viewport.y * 2.0);
+  return normalize(vec3f(
+    (ndc.x + frame.clipProjection[2][0]) / frame.clipProjection[0][0],
+    (ndc.y + frame.clipProjection[2][1]) / frame.clipProjection[1][1],
+    -1.0,
+  ));
+}
+
+// The centre of the image's pixel the fragment at `position` (the output's px) shades: its pixel of
+// the image, the tile's origin added (plan R11, R11.T10.e.2), whatever its sample's sub-pixel
+// offset, so that a disc stays on the image's pixels; the fragment's own centre for every view's
+// frame, bit for bit.
+fn image_pixel_centre(position : vec2f) -> vec2f {
+  return floor(position + frame.tile.xy) + 0.5;
 }
 
 // The body as one fragment sees it, in view space and units of D.
@@ -1261,15 +1277,17 @@ struct DiscPixel {
   drawn : bool,
 }
 
-// The pixel whose centre is `position` (the fragment's, px), as the first draw (`edge_pass` 0, the
-// pixels the body covers wholly, opaque with the meter class) or the second (1, the limb's,
-// premultiplied by their coverage) leaves it; not drawn where the draw has none of it.
-fn disc_pixel(position : vec2f, edge_pass : u32) -> DiscPixel {
+// The image's pixel of the fragment at `position` (its own, px of the output; the image's pixel
+// centre, `image_pixel_centre`), as the first draw (`edge_pass` 0, the pixels the body covers
+// wholly, opaque with the meter class) or the second (1, the limb's, premultiplied by their
+// coverage) leaves it; not drawn where the draw has none of it.
+fn disc_pixel(fragment : vec2f, edge_pass : u32) -> DiscPixel {
   var none : DiscPixel;
   none.colour = vec4f(0.0);
   none.drawn = false;
   let body = body_of();
   let counts = disc_row(3u);
+  let position = image_pixel_centre(fragment);
   let pixel = floor(position);
   if (dot(body.centre, view_ray(pixel + 0.5)) <= 0.0) {
     return none;

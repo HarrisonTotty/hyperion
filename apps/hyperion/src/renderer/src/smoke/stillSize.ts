@@ -78,13 +78,17 @@ function through(xNdc: number, yNdc: number, size: ViewSize): Vec3 {
   return normalise(vec3(xNdc / s, yNdc / (s * (size.widthPx / size.heightPx)), -1));
 }
 
-/** The view's scene, the same at any size: the body, the sprites' and the host's directions. */
-const BODY_DIRECTION = through(-0.45, 0.2, VIEW_SIZE);
-const HOST_DIRECTION = through(0.5, -0.3, VIEW_SIZE);
+/**
+ * The view's scene, the same at any size: the body, the sprites' and the host's directions, off the
+ * view's axis, and on a 2 × 2-tiled still's seams at twice its size (x 128 px, y 70 px): the body
+ * and a sprite across its column seam, the host disc and another sprite across its row seam.
+ */
+const BODY_DIRECTION = through(0.28, 0.45, VIEW_SIZE);
+const HOST_DIRECTION = through(-0.5, 0, VIEW_SIZE);
 const SPRITE_DIRECTIONS: ReadonlyArray<Vec3> = [
-  through(0.12, 0.55, VIEW_SIZE),
-  through(0.61, 0.43, VIEW_SIZE),
-  through(-0.33, -0.52, VIEW_SIZE),
+  through(0.28, -0.5, VIEW_SIZE),
+  through(-0.2, 0, VIEW_SIZE),
+  through(0.6, 0.6, VIEW_SIZE),
 ];
 
 /**
@@ -355,5 +359,74 @@ export async function checkLargerStill(checks: Checks, engine: RenderEngine): Pr
       sprites.every(({ found }) => found.light > 0) &&
       spriteOff <= TOLERANCE_PX.sprite,
     `body ${offPx(body, bodyAt).toFixed(4)} px off its own still's, ${offPx(body, centreAt).toFixed(4)} px off its centre's projection (${radiusPx.toFixed(1)} px radius), host disc ${offPx(host, hostAt).toFixed(4)} px off, sprites at most ${spriteOff.toFixed(4)} px off`,
+  );
+}
+
+/**
+ * The tile limit at which the still at twice the view's size, 200 × 140 px, is cut into 2 × 2
+ * tiles, its seams at x 128 px and y 70 px.
+ */
+const TWO_BY_TWO_LIMIT_PX = 128;
+
+/**
+ * The most a texel of the tiled still may differ from the untiled one's, relative to the larger:
+ * two units in the last place of `rgba16float`'s 11-bit significand, 2⁻⁹. The tiles' M · P differs
+ * from P by the single `f32` rounding of its entries (the projection test's tolerance, under
+ * 10⁻⁵ px here), which moves a pixel's rays by far less than a texel's own rounding.
+ */
+const TILED_RELATIVE_TOLERANCE = 2 ** -9;
+
+/** The texels' differences: the largest relative one, and how many pass the tolerance. */
+function texelDifferences(
+  a: Float32Array,
+  b: Float32Array,
+): { readonly largest: number; readonly over: number } {
+  let largest = 0;
+  let over = 0;
+  for (let i = 0; i < a.length; i += 1) {
+    if (i % 4 === 3) {
+      continue;
+    }
+    const x = a[i] ?? Number.NaN;
+    const y = b[i] ?? Number.NaN;
+    const larger = Math.max(Math.abs(x), Math.abs(y));
+    const relative = larger === 0 ? 0 : Math.abs(x - y) / larger;
+    if (!(relative <= TILED_RELATIVE_TOLERANCE)) {
+      over += 1;
+    }
+    largest = Math.max(largest, Number.isNaN(relative) ? Number.POSITIVE_INFINITY : relative);
+  }
+  return { largest, over };
+}
+
+/**
+ * Part 28's tiled still (R11.T10.e.2): the still at twice the view's size, 2 × 2-tiled through each
+ * tile's M · P and its origin, against the same still drawn as one tile, texel for texel.
+ */
+export async function checkTiledStill(checks: Checks, engine: RenderEngine): Promise<void> {
+  const whole = await takeViewStill(engine, {
+    stillScale: STILL_SCALE,
+    tileLimitPx: 8192,
+    samples: 1,
+  });
+  const tiled = await takeViewStill(engine, {
+    stillScale: STILL_SCALE,
+    tileLimitPx: TWO_BY_TWO_LIMIT_PX,
+    samples: 1,
+  });
+  const comparable =
+    whole.outcome === "saved" &&
+    tiled.outcome === "saved" &&
+    whole.tiles === 1 &&
+    tiled.tiles === 4 &&
+    whole.hdr.length > 0 &&
+    whole.hdr.length === tiled.hdr.length;
+  const { largest, over } = comparable
+    ? texelDifferences(whole.hdr, tiled.hdr)
+    : { largest: Number.NaN, over: Number.NaN };
+  checks.check(
+    "R11.T10.e a 2 × 2-tiled still equals an untiled still of the same size within the projection test's tolerance",
+    comparable && over === 0,
+    `${whole.outcome} in ${String(whole.tiles)} tile, ${tiled.outcome} in ${String(tiled.tiles)}; ${String(over)} channels over ${TILED_RELATIVE_TOLERANCE.toExponential(2)}, the largest relative difference ${largest.toExponential(3)}`,
   );
 }

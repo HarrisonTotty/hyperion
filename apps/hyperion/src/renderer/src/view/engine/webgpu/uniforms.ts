@@ -42,8 +42,11 @@ const LAYOUT: Readonly<Record<string, { readonly size: number; readonly align: n
   mat4x4f: { size: 64, align: 16 },
 };
 
-/** The `Frame` block's size: two `mat4x4f`, then a `vec4f` (`view/shaders/frame.wgsl`). */
-export const FRAME_BYTES = 144;
+/**
+ * The `Frame` block's size: two `mat4x4f`, then two `vec4f` (`view/shaders/frame.wgsl`): the
+ * viewport, and the tile's origin (plan R11, R11.T10.e.2).
+ */
+export const FRAME_BYTES = 160;
 
 /** The member a material's `Draw` begins with, the draw's offset from the camera. */
 export const OFFSET_MEMBER: UniformSpec = { name: "offsetFromCameraM", type: "vec3f" };
@@ -188,6 +191,11 @@ export function packFrame(
   block.set(frame.viewRotation.subarray(0, 16), 0);
   block.set(frame.projection.subarray(0, 16), 16);
   block.set([size.widthPx, size.heightPx, 1 / size.widthPx, 1 / size.heightPx], 32);
+  // A still's tile's origin (R11.T10.e.2); 0, as the block was made, for every other frame.
+  const origin = "tileOriginPx" in frame ? frame.tileOriginPx : undefined;
+  if (origin !== undefined) {
+    block.set(origin, 36);
+  }
   return block;
 }
 

@@ -108,6 +108,7 @@ import { DECORATION_TWIN_KERNEL } from "../surface/decoration/decorationTwin";
 import { DETAIL_KERNELS } from "../surface/decoration/detailTextureBake";
 import { OVERLAY_SCENE_DEPTH_MATERIAL } from "../photoreal/overlayDepth";
 import { TONEMAP_MATERIAL } from "../post/tonemap";
+import { STILL_TILE_FIRST_MATERIAL } from "../stills/stillAccumulate";
 import { BAKE_KERNELS, BAKE_SPLAT } from "../sky/bake";
 import { BAND_MATERIAL } from "../sky/band";
 import { CUBE_DISPLAY_MATERIAL, CUBE_HDR_MATERIAL } from "../sky/cubeLayer";
@@ -233,6 +234,9 @@ const POST_ENTRIES: ReadonlyArray<CatalogueEntry> = [
   { kind: "material", spec: TONEMAP_MATERIAL },
   // The scene's depth into the symbology's pass (plan R14, R14.T1.e).
   { kind: "material", spec: OVERLAY_SCENE_DEPTH_MATERIAL, targets: ["canvas"] },
+  // A still's tiles into its assembled image (plan R11, R11.T10.e.2); its additive form is the same
+  // WGSL.
+  { kind: "material", spec: STILL_TILE_FIRST_MATERIAL },
 ];
 
 /**

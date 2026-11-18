@@ -36,9 +36,11 @@ fn vertexMain(@location(0) position: vec3f) -> BandVarying {
 @fragment
 fn fragmentMain(v: BandVarying) -> @location(0) vec4f {
   // The view ray through the pixel, right-handed, looking along −z.
+  // The projection's third column holds a still's tile's off-axis terms (plan R11, R11.T10.e.2),
+  // 0 for every view's frame.
   let ray = normalize(vec3f(
-    v.ndc.x / frame.clipProjection[0][0],
-    v.ndc.y / frame.clipProjection[1][1],
+    (v.ndc.x + frame.clipProjection[2][0]) / frame.clipProjection[0][0],
+    (v.ndc.y + frame.clipProjection[2][1]) / frame.clipProjection[1][1],
     -1.0,
   ));
   let rotation = mat3x3f(

@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { vec3 } from "../../geometry/vec3";
+import { R05_EARTH_REFERENCE } from "../atmosphere/earth";
+import { AtmosphereTables } from "../atmosphere/tables";
 import { countingRenderEngine, type CountingRenderEngine } from "../../test/countingRenderEngine";
 import {
   type FakeStillTerrainSession,
@@ -28,7 +30,8 @@ import { formatNumber } from "../../lib/format";
 import { runStillJob, type StillRenderer, type StillScene } from "../stills/stillJob";
 import { STILL_MAX_SIDE_PX, STILL_TERRAIN_STREAMING } from "../stills/stillLabel";
 import { STILL_TERRAIN_VIEW_ID } from "../stills/stillTerrain";
-import { planTiles } from "../stills/stillPlan";
+import { STILL_TILE_ADD_MATERIAL, STILL_TILE_FIRST_MATERIAL } from "../stills/stillAccumulate";
+import { planTiles, tileProjection } from "../stills/stillPlan";
 import { TONEMAP_MATERIAL } from "../post/tonemap";
 import { timedPass } from "../../test/passTimes";
 import {
@@ -39,7 +42,6 @@ import {
   PhotorealStillRenderer,
   type StillFrameAsk,
   PhotorealStills,
-  STILL_ACCUMULATE_MATERIAL,
   STILL_SAMPLES,
   STILL_UNAVAILABLE,
   stillJitterPx,
@@ -438,9 +440,10 @@ describe("the photorealistic still renderer (R11.T10.b)", () => {
     const made = { ...engine.counts };
     submitAll(renderer);
     expect([
-      engine.compiles.some(
-        ({ name, targets }) =>
-          name === STILL_ACCUMULATE_MATERIAL.name && targets[0] === "rgba16float",
+      [STILL_TILE_FIRST_MATERIAL, STILL_TILE_ADD_MATERIAL].every((spec) =>
+        engine.compiles.some(
+          ({ name, targets }) => name === spec.name && targets[0] === "rgba16float",
+        ),
       ),
       engine.compiles.some(
         ({ name, targets }) => name === TONEMAP_MATERIAL.name && targets[0] === "rgba8unorm",
@@ -526,44 +529,117 @@ describe("the photorealistic still renderer (R11.T10.b)", () => {
     renderer.dispose();
   });
 
-  it("orders its units as samples of the whole still, then its bloom, then its tone mapping", async () => {
+  it("orders its units as each sample's tiles, sample by sample, then its bloom, then its tone mapping (R11.T10.e.2)", async () => {
     const engine = await countingRenderEngine();
     const renderer = await prepared(engine);
-    expect(renderer.units).toEqual(["scene 0", "scene 0", "scene 0", "bloom 0", "tonemap 0"]);
+    const tiles = ["scene 0", "scene 1", "scene 2", "scene 3"];
+    expect(renderer.units).toEqual([...tiles, ...tiles, ...tiles, "bloom 0", "tonemap 0"]);
     renderer.dispose();
   });
 
-  it("draws the first sample through P itself and the later ones jittered, accumulating each at 1 ÷ n with the first's meter class", async () => {
+  it("draws each tile through its M · P from its origin, the first sample's unmoved and the later ones jittered (R11.T10.e.2)", async () => {
     const engine = await countingRenderEngine();
     const renderer = await prepared(engine);
     const before = engine.targetFrames.length;
     submitAll(renderer);
-    const frames = engine.targetFrames.slice(before);
-    const skies = frames.filter((frame) => frame.label === "sky");
-    const p = perspectiveReversedInfinite(FOV_X_RAD, SIZE.widthPx / SIZE.heightPx, NEAR_PLANE_M);
-    const accumulations = stillPasses(engine).filter(
-      (frame) => frame.label === "still accumulation",
-    );
+    const skies = engine.targetFrames.slice(before).filter((frame) => frame.label === "sky");
+    const tiling = planTiles(SIZE, 64, "high");
+    const drawn = { widthPx: 64, heightPx: 35 };
+    const projectionOf = (x0Px: number, y0Px: number): number[] =>
+      Array.from(
+        tileProjection(FOV_X_RAD, SIZE, {
+          column: 0,
+          row: 0,
+          rect: { x0Px, y0Px, x1Px: x0Px + 64, y1Px: y0Px + 35 },
+          texture: drawn,
+          bytesPerRow: 256,
+        }),
+      );
+    const [dx, dy] = stillJitterPx(1);
+    const last = tiling.tiles[3];
     expect([
       skies.length,
-      Array.from(skies[0]?.projection ?? []),
-      Array.from(skies[1]?.projection ?? []).map((m, i) => i === 8 || i === 9 || m === p[i]),
-      accumulations.map((frame) => [
-        frame.colourFrom !== undefined,
-        frame.colourLoad ?? "clear",
-        frame.draws.map((draw) => draw.uniforms["levelWeight"]?.[0]),
-      ]),
+      skies.slice(0, 4).map((frame) => [frame.tileOriginPx, Array.from(frame.projection)]),
+      [skies[7]?.tileOriginPx, Array.from(skies[7]?.projection ?? [])],
     ]).toEqual([
-      3,
-      Array.from(p),
-      Array.from({ length: 16 }, () => true),
+      12,
+      tiling.tiles.map(({ rect }) => [[rect.x0Px, rect.y0Px], projectionOf(rect.x0Px, rect.y0Px)]),
       [
-        [true, "clear", [Math.fround(1 / 3 - 1)]],
-        [false, "load", [Math.fround(1 / 3)]],
-        [false, "load", [Math.fround(1 / 3)]],
+        [(last?.rect.x0Px ?? 0) + dx, (last?.rect.y0Px ?? 0) + dy],
+        projectionOf((last?.rect.x0Px ?? 0) + dx, (last?.rect.y0Px ?? 0) + dy),
       ],
     ]);
     renderer.dispose();
+  });
+
+  it("adds each tile's rect to the assembled image at 1 ÷ n, the first of each tile with its meter class (R11.T10.e.2)", async () => {
+    const engine = await countingRenderEngine();
+    const renderer = await prepared(engine);
+    submitAll(renderer);
+    const accumulations = stillPasses(engine).filter(
+      (frame) => frame.label === "still accumulation",
+    );
+    const tiling = planTiles(SIZE, 64, "high");
+    const rects = tiling.tiles.map(({ rect }) => ({
+      x: rect.x0Px,
+      y: rect.y0Px,
+      width: rect.x1Px - rect.x0Px,
+      height: rect.y1Px - rect.y0Px,
+    }));
+    expect(
+      accumulations.map((frame) => [
+        frame.scissor,
+        frame.colourLoad,
+        frame.draws.map((draw) => [
+          draw.uniforms["weight"]?.[0],
+          draw.uniforms["first"]?.[0],
+          Array.from(draw.uniforms["origin"] ?? []),
+        ]),
+      ]),
+    ).toEqual(
+      [0, 1, 2].flatMap((k) =>
+        rects.map((rect) => [
+          rect,
+          "load",
+          [[Math.fround(1 / 3), k === 0 ? 1 : 0, [rect.x, rect.y, 0, 0]]],
+        ]),
+      ),
+    );
+    renderer.dispose();
+  });
+
+  it("draws a frame with air whole, in one tile of the still's size, its read-back tiles its own (R11.T10.e.2)", async () => {
+    const engine = await countingRenderEngine();
+    const base = viewFrame();
+    const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, 6.371e6);
+    const frame: PhotorealFrame = {
+      ...base,
+      atmospheres: [
+        {
+          id: aLitBody().body,
+          tables,
+          camera: {
+            positionM: vec3(0, 0, 1e8),
+            orientation: IDENTITY_QUATERNION,
+            fovXRad: FOV_X_RAD,
+            viewport: SIZE,
+          },
+          toBodyFixed: IDENTITY_QUATERNION,
+        },
+      ],
+    };
+    const renderer = new PhotorealStillRenderer(engine, frame, {
+      tileLimitPx: 64,
+      samples: 2,
+      onUnitTimes: () => undefined,
+      onDispose: () => undefined,
+    });
+    expect([renderer.units, renderer.tiling.tiles.length]).toEqual([
+      ["scene 0", "scene 0", "bloom 0", "tonemap 0"],
+      4,
+    ]);
+    renderer.dispose();
+    tables.dispose();
   });
 
   it("tone-maps the assembled image through P into its rgba8 image, its bloom over the whole", async () => {

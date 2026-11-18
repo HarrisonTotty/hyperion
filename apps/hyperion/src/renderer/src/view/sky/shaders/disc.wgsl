@@ -42,7 +42,8 @@ struct DiscVarying {
 fn vertexMain(@location(0) corner: vec3f) -> DiscVarying {
   // A quad over the rectangle that holds the disc's silhouette, outside which the full-view
   // triangle it replaced lit no pixel (R07.T19.e).
-  let px = mix(draw.rect.xy, draw.rect.zw, corner.xy);
+  // The image's pixels less the tile's origin, the output's (plan R11, R11.T10.e.2).
+  let px = mix(draw.rect.xy, draw.rect.zw, corner.xy) - frame.tile.xy;
   let ndc = vec2f(px.x / frame.viewport.x * 2.0 - 1.0, 1.0 - px.y / frame.viewport.y * 2.0);
   // Its depth on the limb's plane, as R07.T9 puts a mesh body's limb: the camera's polar plane of
   // the star's sphere, d cos²ρ along the axis. It holds the limb and lies inside the star along
@@ -50,10 +51,12 @@ fn vertexMain(@location(0) corner: vec3f) -> DiscVarying {
   // body beyond it is hidden. Along the view ray u = (x_ndc ÷ s, y_ndc ÷ (s a), −1) the plane lies
   // at view depth d cos²ρ ÷ (u · axis), so its reversed depth n (u · axis) ÷ (d cos²ρ) is affine on
   // the view and the corners carry it unclamped: where u · axis ≤ 0 the plane is behind the
-  // camera, and the depth clip removes that part, which holds no pixel of the disc.
+  // camera, and the depth clip removes that part, which holds no pixel of the disc. The
+  // projection's third column holds a still's tile's off-axis terms (plan R11, R11.T10.e.2), 0 for
+  // every view's frame.
   let ray = vec3f(
-    ndc.x / frame.clipProjection[0][0],
-    ndc.y / frame.clipProjection[1][1],
+    (ndc.x + frame.clipProjection[2][0]) / frame.clipProjection[0][0],
+    (ndc.y + frame.clipProjection[2][1]) / frame.clipProjection[1][1],
     -1.0,
   );
   let rotation = mat3x3f(
@@ -71,8 +74,8 @@ fn vertexMain(@location(0) corner: vec3f) -> DiscVarying {
 @fragment
 fn fragmentMain(v: DiscVarying) -> @location(0) vec4f {
   let ray = normalize(vec3f(
-    v.ndc.x / frame.clipProjection[0][0],
-    v.ndc.y / frame.clipProjection[1][1],
+    (v.ndc.x + frame.clipProjection[2][0]) / frame.clipProjection[0][0],
+    (v.ndc.y + frame.clipProjection[2][1]) / frame.clipProjection[1][1],
     -1.0,
   ));
   let rotation = mat3x3f(

@@ -45,7 +45,8 @@ struct DiscVarying {
 @vertex
 fn vertexMain(@location(0) corner : vec3f) -> DiscVarying {
   let rect = disc_row(0u);
-  let px = mix(rect.xy, rect.zw, corner.xy);
+  // The image's pixels less the tile's origin, the output's (plan R11, R11.T10.e.2).
+  let px = mix(rect.xy, rect.zw, corner.xy) - frame.tile.xy;
   let ndc = vec2f(px.x / frame.viewport.x * 2.0 - 1.0, 1.0 - px.y / frame.viewport.y * 2.0);
   var out : DiscVarying;
   out.position = vec4f(ndc, draw.depths[u32(corner.x) + 2u * u32(corner.y)], 1.0);
@@ -59,7 +60,7 @@ fn vertexMain(@location(0) corner : vec3f) -> DiscVarying {
 // direction's texel of the mask in the body-fixed axes, as `smoothMesh.wgsl`'s `surveyed_beneath`.
 fn limb_surveyed(position : vec2f) -> bool {
   let body = body_of();
-  let scaled = normalize(stretch_along(body, view_ray(floor(position) + 0.5)));
+  let scaled = normalize(stretch_along(body, view_ray(image_pixel_centre(position))));
   // From the centre to the ray's nearest point, then back along the ray to the near surface.
   let nearest = dot(scaled, body.scaled_centre) * scaled - body.scaled_centre;
   let h2 = body.radius * body.radius - dot(nearest, nearest);

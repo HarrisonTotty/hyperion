@@ -141,7 +141,7 @@ fn vertexMain(@location(0) grid : vec3f, @builtin(instance_index) instance : u32
 // which has no gutter (`class_map_texel`, the mask's lookup since R10.T10.d).
 fn surveyed_beneath(position : vec2f) -> bool {
   let body = body_of();
-  let hit = hit_spheroid(body, view_ray(floor(position) + 0.5));
+  let hit = hit_spheroid(body, view_ray(image_pixel_centre(position)));
   if (hit.w == 0.0) {
     return false;
   }

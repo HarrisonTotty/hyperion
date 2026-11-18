@@ -25,7 +25,11 @@ import { type ViewId, viewId } from "../camera/state";
 import type { FrameOcclusion } from "../clusters/hzb";
 import type { DrawItem, TextureHandle, ViewSize } from "../engine/types";
 import type { FrameTerrain, FrameVisibility } from "../photoreal/renderer";
-import { type FrameTerrainSource, LiveFrameTerrain } from "../terrain/frameTerrain";
+import {
+  type FrameTerrainSource,
+  LiveFrameTerrain,
+  type LiveFrameTerrainInput,
+} from "../terrain/frameTerrain";
 import type { TerrainViewReport } from "../terrain/session";
 
 /** The view a still's terrain is selected, streamed and drawn for in its view's session. */
@@ -131,8 +135,11 @@ export class StillTerrainView {
   /**
    * The terrain one sample draws: the session's draws for the still's view at the time it is
    * drawn, its figures giving way over the coverage masks taken at the request.
+   *
+   * @param tile - The still's tile the sample draws (R11.T10.e.2), whose frustum its clusters are
+   *   culled by; absent, the still's whole.
    */
-  frameTerrain(): FrameTerrain {
+  frameTerrain(tile?: LiveFrameTerrainInput["tile"]): FrameTerrain {
     const { camera, size, exposureScale, coverage, nowMs } = this.#options;
     const live = new LiveFrameTerrain(this.#session, {
       view: STILL_TERRAIN_VIEW_ID,
@@ -142,6 +149,7 @@ export class StillTerrainView {
       exposureScale,
       occluderSlopePx: this.#occluderSlopePx,
       nowMs: nowMs(),
+      ...(tile === undefined ? {} : { tile }),
     });
     return {
       surveyCoverage: (body) => coverage(body)?.mask ?? null,

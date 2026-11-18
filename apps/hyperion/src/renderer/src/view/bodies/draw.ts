@@ -2008,18 +2008,26 @@ export interface DiscCellFrame {
   readonly projection: Float32Array;
   /** The scene target's size, px: the `discs` pass's output. */
   readonly size: ViewSize;
+  /**
+   * The submission's `tileOriginPx` (plan R11, R11.T10.e.2): a still's tile's origin in the image,
+   * px; (0, 0) where absent.
+   */
+  readonly tileOriginPx?: readonly [number, number];
 }
 
 /**
  * The `Frame` block of `frame.wgsl` for a {@link DiscCellFrame}: two `mat4x4f`, then the output's
- * width and height and their reciprocals.
+ * width and height and their reciprocals, then the tile's origin (R11.T10.e.2) and two zeros.
  */
 export function discCellFrameBlock(frame: DiscCellFrame): Float32Array {
-  const block = new Float32Array(36);
+  const block = new Float32Array(40);
   block.set(frame.viewRotation.subarray(0, 16), 0);
   block.set(frame.projection.subarray(0, 16), 16);
   const { widthPx, heightPx } = frame.size;
   block.set([widthPx, heightPx, 1 / widthPx, 1 / heightPx], 32);
+  if (frame.tileOriginPx !== undefined) {
+    block.set(frame.tileOriginPx, 36);
+  }
   return block;
 }
 

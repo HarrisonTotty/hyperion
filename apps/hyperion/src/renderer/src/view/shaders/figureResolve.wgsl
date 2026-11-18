@@ -15,7 +15,7 @@ fn figure_colour(position : vec2f) -> vec4f {
   let body = body_of();
   let counts = disc_row(3u);
   // One call of the shading (`CellSamples`' note).
-  let sum = pixel_cells(body, position, u32(counts.x));
+  let sum = pixel_cells(body, image_pixel_centre(position), u32(counts.x));
   let light = select(vec3f(0.0), sum.radiance / sum.coverage, sum.coverage > 0.0);
   // The pure-pixel class: lit where every shaded point is, unlit where none is, `other` where
   // they are mixed or no star lights the body.

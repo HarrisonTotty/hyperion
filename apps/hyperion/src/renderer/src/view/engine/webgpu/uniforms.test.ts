@@ -78,7 +78,25 @@ describe("packed uniforms", () => {
     );
     expect([...block.subarray(0, 16)]).toEqual([...viewRotation]);
     expect([...block.subarray(16, 32)]).toEqual([...projection]);
-    expect([...block.subarray(32)]).toEqual([4, 2, 0.25, 0.5]);
+    expect([...block.subarray(32)]).toEqual([4, 2, 0.25, 0.5, 0, 0, 0, 0]);
+  });
+
+  it("put a still's tile's origin after the viewport, and none for every other frame (R11.T10.e.2)", () => {
+    const frame = {
+      label: "f",
+      viewRotation: new Float32Array(16),
+      projection: new Float32Array(16),
+      draws: [],
+      postProcesses: [],
+    };
+    const size = { widthPx: 4, heightPx: 2 };
+    expect([
+      [...packFrame({ ...frame, tileOriginPx: [2048.25, 1024.5] }, size).subarray(36)],
+      [...packFrame(frame, size).subarray(36)],
+    ]).toEqual([
+      [2048.25, 1024.5, 0, 0],
+      [0, 0, 0, 0],
+    ]);
   });
 });
 

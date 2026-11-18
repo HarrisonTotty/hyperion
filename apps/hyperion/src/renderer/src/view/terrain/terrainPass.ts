@@ -178,6 +178,7 @@ import {
 } from "./cache";
 import { CoarseFineHolds, TransitionFades } from "./coarseFineHolds";
 import { frustumOf, horizonCone, inFrustum } from "./cull";
+import { type StillTile, tileFrustum } from "../stills/stillPlan";
 import { vertexSpacing } from "./cube";
 import { drawsCells, pixelAngleRad } from "./handover";
 import { TERRAIN_SHADOW_PASS_LABEL, terrainMaterialSpec } from "./gpu/material";
@@ -542,6 +543,13 @@ export interface TerrainFrameInput {
    * cluster its camera's tests keep. Read where `GeometrySettings.occlusion` is `hzb`.
    */
   readonly occlusion?: FrameOcclusion;
+  /**
+   * The tile of a still this frame draws (plan R11, R11.T10.e.2; `stills/stillPlan.ts`), its rect
+   * on the still opened by `marginPx`: its lit pass on the cluster path culls by the tile's frustum
+   * (`tileFrustum`) in place of its camera's, so that each tile draws its own clusters, its
+   * {@link TerrainFrameInput.view} the whole still's. Absent, the camera's whole frustum.
+   */
+  readonly tile?: { readonly tile: StillTile; readonly marginPx: number };
 }
 
 /** One view-frame's shadow cascades (plan R10, R10.T9.b), as {@link TerrainPass.drawFor} drew them. */
@@ -6876,11 +6884,17 @@ export class TerrainPass {
     strides: boolean,
     overToleranceRad: number,
   ): CameraCullPass {
-    const { view } = input;
-    const frustum = frustumOf(
-      { orientation: view.orientation, fovXRad: view.fovXRad, viewport: view.viewport },
-      OVERLAY_CULL_MARGIN_RAD,
-    );
+    const { view, tile } = input;
+    const camera = {
+      orientation: view.orientation,
+      fovXRad: view.fovXRad,
+      viewport: view.viewport,
+    };
+    // A still's tile culls by its own rect on the still (R11.T10.e.2), the view the whole still's.
+    const frustum =
+      tile === undefined
+        ? frustumOf(camera, OVERLAY_CULL_MARGIN_RAD)
+        : tileFrustum(camera, tile.tile, tile.marginPx);
     const { occluderRadiusM } = horizonCone(
       this.#planet,
       rotateToBodyFixed(view.rotation, view.cameraM),

@@ -466,6 +466,13 @@ export interface FrameSubmission {
    * Ignored where the frame has post-processes.
    */
   readonly scissor?: TexelRect;
+  /**
+   * The image's pixel, x and y, at the output's top left (plan R11, R11.T10.e.2): a still's tile's
+   * origin in the still, its sample's sub-pixel offset with it, drawn through
+   * {@link FrameSubmission.projection} the tile's off-axis M · P; reaches the shaders as
+   * `frame.tile.xy`. Absent, (0, 0), as for every view's frame.
+   */
+  readonly tileOriginPx?: readonly [number, number];
 }
 
 /** One post-process in a frame, with its per-frame values, shaped like a {@link DrawItem}. */

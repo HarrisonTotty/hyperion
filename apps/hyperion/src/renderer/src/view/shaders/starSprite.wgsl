@@ -56,7 +56,8 @@ fn vertexMain(
   let at = place.xy;
   // The star's own pixel and three on each side.
   let first = floor(at) - vec2f(floor(PSF_QUAD_PX * 0.5));
-  let px = first + corner.xy * PSF_QUAD_PX;
+  // The image's pixels less the tile's origin, the output's (plan R11, R11.T10.e.2).
+  let px = first + corner.xy * PSF_QUAD_PX - frame.tile.xy;
   let ndc = vec2f(px.x / frame.viewport.x * 2.0 - 1.0, 1.0 - px.y / frame.viewport.y * 2.0);
   var out: SpriteVarying;
   // The sprite's own depth: 0 (infinity under reversed-Z) for a star.
@@ -69,7 +70,10 @@ fn vertexMain(
 fn fragmentMain(v: SpriteVarying) -> @location(0) vec4f {
   let at = sprites[v.sprite * 2u].xy;
   let rgb = sprites[v.sprite * 2u + 1u].xyz;
-  let weight = pixelWeight(v.position.x, at.x) * pixelWeight(v.position.y, at.y);
+  // The image's pixel the fragment shades, the tile's origin added (plan R11, R11.T10.e.2), so that
+  // a sprite stays on the image's pixels whatever a still's sample's offset; its own for a frame.
+  let p = floor(v.position.xy + frame.tile.xy) + 0.5;
+  let weight = pixelWeight(p.x, at.x) * pixelWeight(p.y, at.y);
   // Alpha 1: R01's additive blend scales the colour by the source alpha and keeps the
   // destination's alpha (R07's meter class) whatever this writes.
   return vec4f(agxSprite(rgb * weight), 1.0);

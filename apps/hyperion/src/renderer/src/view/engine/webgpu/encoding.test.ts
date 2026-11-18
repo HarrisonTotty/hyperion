@@ -385,9 +385,9 @@ describe("a chain of targets in one submission (plan R14)", () => {
       ["a:colour", "b:colour", "c:colour"],
       [[16, 8, 4]],
       [
-        [0, 144],
-        [256, 144],
-        [512, 144],
+        [0, 160],
+        [256, 160],
+        [512, 160],
       ],
     ]);
   });

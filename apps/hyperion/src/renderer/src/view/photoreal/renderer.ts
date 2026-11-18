@@ -135,13 +135,11 @@ import type {
   TexelRect,
   TextureHandle,
   ViewSize,
-  WgslMaterialSpec,
 } from "../engine/types";
 import type { KernelPair } from "../engine/kernels";
 import { lightsAt, type PlacedLight } from "../lighting/hostLights";
 import { bloomKernel, bloomThreshold, levelWeight } from "../post/bloom";
 import {
-  BLOOM_UP_MATERIAL,
   BloomChain,
   fullScreenTriangle,
   GLARE_SOURCE_BYTES,
@@ -221,6 +219,7 @@ import type {
   StillSource,
 } from "../stills/stillJob";
 import { isStillSide, type StillRequest } from "../stills/stillLabel";
+import { STILL_TILE_ADD_MATERIAL, STILL_TILE_FIRST_MATERIAL } from "../stills/stillAccumulate";
 import { planTiles, type StillTile, type StillTiling, tileProjection } from "../stills/stillPlan";
 import { stillSizeAt } from "../stills/stillSize";
 import {
@@ -465,6 +464,16 @@ export interface PhotorealFrame {
    * P of the camera and the viewport.
    */
   readonly projection?: Float32Array | undefined;
+  /**
+   * The tile of a still this frame draws (plan R11, R11.T10.e.2): its scene target at `sizePx`,
+   * every pass through {@link PhotorealFrame.projection}, the tile's M · P, with `originPx`, the
+   * image's pixel at the target's top left, its sample's sub-pixel offset with it
+   * (`FrameSubmission.tileOriginPx`); its lit bodies planned at {@link PhotorealFrame.viewport}, the
+   * whole still's, as R06's discs and the sprites are placed. A tile draws in one raster, with no
+   * two-pass occlusion. Absent, as for every view's frame, the frame's own viewport, untiled.
+   */
+  readonly tile?:
+    { readonly sizePx: ViewSize; readonly originPx: readonly [number, number] } | undefined;
   /** R06's draws at infinity, in order: the band, then the baked cube. */
   readonly sky: ReadonlyArray<DrawItem>;
   /** The star sprites' records (stars, and host discs under three pixels), at depth 0. */
@@ -645,6 +654,12 @@ interface OceanCopies {
   /** The scene's colour, made only with refraction. */
   colour: RenderTarget | null;
 }
+
+/**
+ * The `ocean` pass's frame: the scene's rotation and projection, and a still's tile's origin
+ * (plan R11, R11.T10.e.2), which its far and near seas' rays and grid take through M · P.
+ */
+type OceanPassFrame = Pick<FrameSubmission, "viewRotation" | "projection" | "tileOriginPx">;
 
 /** A sea drawn near this frame (R11.T8.c), its draw made once the copies are. */
 interface NearSea {
@@ -1338,9 +1353,10 @@ export class PhotorealRenderer {
     });
   }
 
-  /** Follows the view's size and its bloom kernel's inputs. */
+  /** Follows the view's size, or a still's tile's (R11.T10.e.2), and its bloom kernel's inputs. */
   #follow(resources: Resources, frame: PhotorealFrame): void {
-    const size = { widthPx: frame.viewport.widthPx, heightPx: frame.viewport.heightPx };
+    const drawn = frame.tile?.sizePx ?? frame.viewport;
+    const size = { widthPx: drawn.widthPx, heightPx: drawn.heightPx };
     if (size.widthPx !== resources.size.widthPx || size.heightPx !== resources.size.heightPx) {
       resources.target.resize(size);
       resources.bloom.resize(size);
@@ -1449,6 +1465,8 @@ export class PhotorealRenderer {
         NEAR_PLANE_M,
       );
     const viewRotation = viewRotation4(camera.orientation);
+    // A still's tile's origin in the image, which every pass takes (R11.T10.e.2); none for a frame.
+    const tiled = frame.tile === undefined ? {} : { tileOriginPx: frame.tile.originPx };
     // Each body whose air is drawn lights its surface through it, and is drawn with depth, so that
     // its composite lays the air over its ground (R08.T10.b).
     const atmospheres = frame.atmospheres ?? [];
@@ -1505,6 +1523,7 @@ export class PhotorealRenderer {
       label: SKY_PASS_LABEL,
       viewRotation,
       projection,
+      ...tiled,
       draws: [...frame.sky, ...(stars === null ? [] : [stars])],
       postProcesses: [],
     });
@@ -1516,11 +1535,7 @@ export class PhotorealRenderer {
     this.#bodies.dispatchCells(
       plan,
       (way === "packed" ? this.#cellsFor(plan, way, "plain") : null) ?? resources.discCells,
-      {
-        viewRotation,
-        projection,
-        size: { widthPx: viewport.widthPx, heightPx: viewport.heightPx },
-      },
+      { viewRotation, projection, size: resources.size, ...tiled },
       this.#cellsFor(plan, way, "emissive"),
       this.#cellsFor(plan, way, "air"),
       this.#cellsFor(plan, way, "emissiveAir"),
@@ -1574,6 +1589,7 @@ export class PhotorealRenderer {
             label: PHOTOREAL_PASS_LABELS.bodies,
             viewRotation,
             projection,
+            ...tiled,
             draws: meshes,
             postProcesses: [],
             colourLoad: "load",
@@ -1585,16 +1601,18 @@ export class PhotorealRenderer {
             label: PHOTOREAL_PASS_LABELS.bodies,
             viewRotation,
             projection,
+            ...tiled,
             draws: opaque,
             postProcesses: [],
             colourLoad: "load",
           });
         }
-        this.#figureRaster(figureIds, figureDraws, viewRotation, projection);
+        this.#figureRaster(figureIds, figureDraws, viewRotation, projection, tiled);
         resources.target.render({
           label: PHOTOREAL_PASS_LABELS.figureResolve,
           viewRotation,
           projection,
+          ...tiled,
           draws: [...this.#bodies.figureResolveDraws(plan, figureIds.ids), ...after],
           postProcesses: [],
           colourLoad: "load",
@@ -1608,6 +1626,7 @@ export class PhotorealRenderer {
           label: PHOTOREAL_PASS_LABELS.bodiesLate,
           viewRotation,
           projection,
+          ...tiled,
           draws: late,
           postProcesses: [],
           colourLoad: "load",
@@ -1624,6 +1643,7 @@ export class PhotorealRenderer {
         label: VISIBILITY_RASTER_LABEL,
         viewRotation,
         projection,
+        ...tiled,
         draws: byIds.raster,
         postProcesses: [],
       });
@@ -1635,18 +1655,20 @@ export class PhotorealRenderer {
           label: VISIBILITY_LATE_RASTER_LABEL,
           viewRotation,
           projection,
+          ...tiled,
           draws: late,
           postProcesses: [],
           colourLoad: "load",
         });
       }
       if (figureIds !== null) {
-        this.#figureRaster(figureIds, figureDraws, viewRotation, projection);
+        this.#figureRaster(figureIds, figureDraws, viewRotation, projection, tiled);
       }
       resources.target.render({
         label: VISIBILITY_RESOLVE_LABEL,
         viewRotation,
         projection,
+        ...tiled,
         draws: [
           ...byIds.resolve.map((draw) => this.#withIds(draw, visibility.ids)),
           ...(figureIds === null ? figures : this.#bodies.figureResolveDraws(plan, figureIds.ids)),
@@ -1658,7 +1680,11 @@ export class PhotorealRenderer {
     }
     // Each body's sea over its opaque ground, with its depth, before the painter's sequence and the
     // air composited over it (plan R11, R11.T8.b), its glint past the threshold a glare source.
-    const oceanGlares = this.#drawOceans(resources, frame, plan, bodies, viewRotation, projection);
+    const oceanGlares = this.#drawOceans(resources, frame, plan, bodies, {
+      viewRotation,
+      projection,
+      ...tiled,
+    });
     const glareSources =
       oceanGlares.length === 0 ? frame.glareSources : [...frame.glareSources, ...oceanGlares];
     this.#glareSources = glareSources;
@@ -1666,6 +1692,7 @@ export class PhotorealRenderer {
       label: PHOTOREAL_PASS_LABELS.discs,
       viewRotation,
       projection,
+      ...tiled,
       draws: this.#bodies.draws(plan, frame.hostDraws),
       postProcesses: [],
       colourLoad: "load",
@@ -1832,11 +1859,13 @@ export class PhotorealRenderer {
     draws: ReadonlyArray<DrawItem>,
     viewRotation: Float32Array,
     projection: Float32Array,
+    tiled: Pick<FrameSubmission, "tileOriginPx">,
   ): void {
     figureIds.target.render({
       label: PHOTOREAL_PASS_LABELS.figureIds,
       viewRotation,
       projection,
+      ...tiled,
       draws,
       postProcesses: [],
     });
@@ -1855,7 +1884,13 @@ export class PhotorealRenderer {
     geometry: GeometrySettings,
   ): (FrameOcclusion & { readonly pyramid: DepthPyramid }) | null {
     const kernel = resources.pyramidKernel;
-    if (geometry.occlusion !== "hzb" || frame.terrain === undefined || kernel === null) {
+    // A still's tile draws in one raster: its pyramid's projection would be on the tile's axis.
+    if (
+      geometry.occlusion !== "hzb" ||
+      frame.terrain === undefined ||
+      frame.tile !== undefined ||
+      kernel === null
+    ) {
       this.#pyramid?.dispose();
       this.#pyramid = null;
       return null;
@@ -1903,8 +1938,7 @@ export class PhotorealRenderer {
     frame: PhotorealFrame,
     plan: BodyFramePlan,
     bodies: ReadonlyArray<LitBodyInput>,
-    viewRotation: Float32Array,
-    projection: Float32Array,
+    passFrame: OceanPassFrame,
   ): GlareSource[] {
     const material = resources.ocean;
     const oceans = frame.oceans ?? [];
@@ -2050,13 +2084,12 @@ export class PhotorealRenderer {
         this.#oceanEclipses.delete(id);
       }
     }
-    const nearDraws = this.#nearSeaDraws(resources, nearSeas, cellPx, viewRotation, projection);
+    const nearDraws = this.#nearSeaDraws(resources, nearSeas, cellPx, passFrame);
     draws.push(...nearDraws);
     if (draws.length > 0) {
       resources.target.render({
         label: OCEAN_PASS_LABEL,
-        viewRotation,
-        projection,
+        ...passFrame,
         draws,
         postProcesses: [],
         colourLoad: "load",
@@ -2074,8 +2107,7 @@ export class PhotorealRenderer {
     resources: Resources,
     nearSeas: ReadonlyArray<NearSea>,
     cellPx: number,
-    viewRotation: Float32Array,
-    projection: Float32Array,
+    passFrame: OceanPassFrame,
   ): DrawItem[] {
     const nearMaterial = resources.oceanNear;
     const copyMaterial = resources.oceanDepthCopy;
@@ -2087,15 +2119,13 @@ export class PhotorealRenderer {
       const copies = this.#oceanCopies(resources, refraction);
       copies.depthBits.render({
         label: OCEAN_COPY_PASS_LABEL,
-        viewRotation,
-        projection,
+        ...passFrame,
         draws: [oceanDepthCopyDraw(resources.triangle, copyMaterial, depth)],
         postProcesses: [],
       });
       copies.colour?.render({
         label: OCEAN_COPY_PASS_LABEL,
-        viewRotation,
-        projection,
+        ...passFrame,
         draws: [],
         postProcesses: [],
         colourFrom: resources.target.colour,
@@ -2838,19 +2868,6 @@ const STILL_NAME = "still";
  */
 export const STILL_UNIT_PASSES = { scene: "scene", bloom: "bloom", tonemap: "tonemap" } as const;
 
-/**
- * The accumulation of a still's samples (plan R11, R11.T10.b): R07's bloom upsample (`bloomUp.wgsl`,
- * unchanged), its `coarse` input weighted 0, in an additive form, so that each draw adds its
- * `level`, a sample's HDR colour read texel for texel, at its weight, and the destination's alpha,
- * R07's meter class, is kept.
- */
-export const STILL_ACCUMULATE_MATERIAL: WgslMaterialSpec = {
-  ...BLOOM_UP_MATERIAL,
-  name: "still accumulation",
-  displayName: "STILL ACCUMULATION",
-  blend: "additive",
-};
-
 /** The `NOT AVAILABLE:` causes of a view that gives no still now, with what lifts each. */
 export const STILL_UNAVAILABLE = {
   /**
@@ -2902,19 +2919,38 @@ export function stillJitterPx(k: number): readonly [number, number] {
 }
 
 /**
- * Sample `k`'s projection: `tileProjection` of the still drawn as one tile whose origin is moved
- * by the sample's offset, so that the image moves by it; P itself, bit for bit, for the first.
+ * What one of a still's samples draws of one tile (plan R11, R11.T10.e.2): the image from the
+ * tile's origin moved by the sample's offset, at `drawn`, the still's draw size, through
+ * `tileProjection`, so that the image moves by the offset; P itself, bit for bit, for the first
+ * sample of a still drawn whole.
  */
-function sampleProjection(fovXRad: number, size: ViewSize, k: number): Float32Array {
+function sampleTile(
+  fovXRad: number,
+  still: ViewSize,
+  origin: { readonly x0Px: number; readonly y0Px: number },
+  drawn: ViewSize,
+  k: number,
+): { readonly projection: Float32Array; readonly originPx: readonly [number, number] } {
   const [dx, dy] = stillJitterPx(k);
+  const x0Px = origin.x0Px + dx;
+  const y0Px = origin.y0Px + dy;
   const tile: StillTile = {
     column: 0,
     row: 0,
-    rect: { x0Px: dx, y0Px: dy, x1Px: size.widthPx + dx, y1Px: size.heightPx + dy },
-    texture: size,
-    bytesPerRow: size.widthPx * 4,
+    rect: { x0Px, y0Px, x1Px: x0Px + drawn.widthPx, y1Px: y0Px + drawn.heightPx },
+    texture: drawn,
+    bytesPerRow: drawn.widthPx * 4,
   };
-  return tileProjection(fovXRad, size, tile);
+  return { projection: tileProjection(fovXRad, still, tile), originPx: [x0Px, y0Px] };
+}
+
+/**
+ * How far a still's tile's terrain cull opens its rect, px of the still: the overlay's cull's
+ * margin of 0.01 rad at the still's centre pixel (`terrainPass.ts`' `OVERLAY_CULL_MARGIN_RAD`),
+ * past the `f32` rounding of the planes, and a pixel more for the sample's offset.
+ */
+function tileCullMarginPx(camera: ProjectionCamera, still: ViewSize): number {
+  return 1 + 0.01 / radPerPx(camera, still);
 }
 
 /**
@@ -2984,7 +3020,8 @@ export interface PhotorealStillOptions {
 /** A still renderer's GPU objects, made in its `prepare()`. */
 interface StillResources {
   readonly triangle: MeshHandle;
-  readonly accumulate: MaterialHandle;
+  /** A tile's first sample into the assembled image, and each after it (R11.T10.e.2). */
+  readonly accumulate: { readonly first: MaterialHandle; readonly add: MaterialHandle };
   readonly tonemap: MaterialHandle;
   readonly bloom: BloomChain;
   /** The samples' sum at their weights: the assembled HDR image. */
@@ -3003,21 +3040,25 @@ interface StillResources {
  * `rgba8unorm` image; each tile of the still read back from it through R01's `readTexture`.
  *
  * @remarks
- * It draws at the frame's own size, the view's scene target's, with the frame's own plan inputs, so
- * that every screen-space footprint is the view's, and in one pass rather than tile by tile: R07's
- * disc, point-sprite and host-disc passes place their CPU-made rectangles by `frame.viewport` and
- * rebuild their rays as ndc ÷ P's diagonal, which holds for a centred projection alone, so a tile's
- * off-axis M · P would draw them elsewhere; the tiles are the read-back's (lean, 2026-11-18). A
- * sample's offset moves what is projected through the whole matrix (the figures, R06's sky); the
- * passes placed in pixels keep their own anti-aliasing. The terrain of a body handed over is its own
- * terrain view's (plan R11, R11.T10.e; {@link PhotorealStillOptions.terrain}), drawn by each
- * sample at the time it is drawn. It draws no symbology, meter or histogram.
+ * The frame is the view's made again at the still's size (plan R11, R11.T10.e.1), its plan inputs
+ * the view's, so that every screen-space footprint is the still's pixel's. It is drawn tile by tile
+ * (R11.T10.e.2), each through `tileProjection`'s M · P with its origin in the image
+ * (`PhotorealFrame.tile`), into a scene target of the tiles' largest texture, from which each
+ * tile's rect is added to the assembled image (`stillAccumulate.wgsl`); its terrain's clusters are
+ * culled by the tile's frustum (`tileFrustum`). A frame that draws air is drawn whole, in one tile
+ * of the still's size (lean, 2026-11-18): R08's passes rebuild their rays from their own camera at
+ * the frame's viewport, with no off-axis projection. A sample's offset moves the tile's origin, so
+ * that what is projected through the whole matrix moves by it (the figures, the terrain, R06's sky
+ * and host discs), while R07's discs and the sprites keep to the image's pixels and their own
+ * anti-aliasing. The terrain of a body handed over is its own terrain view's (plan R11, R11.T10.e;
+ * {@link PhotorealStillOptions.terrain}), drawn by each sample at the time it is drawn. It draws no
+ * symbology, meter or histogram.
  *
- * Its units are its samples (`scene 0`), then `bloom 0` and `tonemap 0`, each one submission of
- * whole passes; with timestamps each unit's GPU time is the sum of its resolves', handed to
- * {@link PhotorealStillOptions.onUnitTimes} under its label. A frame's resources taken by
- * reference (the sky's cube, an atmosphere's tables) are the view's: a cache that lets one go while
- * the still runs fails its draw.
+ * Its units are each sample's tiles (`scene <tile>`), sample by sample, then `bloom 0` and
+ * `tonemap 0`, each one submission of whole passes; with timestamps each unit's GPU time is the sum
+ * of its resolves', handed to {@link PhotorealStillOptions.onUnitTimes} under its label. A frame's
+ * resources taken by reference (the sky's cube, an atmosphere's tables) are the view's: a cache that
+ * lets one go while the still runs fails its draw.
  */
 export class PhotorealStillRenderer implements StillRenderer {
   readonly tiling: StillTiling;
@@ -3027,6 +3068,10 @@ export class PhotorealStillRenderer implements StillRenderer {
   readonly #frame: PhotorealFrame;
   readonly #size: ViewSize;
   readonly #samples: number;
+  /** The tiles each sample draws: the read-back's, or one of the whole still where it draws air. */
+  readonly #drawnTiles: ReadonlyArray<StillTile>;
+  /** The scene target's size, px: the drawn tiles' largest texture, which each tile is drawn at. */
+  readonly #drawSize: ViewSize;
   readonly #scene: PhotorealRenderer;
   readonly #terrain: StillTerrainView | null;
   readonly #times = new UnitTimes();
@@ -3056,8 +3101,25 @@ export class PhotorealStillRenderer implements StillRenderer {
     this.#size = { widthPx: frame.viewport.widthPx, heightPx: frame.viewport.heightPx };
     this.#samples = options.samples;
     this.tiling = planTiles(this.#size, options.tileLimitPx, frame.setting);
+    // A frame with air is drawn whole: R08's passes take no off-axis projection.
+    const whole: StillTile = {
+      column: 0,
+      row: 0,
+      rect: { x0Px: 0, y0Px: 0, x1Px: this.#size.widthPx, y1Px: this.#size.heightPx },
+      texture: this.#size,
+      bytesPerRow: this.#size.widthPx * 4,
+    };
+    this.#drawnTiles = (frame.atmospheres ?? []).length > 0 ? [whole] : this.tiling.tiles;
+    this.#drawSize = {
+      widthPx: Math.max(...this.#drawnTiles.map((tile) => tile.texture.widthPx)),
+      heightPx: Math.max(...this.#drawnTiles.map((tile) => tile.texture.heightPx)),
+    };
+    const tiles = this.#drawnTiles.length;
     this.units = [
-      ...Array.from({ length: options.samples }, () => `${STILL_UNIT_PASSES.scene} 0`),
+      ...Array.from(
+        { length: options.samples * tiles },
+        (_, unit) => `${STILL_UNIT_PASSES.scene} ${String(unit % tiles)}`,
+      ),
       `${STILL_UNIT_PASSES.bloom} 0`,
       `${STILL_UNIT_PASSES.tonemap} 0`,
     ];
@@ -3108,9 +3170,12 @@ export class PhotorealStillRenderer implements StillRenderer {
       engine.releaseMaterial(material);
     };
     const geometry = frame.geometry ?? SETTINGS[frame.setting].geometry;
-    const [accumulate, tonemap, bloom] = await Promise.all([
+    const [first, add, tonemap, bloom] = await Promise.all([
       engine
-        .createMaterialAsync(STILL_ACCUMULATE_MATERIAL, [HDR_COLOUR_FORMAT], [triangle])
+        .createMaterialAsync(STILL_TILE_FIRST_MATERIAL, [HDR_COLOUR_FORMAT], [triangle])
+        .then((made) => this.#hold(made, releaseMaterial)),
+      engine
+        .createMaterialAsync(STILL_TILE_ADD_MATERIAL, [HDR_COLOUR_FORMAT], [triangle])
         .then((made) => this.#hold(made, releaseMaterial)),
       engine
         .createMaterialAsync(TONEMAP_MATERIAL, ["rgba8unorm"], [triangle])
@@ -3130,7 +3195,13 @@ export class PhotorealStillRenderer implements StillRenderer {
           chain.dispose();
         }),
       ),
-      this.#scene.prepare(size, frame.setting, frame.role, frame.camera, frame.atmosphereLevers),
+      this.#scene.prepare(
+        this.#drawSize,
+        frame.setting,
+        frame.role,
+        frame.camera,
+        frame.atmosphereLevers,
+      ),
       this.#scene.prepareBodies(geometry.discCells, {
         emissive: frame.bodies.some((body) => body.thermal !== undefined),
         air:
@@ -3206,7 +3277,7 @@ export class PhotorealStillRenderer implements StillRenderer {
     );
     this.#resources = {
       triangle,
-      accumulate,
+      accumulate: { first, add },
       tonemap,
       bloom,
       accumulation: target("accumulation", HDR_COLOUR_FORMAT),
@@ -3247,16 +3318,32 @@ export class PhotorealStillRenderer implements StillRenderer {
     return failure;
   }
 
-  /** Draws unit `unit`: a sample and its accumulation, the bloom chain, or the tone-mapping pass. */
+  /**
+   * Draws unit `unit`: a sample of a tile and its addition to the assembled image, the bloom chain,
+   * or the tone-mapping pass.
+   */
   #drawUnit(resources: StillResources, unit: number): void {
     const frame = this.#frame;
-    if (unit < this.#samples) {
+    const tiles = this.#drawnTiles.length;
+    if (unit < this.#samples * tiles) {
+      const k = Math.floor(unit / tiles);
+      const tile = this.#drawnTiles[unit % tiles];
+      if (tile === undefined) {
+        throw new RangeError(`a still has no tile for unit ${String(unit)}`);
+      }
+      const drawn = sampleTile(frame.camera.fovXRad, this.#size, tile.rect, this.#drawSize, k);
+      // A still drawn whole culls its terrain by the camera's frustum; a tile by its own.
+      const cull =
+        tiles === 1 && tile.rect.x0Px === 0 && tile.rect.y0Px === 0
+          ? undefined
+          : { tile, marginPx: tileCullMarginPx(frame.camera, this.#size) };
       this.#takeFailure();
       const plan = this.#scene.render(null, {
         ...frame,
-        projection: sampleProjection(frame.camera.fovXRad, this.#size, unit),
+        projection: drawn.projection,
+        tile: { sizePx: this.#drawSize, originPx: drawn.originPx },
         // Its own terrain view's draws at the time the sample is drawn (R11.T10.e).
-        terrain: this.#terrain?.frameTerrain(),
+        terrain: this.#terrain?.frameTerrain(cull),
       });
       const failure = this.#takeFailure();
       if (failure !== null) {
@@ -3266,8 +3353,8 @@ export class PhotorealStillRenderer implements StillRenderer {
       if (plan === null || colours === null) {
         throw new Error("a still's sample drew nothing");
       }
-      this.#accumulate(resources, colours.drawn, unit);
-    } else if (unit === this.#samples) {
+      this.#accumulate(resources, colours.drawn, tile, k);
+    } else if (unit === this.#samples * tiles) {
       resources.bloom.run(
         resources.accumulation.colour,
         bloomThreshold(frame.exposureScale, frame.exposureScale),
@@ -3278,32 +3365,33 @@ export class PhotorealStillRenderer implements StillRenderer {
   }
 
   /**
-   * Adds sample `k`'s colour to the accumulation at the weight 1 ÷ n: the first copied in whole,
-   * its meter class with it, and taken down to its weight by a draw of weight 1 ÷ n − 1 over it.
+   * Adds sample `k`'s colour of `tile` to the assembled image over the tile's rect, at the weight
+   * 1 ÷ n: the first sample of a tile with no blend, its meter class with it, each after it added,
+   * which keeps that class.
    */
-  #accumulate(resources: StillResources, colour: TextureHandle, k: number): void {
-    const weight = 1 / this.#samples;
-    const draw = (sampleWeight: number): DrawItem => ({
-      mesh: resources.triangle,
-      material: resources.accumulate,
-      offsetFromCameraM: new Float32Array(3),
-      uniforms: {
-        levelWeight: new Float32Array([sampleWeight]),
-        coarseWeight: new Float32Array([0]),
-      },
-      textures: { level: colour, coarse: resources.blueNoise },
-    });
-    const pass = {
+  #accumulate(resources: StillResources, colour: TextureHandle, tile: StillTile, k: number): void {
+    const { x0Px, y0Px, x1Px, y1Px } = tile.rect;
+    resources.accumulation.render({
       label: `${STILL_NAME} accumulation`,
       viewRotation: STILL_IDENTITY,
       projection: STILL_IDENTITY,
+      draws: [
+        {
+          mesh: resources.triangle,
+          material: k === 0 ? resources.accumulate.first : resources.accumulate.add,
+          offsetFromCameraM: new Float32Array(3),
+          uniforms: {
+            weight: new Float32Array([1 / this.#samples]),
+            first: new Float32Array([k === 0 ? 1 : 0]),
+            origin: new Float32Array([x0Px, y0Px, 0, 0]),
+          },
+          textures: { tile: colour },
+        },
+      ],
       postProcesses: [],
-    };
-    resources.accumulation.render(
-      k === 0
-        ? { ...pass, draws: this.#samples > 1 ? [draw(weight - 1)] : [], colourFrom: colour }
-        : { ...pass, draws: [draw(weight)], colourLoad: "load" },
-    );
+      colourLoad: "load",
+      scissor: { x: x0Px, y: y0Px, width: x1Px - x0Px, height: y1Px - y0Px },
+    });
   }
 
   /**
@@ -3326,7 +3414,11 @@ export class PhotorealStillRenderer implements StillRenderer {
     resources.image.render({
       label: `${STILL_NAME} ${TONEMAP_PASS}`,
       viewRotation: viewRotation4(frame.camera.orientation),
-      projection: sampleProjection(frame.camera.fovXRad, this.#size, 0),
+      projection: perspectiveReversedInfinite(
+        frame.camera.fovXRad,
+        this.#size.widthPx / this.#size.heightPx,
+        NEAR_PLANE_M,
+      ),
       draws: [
         tonemapDraw({
           mesh: resources.triangle,
