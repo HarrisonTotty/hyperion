@@ -1613,6 +1613,7 @@ Size L–XL, tool and client, after T4; each subtask waits on its content except
   procedural builder's pages are the same bytes for the same seed, in a worker and on the main
   thread. _Acceptance:_ R11.T4.c's collision-agrees test holds with the rocks drawn through the
   path.
+  - _Built_ (2026-11-18): records at the end of Risks.
 - **R14.T5.d Instances.** Size M, with R11.T6.a and R11.T9.d. Instance culling above the cluster
   cull (an instance's bounds first), folded dispatches beyond 65,535, a few size templates for
   particles; scatter and ring particles drawn by bucket. _Tests:_ the instance cull's twin against a
@@ -2920,3 +2921,18 @@ pages are assets and presentation; collision never reads them. No domain tag is 
     with `--universe <ID> --body <ID> --setting high --hyperion-gpu-timing`, A with
     `--instance-probe 1000000`, B without: `instance cull` + `instance probe` against 1–2 ms.
     Windows NOT RUN.
+- **R14.T5.c** (`r11-rocks-client`, 2026-11-18, with R11.T4):
+  - The builder is a TypeScript writer of the page format, version 2 (`clusters/meshWrite.ts`'
+    `writeProceduralMesh`), not `tools/meshbuild` in a worker (lean, 2026-11-18): a procedural mesh
+    is clustered as it is generated, so it needs no clusteriser or simplifier. A one-level DAG:
+    every cluster a root of no group, every page a root page; a vertex's word 3 is its consumer's
+    where the page has no UVs (the rocks': its rock's index).
+  - R11's rocks (`surface/scatter/rockPages.ts`' `buildRockPages`): a cube face's tile of 8 × 8
+    quads a cluster, each rock's clusters its sphere and errors (0, its largest diameter), so the
+    camera pass draws a rock while it subtends τ and a pass at τ 0 always (the could-touch region).
+  - In a worker: the mesh page worker's `rocks` request (`meshPageWork.ts`), through
+    `createWorkerRockPageBuilder` or `InThreadRockPageBuilder` (`meshPageProducer.ts`).
+  - `GeometryPagePool` takes an owner (category and name); the rocks' pool is root slots alone,
+    category `scatter` (new in `MemoryCategory`, `@hyperion/perf`'s `MEMORY_ITEMS`).
+  - Decoration's bounded prototypes a biome (the task's last sentence) are not built: no
+    decoration mesh exists until R11.T6.

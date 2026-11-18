@@ -20,6 +20,7 @@ const EVERY_CATEGORY: Readonly<Record<MemoryCategory, true>> = {
   "height-cache": true,
   ocean: true,
   rings: true,
+  scatter: true,
   shadows: true,
   "sky-cube": true,
   "sky-scratch": true,

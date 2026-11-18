@@ -11,8 +11,14 @@
  * whole in the worker from its first request until it is forgotten, when its last mesh is
  * unloaded (lean, 2026-11-02: a test mesh's file is 1–3 MB, and the GPU's pool is the budget
  * Design note 15 holds).
+ *
+ * The procedural builder (plan R14, R14.T5.c) answers here too: a `rocks` request carries a finest
+ * patch's rock layer, which `surface/scatter/rockPages.ts` tessellates and clusters into the
+ * patch's rock mesh, answered whole with the rocks' records, both buffers transferred; the same
+ * function makes the same bytes on the render thread.
  */
 
+import { buildRockPages, type RockPages, type RockPagesInput } from "../surface/scatter/rockPages";
 import {
   type FormatRead,
   type MeshIndex,
@@ -33,12 +39,16 @@ export type MeshPageRequest =
       readonly page: number;
     }
   /** Drops the file's bytes; a later request fetches it again. */
-  | { readonly kind: "forget"; readonly url: string };
+  | { readonly kind: "forget"; readonly url: string }
+  /** Builds a finest patch's rock mesh (the procedural builder, R14.T5.c). */
+  | { readonly kind: "rocks"; readonly id: number; readonly input: RockPagesInput };
 
 /** The worker's answer to a request, matched by its `id`. */
 export type MeshPageReply =
   | { readonly kind: "index"; readonly id: number; readonly read: FormatRead<MeshIndex> }
-  | { readonly kind: "page"; readonly id: number; readonly read: FormatRead<MeshPage> };
+  | { readonly kind: "page"; readonly id: number; readonly read: FormatRead<MeshPage> }
+  /** A patch's rock mesh, `null` for a layer of no rocks. */
+  | { readonly kind: "rocks"; readonly id: number; readonly pages: RockPages | null };
 
 /** How the worker fetches a file's bytes: its `fetch`, or a test's. */
 export type FetchBytes = (url: string) => Promise<ArrayBuffer>;
@@ -54,6 +64,9 @@ export async function fetchAssetBytes(url: string): Promise<ArrayBuffer> {
 
 /** The buffers of `reply` that are posted transferred: a page's bytes and its group tables. */
 export function meshPageTransferables(reply: MeshPageReply): Transferable[] {
+  if (reply.kind === "rocks") {
+    return reply.pages === null ? [] : [reply.pages.file, reply.pages.records];
+  }
   if (reply.kind === "index" || reply.read.kind === "refused") {
     return [];
   }
@@ -75,6 +88,9 @@ export class MeshFileReader {
     if (request.kind === "forget") {
       this.#files.delete(request.url);
       return null;
+    }
+    if (request.kind === "rocks") {
+      return { kind: "rocks", id: request.id, pages: buildRockPages(request.input) };
     }
     const bytes = await this.#file(request.url);
     if (request.kind === "index") {

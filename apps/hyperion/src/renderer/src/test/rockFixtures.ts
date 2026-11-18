@@ -4,7 +4,12 @@
  */
 
 import { cross, normalise, scale, type Vec3, vec3 } from "../geometry/vec3";
-import type { Rock } from "../view/surface/scatter/rockLayer";
+import {
+  ROCK_WORDS,
+  type Rock,
+  type RockLayer,
+  rockLayerOf,
+} from "../view/surface/scatter/rockLayer";
 import { between, seededRandom } from "./seededRandom";
 
 /**
@@ -71,5 +76,58 @@ export function randomRocks(seed: number, count: number, radiusM = 1_737_400): R
       vec3(between(random, -1, 1), between(random, -1, 1), between(random, -1, 1)),
     );
     return rockOf(random, diameterM, up, scale(up, radiusM));
+  });
+}
+
+/** A vector's three components. */
+function componentsOf(p: Vec3): number[] {
+  return [p.x, p.y, p.z];
+}
+
+/** `rocks` as a bake's rock layer lays them out (`rockLayer.ts`' word order). */
+export function rockLayerFrom(rocks: ReadonlyArray<Rock>): RockLayer {
+  const words = new Float64Array(ROCK_WORDS * rocks.length);
+  rocks.forEach((rock, n) => {
+    const v = componentsOf;
+    words.set(
+      [
+        ...v(rock.baseCentreM),
+        ...rock.axes.flatMap(v),
+        ...rock.semiAxesM,
+        rock.exponent,
+        rock.groundHeightM,
+        ...v(rock.dir),
+      ],
+      ROCK_WORDS * n,
+    );
+  });
+  return rockLayerOf(words);
+}
+
+/**
+ * `count` rocks from `seed` scattered over a square of `sideM` about the direction `centre` on a
+ * sphere of `radiusM`, their diameters log-uniform over 0.4 to 6.4 m.
+ */
+export function rocksAbout(
+  seed: number,
+  count: number,
+  centre: Vec3,
+  sideM: number,
+  radiusM = 1_737_400,
+): Rock[] {
+  const random = seededRandom(seed);
+  const up = normalise(centre);
+  const east = normalise(cross(Math.abs(up.z) < 0.9 ? vec3(0, 0, 1) : vec3(1, 0, 0), up));
+  const north = cross(up, east);
+  return Array.from({ length: count }, () => {
+    const [x, y] = [between(random, -0.5, 0.5) * sideM, between(random, -0.5, 0.5) * sideM];
+    const dir = normalise(
+      vec3(
+        up.x * radiusM + x * east.x + y * north.x,
+        up.y * radiusM + x * east.y + y * north.y,
+        up.z * radiusM + x * east.z + y * north.z,
+      ),
+    );
+    return rockOf(random, 0.4 * 16 ** random(), dir, scale(dir, radiusM));
   });
 }

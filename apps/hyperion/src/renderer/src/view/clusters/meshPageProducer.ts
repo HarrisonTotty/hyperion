@@ -8,6 +8,10 @@
  * answer, settles every request waiting with a refusal naming the reason, and refuses every later
  * one with it; a reply that cannot be read settles every request waiting, as does a request the
  * worker cannot take; after {@link MeshPageProducer.dispose} every request is refused.
+ *
+ * The procedural builder (plan R14, R14.T5.c) has its own worker of the same module
+ * ({@link createWorkerRockPageBuilder}), so that a patch's rocks wait on no page fetch, and its
+ * twin on this thread ({@link InThreadRockPageBuilder}).
  */
 
 import {
@@ -16,6 +20,7 @@ import {
   type MeshPageReply,
   type MeshPageRequest,
 } from "./meshPageWork";
+import { buildRockPages, type RockPages, type RockPagesInput } from "../surface/scatter/rockPages";
 import type { FormatRead, MeshIndex, MeshPage, MeshPageEntry } from "./pageFormat";
 import type { MeshPageProducer } from "./residency";
 
@@ -94,14 +99,14 @@ export function createWorkerMeshPageProducer(
       if (typeof reply === "string") {
         return refused(reply);
       }
-      return reply.kind === "index" ? reply.read : refused("the worker answered with a page");
+      return reply.kind === "index" ? reply.read : refused("the worker answered with no index");
     },
     page: async (url, entry, page) => {
       const reply = await ask((id) => ({ kind: "page", id, url, entry, page }));
       if (typeof reply === "string") {
         return refused(reply);
       }
-      return reply.kind === "page" ? reply.read : refused("the worker answered with an index");
+      return reply.kind === "page" ? reply.read : refused("the worker answered with no page");
     },
     forget: (url) => {
       if (!disposed && failed === null) {
@@ -143,6 +148,88 @@ export class InThreadMeshPageProducer implements MeshPageProducer {
     void this.#reader.answer({ kind: "forget", url }).catch((error: unknown) => {
       console.warn(`the mesh file ${url} could not be forgotten`, error);
     });
+  }
+
+  dispose(): void {
+    this.#disposed = true;
+  }
+}
+
+/**
+ * The procedural builder of a finest patch's rock mesh (plan R14, R14.T5.c;
+ * `surface/scatter/rockPages.ts`): its mesh and the rocks' records, `null` for a layer of no
+ * rocks, or the reason it could not be built.
+ */
+export interface RockPageBuilder {
+  build(input: RockPagesInput): Promise<RockPages | null | string>;
+  /** Stops it: every build waiting and every later one is refused. */
+  dispose(): void;
+}
+
+/**
+ * The procedural builder over a mesh page worker of its own (see the module's remarks), each build
+ * numbered and its reply matched by number; a worker that fails refuses every build waiting and
+ * every later one.
+ *
+ * @param start - Starts the worker; the module worker's by default.
+ */
+export function createWorkerRockPageBuilder(
+  start: () => MeshPageWorker = startMeshPageWorker,
+): RockPageBuilder {
+  const worker = start();
+  const waiting = new Map<number, (reply: RockPages | null | string) => void>();
+  let failed: string | null = null;
+  let disposed = false;
+  const failAll = (reason: string): void => {
+    for (const settle of waiting.values()) {
+      settle(reason);
+    }
+    waiting.clear();
+  };
+  worker.addEventListener("message", (event: MessageEvent<MeshPageReply>) => {
+    const settle = waiting.get(event.data.id);
+    waiting.delete(event.data.id);
+    settle?.(event.data.kind === "rocks" ? event.data.pages : "the worker answered with no rocks");
+  });
+  worker.addEventListener("error", (event: Event) => {
+    failed = event instanceof ErrorEvent ? event.message : "the rock builder's worker failed";
+    failAll(failed);
+  });
+  worker.addEventListener("messageerror", () => {
+    failAll("the rock builder's reply could not be read");
+  });
+  let next = 0;
+  return {
+    build: (input) =>
+      new Promise((resolve) => {
+        if (disposed || failed !== null) {
+          resolve(failed ?? "the rock builder is stopped");
+          return;
+        }
+        next += 1;
+        const id = next;
+        waiting.set(id, resolve);
+        try {
+          worker.postMessage({ kind: "rocks", id, input }, []);
+        } catch (error: unknown) {
+          waiting.delete(id);
+          resolve(error instanceof Error ? error.message : "the build could not be posted");
+        }
+      }),
+    dispose: () => {
+      disposed = true;
+      failAll("the rock builder is stopped");
+      worker.terminate();
+    },
+  };
+}
+
+/** The procedural builder on this thread, the same function its worker answers by. */
+export class InThreadRockPageBuilder implements RockPageBuilder {
+  #disposed = false;
+
+  build(input: RockPagesInput): Promise<RockPages | null | string> {
+    return Promise.resolve(this.#disposed ? "the rock builder is stopped" : buildRockPages(input));
   }
 
   dispose(): void {

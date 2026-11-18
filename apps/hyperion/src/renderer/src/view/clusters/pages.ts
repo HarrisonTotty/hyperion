@@ -31,6 +31,7 @@
  */
 
 import type { Vec3 } from "../../geometry/vec3";
+import type { MemoryCategory } from "../engine/memory";
 import type { BufferHandle, RenderEngine } from "../engine/types";
 import { BUFFER_USAGE } from "../engine/gpuFlags";
 import {
@@ -201,18 +202,32 @@ export class GeometryPagePool {
   /**
    * @param poolBytesOrSlots - The pool's bytes, all four buffers together
    *   (`GeometrySettings.pageBytes`), or its slots ({@link pagePoolSlots}).
+   * @param owner - Its buffers' category and their names' first words: R14's `geometry-pages`, or a
+   *   consumer's pool of its own (plan R11's rocks, `scatter`).
    */
-  constructor(engine: GeometryPagePoolEngine, poolBytesOrSlots: number | PagePoolLayout) {
+  constructor(
+    engine: GeometryPagePoolEngine,
+    poolBytesOrSlots: number | PagePoolLayout,
+    owner: { readonly category: MemoryCategory; readonly name: string } = {
+      category: "geometry-pages",
+      name: "geometry",
+    },
+  ) {
     this.#engine = engine;
     this.layout =
       typeof poolBytesOrSlots === "number" ? pagePoolLayout(poolBytesOrSlots) : poolBytesOrSlots;
     const usage = BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST;
     const made = (name: string, bytes: number): BufferHandle =>
-      engine.createBuffer({ name, bytes: Math.max(16, bytes), usage, category: "geometry-pages" });
-    this.pages = made("geometry pages", this.layout.pagesBytes);
-    this.records = made("geometry page records", this.layout.recordsBytes);
-    this.lods = made("geometry page lods", this.layout.lodsBytes);
-    this.errors = made("geometry page errors", this.layout.errorsBytes);
+      engine.createBuffer({
+        name: `${owner.name} ${name}`,
+        bytes: Math.max(16, bytes),
+        usage,
+        category: owner.category,
+      });
+    this.pages = made("pages", this.layout.pagesBytes);
+    this.records = made("page records", this.layout.recordsBytes);
+    this.lods = made("page lods", this.layout.lodsBytes);
+    this.errors = made("page errors", this.layout.errorsBytes);
     this.#slots = Array.from({ length: this.layout.rootSlots + this.layout.pageSlots }, () => null);
   }
 

@@ -227,6 +227,7 @@ export const MEMORY_ITEMS = {
   "height-cache": "height-cache",
   ocean: "ocean",
   rings: "rings",
+  scatter: "scatter",
   shadows: "shadows",
   "sky-cube": "star-cubemap",
   "sky-scratch": "other",

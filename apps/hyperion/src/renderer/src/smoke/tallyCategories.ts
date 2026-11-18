@@ -23,6 +23,7 @@ export const CATEGORIES: ReadonlyArray<MemoryCategory> = [
   "height-cache",
   "ocean",
   "rings",
+  "scatter",
   "shadows",
   "sky-cube",
   "sky-scratch",
