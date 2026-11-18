@@ -310,10 +310,13 @@ export interface GeometrySettings {
   readonly selectionScale: "presented" | "rendered";
   /**
    * The classes' edges (lane fix-jagged-biome-edges): `shaped`, the settings' own, draws each
-   * keyed class's edge on the disc and the terrain noise-shaped and, on a disc's lattice of few
-   * pixels, box-smoothed (`classEdge.wgsl`); `off` keys no class, so that both draw their shares as
-   * the reconstruction leaves them, for the owner's Mac pair `biome-edges`. The disc takes it from
-   * its next plan, the terrain from the next slot it writes.
+   * keyed class's edge on the disc and the terrain noise-shaped (`classEdge.wgsl`), held out near
+   * the hand-over; `off` keys no class, so that both draw their shares as the reconstruction leaves
+   * them, for the owner's Mac pair `biome-edges`. The disc takes it from its next plan, the
+   * terrain from the next slot it writes. `shaped` on both settings until that pair (a lean,
+   * 2026-11-18): it mends the jagged boundaries the owner reported, and on the pod's SwiftShader
+   * the low window's `discs` pass rose 31 ms of a 4.8 s frame, within the run-to-run noise, the
+   * orbit's `disc cells` falling.
    */
   readonly classEdges: "shaped" | "off";
 }

@@ -676,8 +676,7 @@ export interface GeometryOverride {
   readonly selectionScale?: "presented" | "rendered";
   /**
    * Lane fix-jagged-biome-edges: the classes' edges on the disc and the terrain shaped by their
-   * noise and, on a disc's lattice of few pixels, box-smoothed; or drawn as the reconstruction
-   * leaves them, no class keyed.
+   * noise, held out near the hand-over; or drawn as the reconstruction leaves them, no class keyed.
    */
   readonly classEdges?: "shaped" | "off";
 }

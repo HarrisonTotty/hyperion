@@ -227,7 +227,7 @@ export const MAC_PROFILE_LEVERS: ReadonlyArray<MacProfileLever> = [
   {
     name: "biome-edges",
     decides:
-      "lane fix-jagged-biome-edges, the classes' edges: noise-shaped and, on a disc's lattice of few pixels, box-smoothed, the settings' (A), against as the reconstruction leaves them (B)",
+      "lane fix-jagged-biome-edges, the classes' edges: noise-shaped, held out near the hand-over, the settings' (A), against as the reconstruction leaves them (B)",
     a: [],
     b: ["--geometry", "classEdges=off"],
     ratios: [1],
