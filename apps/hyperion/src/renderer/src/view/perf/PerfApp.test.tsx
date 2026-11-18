@@ -1,10 +1,11 @@
 import { PERF_PINS, type PerfSceneId } from "@hyperion/perf";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import { StrictMode } from "react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { PerfApi, PerfEnd } from "../../../../preload/api";
 import { fakeFramesAndTimeouts } from "../../test/fakeFramesAndTimeouts";
+import { FakeWebSocket } from "../../test/FakeWebSocket";
 import { statusLine } from "../../test/statusLine";
 import { TEST_GRAPHICS } from "../../test/stubHyperionApi";
 import { PERF_PREPARING, PerfApp } from "./PerfApp";
@@ -17,6 +18,7 @@ import {
   type PerfSceneDriver,
   WARM_UP_SAMPLE_MS,
 } from "./runPerfScene";
+import type { ViewStages } from "./viewDriver";
 
 /** The main process's side of a run of `scene`, one repetition long, its end recorded. */
 function fakePerf(scene: PerfSceneId, ends: PerfEnd[]): PerfApi {
@@ -107,21 +109,17 @@ describe("PerfApp", () => {
     expect(screen.getByText(statusLine(PERF_PREPARING))).toBeDefined();
   });
 
-  it("ends a run of a scene it has no driver for at once, its reason in full for the record", async () => {
+  it("ends a run of VIEW's scene at once in a renderer without WebGPU, its reason in full", async () => {
     const ends: PerfEnd[] = [];
     render(<PerfApp perf={fakePerf("ringed-giant-approach", ends)} graphics={TEST_GRAPHICS} />);
     await waitFor(() => {
-      expect(ends).toEqual([
-        { status: "failed", reason: "ringed-giant-approach: no renderer driver yet (R12.T4.c)" },
-      ]);
+      expect(ends).toEqual([{ status: "failed", reason: "this renderer has no WebGPU" }]);
     });
   });
 
   it("shows a failed run's fault line with its cause in the guide's words", async () => {
     render(<PerfApp perf={fakePerf("ringed-giant-approach", [])} graphics={TEST_GRAPHICS} />);
-    expect(
-      await screen.findByText(statusLine(perfFailedLine("this build draws no view of this scene"))),
-    ).toBeDefined();
+    expect(await screen.findByText(statusLine(perfFailedLine("no WebGPU")))).toBeDefined();
   });
 
   it("shows PERFORMANCE RUN COMPLETE once its run has ended complete", async () => {
@@ -160,5 +158,45 @@ describe("PerfApp", () => {
     await waitFor(() => {
       expect(ends).toEqual([{ status: "failed", reason: "this renderer has no WebGPU" }]);
     });
+  });
+
+  it("shows VIEW's stage while one is set, and keeps VIEW's title on its frame after it", async () => {
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+    const captured: { views: ViewStages | null } = { views: null };
+    render(
+      <PerfApp
+        perf={fakePerf("nuclear-disc-sky", [])}
+        graphics={TEST_GRAPHICS}
+        driverFor={(_config, page) => {
+          captured.views = page.views;
+          return { kind: "refused", reason: "a fake's end", shown: "a fake's end" };
+        }}
+      />,
+    );
+    await screen.findByText(statusLine(perfFailedLine("a fake's end")));
+    const stages = captured.views;
+    if (stages === null) {
+      throw new Error("the page gave the driver no VIEW stages");
+    }
+    act(() => {
+      stages.set({
+        key: "warm-up",
+        serverUrl: "ws://127.0.0.1:40000/bridge",
+        universe: "0000000000000001",
+        setting: "low",
+        perf: { cameraAt: () => null, onDrawn: () => undefined },
+        watchTerrain: () => () => undefined,
+        onFailed: () => undefined,
+      });
+    });
+    expect(screen.queryByText(statusLine(perfFailedLine("a fake's end")))).toBeNull();
+    expect(screen.getByRole("heading", { name: "VIEW" })).toBeDefined();
+    act(() => {
+      stages.set(null);
+    });
+    expect([
+      screen.getByRole("heading", { name: "VIEW" }).tagName,
+      screen.getByText(statusLine(perfFailedLine("a fake's end"))).tagName.length > 0,
+    ]).toEqual(["H1", true]);
   });
 });

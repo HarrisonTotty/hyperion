@@ -8,6 +8,8 @@ export interface SpikeHeaderProps {
    * beside the banner; absent over every other world, which links to no server.
    */
   readonly link?: ConnectionStatus | undefined;
+  /** The display's title: `DESCENT SPIKE` unless given, `VIEW` for a perf run's `VIEW` scenes. */
+  readonly title?: string | undefined;
 }
 
 /**
@@ -15,12 +17,12 @@ export interface SpikeHeaderProps {
  * banner, which stands the whole run (the guide's "Layout"), and over a served world the server
  * link's annunciator (`LinkStatus`), the state of the link its terrain comes over.
  */
-export function SpikeHeader({ link }: SpikeHeaderProps) {
+export function SpikeHeader({ link, title = "DESCENT SPIKE" }: SpikeHeaderProps) {
   return (
     <header className="console__header">
       <div className="console__identity">
         <span className="console__ship">HYPERION</span>
-        <h1 className="console__title">DESCENT SPIKE</h1>
+        <h1 className="console__title">{title}</h1>
       </div>
       <div className="console__status">
         <output className="console__banner" aria-label="Mode">

@@ -25,7 +25,7 @@
 
 import type { AdapterRecord, InternalScaleRecord } from "@hyperion/perf";
 
-import type { PerfConfig, PerfDescribedView } from "../../../../preload/api";
+import type { PerfDescribedView } from "../../../../preload/api";
 import type { ViewEngineSource } from "../../displays/view/useViewEngine";
 import type { RenderStyle } from "../camera/state";
 import type { AllocationEvent } from "../engine/memory";
@@ -44,13 +44,13 @@ import type { WorkerMemory } from "../terrain/workers/pool";
 import { MemoryLedger } from "./ledger";
 import type {
   PerfDrawn,
-  PerfDriverChoice,
   PerfFailure,
   PerfSceneDriver,
   PerfSceneSink,
   PerfStage,
 } from "./runPerfScene";
-import { PERF_LANDING_SEED, PERF_SCENES, type PerfScene } from "./scenes";
+import { PERF_LANDING_SEED, type PerfScene } from "./scenes";
+import { PerfStages } from "./stages";
 import { ARRIVAL_SETTLE_S, ArrivalHolds } from "./arrivalHolds";
 import { ARRIVAL_HELD_S, arrivalHold } from "./scripts";
 
@@ -273,30 +273,8 @@ export interface DescentStage {
   readonly perf: DescentSpikePerf;
 }
 
-/** The stage `PerfApp` renders, an external store it subscribes to. */
-export class DescentStages {
-  #stage: DescentStage | null = null;
-  readonly #listeners = new Set<() => void>();
-
-  /** The stage now, or `null` between mounts. */
-  readonly current = (): DescentStage | null => this.#stage;
-
-  /** Listens for a change of stage; returns the unsubscribe. */
-  readonly subscribe = (listener: () => void): (() => void) => {
-    this.#listeners.add(listener);
-    return () => {
-      this.#listeners.delete(listener);
-    };
-  };
-
-  /** Shows `stage`, or none. */
-  set(stage: DescentStage | null): void {
-    this.#stage = stage;
-    for (const listener of this.#listeners) {
-      listener();
-    }
-  }
-}
+/** The descents' and the arrival's stage, which `PerfApp` renders as `ServedDescentSpike`. */
+export class DescentStages extends PerfStages<DescentStage> {}
 
 /** What a {@link DescentDriver} is given. */
 export interface DescentDriverOptions {
@@ -622,57 +600,4 @@ export class DescentDriver implements PerfSceneDriver {
     this.#demand = demand;
     return demand;
   }
-}
-
-/** What {@link descentDriverFor} needs of the page. */
-export interface DescentDriverPage {
-  readonly engine: PerfEngine;
-  readonly stages: DescentStages;
-  /** `window.hyperion.graphics.launchMode`. */
-  readonly launchMode: PerfConfig["launchMode"];
-  /** Whether the renderer has WebGPU (`navigator.gpu`). */
-  readonly webGpu: boolean;
-  /** The height workers a scene that names none runs: the machine's default. */
-  readonly defaultWorkers: () => number;
-}
-
-/**
- * The driver of the configured scene: the spike's for a descent and the arrival, or why the
- * renderer has none: the approach and the sweep have no driver yet (R12.T4.c), and the graphics
- * safe mode and a renderer without WebGPU draw no view.
- */
-export function descentDriverFor(config: PerfConfig, page: DescentDriverPage): PerfDriverChoice {
-  const scene = PERF_SCENES[config.launch.scene];
-  switch (scene.script.kind) {
-    case "descent":
-    case "arrival":
-      break;
-    case "approach":
-    case "sweep":
-      return {
-        kind: "refused",
-        reason: `${scene.id}: no renderer driver yet (R12.T4.c)`,
-        shown: "this build draws no view of this scene",
-      };
-  }
-  if (page.launchMode === "safe") {
-    return {
-      kind: "refused",
-      reason: "the graphics safe mode draws no WebGPU view",
-      shown: "the graphics safe mode draws no view, relaunch to retry",
-    };
-  }
-  if (!page.webGpu) {
-    return { kind: "refused", reason: "this renderer has no WebGPU", shown: "no WebGPU" };
-  }
-  return {
-    kind: "driver",
-    driver: new DescentDriver({
-      scene,
-      setting: config.launch.setting,
-      workers: scene.harness.heightWorkers ?? page.defaultWorkers(),
-      engine: page.engine,
-      stages: page.stages,
-    }),
-  };
 }

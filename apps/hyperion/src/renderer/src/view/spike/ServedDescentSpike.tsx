@@ -28,8 +28,12 @@ import { type ServedSpikeWorld, servedSpikeWorld } from "./spikeWorld";
 /** The status while the served world is read from the server (plan R10, R10.T15.b). */
 export const READING_SERVED = "MEASURING TERRAIN: reading the served world";
 
+/** A server of another protocol version and its remedy, in the guide's words. */
+export const SERVED_LINK_INCOMPATIBLE_REMEDY =
+  "server of another protocol version, relaunch with a matching server";
+
 /** The status of a server of another protocol version, with its remedy (the guide's row). */
-export const SERVED_LINK_INCOMPATIBLE = `${LINK_STATUS_LABEL.incompatible}: server of another protocol version, relaunch with a matching server`;
+export const SERVED_LINK_INCOMPATIBLE = `${LINK_STATUS_LABEL.incompatible}: ${SERVED_LINK_INCOMPATIBLE_REMEDY}`;
 
 /**
  * The status where the served world's host discs could not be had of the server's sky, a request

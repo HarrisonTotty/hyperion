@@ -8,12 +8,9 @@ import { navigatorGpu } from "../engine/status";
 import { ServedDescentSpike } from "../spike/ServedDescentSpike";
 import { SpikeHeader } from "../spike/SpikeHeader";
 import { defaultSpikeWorkers } from "../spike/spikeRun";
-import {
-  type DescentDriverPage,
-  descentDriverFor,
-  DescentStages,
-  PerfEngine,
-} from "./descentDriver";
+import { DescentStages, PerfEngine } from "./descentDriver";
+import { type PerfDriverPage, perfDriverFor } from "./driverFor";
+import { PerfViewStage } from "./PerfViewStage";
 import {
   PAGE_CLOCK,
   PERF_COMPLETE,
@@ -23,6 +20,7 @@ import {
   type PerfRunOutcome,
   PerfSceneRun,
 } from "./runPerfScene";
+import { VIEW_TITLE, ViewStages } from "./viewDriver";
 
 /** The status while no scene's views are mounted: before the first, and between repetitions. */
 export const PERF_PREPARING = "PERFORMANCE RUN: preparing the scene's views";
@@ -64,11 +62,10 @@ export interface PerfAppProps {
    */
   readonly loadEngine?: ViewEngineSource["load"] | undefined;
   /**
-   * Chooses the scene's driver on the page: the descents' (`descentDriverFor`) by default, a fake
+   * Chooses the scene's driver on the page: the catalogue's (`perfDriverFor`) by default, a fake
    * in a test. Read at the first render.
    */
-  readonly driverFor?:
-    ((config: PerfConfig, page: DescentDriverPage) => PerfDriverChoice) | undefined;
+  readonly driverFor?: ((config: PerfConfig, page: PerfDriverPage) => PerfDriverChoice) | undefined;
 }
 
 /**
@@ -77,9 +74,11 @@ export interface PerfAppProps {
  * repetition, each under its own `key` on the server and arrival the main process gives.
  *
  * @remarks
- * The descents (`cockpit-descent`, `station-wireframe-descent`) are R05's spike over the served
- * world (`descentDriver.ts`); a scene the renderer has no driver for yet ends its run at once,
- * saying so. Between mounts the spike's frame stands with {@link PERF_PREPARING}; once the run has
+ * The descents (`cockpit-descent`, `station-wireframe-descent`) and `arrival-memory` are R05's spike
+ * over the served world (`descentDriver.ts`); `ringed-giant-approach` and `nuclear-disc-sky` are
+ * `VIEW` over the served scene on its free scripted camera (`viewDriver.ts`, `PerfViewStage`); a
+ * renderer that can draw no view ends the run at once, saying so (`perfDriverFor`). Between mounts
+ * the spike's frame stands with {@link PERF_PREPARING}; once the run has
  * ended, with `PERFORMANCE RUN COMPLETE`, or on a failure the spike's own fault line where it
  * showed one, else `PERFORMANCE RUN FAILED` with its cause (`perfFailedLine`).
  */
@@ -88,9 +87,16 @@ export function PerfApp({ perf, graphics, loadEngine, driverFor }: PerfAppProps)
   const [page] = useState(() => ({
     engine: new PerfEngine(navigatorGpu(), loadEngine),
     stages: new DescentStages(),
-    driverFor: driverFor ?? descentDriverFor,
+    views: new ViewStages(),
+    driverFor: driverFor ?? perfDriverFor,
   }));
   const stage = useSyncExternalStore(page.stages.subscribe, page.stages.current);
+  const viewStage = useSyncExternalStore(page.views.subscribe, page.views.current);
+  // The frame between mounts and after the run keeps the title of the display the run shows.
+  const [title, setTitle] = useState<string | undefined>(undefined);
+  if (viewStage !== null && title === undefined) {
+    setTitle(VIEW_TITLE);
+  }
   const [ended, setEnded] = useState<PerfRunOutcome | null>(null);
   useEffect(() => {
     const abort = new AbortController();
@@ -107,6 +113,7 @@ export function PerfApp({ perf, graphics, loadEngine, driverFor }: PerfAppProps)
         page.driverFor(config, {
           engine: page.engine,
           stages: page.stages,
+          views: page.views,
           launchMode: graphics.launchMode,
           webGpu: navigatorGpu() !== undefined,
           defaultWorkers: () =>
@@ -125,9 +132,22 @@ export function PerfApp({ perf, graphics, loadEngine, driverFor }: PerfAppProps)
   const line = runLine(ended);
   return (
     <GraphicsStatusProvider graphics={graphics} gpu={navigatorGpu()}>
-      {stage === null ? (
+      {viewStage !== null ? (
+        <PerfViewStage
+          key={viewStage.key}
+          serverUrl={viewStage.serverUrl}
+          universe={viewStage.universe}
+          setting={viewStage.setting}
+          perf={viewStage.perf}
+          watchTerrain={viewStage.watchTerrain}
+          onFailed={viewStage.onFailed}
+          engineSource={page.engine.source}
+          performanceThreads={window.hyperion.performanceThreads}
+          platform={window.hyperion.platform}
+        />
+      ) : stage === null ? (
         <div className="spike">
-          <SpikeHeader />
+          <SpikeHeader title={title} />
           <main className="view spike__work">
             <div className="view__main">
               <StatusLine text={line.text} standing={line.standing} />

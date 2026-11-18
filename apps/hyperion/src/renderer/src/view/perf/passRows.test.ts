@@ -79,8 +79,9 @@ const TIMED_PASSES: ReadonlyArray<readonly [string, PassStyle]> = [
   [DETAIL_PASS_LABEL, "photorealistic"],
   [CLOUD_LAYER_PASS, "photorealistic"],
   [WIREFRAME_PASS_LABEL, "wireframe"],
-  [HULL_CLUSTER_CULL_LABEL, "wireframe"],
-  [MESH_OCCLUDER_CULL_LABEL, "wireframe"],
+  // A photorealistic view's symbology culls its hulls and mesh occluders too (R12.T4.c).
+  [HULL_CLUSTER_CULL_LABEL, "both"],
+  [MESH_OCCLUDER_CULL_LABEL, "both"],
   [TERRAIN_CLUSTER_CULL_LABEL, "both"],
   [TERRAIN_CLUSTER_COMPACT_LABEL, "both"],
   [FIGURE_CLUSTER_CULL_LABEL, "both"],

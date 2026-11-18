@@ -17,7 +17,6 @@ import {
   capabilityFlags,
   DescentDriver,
   type DescentStage,
-  descentDriverFor,
   DescentStages,
   faultFailure,
   fieldResident,
@@ -493,49 +492,6 @@ describe("the descent's measurement", () => {
     expect(await once(null, { body: PERF_PINS.world }, 7n, signal)).toBe(PREPARED);
     expect(await once(null, { body: PERF_PINS.world }, 7n, signal)).toBe(PREPARED);
     expect(asked).toEqual([PERF_PINS.world, PERF_PINS.world]);
-  });
-});
-
-describe("the driver for a scene", () => {
-  const page = {
-    engine: new PerfEngine(undefined),
-    stages: new DescentStages(),
-    launchMode: "vulkan" as const,
-    webGpu: true,
-    defaultWorkers: () => 5,
-  };
-
-  it("is the descent spike's for both descents and the arrival", () => {
-    for (const scene of [
-      "cockpit-descent",
-      "station-wireframe-descent",
-      "arrival-memory",
-    ] as const) {
-      expect(descentDriverFor(config(scene), page).kind).toBe("driver");
-    }
-  });
-
-  it("is none yet for the scenes VIEW's camera flies, saying so", () => {
-    for (const scene of ["ringed-giant-approach", "nuclear-disc-sky"] as const) {
-      expect(descentDriverFor(config(scene), page)).toEqual({
-        kind: "refused",
-        reason: `${scene}: no renderer driver yet (R12.T4.c)`,
-        shown: "this build draws no view of this scene",
-      });
-    }
-  });
-
-  it("is none in the graphics safe mode or without WebGPU", () => {
-    expect(descentDriverFor(config("cockpit-descent"), { ...page, launchMode: "safe" })).toEqual({
-      kind: "refused",
-      reason: "the graphics safe mode draws no WebGPU view",
-      shown: "the graphics safe mode draws no view, relaunch to retry",
-    });
-    expect(descentDriverFor(config("cockpit-descent"), { ...page, webGpu: false })).toEqual({
-      kind: "refused",
-      reason: "this renderer has no WebGPU",
-      shown: "no WebGPU",
-    });
   });
 });
 
