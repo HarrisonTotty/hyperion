@@ -9,6 +9,7 @@ import { AtmosphereTables } from "../atmosphere/tables";
 import type { BodyFramePlan, LitBodyInput } from "../bodies/draw";
 import { IDENTITY_QUATERNION } from "../camera/quaternion";
 import { CLOUD_LAYER_MATERIAL, CLOUD_LAYER_PASS, CLOUD_TEXTURES } from "../clouds/cloudLayer";
+import { CLOUD_RESOLVE_PASS, CLOUD_VOLUME_PASS } from "../clouds/cloudVolumePass";
 import type { BodyClouds } from "../clouds/condensates";
 import type { DrawItem, FrameSubmission, RenderView } from "../engine/types";
 import { AU_M } from "../scenes/kept";
@@ -246,6 +247,123 @@ describe("the photorealistic renderer's clouds (R11.T7.b)", () => {
     const body = lit.at(-1)?.find((each) => each.id === planet.id);
     expect(record?.clouds).toBeDefined();
     expect(body?.clouds).toBe(record?.clouds);
+    renderer.dispose();
+    tables.dispose();
+  });
+});
+
+describe("the photorealistic renderer's cloud volume (R11.T7.c)", () => {
+  /** The labels of the last of `frames` renders of `planet`'s clouds on `setting`. */
+  async function lastFrameLabels(
+    setting: "high" | "low",
+    frames: number,
+    atmosphereSetting?: "low",
+  ): Promise<ReadonlyArray<string>> {
+    const { engine, view, renderer } = await preparedRenderer();
+    renderer.prepareClouds();
+    const planet = bodyAt("0200080020000000.0300", vec3(0, 0, -1e8));
+    const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, EARTH_RADIUS_M);
+    const frame = {
+      ...frameOf(planet, tables, EARTH_CLOUDS),
+      setting,
+      ...(atmosphereSetting === undefined ? {} : { atmosphereSetting }),
+    };
+    let from = 0;
+    for (let i = 0; i < frames; i += 1) {
+      from = engine.targetFrames.length;
+      renderer.render(view, frame);
+    }
+    const labels = engine.targetFrames.slice(from).map((f) => f.label);
+    renderer.dispose();
+    tables.dispose();
+    return labels;
+  }
+
+  it("draws the nearest body's clouds as the volume on high once its correction is made, the layer until then", async () => {
+    const early = await lastFrameLabels("high", 1);
+    const made = await lastFrameLabels("high", 16);
+    expect([early.includes(CLOUD_VOLUME_PASS), made.includes(CLOUD_VOLUME_PASS)]).toEqual([
+      false,
+      true,
+    ]);
+    const at = made.indexOf(CLOUD_VOLUME_PASS);
+    expect(made.slice(at - 1, at + 3)).toEqual([
+      ATMOSPHERE_COMPOSITE_PASS,
+      CLOUD_VOLUME_PASS,
+      CLOUD_RESOLVE_PASS,
+      CLOUD_LAYER_PASS,
+    ]);
+  });
+
+  it("draws the layer on low, and on high while the frame-rate floor steps the air down", async () => {
+    const low = await lastFrameLabels("low", 16);
+    const stepped = await lastFrameLabels("high", 16, "low");
+    expect([low.includes(CLOUD_VOLUME_PASS), stepped.includes(CLOUD_VOLUME_PASS)]).toEqual([
+      false,
+      false,
+    ]);
+    expect([low.includes(CLOUD_LAYER_PASS), stepped.includes(CLOUD_LAYER_PASS)]).toEqual([
+      true,
+      true,
+    ]);
+  });
+});
+
+describe("the cloud volume's materials and history in the renderer (R11.T7.c)", () => {
+  const VOLUME_NAMES = ["cloud volume", "cloud volume resolve", "cloud volume composite"];
+
+  it("releases the volume's materials with the view", async () => {
+    const { engine, renderer } = await preparedRenderer();
+    const released = vi.spyOn(engine, "releaseMaterial");
+    renderer.dispose();
+    expect(released.mock.calls.map(([material]) => material.name)).toEqual(
+      expect.arrayContaining(VOLUME_NAMES),
+    );
+  });
+
+  it("draws the layer on high where a volume material is refused, its others released", async () => {
+    const engine = await countingRenderEngine();
+    engine.failMaterials((name) => name === "cloud volume resolve");
+    const warned = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const released = vi.spyOn(engine, "releaseMaterial");
+    const view = new RecordingView();
+    const renderer = new PhotorealRenderer(engine, "test view", { nowMs: steppingClock() });
+    await renderer.prepare(VIEWPORT, "high", "eye", {
+      orientation: IDENTITY_QUATERNION,
+      fovXRad: Math.PI / 3,
+    });
+    expect(released.mock.calls.map(([material]) => material.name)).toEqual(
+      expect.arrayContaining(["cloud volume", "cloud volume composite"]),
+    );
+    expect(warned).toHaveBeenCalled();
+    renderer.prepareClouds();
+    const planet = bodyAt("0200080020000000.0300", vec3(0, 0, -1e8));
+    const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, EARTH_RADIUS_M);
+    for (let i = 0; i < 16; i += 1) {
+      renderer.render(view, frameOf(planet, tables, EARTH_CLOUDS));
+    }
+    const labels = new Set(engine.targetFrames.map((f) => f.label));
+    expect([labels.has(CLOUD_VOLUME_PASS), labels.has(CLOUD_LAYER_PASS)]).toEqual([false, true]);
+    renderer.dispose();
+    tables.dispose();
+  });
+
+  it("begins the volume's history again after a cut", async () => {
+    const { engine, view, renderer } = await preparedRenderer();
+    const planet = bodyAt("0200080020000000.0300", vec3(0, 0, -1e8));
+    const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, EARTH_RADIUS_M);
+    const air = frameOf(planet, tables, EARTH_CLOUDS);
+    renderer.prepareClouds(air.atmospheres);
+    const held = (): number | undefined =>
+      engine.targetFrames.findLast((f) => f.label === CLOUD_RESOLVE_PASS)?.draws[0]?.uniforms[
+        "camera"
+      ]?.[3];
+    renderer.render(view, air);
+    renderer.render(view, air);
+    const before = held();
+    renderer.dropHistograms();
+    renderer.render(view, air);
+    expect([before, held()]).toEqual([1, 0]);
     renderer.dispose();
     tables.dispose();
   });

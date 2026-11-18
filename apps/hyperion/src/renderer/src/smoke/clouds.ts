@@ -44,6 +44,7 @@ import {
   CLOUD_LAYER_MATERIAL,
   CLOUD_SEASON_STEP_RAD,
   type CloudFrame,
+  type CloudLayerView,
   cloudLayerDraw,
   cloudLayerHeightM,
   CloudLayers,
@@ -64,6 +65,13 @@ import {
 } from "../view/clouds/cloudProbe";
 import type { CloudLightInput } from "../view/clouds/cloudShadow";
 import { CORRECTION_MUS, CORRECTION_TAUS, octaveCorrectionOf } from "../view/clouds/cloudVolume";
+import {
+  CLOUD_COMPOSITE_MATERIAL,
+  CLOUD_RESOLVE_MATERIAL,
+  CLOUD_VOLUME_MATERIAL,
+  CloudVolumes,
+} from "../view/clouds/cloudVolumePass";
+import { toHalfBits } from "../view/sky/half";
 import { type CloudCondensate, STAND_IN_CONDENSATES } from "../view/clouds/condensates";
 import type { GraphicsStatusStore } from "../view/engine/status";
 import { checkCatalogue } from "./catalogue";
@@ -122,17 +130,17 @@ const FRAME: CloudFrame = {
   octaves: 12,
 };
 
-/** The twins' inputs for {@link FRAME}, as `CloudLayers.frame` makes them. */
-function twinOf(noise: Uint8Array): CloudLightInput {
-  const coverage = seasonCoverage(FRAME.season, FRAME.clouds.cloudFraction);
+/** The twins' inputs for `frame`, {@link FRAME} if not given, as `CloudLayers.frame` makes them. */
+function twinOf(noise: Uint8Array, frame: CloudFrame = FRAME): CloudLightInput {
+  const coverage = seasonCoverage(frame.season, frame.clouds.cloudFraction);
   const params = cloudFieldParams({
-    seed: cloudSeedOf(FRAME.id),
-    condensate: FRAME.condensate,
+    seed: cloudSeedOf(frame.id),
+    condensate: frame.condensate,
     radiusM: FIGURE.equatorialRadiusM,
-    time: FRAME.time,
-    rate: FRAME.rate,
+    time: frame.time,
+    rate: frame.rate,
     windMps: largestWindMps(coverage),
-    octaves: FRAME.octaves,
+    octaves: frame.octaves,
   });
   return {
     coverage,
@@ -582,6 +590,68 @@ const LAYER_VIEWS = [
 /** The layer's target's side, px. */
 const LAYER_SIDE_PX = 32;
 
+/**
+ * The layer's view of the Earth-like body from one of {@link LAYER_VIEWS}: over 15° N, 25° E,
+ * looking east, pitched above or below the horizon, under a sun a little east of overhead.
+ */
+function layerViewOf(
+  view: { readonly heightM: number; readonly pitchRad: number },
+  shell: ReturnType<typeof cloudShellOf>,
+  size: { readonly widthPx: number; readonly heightPx: number },
+  octaves: number,
+  place: { readonly latitudeDeg: number; readonly longitudeDeg: number } = {
+    latitudeDeg: 15,
+    longitudeDeg: 25,
+  },
+): CloudLayerView {
+  const at = directionAt(place.latitudeDeg, place.longitudeDeg);
+  const radius = FIGURE.equatorialRadiusM + view.heightM;
+  const east = unit({ x: -at.y, y: at.x, z: 0 });
+  const c = Math.cos(view.pitchRad);
+  const s = Math.sin(view.pitchRad);
+  const orientation = lookAlong(
+    { x: c * east.x + s * at.x, y: c * east.y + s * at.y, z: c * east.z + s * at.z },
+    at,
+  );
+  return {
+    camera: {
+      positionM: { x: at.x * radius, y: at.y * radius, z: at.z * radius },
+      orientation,
+      fovXRad: 1.2,
+      viewport: size,
+    },
+    figure: FIGURE,
+    shell,
+    airTopM: 100_000,
+    suns: [
+      {
+        directionBodyFixed: unit({ x: at.x + 0.3 * east.x, y: at.y + 0.3 * east.y, z: at.z }),
+        illuminanceLx: [120_000, 118_000, 110_000],
+        angularRadiusRad: 4.65e-3,
+        curveSlot: 0,
+      },
+    ],
+    exposureScale: 1e-5,
+    octaves,
+  };
+}
+
+/** Of half-float texels, how many draw (α above 0) and how many are not finite or of α outside [0, 1]. */
+function tallyTexels(texels: Float32Array): { readonly drawn: number; readonly bad: number } {
+  let drawn = 0;
+  let bad = 0;
+  for (let i = 0; i < texels.length; i += 4) {
+    const alpha = texels[i + 3] ?? Number.NaN;
+    const finite = [0, 1, 2, 3].every((k) => Number.isFinite(texels[i + k] ?? Number.NaN));
+    if (!finite || alpha < 0 || alpha > 1) {
+      bad += 1;
+    } else if (alpha > 0) {
+      drawn += 1;
+    }
+  }
+  return { drawn, bad };
+}
+
 /** R11.T7.b's layer drawn from above and below its shell: every texel finite, its α in [0, 1]. */
 export async function checkCloudLayerDraw(engine: RenderEngine, checks: Checks): Promise<void> {
   const layers = new CloudLayers(engine, "smoke layer");
@@ -614,37 +684,7 @@ export async function checkCloudLayerDraw(engine: RenderEngine, checks: Checks):
     const triangle = fullScreenMesh(engine, "cloud layer's triangle");
     const shell = cloudShellOf(FIGURE, cloudLayerHeightM(CONDENSATE));
     for (const view of LAYER_VIEWS) {
-      const at = directionAt(15, 25);
-      const radius = FIGURE.equatorialRadiusM + view.heightM;
-      // Looking east, pitched above or below the horizon.
-      const east = unit({ x: -at.y, y: at.x, z: 0 });
-      const c = Math.cos(view.pitchRad);
-      const s = Math.sin(view.pitchRad);
-      const orientation = lookAlong(
-        { x: c * east.x + s * at.x, y: c * east.y + s * at.y, z: c * east.z + s * at.z },
-        at,
-      );
-      const uniforms = cloudLayerUniforms({
-        camera: {
-          positionM: { x: at.x * radius, y: at.y * radius, z: at.z * radius },
-          orientation,
-          fovXRad: 1.2,
-          viewport: size,
-        },
-        figure: FIGURE,
-        shell,
-        airTopM: 100_000,
-        suns: [
-          {
-            directionBodyFixed: unit({ x: at.x + 0.3 * east.x, y: at.y + 0.3 * east.y, z: at.z }),
-            illuminanceLx: [120_000, 118_000, 110_000],
-            angularRadiusRad: 4.65e-3,
-            curveSlot: 0,
-          },
-        ],
-        exposureScale: 1e-5,
-        octaves: 9,
-      });
+      const uniforms = cloudLayerUniforms(layerViewOf(view, shell, size, 9));
       target.render(
         frameOf(`cloud layer ${view.name}`, [
           cloudLayerDraw(triangle, material, gpu, scene.depth, tables, uniforms),
@@ -652,18 +692,7 @@ export async function checkCloudLayerDraw(engine: RenderEngine, checks: Checks):
       );
       // The harness's checks run in order: each reads the GPU back before the next draws.
       // oxlint-disable-next-line no-await-in-loop
-      const texels = halfTexels(await engine.readTexture(target.colour));
-      let drawn = 0;
-      let bad = 0;
-      for (let i = 0; i < texels.length; i += 4) {
-        const alpha = texels[i + 3] ?? Number.NaN;
-        const finite = [0, 1, 2, 3].every((k) => Number.isFinite(texels[i + k] ?? Number.NaN));
-        if (!finite || alpha < 0 || alpha > 1) {
-          bad += 1;
-        } else if (alpha > 0) {
-          drawn += 1;
-        }
-      }
+      const { drawn, bad } = tallyTexels(halfTexels(await engine.readTexture(target.colour)));
       checks.check(
         `R11.T7.b the cloud layer seen from ${view.name} its shell draws every texel finite`,
         bad === 0 && drawn > 0,
@@ -674,6 +703,112 @@ export async function checkCloudLayerDraw(engine: RenderEngine, checks: Checks):
     target.dispose();
     scene.dispose();
     engine.releaseTexture(tables.body);
+    layers.dispose();
+  }
+}
+
+/** The volume's frames drawn at each of its views: enough for its history to hold. */
+const VOLUME_FRAMES = 3;
+
+/**
+ * R11.T7.c's volume drawn from above and below the deck through its march, its resolve and its
+ * composite (`cloudVolumePass.ts`), several frames so that its history holds: every texel of the
+ * composite finite, its α in [0, 1], and some drawn.
+ */
+export async function checkCloudVolumeDraw(engine: RenderEngine, checks: Checks): Promise<void> {
+  const layers = new CloudLayers(engine, "smoke volume");
+  layers.step(() => performance.now(), Number.POSITIVE_INFINITY);
+  const gpu = layers.frame(FRAME);
+  const volumes = new CloudVolumes(engine, "smoke volume");
+  const correction = volumes.correction(
+    CONDENSATE,
+    () => performance.now(),
+    Number.POSITIVE_INFINITY,
+  );
+  const tables = createAirlessTables(engine, "cloud volume: no air");
+  const size = { widthPx: LAYER_SIDE_PX, heightPx: LAYER_SIDE_PX };
+  const blueNoise = engine.createTexture({
+    name: "cloud volume blue noise",
+    size: { width: 4, height: 4 },
+    dimension: "2d",
+    format: "r16float",
+    mips: 1,
+    usage: TEXTURE_USAGE.TEXTURE_BINDING | TEXTURE_USAGE.COPY_DST,
+    category: "other",
+  });
+  engine.writeTexture(
+    blueNoise,
+    { x: 0, y: 0 },
+    { width: 4, height: 4 },
+    Uint16Array.from({ length: 16 }, (_, i) => toHalfBits(i / 16)),
+  );
+  const scene = engine.createRenderTarget({
+    name: "cloud volume scene",
+    size,
+    format: "rgba16float",
+    mips: 1,
+    depth: true,
+    category: "render-targets",
+  });
+  const target = engine.createRenderTarget({
+    name: "cloud volume",
+    size,
+    format: "rgba16float",
+    mips: 1,
+    depth: false,
+    category: "render-targets",
+  });
+  try {
+    if (gpu === null || scene.depth === null || correction === null) {
+      throw new Error("the clouds' state, their correction or the scene's depth was not made");
+    }
+    scene.render(frameOf("cloud volume scene", []));
+    const materials = {
+      march: engine.createMaterial(CLOUD_VOLUME_MATERIAL),
+      resolve: engine.createMaterial(CLOUD_RESOLVE_MATERIAL),
+      composite: engine.createMaterial(CLOUD_COMPOSITE_MATERIAL),
+      triangle: fullScreenMesh(engine, "cloud volume's triangle"),
+    };
+    const shell = cloudShellOf(FIGURE, cloudLayerHeightM(CONDENSATE));
+    const { viewRotation, projection } = frameOf("cloud volume", []);
+    const pass = { viewRotation, projection };
+    for (const view of LAYER_VIEWS) {
+      volumes.cut();
+      for (let frame = 0; frame < VOLUME_FRAMES; frame += 1) {
+        target.render(frameOf(`cloud volume ${view.name} clear`, []));
+        volumes.draw(
+          {
+            id: FRAME.id,
+            gpu,
+            condensate: CONDENSATE,
+            view: layerViewOf(view, shell, size, 12),
+            lighting: tables,
+            sceneDepth: scene.depth,
+            blueNoise,
+            correction,
+          },
+          materials,
+          target,
+          size,
+          pass,
+          null,
+        );
+      }
+      // The harness's checks run in order: each reads the GPU back before the next draws.
+      // oxlint-disable-next-line no-await-in-loop
+      const { drawn, bad } = tallyTexels(halfTexels(await engine.readTexture(target.colour)));
+      checks.check(
+        `R11.T7.c the cloud volume seen from ${view.name} its deck draws every texel finite`,
+        bad === 0 && drawn > 0,
+        `${drawn} of ${LAYER_SIDE_PX * LAYER_SIDE_PX} texels drawn, ${bad} not finite or of α outside [0, 1]`,
+      );
+    }
+  } finally {
+    target.dispose();
+    scene.dispose();
+    engine.releaseTexture(tables.body);
+    engine.releaseTexture(blueNoise);
+    volumes.dispose();
     layers.dispose();
   }
 }

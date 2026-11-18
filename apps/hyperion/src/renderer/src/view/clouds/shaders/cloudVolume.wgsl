@@ -94,7 +94,8 @@ fn cloud_column_march(
   var c = 1.0;
   for (var i = 0u; i < CLOUD_OCTAVE_COUNT; i = i + 1u) {
     let phase = cloud_two_lobe(cos_theta, g, c);
-    let view_step = a * dt / view_mu;
+    // The view's path takes the medium's own extinction, the octaves' a^i the sun's alone.
+    let view_step = dt / view_mu;
     let step_light = b * albedo * phase * (dt / view_mu) * cloud_escape(view_step);
     var radiance = 0.0;
     var transmittance = 1.0;
@@ -158,18 +159,22 @@ fn cloud_volume_march(
     // From beneath the base: the deck begins where the ray leaves it.
     t0 = inner.y;
   }
-  return cloud_volume_march_between(o, d, sun, base_m, top_m, t0, t1, steps, footprint_per_m, k, shell, optics, datum);
+  return cloud_volume_march_between(o, d, sun, base_m, top_m, t0, t1, steps, footprint_per_m, k, shell, optics, datum, 1.0);
 }
 
+// `cloud_volume_march`'s march between `t0` and `t1` along the ray, each sample's column the field's
+// mean τ over `share`, the covered share of the view's footprint it is drawn in: 1 for the column
+// spread over its whole footprint; the footprint's f for its covered part alone, whose light and
+// opacity the caller weighs by f, the layer's independent-pixel form (Design note 10).
 fn cloud_volume_march_between(
   o : vec3f, d : vec3f, sun : vec3f, base_m : f32, top_m : f32, t0 : f32, t1 : f32, steps : u32,
-  footprint_per_m : f32, k : f32, shell : vec4f, optics : vec4f, datum : f32,
+  footprint_per_m : f32, k : f32, shell : vec4f, optics : vec4f, datum : f32, share : f32,
 ) -> vec2f {
   let depth = max(top_m - base_m, 1.0);
   let dt = (t1 - t0) / f32(steps);
   let cos_theta = dot(sun, d);
   let albedo = 1.0 - optics.y;
-  var view = array<f32, 4>(1.0, 1.0, 1.0, 1.0);
+  var view = 1.0;
   var radiance = 0.0;
   for (var s = 0u; s < steps; s = s + 1u) {
     let t = t0 + (f32(s) + 0.5) * dt;
@@ -180,7 +185,7 @@ fn cloud_volume_march_between(
     // The column above the sample, read on the layer's shell.
     let on_shell = x * (shell.x / scaled);
     let field = cloud_field_at(on_shell, max(footprint_per_m * t, 1.0), CLOUD_OCTAVES_MAX);
-    let column = field.mean_tau;
+    let column = field.mean_tau / share;
     let sigma = column / depth;
     let normal = normalize(vec3f(x.xy, x.z * k * k));
     let raw_mu = dot(normal, sun);
@@ -189,22 +194,23 @@ fn cloud_volume_march_between(
     let mu_sun = max(raw_mu, CLOUD_VOLUME_LEAST_MU);
     let above = column * clamp((top_m - height) / depth, 0.0, 1.0);
     let multiple = cloud_octave_correction_at(column, mu_sun);
+    // One view transmittance, the medium's own extinction's; the octaves' a^i on the sun's path.
+    let view_step = sigma * dt;
     var a = 1.0;
     var b = 1.0;
     var c = 1.0;
+    var source = 0.0;
     for (var i = 0u; i < CLOUD_OCTAVE_COUNT; i = i + 1u) {
-      let view_step = a * sigma * dt;
       let weight = select(multiple, 1.0, i == 0u);
-      var source = 0.0;
       if (lit) {
-        source = weight * b * albedo * cloud_two_lobe(cos_theta, optics.x, c) * exp(-a * above / mu_sun);
+        source = source + weight * b * albedo * cloud_two_lobe(cos_theta, optics.x, c) * exp(-a * above / mu_sun);
       }
-      radiance = radiance + view[i] * source * sigma * dt * cloud_escape(view_step);
-      view[i] = view[i] * exp(-view_step);
       a = a * CLOUD_OCTAVE_EXTINCTION;
       b = b * CLOUD_OCTAVE_SCATTERING;
       c = c * CLOUD_OCTAVE_PHASE;
     }
+    radiance = radiance + view * source * sigma * dt * cloud_escape(view_step);
+    view = view * exp(-view_step);
   }
-  return vec2f(radiance, view[0]);
+  return vec2f(radiance, view);
 }

@@ -160,7 +160,12 @@ import {
 } from "./frameTimingScene";
 import { checkBlendComputeCube, checkMaterialState, checkSplatRefused } from "./blending";
 import { checkBloom } from "./bloom";
-import { checkCloudCatalogue, checkCloudLayerDraw, checkCloudTwins } from "./clouds";
+import {
+  checkCloudCatalogue,
+  checkCloudLayerDraw,
+  checkCloudTwins,
+  checkCloudVolumeDraw,
+} from "./clouds";
 import { BROKEN_ENTRY, checkCatalogue, makeExternalRequests, type SmokeFixture } from "./catalogue";
 import { checkIdTarget } from "./idTarget";
 import { checkInstanceCull, checkInstancesAboveClusters, checkParticleFaces } from "./instances";
@@ -837,6 +842,7 @@ async function run(
     () => checkCloudTwins(engine, checks),
   );
   await group(26, "R11.T7.b the cloud layer drawn", () => checkCloudLayerDraw(engine, checks));
+  await group(26, "R11.T7.c the cloud volume drawn", () => checkCloudVolumeDraw(engine, checks));
   // In part 28, alone: R11.T10.c's PNG round trip through the harness's main process and VIEW's
   // still mount, whose R11.T10.b job draws a small still of flat colours into targets of its own,
   // then a small still of a lit body through the photorealistic renderer's hook (R11.T10.b), each

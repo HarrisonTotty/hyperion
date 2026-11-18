@@ -59,6 +59,7 @@ import { COMPOSITE_CENSUS_KERNEL, MARCH_CENSUS_KERNEL } from "../atmosphere/marc
 import { LIT_BODY_PROBE } from "../appearance/litBodyProbe";
 import { CLOUD_LAYER_MATERIAL } from "../clouds/cloudLayer";
 import { CLOUD_PROBE_MATERIAL } from "../clouds/cloudProbe";
+import { CLOUD_VOLUME_MATERIALS } from "../clouds/cloudVolumePass";
 import { TERRAIN_LIT_CLOUD_MATERIALS } from "../terrain/cloudLight";
 import { OCEAN_FAR_PROBE } from "../ocean/oceanFarProbe";
 import {
@@ -422,13 +423,16 @@ const SKY_ENTRIES: ReadonlyArray<CatalogueEntry> = [
 /**
  * Plan R11's clouds (R11.T7.b): the two-dimensional layer, the probe that runs the field, the
  * optics and the ground's tap against their twins in an `r32uint` target (`clouds/cloudProbe.ts`),
- * and the lit terrain's cloudy forms on both vertex paths (`terrain/cloudLight.ts`). The smoke
+ * the lit terrain's cloudy forms on both vertex paths (`terrain/cloudLight.ts`), and the volume's
+ * passes (R11.T7.c, `clouds/cloudVolumePass.ts`). The smoke
  * harness compiles them in part 26, with the clouds' checks.
  */
 export const CLOUD_ENTRIES: ReadonlyArray<CatalogueEntry> = [
   { kind: "material", spec: CLOUD_LAYER_MATERIAL },
   { kind: "material", spec: CLOUD_PROBE_MATERIAL, targets: ["r32uint"] },
   ...TERRAIN_LIT_CLOUD_MATERIALS.map((spec): CatalogueEntry => ({ kind: "material", spec })),
+  // The volume's march, resolve and composite (R11.T7.c), into the scene's `rgba16float`.
+  ...CLOUD_VOLUME_MATERIALS.map((spec): CatalogueEntry => ({ kind: "material", spec })),
 ];
 
 /** The point splats (R06.T13.h). */

@@ -118,7 +118,12 @@ describe("photorealisticPasses", () => {
       const passes = photorealisticPasses(setting).passes;
       const labels = passes.map((pass) => pass.label);
       const at = labels.indexOf(CLOUD_LAYER_PASS);
-      expect(passes[at]).toEqual({ label: CLOUD_LAYER_PASS, owner: "R11", built: true });
+      expect(passes[at]).toEqual({
+        label: CLOUD_LAYER_PASS,
+        owner: "R11",
+        built: true,
+        labels: ["clouds volume", "clouds resolve", "clouds"],
+      });
       expect(at).toBeGreaterThan(labels.indexOf("atmosphere"));
       expect(at).toBeLessThan(labels.indexOf(PHOTOREAL_PASS_LABELS.histogram));
     },

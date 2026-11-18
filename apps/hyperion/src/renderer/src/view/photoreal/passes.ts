@@ -30,6 +30,7 @@ import {
 } from "../atmosphere/hillaire";
 import { ATMOSPHERE_TABLES_PASS } from "../atmosphere/tables";
 import { CLOUD_LAYER_PASS } from "../clouds/cloudLayer";
+import { CLOUD_RESOLVE_PASS, CLOUD_VOLUME_PASS } from "../clouds/cloudVolumePass";
 import { DISC_CELLS_PASS } from "../bodies/draw";
 import { DEPTH_PYRAMID_LABEL } from "../clusters/hzb";
 import {
@@ -95,6 +96,17 @@ export const ATMOSPHERE_PASS_LABELS: ReadonlyArray<string> = [
   ATMOSPHERE_VIEW_PASS,
   ATMOSPHERE_BEHIND_PASS,
   ATMOSPHERE_COMPOSITE_PASS,
+];
+
+/**
+ * The labels R11's clouds submit their passes under (plan R11, R11.T7.b and T7.c), in a frame's
+ * order: the volume's march and its temporal resolve, for the body drawn as a volume, then each
+ * body's layer or the volume's composite over its air.
+ */
+export const CLOUD_PASS_LABELS: ReadonlyArray<string> = [
+  CLOUD_VOLUME_PASS,
+  CLOUD_RESOLVE_PASS,
+  CLOUD_LAYER_PASS,
 ];
 
 /** The plan that owns a pass. */
@@ -174,8 +186,9 @@ export function photorealisticPasses(setting: QualitySetting): PassList {
       // Each body's air over everything opaque drawn before it (R08.T10.b).
       slot("atmosphere", "R08", true, ATMOSPHERE_PASS_LABELS),
       slot("rings", "R11", false),
-      // Each body's clouds after its composite, into the target it drew (plan R11, R11.T7.b).
-      slot(CLOUD_LAYER_PASS, "R11", true),
+      // Each body's clouds after its composite, into the target it drew (plan R11, R11.T7.b): the
+      // volume's march and resolve where a body draws it (R11.T7.c), then the layer or its composite.
+      slot(CLOUD_LAYER_PASS, "R11", true, CLOUD_PASS_LABELS),
       slot("ocean", "R11", false),
       own(PHOTOREAL_PASS_LABELS.histogram),
       own(PHOTOREAL_PASS_LABELS.bloom),

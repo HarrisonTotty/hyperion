@@ -71,6 +71,12 @@ import {
   layerCondensateOf,
   seasonOf,
 } from "../clouds/cloudLayer";
+import {
+  CLOUD_COMPOSITE_MATERIAL,
+  CLOUD_RESOLVE_MATERIAL,
+  CLOUD_VOLUME_MATERIAL,
+  CloudVolumes,
+} from "../clouds/cloudVolumePass";
 import type { BodyClouds, CloudCondensate } from "../clouds/condensates";
 import {
   BODY_DISC_CELLS_AIR_KERNEL,
@@ -587,6 +593,15 @@ interface Resources {
    */
   readonly cloudLayer: MaterialHandle | null;
   /**
+   * The cloud volume's march, resolve and composite (plan R11, R11.T7.c; `cloudVolumePass.ts`), made
+   * with the rest; `null` where its compiler refused any, when the high setting draws the layer.
+   */
+  readonly cloudVolume: {
+    readonly march: MaterialHandle;
+    readonly resolve: MaterialHandle;
+    readonly composite: MaterialHandle;
+  } | null;
+  /**
    * The targets the bodies' composites draw into in turn, the first reading the scene target and
    * each after it the one before (R08.T10.b): made at the first frame that draws an atmosphere.
    */
@@ -648,6 +663,24 @@ function withAtmospheres(
 export interface FrameClouds {
   readonly condensate: CloudCondensate;
   readonly gpu: CloudBodyGpu;
+  /**
+   * Its condensate's correction texture where the frame draws its clouds as the volume (plan R11,
+   * R11.T7.c; `cloudVolumePass.ts`), absent where it draws the layer.
+   */
+  readonly volume?: TextureHandle;
+}
+
+/** Of bodies' atmospheres, the one whose camera stands nearest its centre; `null` with none. */
+function nearestOf<T extends { readonly air: FrameAtmosphere }>(
+  bodies: ReadonlyArray<T>,
+): T | null {
+  let nearest: T | null = null;
+  for (const body of bodies) {
+    if (nearest === null || norm(body.air.camera.positionM) < norm(nearest.air.camera.positionM)) {
+      nearest = body;
+    }
+  }
+  return nearest;
 }
 
 /** No season: a body with no star is drawn at the equinox. */
@@ -748,6 +781,33 @@ function insideAir(air: FrameAtmosphere): boolean {
   return heightM < air.tables.medium.topHeightM;
 }
 
+/**
+ * The cloud volume's three materials where all were made (plan R11, R11.T7.c), else `null`, those
+ * made released: the high setting then draws the layer.
+ */
+function volumeMaterialsOf(
+  engine: Pick<RenderEngine, "releaseMaterial">,
+  made: ReadonlyArray<MaterialHandle | null>,
+): Resources["cloudVolume"] {
+  const [march, resolve, composite] = made;
+  if (
+    march === undefined ||
+    march === null ||
+    resolve === undefined ||
+    resolve === null ||
+    composite === undefined ||
+    composite === null
+  ) {
+    for (const material of made) {
+      if (material !== null) {
+        engine.releaseMaterial(material);
+      }
+    }
+    return null;
+  }
+  return { march, resolve, composite };
+}
+
 /** `rect` held to a target of `size`, its pixels from the top left. */
 function rectWithin(rect: TexelRect, size: ViewSize): TexelRect {
   const x = Math.min(rect.x, size.widthPx);
@@ -793,6 +853,8 @@ export class PhotorealRenderer {
    * frames, and each body's rows and coverage; made again after a device loss.
    */
   #clouds: CloudLayers;
+  /** The cloud volume of the body it draws as one (plan R11, R11.T7.c); made again after a loss. */
+  #volumes: CloudVolumes;
   /**
    * The view's depth pyramid (plan R14, R14.T3.d), made at the first frame whose geometry asks the
    * two-pass occlusion and let go at the first that does not; and whether a cut came since its last
@@ -834,6 +896,7 @@ export class PhotorealRenderer {
     // The bodies' renderer makes its own handles again after a loss, so it lives as long as this.
     this.#bodies = new LitBodyRenderer(engine, SKY_SPRITE_HDR_MATERIAL);
     this.#clouds = new CloudLayers(engine, viewName);
+    this.#volumes = new CloudVolumes(engine, viewName);
     this.#unsubscribe = engine.onRestored(() => {
       // The handles died with the device; a making in flight is abandoned, and the next frame
       // makes them again.
@@ -849,6 +912,8 @@ export class PhotorealRenderer {
       // The clouds' handles died with it too; their noise tile is made again over frames.
       this.#clouds.dispose();
       this.#clouds = new CloudLayers(engine, viewName);
+      this.#volumes.dispose();
+      this.#volumes = new CloudVolumes(engine, viewName);
       this.#formCells = noFormCells();
       this.#histogram = undefined;
       this.#making = null;
@@ -918,51 +983,77 @@ export class PhotorealRenderer {
     let pyramidKernel: ComputeHandle | null;
     let atmosphere: AtmosphereFrameKernels;
     let cloudLayer: MaterialHandle | null;
+    let cloudVolume: ReadonlyArray<MaterialHandle | null>;
     try {
-      [tonemap, overlayDepth, sprite, kernel, discCells, pyramidKernel, atmosphere, cloudLayer] =
-        await Promise.all([
-          engine.createMaterialAsync(TONEMAP_MATERIAL, ["canvas-in-pass"], [triangle]),
-          engine.createMaterialAsync(OVERLAY_SCENE_DEPTH_MATERIAL, ["canvas"], [triangle]),
-          engine.createMaterialAsync(SKY_SPRITE_HDR_MATERIAL, ["rgba16float"], [quad]),
-          engine.createComputeAsync(HISTOGRAM_KERNEL),
-          engine.createComputeAsync(BODY_DISC_CELLS_KERNEL),
-          // A refused pyramid leaves the view its one raster: the occlusion is a lever, not the frame.
-          engine.createComputeAsync(DEPTH_PYRAMID_KERNEL).catch((error: unknown) => {
-            console.warn(`the photorealistic view ${this.#name} has no depth pyramid:`, error);
+      [
+        tonemap,
+        overlayDepth,
+        sprite,
+        kernel,
+        discCells,
+        pyramidKernel,
+        atmosphere,
+        cloudLayer,
+        cloudVolume,
+      ] = await Promise.all([
+        engine.createMaterialAsync(TONEMAP_MATERIAL, ["canvas-in-pass"], [triangle]),
+        engine.createMaterialAsync(OVERLAY_SCENE_DEPTH_MATERIAL, ["canvas"], [triangle]),
+        engine.createMaterialAsync(SKY_SPRITE_HDR_MATERIAL, ["rgba16float"], [quad]),
+        engine.createComputeAsync(HISTOGRAM_KERNEL),
+        engine.createComputeAsync(BODY_DISC_CELLS_KERNEL),
+        // A refused pyramid leaves the view its one raster: the occlusion is a lever, not the frame.
+        engine.createComputeAsync(DEPTH_PYRAMID_KERNEL).catch((error: unknown) => {
+          console.warn(`the photorealistic view ${this.#name} has no depth pyramid:`, error);
+          return null;
+        }),
+        // Every world with air draws by the thick read's kernels once its correction is routed
+        // (R08.T14.f), so they are made ahead of the first frame of one; and the kernel of what lies
+        // behind the sky at the march's resolution, which the settings' levers take (the owner's
+        // priority, 2026-11-01), with the tile cull's where a setting takes it (R08.T8.d): either
+        // setting's, since the frame-rate floor draws high's air at low's. The packed limb's are made
+        // in the background at the first frame that takes them, each body's form alone, its frames
+        // marching per texel, the same bits, until then. The thick read's marches from the
+        // sources' table are made too where a setting takes it (perf-thick-march).
+        createAtmosphereFrameKernels(engine, {
+          thick: QUALITY_SETTINGS.some(
+            (each) =>
+              ({ ...SETTINGS[each].atmosphereLevers, ...levers }).marchSourceTransmittance ===
+              "table",
+          )
+            ? "with the table"
+            : CORRECTION_ROUTED,
+          behind: true,
+          tiles: QUALITY_SETTINGS.some(
+            (each) => ({ ...SETTINGS[each].atmosphereLevers, ...levers }).marchCover === "tiles",
+          ),
+        }),
+        // A refused cloud layer leaves the view without clouds, as a refused pyramid leaves it
+        // one raster (plan R11, R11.T7.b).
+        engine
+          .createMaterialAsync(CLOUD_LAYER_MATERIAL, [HDR_COLOUR_FORMAT], [triangle])
+          .catch((error: unknown) => {
+            if (!lostDevice(error)) {
+              console.warn(`the photorealistic view ${this.#name} draws no clouds:`, error);
+            }
             return null;
           }),
-          // Every world with air draws by the thick read's kernels once its correction is routed
-          // (R08.T14.f), so they are made ahead of the first frame of one; and the kernel of what lies
-          // behind the sky at the march's resolution, which the settings' levers take (the owner's
-          // priority, 2026-11-01), with the tile cull's where a setting takes it (R08.T8.d): either
-          // setting's, since the frame-rate floor draws high's air at low's. The packed limb's are made
-          // in the background at the first frame that takes them, each body's form alone, its frames
-          // marching per texel, the same bits, until then. The thick read's marches from the
-          // sources' table are made too where a setting takes it (perf-thick-march).
-          createAtmosphereFrameKernels(engine, {
-            thick: QUALITY_SETTINGS.some(
-              (each) =>
-                ({ ...SETTINGS[each].atmosphereLevers, ...levers }).marchSourceTransmittance ===
-                "table",
-            )
-              ? "with the table"
-              : CORRECTION_ROUTED,
-            behind: true,
-            tiles: QUALITY_SETTINGS.some(
-              (each) => ({ ...SETTINGS[each].atmosphereLevers, ...levers }).marchCover === "tiles",
-            ),
-          }),
-          // A refused cloud layer leaves the view without clouds, as a refused pyramid leaves it
-          // one raster (plan R11, R11.T7.b).
-          engine
-            .createMaterialAsync(CLOUD_LAYER_MATERIAL, [HDR_COLOUR_FORMAT], [triangle])
-            .catch((error: unknown) => {
-              if (!lostDevice(error)) {
-                console.warn(`the photorealistic view ${this.#name} draws no clouds:`, error);
-              }
-              return null;
-            }),
-        ]);
+        // A refused volume leaves the high setting the layer (plan R11, R11.T7.c).
+        Promise.all(
+          [CLOUD_VOLUME_MATERIAL, CLOUD_RESOLVE_MATERIAL, CLOUD_COMPOSITE_MATERIAL].map((spec) =>
+            engine
+              .createMaterialAsync(spec, [HDR_COLOUR_FORMAT], [triangle])
+              .catch((error: unknown) => {
+                if (!lostDevice(error)) {
+                  console.warn(
+                    `the photorealistic view ${this.#name} draws its clouds as the layer:`,
+                    error,
+                  );
+                }
+                return null;
+              }),
+          ),
+        ),
+      ]);
     } catch (error: unknown) {
       // A chain made before the refusal is released with it, and the meshes made for it.
       void making
@@ -980,7 +1071,14 @@ export class PhotorealRenderer {
     // and may be disposed, at each still).
     if (this.#disposed || generation !== this.#generation) {
       bloom.dispose();
-      for (const material of [tonemap, overlayDepth, sprite, atmosphere.composite, cloudLayer]) {
+      for (const material of [
+        tonemap,
+        overlayDepth,
+        sprite,
+        atmosphere.composite,
+        cloudLayer,
+        ...cloudVolume,
+      ]) {
         if (material !== null) {
           engine.releaseMaterial(material);
         }
@@ -1023,6 +1121,7 @@ export class PhotorealRenderer {
       pyramidKernel,
       atmosphere,
       cloudLayer,
+      cloudVolume: volumeMaterialsOf(engine, cloudVolume),
       airTargets: [],
       visibility: null,
       figureIds: null,
@@ -1514,8 +1613,10 @@ export class PhotorealRenderer {
   dropHistograms(): void {
     this.#histogram = undefined;
     this.#resources?.histograms.dropInFlight();
-    // A cut: the next frame's two-pass occlusion keeps nothing of this one's visibility (R14.T3.d).
+    // A cut: the next frame's two-pass occlusion keeps nothing of this one's visibility (R14.T3.d),
+    // nor its clouds' volume of its history (R11.T7.c).
     this.#cut = true;
+    this.#volumes.cut();
   }
 
   /**
@@ -1707,7 +1808,7 @@ export class PhotorealRenderer {
       const lighting = byId.get(air.id)?.atmosphere;
       if (own !== undefined && resources.cloudLayer !== null && lighting !== undefined) {
         const figure = tablesFigureOf(tables);
-        const uniforms = cloudLayerUniforms({
+        const view = {
           camera: air.camera,
           figure,
           shell: cloudShellOf(figure, cloudLayerHeightM(own.condensate)),
@@ -1715,7 +1816,31 @@ export class PhotorealRenderer {
           suns,
           exposureScale: frame.exposureScale,
           octaves: LAYER_OCTAVES[frame.setting],
-        });
+        };
+        const scissor = area === null ? null : rectWithin(area, resources.size);
+        // The volume of the body it draws as one (plan R11, R11.T7.c), else the layer.
+        if (own.volume !== undefined && resources.cloudVolume !== null) {
+          this.#volumes.draw(
+            {
+              id: air.id,
+              gpu: own.gpu,
+              condensate: own.condensate,
+              view,
+              lighting,
+              sceneDepth: depth,
+              blueNoise: resources.blueNoise,
+              correction: own.volume,
+            },
+            { ...resources.cloudVolume, triangle: resources.triangle },
+            target,
+            resources.size,
+            pass,
+            scissor,
+          );
+          colour = target.colour;
+          continue;
+        }
+        const uniforms = cloudLayerUniforms(view);
         target.render({
           label: CLOUD_LAYER_PASS,
           viewRotation: pass.viewRotation,
@@ -1732,7 +1857,7 @@ export class PhotorealRenderer {
           ],
           postProcesses: [],
           colourLoad: "load",
-          ...(area === null ? {} : { scissor: rectWithin(area, resources.size) }),
+          ...(scissor === null ? {} : { scissor }),
         });
       }
       colour = target.colour;
@@ -1793,15 +1918,42 @@ export class PhotorealRenderer {
       }
     }
     this.#clouds.keepOnly(new Set(drawn.keys()));
+    // The nearest such body as the volume, where the setting's clouds are one and the frame-rate
+    // floor has not stepped the air down (plan R11, R11.T7.c), once its correction is made.
+    const volume =
+      SETTINGS[frame.setting].clouds === "volume" &&
+      (frame.atmosphereSetting ?? frame.setting) === frame.setting &&
+      resources.cloudVolume !== null
+        ? nearestOf(wanted.filter(({ air }) => drawn.has(air.id)))
+        : null;
+    if (volume === null) {
+      // A frame without the volume ends its history; its corrections, 2 KiB each, are kept.
+      this.#volumes.cut();
+      return drawn;
+    }
+    const correction = this.#volumes.correction(volume.condensate, this.#nowMs);
+    this.#volumes.keepOnly([volume.condensate]);
+    const own = drawn.get(volume.air.id);
+    if (correction !== null && own !== undefined) {
+      drawn.set(volume.air.id, { ...own, volume: correction });
+    }
     return drawn;
   }
 
   /**
-   * Makes the clouds' noise tile at once, so that a still's first sample draws its bodies' clouds
-   * (plan R11, R11.T10.b's still renderer, made at each still); a view's frames make it over frames.
+   * Makes the clouds' noise tile at once, and the volume's correction of each of `atmospheres`'
+   * condensates, so that a still's first sample draws its bodies' clouds as its frames would (plan
+   * R11, R11.T10.b's still renderer, made at each still); a view's frames make them over frames.
    */
-  prepareClouds(): void {
+  prepareClouds(atmospheres: ReadonlyArray<FrameAtmosphere> = []): void {
     this.#clouds.step(this.#nowMs, Number.POSITIVE_INFINITY);
+    for (const air of atmospheres) {
+      const clouds = air.clouds ?? null;
+      const condensate = clouds === null ? null : layerCondensateOf(clouds);
+      if (condensate !== null) {
+        this.#volumes.correction(condensate, this.#nowMs, Number.POSITIVE_INFINITY);
+      }
+    }
   }
 
   /**
@@ -1993,6 +2145,7 @@ export class PhotorealRenderer {
     this.#bodies.dispose();
     this.#releaseAtmospheres();
     this.#clouds.dispose();
+    this.#volumes.dispose();
     const resources = this.#resources;
     if (resources !== null) {
       resources.histograms.dispose();
@@ -2005,8 +2158,15 @@ export class PhotorealRenderer {
       // The atmospheres' composite and its triangle, made with the view's pipelines; their
       // kernels have no release.
       this.#engine.releaseMaterial(resources.atmosphere.composite);
-      if (resources.cloudLayer !== null) {
-        this.#engine.releaseMaterial(resources.cloudLayer);
+      for (const material of [
+        resources.cloudLayer,
+        resources.cloudVolume?.march ?? null,
+        resources.cloudVolume?.resolve ?? null,
+        resources.cloudVolume?.composite ?? null,
+      ]) {
+        if (material !== null) {
+          this.#engine.releaseMaterial(material);
+        }
       }
       this.#engine.releaseMaterial(resources.overlayDepth);
       this.#engine.releaseMesh(resources.atmosphere.triangle);
@@ -2349,7 +2509,7 @@ export class PhotorealStillRenderer implements StillRenderer {
     }
     // Its bodies' clouds from its first sample (plan R11, R11.T7.b).
     if ((frame.atmospheres ?? []).some((each) => (each.clouds ?? null) !== null)) {
-      this.#scene.prepareClouds();
+      this.#scene.prepareClouds(frame.atmospheres ?? []);
     }
     if (this.#disposed) {
       return;

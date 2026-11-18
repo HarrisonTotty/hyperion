@@ -104,14 +104,14 @@ describe("the two lobes", () => {
 });
 
 describe("the octaves' fit to δ-Eddington", () => {
-  it("misses δ-Eddington by its stated 59% alone", () => {
+  it("misses δ-Eddington by its stated 94% alone", () => {
     let worst = 0;
     for (const tau of TAUS) {
       for (const mu0 of MUS) {
         worst = Math.max(worst, Math.abs(octaveTotal(tau, mu0) / slabReflectance(tau, mu0) - 1));
       }
     }
-    expect(worst).toBeLessThan(0.6);
+    expect(worst).toBeLessThan(0.95);
   });
 
   it("adds no light: no octave scatters more than it takes out", () => {
@@ -157,7 +157,7 @@ describe("the reference march", () => {
       [50, 0.75],
     ] as const) {
       const marched = fluxReflectance(mu0, (muView, cosTheta) => {
-        const light = marchColumn({ tau, mu0, muView, cosTheta, optics: WATER, steps: 512 });
+        const light = marchColumn({ tau, mu0, muView, cosTheta, optics: WATER, steps: 2048 });
         return light.single + light.multiple;
       });
       expect(marched / octaveTotal(tau, mu0)).toBeCloseTo(1, 3);
@@ -306,6 +306,22 @@ describe("marchDeckRay", () => {
       footprintPerM: 1e-3,
     });
     expect(marched.transmittance).toBeCloseTo(Math.exp(-8), 4);
+  });
+
+  it("marches the covered part of a footprint alone at its share: each column its mean τ over it (R11.T7.c)", () => {
+    const clouds = uniformClouds(0.6, 1);
+    const doubled = { ...clouds, params: { ...clouds.params, meanTau: 2 * clouds.params.meanTau } };
+    const deck = { baseM: 1_000, topM: 3_000 };
+    const ray = {
+      originM: { x: 6_378_137 + 400_000, y: 0, z: 0 },
+      direction: { x: -1, y: 0, z: 0 },
+      sun: { x: 1, y: 0, z: 0 },
+      steps: 16,
+      footprintPerM: 1e-3,
+    };
+    expect(marchDeckRay(clouds, deck, CORRECTION, { ...ray, share: 0.5 })).toEqual(
+      marchDeckRay(doubled, deck, CORRECTION, ray),
+    );
   });
 
   it("passes a ray that misses the deck untouched", () => {

@@ -11,14 +11,16 @@
  *   ({@link twoLobeOf}): a forward lobe half-way from g to 1 and a backward one at
  *   {@link BACKWARD_LOBE_ASYMMETRY} (lean, 2026-11-13).
  * - **Multiple scattering** is Wrenninge et al. 2013's octaves (as Hillaire 2016 takes them):
- *   octave i is a medium of extinction a^i σ on both the sun's path and the view's, of scattering
- *   b^i σ with b ≤ a, so that no octave adds light, and of phase asymmetry c^i
- *   ({@link CLOUD_OCTAVES}).
+ *   octave i is a medium of extinction a^i σ on the sun's path, of scattering b^i σ with b ≤ a, so
+ *   that no octave adds light, and of phase asymmetry c^i ({@link CLOUD_OCTAVES}); the view's path
+ *   takes the medium's own extinction, one transmittance for all, as Hillaire 2016's integration
+ *   does (R11.T7.d's check, 2026-11-18: the octaves' a^i on the view's path brightened a grazing
+ *   view through the deck threefold).
  * - **The correction** ({@link octaveCorrectionOf}): the octaves past the first, the multiple
  *   scattering, take a factor K(τ, μ₀) = (R_δE − R₀) ÷ (R_octaves − R₀), R₀ the first octave's single
  *   scattering, so that each column's flux reflectance is δ-Eddington's within the table's
  *   interpolation while its single scattering stays its own (lean, 2026-11-13): the octaves alone
- *   miss δ-Eddington by up to 59% ({@link CLOUD_OCTAVES}' remarks), a step a switch of setting
+ *   miss δ-Eddington by up to 94% ({@link CLOUD_OCTAVES}' remarks), a step a switch of setting
  *   would show. δ-Eddington is itself about 10% high at τ 1, g 0.85, μ₀ 1 against a converged Monte
  *   Carlo (10.0 ± 0.2% and 10.2 ± 0.15% in two 10⁷-photon runs; T7.a.1's records), within 2.6% at
  *   τ ≥ 10.
@@ -95,7 +97,7 @@ export function twoLobePhase(cosTheta: number, lobes: TwoLobePhase, scale = 1): 
 /** Wrenninge et al. 2013's octaves: their count and each one's scale on the last's. */
 export interface CloudOctaves {
   readonly count: number;
-  /** a, on the extinction, the sun's path's and the view's. */
+  /** a, on the extinction of the sun's path. */
   readonly extinction: number;
   /** b, on the scattering, at most a. */
   readonly scattering: number;
@@ -106,14 +108,16 @@ export interface CloudOctaves {
 /**
  * The octaves, fitted by differential evolution to the minimax of R ÷ R_δE − 1 over τ 1, 1.5, 2,
  * 3, 5, 7, 10, 15, 20, 30 and 50 and μ₀ 0.5 to 1 by eighths, at liquid water's g 0.8654 and
- * 1 − ϖ₀ 5.4 × 10⁻⁷, with the two lobes of {@link twoLobeOf}, under b ≤ a (2026-11-14).
+ * 1 − ϖ₀ 5.4 × 10⁻⁷, with the two lobes of {@link twoLobeOf}, under b ≤ a (2026-11-14), when
+ * their a^i stood on the view's path too.
  *
  * @remarks
  * The fit puts b at a and c at 0: each octave past the first a conservative, isotropic medium of
- * a^i the extinction. Alone they miss δ-Eddington's flux reflectance by up to 59% (+59% at τ 1,
- * μ₀ 1; −59% at τ 50, μ₀ 1): octaves that add no light cannot reach a thick deck's albedo, and
- * fits that let b exceed a (a 22–23% miss) add light, unboundedly along a grazing view.
- * {@link octaveCorrectionOf} takes up the rest.
+ * a^i the extinction. With the view's path at the medium's own extinction (R11.T7.d, 2026-11-18)
+ * they alone miss δ-Eddington's flux reflectance by up to 94% (−5% at τ 1, μ₀ 1; −94% at τ 50,
+ * μ₀ 1; 59% when fitted): octaves that add no light cannot reach a thick deck's albedo, and fits
+ * that let b exceed a (a 22–23% miss) add light, unboundedly along a grazing view.
+ * {@link octaveCorrectionOf} takes up the rest, K up to about 27 at τ 50.
  */
 export const CLOUD_OCTAVES: CloudOctaves = {
   count: 4,
@@ -180,7 +184,8 @@ export function marchColumn(
   let c = 1;
   for (let i = 0; i < octaves.count; i += 1) {
     const phase = twoLobePhase(cosTheta, lobes, c);
-    const viewStep = (a * dt) / muView;
+    // The view's path takes the medium's own extinction, the octaves' a^i the sun's alone.
+    const viewStep = dt / muView;
     let radiance = 0;
     let transmittance = 1;
     for (let k = 0; k < steps; k += 1) {
@@ -283,8 +288,8 @@ export function octaveReflectance(
       for (let i = 0; i < to; i += 1) {
         if (i >= from) {
           radiance +=
-            ((b * albedo * twoLobePhase(cosTheta, lobes, c) * mu0) / (a * (mu + mu0))) *
-            -Math.expm1(-a * tau * (1 / mu0 + 1 / mu));
+            ((b * albedo * twoLobePhase(cosTheta, lobes, c) * mu0) / (a * mu + mu0)) *
+            -Math.expm1(-tau * (a / mu0 + 1 / mu));
         }
         a *= octaves.extinction;
         b *= octaves.scattering;
@@ -334,21 +339,35 @@ export function octaveCorrectionOf(
 ): OctaveCorrection {
   const factors = new Float32Array(CORRECTION_TAUS * CORRECTION_MUS);
   for (let j = 0; j < CORRECTION_MUS; j += 1) {
-    const mu0 = correctionMu(j);
-    for (let i = 0; i < CORRECTION_TAUS; i += 1) {
-      const tau = correctionTau(i);
-      const target = deltaEddington({
-        tau,
-        asymmetry: optics.asymmetry,
-        singleScatterAlbedo: 1 - optics.coAlbedo,
-        mu0,
-      }).reflectance;
-      const flux = octaveReflectance(tau, mu0, optics, octaves);
-      const k = flux.multiple > 0 ? (target - flux.single) / flux.multiple : 0;
-      factors[j * CORRECTION_TAUS + i] = Math.min(Math.max(k, 0), CORRECTION_MAX);
-    }
+    octaveCorrectionRow(optics, j, factors, octaves);
   }
   return { factors };
+}
+
+/**
+ * Row `j` of a condensate's correction table, its μ₀ sample's ({@link octaveCorrectionOf}), into
+ * `factors`, so that the table may be made a row at a time over frames (`cloudVolumePass.ts`'
+ * `OctaveCorrectionBuilder`), bit for bit as at once.
+ */
+export function octaveCorrectionRow(
+  optics: CloudOptics,
+  j: number,
+  factors: Float32Array,
+  octaves: CloudOctaves = CLOUD_OCTAVES,
+): void {
+  const mu0 = correctionMu(j);
+  for (let i = 0; i < CORRECTION_TAUS; i += 1) {
+    const tau = correctionTau(i);
+    const target = deltaEddington({
+      tau,
+      asymmetry: optics.asymmetry,
+      singleScatterAlbedo: 1 - optics.coAlbedo,
+      mu0,
+    }).reflectance;
+    const flux = octaveReflectance(tau, mu0, optics, octaves);
+    const k = flux.multiple > 0 ? (target - flux.single) / flux.multiple : 0;
+    factors[j * CORRECTION_TAUS + i] = Math.min(Math.max(k, 0), CORRECTION_MAX);
+  }
 }
 
 /**
@@ -409,6 +428,11 @@ export interface DeckRay {
   readonly steps: number;
   /** Its footprint's growth with distance, m per m; the footprint is at least 1 m. */
   readonly footprintPerM: number;
+  /**
+   * The covered share of the view's footprint the ray is drawn in (`cloud_volume_march_between`'s
+   * `share`): each column's mean τ over it, the covered part alone, 1 if absent.
+   */
+  readonly share?: number;
 }
 
 /** One view ray's march through a deck. */
@@ -451,7 +475,7 @@ export function marchDeckRay(
   const cosTheta = sun.x * direction.x + sun.y * direction.y + sun.z * direction.z;
   const lobes = twoLobeOf(optics.asymmetry);
   const albedo = 1 - optics.coAlbedo;
-  const view = Array.from({ length: octaves.count }, () => 1);
+  let view = 1;
   let radiance = 0;
   for (let s = 0; s < steps; s += 1) {
     const t = t0 + (s + 0.5) * dt;
@@ -467,14 +491,15 @@ export function marchDeckRay(
       y: (x.y * shell.equatorialRadiusM) / scaled,
       z: (x.z * shell.equatorialRadiusM) / scaled,
     };
-    const column = cloudFieldAt(
-      clouds.coverage,
-      clouds.noise,
-      clouds.params,
-      onShell,
-      Math.max(footprintPerM * t, 1),
-      CLOUD_OCTAVES_MAX,
-    ).meanTau;
+    const column =
+      cloudFieldAt(
+        clouds.coverage,
+        clouds.noise,
+        clouds.params,
+        onShell,
+        Math.max(footprintPerM * t, 1),
+        CLOUD_OCTAVES_MAX,
+      ).meanTau / (ray.share ?? 1);
     const sigma = column / depth;
     const n = { x: x.x, y: x.y, z: x.z * k * k };
     const rawMu = (n.x * sun.x + n.y * sun.y + n.z * sun.z) / Math.hypot(n.x, n.y, n.z);
@@ -482,21 +507,23 @@ export function marchDeckRay(
     const muSun = Math.max(rawMu, CLOUD_VOLUME_LEAST_MU);
     const above = column * Math.min(Math.max((deck.topM - height) / depth, 0), 1);
     const multiple = octaveCorrectionAt(correction, column, muSun);
+    // One view transmittance, the medium's own extinction's; the octaves' a^i on the sun's path.
+    const viewStep = sigma * dt;
     let a = 1;
     let b = 1;
     let c = 1;
+    let source = 0;
     for (let i = 0; i < octaves.count; i += 1) {
-      const viewStep = a * sigma * dt;
       const weight = i === 0 ? 1 : multiple;
-      const source = lit
+      source += lit
         ? weight * b * albedo * twoLobePhase(cosTheta, lobes, c) * Math.exp((-a * above) / muSun)
         : 0;
-      radiance += (view[i] ?? 0) * source * sigma * dt * escape(viewStep);
-      view[i] = (view[i] ?? 0) * Math.exp(-viewStep);
       a *= octaves.extinction;
       b *= octaves.scattering;
       c *= octaves.phase;
     }
+    radiance += view * source * sigma * dt * escape(viewStep);
+    view *= Math.exp(-viewStep);
   }
-  return { radiance, transmittance: view[0] ?? 1 };
+  return { radiance, transmittance: view };
 }
