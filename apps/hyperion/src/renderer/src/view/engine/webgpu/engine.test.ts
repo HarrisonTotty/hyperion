@@ -607,6 +607,72 @@ async function drawWith(
     });
 }
 
+/** A material whose fragment stage writes `frag_depth` when `depth`, as R11's seas do. */
+function depthWriter(depth: boolean): WgslMaterialSpec {
+  const output = depth
+    ? "struct Out { @location(0) colour : vec4f, @builtin(frag_depth) depth : f32 }"
+    : "// a fragment that writes no @builtin(frag_depth)\nstruct Out { @location(0) colour : vec4f }";
+  return {
+    name: depth ? "depth writer" : "colour writer",
+    displayName: "DEPTH WRITER",
+    vertexWgsl: "",
+    fragmentWgsl: `${output}\n@fragment fn fragmentMain() -> Out { return Out(); }`,
+    uniforms: [],
+    samplers: [],
+    cullMode: "none",
+    depthWrite: true,
+    colourWrites: true,
+    blend: "none",
+  };
+}
+
+describe("a material that writes frag_depth (plan R12, R12.T7.a's ladder)", () => {
+  beforeEach(() => {
+    // The engine asks `navigator.gpu` for the canvas's format when it makes a material's pipelines.
+    vi.stubGlobal("navigator", { gpu: new FakeGpu([]) });
+  });
+
+  /** Whether each pipeline `spec` makes into `rgba16float`, in order, has a depth attachment. */
+  async function depthsOf(spec: WgslMaterialSpec, prepared: boolean): Promise<boolean[]> {
+    const { engine, gpu } = await engineOn();
+    const mesh = indexedTriangle(engine);
+    if (prepared) {
+      await engine.prepareMaterial(engine.createMaterial(spec), ["rgba16float"], [mesh]);
+    } else {
+      await engine.createMaterialAsync(spec, ["rgba16float"], [mesh]);
+    }
+    return gpu.renderPipelines
+      .filter((pipeline) => pipeline.label === spec.name)
+      .map((pipeline) => pipeline.descriptor.depthStencil !== undefined);
+  }
+
+  it("makes its pipelines into a colour target with depth alone, which WebGPU requires", async () => {
+    expect(await depthsOf(depthWriter(true), false)).toEqual([true]);
+    expect(await depthsOf(depthWriter(true), true)).toEqual([true]);
+  });
+
+  it("refuses to prepare it for a target without depth alone, by name", async () => {
+    const { engine } = await engineOn();
+    const material = engine.createMaterial(depthWriter(true));
+    await expect(
+      engine.prepareMaterial(
+        material,
+        [{ colour: "rgba16float", depth: false }],
+        [indexedTriangle(engine)],
+      ),
+    ).rejects.toThrow("material depth writer writes frag_depth");
+  });
+
+  it("makes another's both with depth and without, a comment naming frag_depth aside", async () => {
+    expect(
+      (await depthsOf(depthWriter(false), false)).toSorted((a, b) => Number(a) - Number(b)),
+    ).toEqual([false, true]);
+    expect(
+      (await depthsOf(depthWriter(false), true)).toSorted((a, b) => Number(a) - Number(b)),
+    ).toEqual([false, true]);
+  });
+});
+
 describe("a texture bound where a 2d-array is declared", () => {
   beforeEach(() => {
     // The engine asks `navigator.gpu` for the canvas's format when it makes a material's pipelines.

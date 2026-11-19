@@ -83,8 +83,9 @@ export type RenderTargetFormat = ColourTargetFormat | "canvas" | "canvas-in-pass
 /**
  * What a material's pipelines are prepared for ({@link RenderEngine.prepareMaterial}; plan R10,
  * R10.T14.d): a {@link RenderTargetFormat} as `createMaterialAsync` takes it, a colour format both
- * with and without depth, or a colour format with depth or without it alone, as a pass that always
- * draws one way into it needs.
+ * with and without depth (with depth alone for a material that writes `frag_depth`, plan R12,
+ * R12.T7.a), or a colour format with depth or without it alone, as a pass that always draws one way
+ * into it needs.
  */
 export type PreparedTarget =
   RenderTargetFormat | { readonly colour: ColourTargetFormat; readonly depth: boolean };
@@ -673,7 +674,9 @@ export interface RenderEngine {
    * @throws Error, as a rejection, where a pipeline could not be made, or the material or a mesh
    *   was released; a draw then makes the pipeline itself. A fragment output a target's format
    *   does not take is refused by name, the material, the format and the two types (plan R14,
-   *   R14.T2.b's finding), and again by a draw that would make the pipeline.
+   *   R14.T2.b's finding), and again by a draw that would make the pipeline; so is a target without
+   *   depth asked of a material that writes `frag_depth`, which WebGPU cannot make (plan R12,
+   *   R12.T7.a).
    */
   prepareMaterial(
     material: MaterialHandle,

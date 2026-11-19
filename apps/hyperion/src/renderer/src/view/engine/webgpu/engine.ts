@@ -95,7 +95,7 @@ import {
 } from "./materials";
 import { MeshRecord } from "./meshes";
 import { MipGenerator } from "./mipmaps";
-import { pipelineOutputs } from "./pipelineOutputs";
+import { materialOutputs } from "./pipelineOutputs";
 import {
   assertSplatInputs,
   assertSplatSupported,
@@ -553,7 +553,8 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
    * @remarks
    * A canvas target is the preferred canvas format's sRGB view with depth, `canvas-in-pass` the
    * format itself with depth (R07.T15's pass, which encodes); a colour target is made both with and
-   * without depth, since a target may have either. A fragment output a target's format does not
+   * without depth, since a target may have either, but with depth alone for a material that writes
+   * `frag_depth` ({@link materialOutputs}). A fragment output a target's format does not
    * take is refused by name for each target, with `meshes` or none, as the catalogue's compile
    * makes it (plan R14, R14.T2.b's finding).
    *
@@ -573,7 +574,7 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
       throw new Error(`material ${spec.name} failed to compile: ${errors.join("; ")}`);
     }
     const preferred = navigator.gpu.getPreferredCanvasFormat();
-    const outputs = targets.flatMap((target) => pipelineOutputs(target, preferred));
+    const outputs = materialOutputs(spec, targets, preferred);
     assertOutputsFit(
       spec,
       outputs.map(([format]) => format),
@@ -602,7 +603,7 @@ export class WebGpuRenderEngine implements RenderEngine, DrawingHost {
       return;
     }
     const preferred = navigator.gpu.getPreferredCanvasFormat();
-    const outputs = targets.flatMap((target) => pipelineOutputs(target, preferred));
+    const outputs = materialOutputs(record.spec, targets, preferred);
     assertOutputsFit(
       record.spec,
       outputs.map(([format]) => format),
