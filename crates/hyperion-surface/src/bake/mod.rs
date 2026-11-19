@@ -86,7 +86,7 @@ pub trait BakeHook {
 
 /// What a [`BakeHook`] reads of a patch's bake: its key, R05's heights, and each vertex's height at
 /// the patch's level in `f64` where the view made it.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BakedHeights<'b> {
     key: PatchKey,
     heights: &'b [f32],

@@ -2963,3 +2963,8 @@ pages are assets and presentation; collision never reads them. No domain tag is 
   - Mac pair `rocks` (`macProfile.ts`, B `--geometry pageBytes=0`, no rock built or drawn), a body
     lever out of the defaults: its sides differ only near the ground.
   - Fixed beside it: `result.test.ts`' part count, which R11.T4.b's part 31 left at 30.
+  - T5.c and T5.e's checks: restore tests of the rocks (`terrainPassCascades.test.ts`); new goldens
+    alone (R11's `collision_*`, `bake_moon_like`). Not measured: Design note 18's counts, and the
+    `scatter` category's bytes (the rocks' pool, ½ of `pageBytes`: 64 MiB high, 16 MiB low) against
+    Design note 15, which has no row for it. NOT RUN: the owner's Mac pair `rocks` and RTX runs;
+    Windows.

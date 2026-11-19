@@ -203,10 +203,11 @@ describe("the rocks' draw rules (R11.T4.b, Design note 7)", () => {
       ],
       views: Uint32Array.of(1, 1, 2, 1, 1),
     };
-    const held = new Map([
+    const meshes = new Map([
       [patchKeyString(SITE), { largestRockM: 2 }],
       [patchKeyString({ ...SITE, i: SITE.i + 60 }), { largestRockM: 3 }],
     ]);
+    const held = { get: (key: string) => meshes.get(key), isRefused: () => false };
     const region = [couldTouch(BODY)];
     const high = rocksToDraw(drawSet, 1, PLANET.finestLevel, held, region, "high");
     expect(high.patches).toEqual([
@@ -221,5 +222,37 @@ describe("the rocks' draw rules (R11.T4.b, Design note 7)", () => {
     const low = rocksToDraw(drawSet, 1, PLANET.finestLevel, held, region, "low");
     expect(low.patches.map((p) => p.rule)).toEqual(["region"]);
     expect(rocksToDraw(drawSet, 2, PLANET.finestLevel, held, region, "high").patches).toEqual([]);
+    expect([high.regionRefused, low.regionRefused]).toEqual([false, false]);
+  });
+
+  it("says where the pool refused the mesh of a region patch in view, and not of a patch outside it", () => {
+    const key = (i: number): PatchKey => ({ ...SITE, i });
+    const drawn = (k: PatchKey) => ({
+      keyString: patchKeyString(k),
+      patch: {
+        key: k,
+        generation: 1,
+        originM: sphereOf(k).centreM,
+        heightRangeM: [0, 0] as const,
+        boundingRadiusM: sphereOf(k).radiusM,
+        slot: 0,
+        keyString: patchKeyString(k),
+      },
+      standIn: false,
+      within: null,
+    });
+    const refusedOf = (i: number) => ({
+      get: () => undefined,
+      isRefused: (keyString: string) => keyString === patchKeyString(key(i)),
+    });
+    const region = [couldTouch(BODY)];
+    const drawSet = {
+      count: 2,
+      patches: [drawn(SITE), drawn(key(SITE.i + 60))],
+      views: Uint32Array.of(1, 1),
+    };
+    const rule = (i: number) =>
+      rocksToDraw(drawSet, 1, PLANET.finestLevel, refusedOf(i), region, "high").regionRefused;
+    expect([rule(SITE.i), rule(SITE.i + 60)]).toEqual([true, false]);
   });
 });

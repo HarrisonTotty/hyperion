@@ -29,6 +29,12 @@
 //! rocks' axis, two points inside its outline and one past it, then points drawn uniformly over
 //! the patches from 2 m below the ground to 3 m above it, until there are [`COLLISION_POINTS`].
 //!
+//! `bake_moon_like` (plan R11, T4.a): the rock layer each finest patch of the twelve pinned site
+//! cells' bakes carries to the client ([`RockBakeHook`](super::RockBakeHook)), `patch <face>
+//! <level> <i> <j> rocks <n> complete <bool>`, then a `rock` line of each rock's
+//! [`rock_words`](super::rock_words), in the layer's order: the layer's order and its words, which
+//! the collision goldens' heights do not pin.
+//!
 //! `octaves_moon_like`: the rocks of every octave at a stated k, [`MAX_ROCK_ABUNDANCE`], through
 //! [`rocks_in_cell_at`], so that the larger octaves, which the worlds' sites hold too few of, are
 //! pinned too: for each octave, its cells of a row-major block on face 3 in turn, until four rocks
@@ -391,6 +397,90 @@ fn the_collision_surface_matches_its_goldens() {
     }
 }
 
+/// The golden text of the rock layers of `w`'s pinned finest patches' bakes.
+fn bake_rocks_text(w: SyntheticWorld) -> String {
+    use super::ExtraLayer;
+    use crate::bake::{HorizonLayer, NormalsLayer, TerrainBakeOptions, WeightsLayer, bake_terrain};
+    use crate::field::{Cover, CoverRange, PartialField, ResolutionCode, cell_index};
+    use crate::patch::{BakeOptions, NormalScale, VertexPath};
+    use crate::synth::craters::neighbourhood;
+    use crate::wire::{decode_payload, encode_payload};
+    let options = TerrainBakeOptions {
+        patch: BakeOptions {
+            vertex_path: VertexPath::FaceDifferences,
+            normals: NormalScale::Mesh,
+            skirt_m: 0.0,
+        },
+        weights: WeightsLayer::Skipped,
+        horizon: HorizonLayer::Skipped,
+        normals: NormalsLayer::Skipped,
+    };
+    let field = world(w);
+    let patches = pinned_finest_patches(w);
+    // A client's survey of every field cell about the patches at 50 m, with its margin, which
+    // the bake reads as the worker's field.
+    let level = field.header().level().get();
+    let mut cells: Vec<u32> = patches
+        .iter()
+        .flat_map(|patch| {
+            let home = PatchKey::containing(level, patch.vertex_dir(32, 32)).expect("a cell");
+            let (around, count) = neighbourhood(home);
+            around[..count]
+                .iter()
+                .map(|&c| cell_index(c))
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    cells.sort_unstable();
+    cells.dedup();
+    let code = ResolutionCode::from_resolution(hyperion_base::units::Metres::new(50.0))
+        .expect("50 m is a resolution");
+    let cover = Cover::from_ranges(
+        cells
+            .iter()
+            .map(|&i| CoverRange::new(i, i + 1, code).expect("a cell's range")),
+    )
+    .expect("the cells' cover");
+    let blocks = decode_payload(&encode_payload(field, &cover, None)).expect("the payload");
+    let mut view = PartialField::new(blocks[0].header().expect("a header").clone());
+    for block in &blocks {
+        view.insert(block).expect("the field's own block");
+    }
+    let synth = Synthesiser::new(&view, SEED);
+    let mut out = GoldenWriter::new();
+    out.header(crate::generator_version());
+    for patch in patches {
+        let hook = super::RockBakeHook::new(&synth, SynthCache::new());
+        let bake = bake_terrain(&synth, &mut SynthCache::new(), patch, &options, &[&hook])
+            .expect("a whole field bakes every patch");
+        let [ExtraLayer::Rocks(rocks)] = bake.layers().extra() else {
+            panic!("a finest patch's bake carries one rock layer");
+        };
+        out.line(&format!(
+            "patch {} {} {} {} rocks {} complete {}",
+            patch.face().index(),
+            patch.level(),
+            patch.i(),
+            patch.j(),
+            rocks.len(),
+            bake.layers().is_complete()
+        ));
+        for rock in rocks {
+            let words: Vec<String> = super::rock_words(rock).iter().map(|&w| hex(w)).collect();
+            out.line(&format!("rock {}", words.join(" ")));
+        }
+    }
+    out.finish()
+}
+
+#[test]
+fn the_baked_rock_layers_match_their_golden() {
+    golden!(
+        "scatter/bake_moon_like",
+        &bake_rocks_text(SyntheticWorld::MoonLike)
+    );
+}
+
 #[test]
 fn every_octaves_rocks_match_their_golden() {
     golden!("scatter/octaves_moon_like", &octaves_text());
@@ -449,6 +539,6 @@ mod native_only {
             );
             seen += 1;
         }
-        assert!(seen >= 10, "{seen} scatter goldens");
+        assert!(seen >= 11, "{seen} scatter goldens");
     }
 }

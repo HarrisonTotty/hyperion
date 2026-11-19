@@ -80,6 +80,25 @@ describe("a finest patch's rocks on the real module (R11.T4.a)", () => {
     expect(rockWords()).toBe(ROCK_WORDS);
   });
 
+  it("refuses a point at the centre or past the sight's reach and a search radius past 1 km, and knows no rocks of a body it holds no field of", () => {
+    const fixture = parseWorkerFixture(moonFixture);
+    const { direct, args, seed } = directFieldsOf(() => new SurfaceFields(), fixture);
+    const [a = 0] = direct.figureM(...args) ?? [];
+    const on = [a, 0, 0] as const;
+    expect(() => direct.rocksNear(...args, seed, 0, 0, 0, 10)).toThrow(/is not between/u);
+    expect(() => direct.rocksNear(...args, seed, 2e12, 0, 0, 10)).toThrow(/is not between/u);
+    expect(() => direct.rocksNear(...args, seed, ...on, 1_001)).toThrow(/search radius/u);
+    expect(() => direct.rocksNear(...args, seed, ...on, -1)).toThrow(/search radius/u);
+    expect(() => direct.surfaceHeightWithRocksM(...args, seed, 0, 0, 0)).toThrow(/is not between/u);
+    const [system, index] = args;
+    const other = [system, index + 1] as const;
+    expect([
+      direct.rocksNear(...other, seed, ...on, 10),
+      direct.surfaceHeightWithRocksM(...other, seed, ...on),
+    ]).toEqual([undefined, undefined]);
+    direct.free();
+  });
+
   it.each([
     ["the Moon-like world", moonFixture],
     ["the Earth-like world", earthFixture],

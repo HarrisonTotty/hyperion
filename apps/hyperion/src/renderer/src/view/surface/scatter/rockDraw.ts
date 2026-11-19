@@ -69,8 +69,10 @@ export const ROCK_CONSUMER: ClusterConsumer = {
   vertexWgsl: rockPageWgsl,
 };
 
-/** The pass a `pixel` patch's instances enter, and a `region` patch's. */
+/** The pass a `pixel` patch's instances enter: the camera's tolerance. */
 export const ROCK_PIXEL_PASS = 0;
+
+/** The pass a `region` patch's instances enter: a tolerance of 0, the finest cut. */
 export const ROCK_REGION_PASS = 1;
 
 /** The `f32` bits of 1, an instance's unread error unit (every rock record is a DAG's). */

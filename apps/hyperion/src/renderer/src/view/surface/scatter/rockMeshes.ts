@@ -10,7 +10,9 @@
  *   patch's rocks are never shed apart from it (the research's "rock lists ride in the patch cache,
  *   never shed"). Its bytes are {@link ROCK_POOL_SHARE} of the setting's `pageBytes` (lean,
  *   2026-11-18). A mesh the pool cannot hold whole is refused and counted
- *   ({@link RockMeshes.refused}), its patch's rocks not drawn.
+ *   ({@link RockMeshes.refused}), its patch's rocks not drawn; a refused patch in a could-touch
+ *   region raises `TERRAIN: DETAIL LIMITED` ({@link RockMeshes.isRefused}). The pool takes the
+ *   resident patches first come; it gives a region's patches no precedence (a finding).
  * - **Builds**: {@link RockMeshes.sync} asks a build for each resident layer it holds no mesh of,
  *   or holds an older bake's, and removes each mesh whose patch has left; a build that lands after
  *   its layer left or was rebaked is dropped. Nothing is asked while the resident layers' revision
@@ -57,6 +59,8 @@ export class RockMeshes {
   readonly #building = new Map<string, number>();
   #revision = -1;
   #refused = 0;
+  /** Each patch whose mesh the pool last refused, by the generation refused. */
+  readonly #refusedKeys = new Map<string, number>();
   #disposed = false;
 
   /**
@@ -93,12 +97,25 @@ export class RockMeshes {
     return this.#refused;
   }
 
+  /**
+   * Whether the pool refused resident patch `keyString`'s mesh, its rocks then not drawn, until a
+   * later sync holds it or its patch leaves.
+   */
+  isRefused(keyString: string): boolean {
+    return this.#refusedKeys.has(keyString);
+  }
+
   /** Brings its meshes to `rocks`, the pass's resident layers (see the module's remarks). */
   sync(rocks: ResidentRocksView): void {
     if (this.#disposed || rocks.revision === this.#revision) {
       return;
     }
     this.#revision = rocks.revision;
+    for (const [keyString, generation] of this.#refusedKeys) {
+      if (rocks.get(keyString)?.generation !== generation) {
+        this.#refusedKeys.delete(keyString);
+      }
+    }
     for (const [keyString, held] of this.#meshes) {
       if (rocks.get(keyString)?.generation !== held.generation) {
         this.pool.removeMesh(held.mesh);
@@ -172,6 +189,7 @@ export class RockMeshes {
     const index = readMeshIndex(built.file);
     if (index.kind !== "read") {
       this.#refused += 1;
+      this.#refusedKeys.set(keyString, built.generation);
       return;
     }
     const mesh = this.pool.addMesh(index.value);
@@ -184,11 +202,13 @@ export class RockMeshes {
       if (page.kind !== "read" || this.pool.insert(mesh, page.value).kind !== "stored") {
         this.pool.removeMesh(mesh);
         this.#refused += 1;
+        this.#refusedKeys.set(keyString, built.generation);
         return;
       }
     }
     const { file: _file, ...held } = built;
     this.#meshes.set(keyString, { ...held, mesh });
+    this.#refusedKeys.delete(keyString);
   }
 
   /** Releases the pool and stops the builder. */
@@ -198,5 +218,6 @@ export class RockMeshes {
     this.pool.dispose();
     this.#meshes.clear();
     this.#building.clear();
+    this.#refusedKeys.clear();
   }
 }

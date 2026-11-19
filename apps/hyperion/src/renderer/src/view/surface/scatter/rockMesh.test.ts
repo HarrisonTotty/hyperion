@@ -9,7 +9,7 @@ import {
   MIN_ROCK_LEVEL,
   radialDepthM,
   rockLevel,
-  rockTolerance,
+  rockToleranceM,
   tessellateRock,
 } from "./rockMesh";
 
@@ -73,9 +73,9 @@ describe("a rock's tessellation (Design note 6)", () => {
         const level = rockLevel(rock);
         const bound = chordalBound(rock, level);
         // Within the tolerance below the finest level, and the level below it not, above the least.
-        const within = level === MAX_ROCK_LEVEL || bound <= rockTolerance(rock);
+        const within = level === MAX_ROCK_LEVEL || bound <= rockToleranceM(rock);
         const least =
-          level === MIN_ROCK_LEVEL || chordalBound(rock, level - 1) > rockTolerance(rock);
+          level === MIN_ROCK_LEVEL || chordalBound(rock, level - 1) > rockToleranceM(rock);
         expect([within, least]).toEqual([true, true]);
         const depth = sampledDepthM(rock, level, 3);
         expect(depth).toBeLessThanOrEqual(bound);

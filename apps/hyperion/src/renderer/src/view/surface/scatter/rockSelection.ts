@@ -18,8 +18,9 @@
  *   low setting not at all. Both styles take the same rule (lean, 2026-11-18: the brainstorm binds
  *   the region in both and leaves the rest to the setting).
  * - **The annunciation** ({@link rocksLimitDetail}): on the low setting, exactly where a finest
- *   patch in view outside the region holds a rock that would subtend the tolerance at the patch's
- *   nearest point.
+ *   patch in view outside the region holds a rock that would subtend a pixel
+ *   ({@link ROCK_DETAIL_PX}) at the patch's nearest point; and on either, where a region patch's
+ *   mesh was refused by the rocks' pool (`RocksToDraw.regionRefused`).
  * - **The swept region** ({@link couldTouchContacts}, R11.T4.d): a descending body's footprint
  *   swept along its path ahead over R05's `FORCED_REGION_RESIDENCY_S`, R03's `predictedPath`: the
  *   planned path where one is sent, else the straight line of its pose at its velocity, which is
@@ -141,28 +142,44 @@ export interface RockDrawnPatch {
   readonly rule: RockDrawRule;
 }
 
-/** What a view's draw set gives its rocks: the patches drawn by rule, and every finest one in view. */
+/**
+ * What a view's draw set gives its rocks: the patches drawn by rule, every finest one in view, and
+ * whether a patch of the region the view sees has its mesh refused.
+ */
 export interface RocksToDraw {
   readonly patches: ReadonlyArray<RockDrawnPatch>;
   readonly inView: ReadonlyArray<RockPatchInView>;
+  /** Whether a region patch in view has no mesh because the rocks' pool refused it. */
+  readonly regionRefused: boolean;
 }
+
+/**
+ * The size, px, at which a rock the low setting leaves out limits the view's detail: a pixel
+ * (Design note 7's "would subtend a pixel").
+ */
+export const ROCK_DETAIL_PX = 1;
 
 /**
  * The rocks a view of draw-set bit `mask` draws (see the module's remarks): of every patch of
  * `drawSet` the view sees drawn whole at `finestLevel`, its sphere about its origin and its rocks'
  * largest diameter where `meshes` holds its mesh, and, where its rule draws them and its mesh is
- * held, the patch and its rule; in the draw set's order.
+ * held, the patch and its rule; in the draw set's order; and whether a region patch's mesh was
+ * refused.
  */
 export function rocksToDraw(
   drawSet: Pick<DrawSet, "count" | "patches" | "views">,
   mask: number,
   finestLevel: number,
-  meshes: { get(keyString: string): { readonly largestRockM: number } | undefined },
+  meshes: {
+    get(keyString: string): { readonly largestRockM: number } | undefined;
+    isRefused(keyString: string): boolean;
+  },
   region: ReadonlyArray<GroundContact>,
   setting: QualitySetting,
 ): RocksToDraw {
   const patches: RockDrawnPatch[] = [];
   const inView: RockPatchInView[] = [];
+  let regionRefused = false;
   for (let n = 0; n < drawSet.count; n += 1) {
     const drawn = drawSet.patches[n];
     if (
@@ -180,8 +197,9 @@ export function rocksToDraw(
     if (rule !== null && held !== undefined) {
       patches.push({ keyString: drawn.keyString, terrainSlot: drawn.patch.slot, rule });
     }
+    regionRefused ||= rule === "region" && held === undefined && meshes.isRefused(drawn.keyString);
   }
-  return { patches, inView };
+  return { patches, inView, regionRefused };
 }
 
 /**
@@ -195,7 +213,8 @@ export function extrapolationMargin(gravityMps2: number, tS: number): number {
 /**
  * How far the ground beneath an unpowered arc departs from the ground beneath its straight line
  * at `tS`, metres: the {@link extrapolationMargin} m times the sine of the most its direction can
- * turn from the datum's normal under the line, at most m.
+ * turn from the datum's normal under the line, at most m, and, in a body's turning frame, the
+ * drift of its Coriolis and centrifugal pulls.
  *
  * @remarks
  * Gravity pulls the arc towards the body's centre, so it falls from the line along the vertical
@@ -206,21 +225,34 @@ export function extrapolationMargin(gravityMps2: number, tS: number): number {
  * normal by at most δ = atan((a² − c²) ÷ 2ac), a spheroid's greatest difference of geodetic and
  * geocentric latitude, 0 on a sphere. So the widening is m · min(1, (|p(t) − p(0)| + m) ÷ c + 2δ)
  * (lean, 2026-11-18): ½ g t² as a ground radius would force the finest level over 1.7 km² at 30 s
- * on a Moon and 61 km² on an Earth, some 3 × 10³ and 10⁵ finest patches.
+ * on a Moon and 61 km² on an Earth, some 3 × 10³ and 10⁵ finest patches. A line in the body's
+ * turning frame at ω also drifts by its Coriolis pull, at most 2ω times the speed v₀ + g t, so by
+ * ω t² (v₀ + g t ÷ 3), and by its centrifugal pull, at most ω² (a + |p(t) − p(0)|), so by
+ * ½ ω² (a + |p(t) − p(0)|) t² (Goldstein, Poole and Safko 2002, _Classical Mechanics_, 3rd ed.,
+ * §4.10), both taken whole.
  *
  * @param travelledM - |p(t) − p(0)|, the line's distance from the pose, m.
+ * @param spinRadPerS - The body's rotation rate, rad/s, the frame's; 0 for a frame that does not
+ *   turn.
+ * @param speedMps - The line's speed v₀, m/s.
  */
 export function sweptWideningM(
   figure: Pick<BodyFigure, "equatorialRadiusM" | "polarRadiusM">,
   gravityMps2: number,
   tS: number,
   travelledM: number,
+  spinRadPerS = 0,
+  speedMps = 0,
 ): number {
   const a = figure.equatorialRadiusM;
   const c = figure.polarRadiusM;
   const m = extrapolationMargin(gravityMps2, tS);
   const offNormal = Math.atan(Math.abs(a * a - c * c) / (2 * a * c));
-  return m * Math.min(1, (travelledM + m) / Math.min(a, c) + 2 * offNormal);
+  const fall = m * Math.min(1, (travelledM + m) / Math.min(a, c) + 2 * offNormal);
+  const w = spinRadPerS;
+  const coriolis = w * tS * tS * (speedMps + (gravityMps2 * tS) / 3);
+  const centrifugal = 0.5 * w * w * (Math.max(a, c) + travelledM) * tS * tS;
+  return fall + coriolis + centrifugal;
 }
 
 /**
@@ -252,6 +284,11 @@ export interface SweptSurface {
   readonly ground: GroundUnderFunction;
   /** The finest patch's edge, m (`finestPatchSizeM`): R05's forced region reaches 3 past a contact. */
   readonly patchSizeM: number;
+  /**
+   * The body's rotation rate, rad/s, where the paths are in its turning frame, which widens an
+   * extrapolation by its Coriolis and centrifugal drift ({@link sweptWideningM}); absent, 0.
+   */
+  readonly spinRadPerS?: number;
   /**
    * The most finest patches the chain may force, by its contacts' new ground, beyond which it is
    * cut, in time order; absent, no limit.
@@ -302,9 +339,13 @@ function sweepSamples(
         const tS = (sweepS * k) / steps;
         const move = scale(path.velocityMps, tS);
         const g = path.gravityMps2;
+        const widening =
+          g === null
+            ? 0
+            : sweptWideningM(surface.figure, g, tS, norm(move), surface.spinRadPerS ?? 0, speed);
         at(
           add(path.positionM, move),
-          radiusM + (g === null ? 0 : sweptWideningM(surface.figure, g, tS, norm(move))),
+          radiusM + widening,
           g === null ? 0 : extrapolationMargin(g, tS),
         );
       }

@@ -85,9 +85,15 @@ impl<F: FieldView> BakeHook for RockBakeHook<'_, '_, F> {
         if patch.key().level() != finest_level(figure.equatorial_radius_m) {
             return true;
         }
-        let rocks = patch_rocks(self.synth, &mut self.cache.borrow_mut(), patch, None);
+        let rocks = patch_rocks(
+            self.synth,
+            &mut self.cache.borrow_mut(),
+            patch,
+            CellAbundance::Site,
+        );
+        let complete = rocks.unknown.is_none();
         out.push(ExtraLayer::Rocks(rocks.rocks));
-        rocks.complete
+        complete
     }
 }
 
@@ -123,7 +129,8 @@ pub fn rock_words(rock: &Rock) -> [f64; ROCK_WORDS] {
 ///
 /// # Errors
 ///
-/// [`FindRocksError::Query`] for the first cell a rock's ground reads that the view does not hold.
+/// [`FindRocksError::Query`](super::FindRocksError::Query) with the first query the view could not
+/// answer, in the cells' order: a cell a rock's ground reads that the view does not hold.
 ///
 /// # Panics
 ///
@@ -135,26 +142,33 @@ pub fn patch_rocks_at<F: FieldView>(
     patch: &BakedHeights<'_>,
     k: RockAbundance,
 ) -> Result<Vec<Rock>, super::FindRocksError> {
-    let rocks = patch_rocks(synth, cache, patch, Some(k));
-    if rocks.complete {
-        Ok(rocks.rocks)
-    } else {
-        Err(super::FindRocksError::Query(QueryHeightError::NotSurveyed(
-            patch.key(),
-        )))
+    let rocks = patch_rocks(synth, cache, patch, CellAbundance::Stated(k));
+    match rocks.unknown {
+        None => Ok(rocks.rocks),
+        Some(error) => Err(super::FindRocksError::Query(error)),
     }
 }
 
-/// A patch's rocks, and whether the view could make every cell's.
+/// The abundance each cell's rocks are drawn at.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum CellAbundance {
+    /// Its site's, the generator's.
+    Site,
+    /// The one stated, whatever the site's: the benches' (feature `testing`).
+    #[cfg(any(test, feature = "testing"))]
+    Stated(RockAbundance),
+}
+
+/// A patch's rocks, and the first query the view could not answer, where it could not make every
+/// cell's.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct PatchRocks {
     pub(crate) rocks: Vec<Rock>,
-    pub(crate) complete: bool,
+    pub(crate) unknown: Option<QueryHeightError>,
 }
 
 /// The rocks whose axis `patch` holds, their ground from its own vertex heights (see the [module
-/// documentation](self)), every cell at its site's abundance, or at `stated` where it is given
-/// (the benches').
+/// documentation](self)), each cell's at `abundance`.
 ///
 /// # Panics
 ///
@@ -163,7 +177,7 @@ pub(crate) fn patch_rocks<F: FieldView>(
     synth: &Synthesiser<'_, F>,
     cache: &mut SynthCache,
     patch: &BakedHeights<'_>,
-    stated: Option<RockAbundance>,
+    abundance: CellAbundance,
 ) -> PatchRocks {
     let figure = synth.field().header().figure();
     let levels = rock_octave_levels(&figure);
@@ -172,23 +186,27 @@ pub(crate) fn patch_rocks<F: FieldView>(
     // Each site's k once in the bake: a patch's cells share a few dozen sites.
     let mut sites: BTreeMap<PatchKey, Result<RockAbundance, QueryHeightError>> = BTreeMap::new();
     let mut rocks = Vec::new();
-    let mut complete = true;
+    let mut unknown = None;
     for (octave, &level) in levels.iter().enumerate() {
         for cell in cells_over(key, level) {
             let site = site_cell(cell, levels[ROCK_OCTAVE_COUNT - 1]);
-            let k = *sites.entry(site).or_insert_with(|| match stated {
-                Some(k) => Ok(k),
-                None => site_abundance(synth, cache, site),
+            let k = *sites.entry(site).or_insert_with(|| match abundance {
+                #[cfg(any(test, feature = "testing"))]
+                CellAbundance::Stated(k) => Ok(k),
+                CellAbundance::Site => site_abundance(synth, cache, site),
             });
-            let Ok(k) = k else {
-                complete = false;
-                continue;
+            let k = match k {
+                Ok(k) => k,
+                Err(error) => {
+                    unknown.get_or_insert(error);
+                    continue;
+                }
             };
             let start = rocks.len();
-            if rocks_of(synth, &ground, cache, cell, octave, k, &mut rocks).is_err() {
+            if let Err(error) = rocks_of(synth, &ground, cache, cell, octave, k, &mut rocks) {
                 // The cell's rocks are not known here: none of them, rather than some.
                 rocks.truncate(start);
-                complete = false;
+                unknown.get_or_insert(error);
                 continue;
             }
             if level < key.level() {
@@ -197,7 +215,7 @@ pub(crate) fn patch_rocks<F: FieldView>(
             }
         }
     }
-    PatchRocks { rocks, complete }
+    PatchRocks { rocks, unknown }
 }
 
 /// Whether `key` holds `rock`'s axis.
@@ -247,6 +265,7 @@ struct PatchGround<'p, 's, 'a, F> {
 impl<F: FieldView> PatchGround<'_, '_, '_, F> {
     /// Vertex (`x`, `y`) of `key` as the patch made it, where it is one of the patch's own vertices
     /// on its face and level and the view made it.
+    #[must_use]
     fn own(&self, key: PatchKey, x: u8, y: u8) -> Option<HeightSample> {
         let patch = self.patch.key();
         if key.face() != patch.face() || key.level() != patch.level() {

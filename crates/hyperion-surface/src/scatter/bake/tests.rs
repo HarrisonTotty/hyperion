@@ -279,3 +279,71 @@ fn a_rocks_words_are_its_place_frame_and_shape() {
         assert_eq!(c, figure.normal(rock.dir()));
     }
 }
+
+/// A hook that draws the patch's rocks at a stated k ([`patch_rocks_at`]) and keeps the answer.
+struct StatedDraw<'s, 'a, F> {
+    synth: &'s Synthesiser<'a, F>,
+    answer: std::cell::RefCell<Option<Result<Vec<Rock>, crate::scatter::FindRocksError>>>,
+}
+
+impl<F: FieldView> BakeHook for StatedDraw<'_, '_, F> {
+    fn bake(&self, patch: &BakedHeights<'_>, _out: &mut Vec<ExtraLayer>) -> bool {
+        let k = RockAbundance::new(0.18);
+        self.answer.replace(Some(patch_rocks_at(
+            self.synth,
+            &mut SynthCache::new(),
+            patch,
+            k,
+        )));
+        true
+    }
+}
+
+/// Past the survey's edge the stated draw names the first cell the view lacks, never the patch.
+#[test]
+fn the_stated_draw_names_the_first_cell_the_view_lacks() {
+    let w = SyntheticWorld::MoonLike;
+    let field = world(w);
+    let level = field.header().level().get();
+    let home = PatchKey::containing(level, unit_dir(DIRS[0])).unwrap();
+    let view = client_of(field, &BTreeSet::from([home]));
+    let synth = Synthesiser::new(&view, SEED);
+    let finest = finest_level(field.header().figure().equatorial_radius_m);
+    let down = finest - level;
+    let span = 1_u32 << down;
+    let (mut refused, mut drawn) = (0, 0);
+    for step in [0, 24, 47] {
+        let key = PatchKey::new(
+            home.face(),
+            finest,
+            (home.i() << down) + span / 2 + step * (span / 16),
+            (home.j() << down) + span / 2,
+        )
+        .unwrap();
+        let hook = StatedDraw {
+            synth: &synth,
+            answer: std::cell::RefCell::new(None),
+        };
+        bake_terrain(&synth, &mut SynthCache::new(), key, &BARE, &[&hook]).unwrap();
+        match hook
+            .answer
+            .take()
+            .expect("the finest patch's bake ran the hook")
+        {
+            Ok(rocks) => drawn += usize::from(!rocks.is_empty()),
+            Err(crate::scatter::FindRocksError::Query(QueryHeightError::NotSurveyed(cell))) => {
+                assert_eq!(
+                    cell.level(),
+                    level,
+                    "{key:?} names a field cell, not itself"
+                );
+                assert!(
+                    view.cell(cell).is_none(),
+                    "{key:?} names {cell:?}, which the view holds"
+                );
+                refused += 1;
+            }
+        }
+    }
+    assert!(refused > 0 && drawn > 0, "{refused} refused, {drawn} drawn");
+}

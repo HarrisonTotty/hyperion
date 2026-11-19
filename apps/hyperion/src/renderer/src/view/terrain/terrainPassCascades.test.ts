@@ -112,6 +112,9 @@ import {
   PARENT_MIX_SLOT,
 } from "./gpu/uniforms";
 import { MAX_LEVEL, type PatchKey } from "./patchKey";
+import { InThreadRockPageBuilder } from "../clusters/meshPageProducer";
+import type { RockLayer } from "../surface/scatter/rockLayer";
+import { rockLayerFrom, rocksAbout } from "../../test/rockFixtures";
 import { type PlanetGeometry, planetGeometry, spheroidNormal, surfacePoint } from "./planet";
 import type { GroundContact } from "./grounded";
 import type { PatchRequest } from "./select";
@@ -196,6 +199,8 @@ class PlacedLane implements TerrainPool {
   layers: TerrainLayers = layers();
   /** The measured errors each bake carries (plan R14, R14.T3.b), none unless a test gives them. */
   clusterErrors: Float16Array | null = null;
+  /** Each finest bake's rocks (plan R11, R11.T4), none unless a test gives them. */
+  rocks: ((key: PatchKey) => RockLayer | undefined) | null = null;
 
   constructor(readonly settings: BakeSettings) {}
 
@@ -212,6 +217,12 @@ class PlacedLane implements TerrainPool {
 
   terminate(): void {
     this.#baked.clear();
+  }
+
+  /** The layers `key`'s bake carries, with its rocks where the test gives them. */
+  layersOf(key: PatchKey): TerrainLayers {
+    const rocks = this.rocks?.(key);
+    return rocks === undefined ? this.layers : { ...this.layers, rocks };
   }
 
   /** Answers every demanded patch. */
@@ -237,7 +248,7 @@ class PlacedLane implements TerrainPool {
       boundingRadiusM: 64 * vertexSpacing(PLANET.figure.equatorialRadiusM, key.level).maxM,
       originHeightM: 0,
       skirtDepthM: 1,
-      layers: this.layers,
+      layers: this.layersOf(key),
       ...(this.clusterErrors === null ? {} : { clusterErrors: this.clusterErrors }),
     };
     for (const listener of this.#baked) {
@@ -359,7 +370,7 @@ async function litPass(
   setting: "high" | "low" = "high",
   given?: CountingRenderEngine,
   reliefM: () => number | null = () => 8_000,
-  extra: Pick<TerrainPassOptions, "clusterCullKernel"> = {},
+  extra: Pick<TerrainPassOptions, "clusterCullKernel" | "rocks"> = {},
 ): Promise<Made> {
   const engine =
     given ??
@@ -4047,5 +4058,147 @@ describe("a cascade's caster inputs (plan R14, R14.T6.a)", () => {
     reuse.start();
     reuse.f64(6_378_137.000_002);
     expect(reuse.unchanged(0)).toBe(false);
+  });
+});
+
+/** Whether `draw` is a rock draw: the one kind that binds the rocks' pages. */
+function isRock(draw: DrawItem): boolean {
+  return draw.storageBuffers?.["rockPages"] !== undefined;
+}
+
+describe("the authoritative rocks in the lit pass (plan R11, R11.T4.b; plan R14, R14.T5.c and T5.e)", () => {
+  /** The primary 4 m over the place, where the finest patches are drawn. */
+  const LOW_VIEW = viewOver(4);
+
+  /** The ground under the views, the datum's point over the place. */
+  const ground = (() => {
+    const [x, y, z] = surfacePoint(PLANET.figure, OVER, 0);
+    return { x, y, z };
+  })();
+
+  /** Four rocks of 0.4 to 1 m about each finest patch within 120 m of the ground under the views. */
+  function rocksNear(key: PatchKey): RockLayer | undefined {
+    if (key.level !== PLANET.finestLevel) {
+      return undefined;
+    }
+    const [x, y, z] = surfacePoint(PLANET.figure, vertexDir(key, 32, 32), 0);
+    const centre = { x, y, z };
+    if (norm(sub(centre, ground)) > 120) {
+      return rockLayerFrom([]);
+    }
+    return rockLayerFrom(
+      rocksAbout(key.i + 7 * key.j, 4, normalise(centre), 16, norm(centre), [0.4, 1]),
+    );
+  }
+
+  /** A clustered pass on `setting` with rocks under the views, streamed, its rocks asked and built. */
+  async function rockyPass(
+    setting: "high" | "low",
+    grounded: ReadonlyArray<GroundContact> = [],
+    given?: CountingRenderEngine,
+  ): Promise<Made> {
+    const made = await litPass(setting, given, () => 8_000, {
+      rocks: { createBuilder: () => new InThreadRockPageBuilder() },
+    });
+    made.pass.setGeometry({ ...SETTINGS[setting].geometry, strides: "off" });
+    made.pass.setReducedMotion(true);
+    await streamRocks(made, setting, grounded);
+    return made;
+  }
+
+  /** Streams `made` with rocks under the views and lets their meshes and forms be made. */
+  async function streamRocks(
+    made: Made,
+    setting: "high" | "low",
+    grounded: ReadonlyArray<GroundContact>,
+  ): Promise<void> {
+    made.lane().layers = { ...layers(), surveyMask: new Uint8Array(65 * 65).fill(255) };
+    made.lane().rocks = rocksNear;
+    const views = [{ ...passView(PRIMARY, LOW_VIEW), ...(setting === "low" ? { tauPx: 2 } : {}) }];
+    for (let n = 0; n < 24; n += 1) {
+      made.pass.step({ views, grounded });
+      made.lane().bakeDemand(made.pass);
+    }
+    made.pass.step({ views, grounded });
+    for (let n = 0; n < 3; n += 1) {
+      made.pass.drawFor(PRIMARY, frameOf(LOW_VIEW, true));
+      // Each frame asks what the one before made, so the frames go one at a time.
+      // oxlint-disable-next-line no-await-in-loop
+      await settle();
+    }
+  }
+
+  it("draws the rocks of the finest patches it draws on the high setting, out to a pixel, through the cluster path", async () => {
+    const made = await rockyPass("high");
+    const frame = made.pass.drawFor(PRIMARY, frameOf(LOW_VIEW, true));
+    const rocks = frame.draws.filter(isRock);
+    expect([rocks.length, rocks.map((draw) => draw.material.name)]).toEqual([
+      2,
+      ["rock-lit", "rock-lit"],
+    ]);
+    expect(frame.rocks?.rocks ?? 0).toBeGreaterThan(0);
+  });
+
+  it("draws none on the low setting outside a could-touch region, and a grounded body's region's whole", async () => {
+    const free = await rockyPass("low");
+    const away = free.pass.drawFor(PRIMARY, frameOf(LOW_VIEW, true));
+    const craft: GroundContact = { positionM: ground, radiusM: 20 };
+    const grounded = await rockyPass("low", [craft]);
+    const near = grounded.pass.drawFor(PRIMARY, frameOf(LOW_VIEW, true));
+    expect([away.draws.filter(isRock).length, away.rocks?.rocks ?? 0]).toEqual([0, 0]);
+    expect(near.draws.filter(isRock).length).toBe(2);
+    expect(near.rocks?.rocks ?? 0).toBeGreaterThan(0);
+  });
+
+  it("makes its rocks again after a restore, their pool, forms and kernel new, its first frame's rock draws a fresh pass's (Design note 16)", async () => {
+    const made = await rockyPass("high");
+    made.pass.drawFor(PRIMARY, frameOf(LOW_VIEW, true));
+    const created: string[] = [];
+    const off = made.engine.onAllocation((event) => {
+      if (event.kind === "created") {
+        created.push(event.name);
+      }
+    });
+    made.engine.loseDevice();
+    made.engine.restore();
+    await made.pass.ready();
+    await streamRocks(made, "high", []);
+    const restored = made.pass.drawFor(PRIMARY, frameOf(LOW_VIEW, true));
+    off();
+    const fresh = await rockyPass("high");
+    const freshFrame = fresh.pass.drawFor(PRIMARY, frameOf(LOW_VIEW, true));
+    expect(created.some((name) => name.startsWith("rock"))).toBe(true);
+    expect(restored.draws.filter(isRock).map(drawShape)).toEqual(
+      freshFrame.draws.filter(isRock).map(drawShape),
+    );
+    expect(restored.rocks).toEqual(freshFrame.rocks);
+  });
+
+  it("draws them by the visibility buffer by their own ID raster and resolve, in their range after the terrain's, nothing forward (R14.T5.e)", async () => {
+    const made = await rockyPass("high");
+    made.pass.setGeometry({ ...SETTINGS.high.geometry, strides: "off", shading: "visibility" });
+    for (let n = 0; n < 3; n += 1) {
+      made.pass.drawFor(PRIMARY, frameOf(LOW_VIEW, true));
+      // Each frame asks what the one before made, so the frames go one at a time.
+      // oxlint-disable-next-line no-await-in-loop
+      await settle();
+    }
+    const frame = made.pass.drawFor(PRIMARY, frameOf(LOW_VIEW, true));
+    const meshes = frame.visibility?.meshes;
+    expect([
+      meshes?.raster.map((draw) => draw.material.name),
+      meshes?.resolve.map((draw) => draw.material.name),
+      (frame.visibility?.forward ?? []).filter(isRock).length,
+      (meshes?.entries ?? 0) > 0,
+    ]).toEqual([["rock-id", "rock-id"], ["rock-resolve"], 0, true]);
+    expect(
+      made.engine.compiles
+        .filter((c) => c.name.startsWith("rock-"))
+        .map((c) => [c.name, c.targets]),
+    ).toEqual([
+      ["rock-lit", ["rgba16float"]],
+      ["rock-id", ["r32uint"]],
+      ["rock-resolve", ["rgba16float"]],
+    ]);
   });
 });

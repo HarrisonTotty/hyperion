@@ -277,7 +277,12 @@ import {
   rockWireMaterialSpec,
 } from "../surface/scatter/rockMaterial";
 import { RockMeshes } from "../surface/scatter/rockMeshes";
-import { couldTouch, rocksLimitDetail, rocksToDraw } from "../surface/scatter/rockSelection";
+import {
+  couldTouch,
+  ROCK_DETAIL_PX,
+  rocksLimitDetail,
+  rocksToDraw,
+} from "../surface/scatter/rockSelection";
 import { wireframeToleranceRad } from "../wireframe/meshOccluders";
 import { ResidentHeights, type ResidentHeightsView } from "./residentHeights";
 import { DrawnGround, type DrawnGroundView } from "./drawnGround";
@@ -3539,7 +3544,7 @@ export class TerrainPass {
     const region = this.#grounded.map((contact) =>
       couldTouch({ groundPointM: contact.positionM, radiusM: contact.radiusM }),
     );
-    const { patches, inView } = rocksToDraw(
+    const { patches, inView, regionRefused } = rocksToDraw(
       drawSet,
       mask,
       this.#planet.finestLevel,
@@ -3548,14 +3553,11 @@ export class TerrainPass {
       this.#setting,
     );
     const pxPerRad = view.viewport.widthPx / (2 * Math.tan(view.fovXRad / 2));
-    const limited = rocksLimitDetail(
-      inView,
-      region,
-      this.#setting,
-      cameraBodyFixedM,
-      pxPerRad,
-      geometry.meshTolerancePx.camera,
-    );
+    // On the low setting, where a rock left out would subtend a pixel; on either, where the pool
+    // refused a region patch's mesh, whose rocks the body could touch.
+    const limited =
+      regionRefused ||
+      rocksLimitDetail(inView, region, this.#setting, cameraBodyFixedM, pxPerRad, ROCK_DETAIL_PX);
     const base = state.clusters?.litBase ?? null;
     const { material, kernel } = rocks;
     if (patches.length === 0 || base === null || material === null || kernel === null) {
@@ -3607,7 +3609,10 @@ export class TerrainPass {
   ): RockIdsInput | null {
     if (!rocks.idsAsked) {
       rocks.idsAsked = true;
-      void this.#readyRockIds(device, rocks);
+      // Its specs are composed inside, and one that cannot be composed rejects.
+      void this.#readyRockIds(device, rocks).catch((error: unknown) => {
+        console.error("the terrain's rocks by the visibility buffer could not be made", error);
+      });
     }
     const forms = rocks.ids;
     const screen = device.resources.screenMesh;
@@ -3635,8 +3640,8 @@ export class TerrainPass {
 
   /**
    * Compiles the rocks' ID raster into `r32uint` and their resolve into the scene target (plan
-   * R14, R14.T5.e); never rejects. A form that cannot be made is reported, and the rocks draw
-   * forward over the terrain's resolve.
+   * R14, R14.T5.e). A form the device refuses is reported, and the rocks draw forward over the
+   * terrain's resolve; it rejects only where a spec cannot be composed (a bug).
    */
   async #readyRockIds(device: Device, rocks: DeviceRocks): Promise<void> {
     const screen = device.resources.screenMesh;
@@ -3674,14 +3679,17 @@ export class TerrainPass {
       idsAsked: false,
       idInputs: new WeakMap(),
     };
-    void this.#readyRocks(device, rocks);
+    // Its specs are composed inside, and one that cannot be composed rejects.
+    void this.#readyRocks(device, rocks).catch((error: unknown) => {
+      console.error("the terrain's rocks could not be made: none is drawn", error);
+    });
     return rocks;
   }
 
   /**
    * Compiles `rocks`' material, the lit pass's into the scene target or the wireframe's into the
-   * canvas, and the plain cluster cull's kernel; never rejects. One that cannot be made is
-   * reported, and no rock is drawn.
+   * canvas, and the plain cluster cull's kernel. One the device refuses is reported, and no rock
+   * is drawn; it rejects only where a spec cannot be composed (a bug).
    */
   async #readyRocks(device: Device, rocks: DeviceRocks): Promise<void> {
     const lit = this.#shading === "lit";

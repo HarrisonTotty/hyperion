@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { normalise, vec3 } from "../../../geometry/vec3";
 import { CountingRenderEngine, fakeDevice } from "../../../test/countingRenderEngine";
@@ -298,6 +298,59 @@ describe("a view's rock draw (R11.T4.b, R14.T5.c)", () => {
       true,
     ]);
     view.dispose();
+    meshes.dispose();
+  });
+
+  it("refuses a mesh its pool cannot hold whole, its patch named refused until the patch leaves", async () => {
+    const engine = new CountingRenderEngine(await fakeDevice());
+    const centre = normalise(vec3(0.3, 1, 0.2));
+    const originM = vec3(centre.x * RADIUS_M, centre.y * RADIUS_M, centre.z * RADIUS_M);
+    const resident = new ResidentRocks();
+    const key: PatchKey = { face: 2, level: 17, i: 10, j: 20 };
+    resident.take("2/17/10/20", bakeOf(key, originM, rockLayerFrom(rocksAbout(3, 40, centre, 12))));
+    // A pool of two root slots, against the many pages of forty rocks.
+    const meshes = new RockMeshes(
+      engine,
+      new InThreadRockPageBuilder(),
+      2 * 2 * (16 * 1024 + 6_656),
+    );
+    meshes.sync(resident);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect([meshes.size, meshes.refused, meshes.isRefused("2/17/10/20")]).toEqual([0, 1, true]);
+    expect(meshes.pool.pressure().rootSlotsUsed).toBe(0);
+    resident.forget("2/17/10/20");
+    meshes.sync(resident);
+    expect(meshes.isRefused("2/17/10/20")).toBe(false);
+    meshes.dispose();
+  });
+
+  it("holds no mesh of a build that fails, and asks again at the next change of the layers", async () => {
+    const engine = new CountingRenderEngine(await fakeDevice());
+    const centre = normalise(vec3(0.3, 1, 0.2));
+    const originM = vec3(centre.x * RADIUS_M, centre.y * RADIUS_M, centre.z * RADIUS_M);
+    const warned = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    let asked = 0;
+    const failing = {
+      build: (): Promise<null> => {
+        asked += 1;
+        return Promise.reject(new Error("no builder"));
+      },
+      dispose: (): void => undefined,
+    };
+    const resident = new ResidentRocks();
+    const key: PatchKey = { face: 2, level: 17, i: 10, j: 20 };
+    resident.take("2/17/10/20", bakeOf(key, originM, rockLayerFrom(rocksAbout(3, 3, centre, 12))));
+    const meshes = new RockMeshes(engine, failing, 32 * 1024 * 1024);
+    meshes.sync(resident);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect([meshes.size, meshes.building, meshes.refused, warned.mock.calls.length]).toEqual([
+      0, 0, 0, 1,
+    ]);
+    resident.take("2/17/11/20", bakeOf({ ...key, i: 11 }, originM, rockLayerFrom([])));
+    meshes.sync(resident);
+    expect(asked).toBe(2);
     meshes.dispose();
   });
 

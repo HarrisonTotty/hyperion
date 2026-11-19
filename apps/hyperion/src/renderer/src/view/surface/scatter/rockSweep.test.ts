@@ -52,9 +52,14 @@ const EARTH_SURFACE: SweptSurface = {
 /** WGS 84's GM, m³/s² (NIMA TR8350.2, 3rd ed., 2000, Table 3.1). */
 const EARTH_GM_M3_S2 = 3.986_004_418e14;
 
-/** The Moon's GM, m³/s² (Park et al. 2021, DE440, 4,902.800 km³/s²), and its mean radius, m. */
-const MOON_GM_M3_S2 = 4.902_800e12;
+/** The Moon's GM, m³/s² (Park et al. 2021, _AJ_ 161, 105, DE440: 4,902.800118 km³/s²). */
+const MOON_GM_M3_S2 = 4.902_800_118e12;
+
+/** The Moon as a sphere of its mean radius, 1,737.4 km (Archinal et al. 2018, _CMDA_ 130, 22). */
 const MOON: BodyFigure = { equatorialRadiusM: 1_737_400, polarRadiusM: 1_737_400, pole: null };
+
+/** WGS 84's rotation rate, rad/s (NIMA TR8350.2, 3rd ed., 2000, Table 3.1). */
+const EARTH_SPIN_RAD_S = 7.292_115e-5;
 
 /** A finest patch of the test planet, inside face 2, which the sweeps start over. */
 const SITE: PatchKey = { face: 2, level: PLANET.finestLevel, i: 200_011, j: 300_007 };
@@ -150,6 +155,13 @@ describe("the swept region (R11.T4.d)", () => {
     expect(sweptWideningM(MOON, 1.62, 3_000, 1e9)).toBe(extrapolationMargin(1.62, 3_000));
     // On a spheroid, the normal's turn from the radial.
     expect(sweptWideningM(TEST_PLANET_FIGURE, 9.8, 1, 0)).toBeGreaterThan(4.9 * 2 * (1 / 298.26));
+    // In a turning frame, its Coriolis drift ω t² (v₀ + g t ÷ 3) and centrifugal ½ ω² r t².
+    const turning = sweptWideningM(TEST_PLANET_FIGURE, 9.8, 30, 0, EARTH_SPIN_RAD_S, 300);
+    const still = sweptWideningM(TEST_PLANET_FIGURE, 9.8, 30, 0);
+    expect(turning - still).toBeCloseTo(
+      EARTH_SPIN_RAD_S * 900 * (300 + 98) + 0.5 * EARTH_SPIN_RAD_S ** 2 * 6_378_137 * 900,
+      6,
+    );
   });
 
   it("forces every could-touch region of a grounded body by its own contact", () => {
@@ -178,14 +190,22 @@ describe("the swept region (R11.T4.d)", () => {
   );
 
   it.each([
-    ["a Moon", MOON, MOON_GM_M3_S2],
-    ["an Earth", TEST_PLANET_FIGURE, EARTH_GM_M3_S2],
+    ["a Moon", MOON, MOON_GM_M3_S2, 0],
+    ["an Earth", TEST_PLANET_FIGURE, EARTH_GM_M3_S2, 0],
+    ["an Earth in its turning frame", TEST_PLANET_FIGURE, EARTH_GM_M3_S2, EARTH_SPIN_RAD_S],
   ])(
     "keeps the ground beneath an unpowered arc over %s within its straight line's widened sweep",
-    (_, figure, gm) => {
+    (_, figure, gm, spin) => {
       const ground = datumGroundUnder(figure);
       const gravity = gm / Math.min(figure.equatorialRadiusM, figure.polarRadiusM) ** 2;
       const site: PatchKey = { face: 2, level: 16, i: 20_011, j: 30_007 };
+      const omega = vec3(0, 0, spin);
+      // The body's central pull and, in its turning frame, the Coriolis and centrifugal ones.
+      const pull = (p: Vec3, v: Vec3): Vec3 =>
+        sub(
+          sub(scale(p, -gm / norm(p) ** 3), scale(cross(omega, v), 2)),
+          cross(omega, cross(omega, p)),
+        );
       for (const [heightM, alongMps, downMps] of [
         [300, 300, 10],
         [1_000, 20, 2],
@@ -194,22 +214,21 @@ describe("the swept region (R11.T4.d)", () => {
         const p0 = pointOver(figure, site, heightM);
         const { east, up } = localFrame(p0);
         const v0 = add(scale(east, alongMps), scale(up, -downMps));
-        const pull = (p: Vec3): Vec3 => scale(p, -gm / norm(p) ** 3);
         let p = p0;
         let v = v0;
         const dtS = 0.01;
         let steps = 0;
         let departedM = 0;
-        // The fourth-order Runge–Kutta step of the arc under the body's central pull.
+        // The fourth-order Runge–Kutta step of the arc.
         for (let n = 1; n <= FORCED_REGION_RESIDENCY_S / dtS; n += 1) {
-          const k1v = pull(p);
+          const k1v = pull(p, v);
           const k1p = v;
-          const k2v = pull(add(p, scale(k1p, dtS / 2)));
           const k2p = add(v, scale(k1v, dtS / 2));
-          const k3v = pull(add(p, scale(k2p, dtS / 2)));
+          const k2v = pull(add(p, scale(k1p, dtS / 2)), k2p);
           const k3p = add(v, scale(k2v, dtS / 2));
-          const k4v = pull(add(p, scale(k3p, dtS)));
+          const k3v = pull(add(p, scale(k2p, dtS / 2)), k3p);
           const k4p = add(v, scale(k3v, dtS));
+          const k4v = pull(add(p, scale(k3p, dtS)), k4p);
           p = add(p, scale(add(add(k1p, scale(k2p, 2)), add(scale(k3p, 2), k4p)), dtS / 6));
           v = add(v, scale(add(add(k1v, scale(k2v, 2)), add(scale(k3v, 2), k4v)), dtS / 6));
           const tS = n * dtS;
@@ -219,10 +238,9 @@ describe("the swept region (R11.T4.d)", () => {
           }
           const line = add(p0, scale(v0, tS));
           const apartM = norm(sub(under.groundPointM, ground(line).groundPointM));
+          const widening = sweptWideningM(figure, gravity, tS, norm(sub(line, p0)), spin, norm(v0));
           // Within a nanometre's rounding of the two feet.
-          expect(apartM).toBeLessThanOrEqual(
-            sweptWideningM(figure, gravity, tS, norm(sub(line, p0))) + 1e-6,
-          );
+          expect(apartM).toBeLessThanOrEqual(widening + 1e-6);
           departedM = Math.max(departedM, norm(sub(p, line)));
           steps += 1;
         }

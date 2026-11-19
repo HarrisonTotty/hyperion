@@ -112,7 +112,7 @@ function sideCoordinates(level: number): Float64Array {
  * The rock's tolerance, m: the lesser of {@link CHORDAL_TOLERANCE_M} and
  * {@link CHORDAL_TOLERANCE_SHARE} of its smallest semi-axis (Design note 6).
  */
-export function rockTolerance(rock: Rock): number {
+export function rockToleranceM(rock: Rock): number {
   return Math.min(CHORDAL_TOLERANCE_M, CHORDAL_TOLERANCE_SHARE * Math.min(...rock.semiAxesM));
 }
 
@@ -312,7 +312,7 @@ const PROBE_LEVEL = 8;
 
 /**
  * The level Design note 6 picks for the rock: one whose {@link chordalBound} is within
- * {@link rockTolerance}, from {@link MIN_ROCK_LEVEL} to {@link MAX_ROCK_LEVEL}, and the level
+ * {@link rockToleranceM}, from {@link MIN_ROCK_LEVEL} to {@link MAX_ROCK_LEVEL}, and the level
  * below it not, where that is within the range.
  *
  * @remarks
@@ -321,7 +321,7 @@ const PROBE_LEVEL = 8;
  * within the tolerance and up while its own is not: a few bounds a rock rather than one a level.
  */
 export function rockLevel(rock: Rock): number {
-  const tolerance = rockTolerance(rock);
+  const tolerance = rockToleranceM(rock);
   const probe = chordalBound(rock, PROBE_LEVEL);
   const clamp = (n: number): number => Math.min(MAX_ROCK_LEVEL, Math.max(MIN_ROCK_LEVEL, n));
   let level = clamp(Math.ceil(PROBE_LEVEL * Math.sqrt(probe / tolerance)));

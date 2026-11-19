@@ -58,7 +58,7 @@ import { PATCH_VERTICES_PER_SIDE } from "../../terrain/slotLayout";
 import { answerRequest, type HeightModule } from "../../terrain/workers/heightBake";
 import type { BakeSettings } from "../../terrain/workers/messages";
 import { type Rock, type RockLayer, rocksOf } from "./rockLayer";
-import { rockTolerance } from "./rockMesh";
+import { rockToleranceM } from "./rockMesh";
 import { buildRockPages, placeInPatch } from "./rockPages";
 
 /**
@@ -488,7 +488,7 @@ describe("collision agrees with what is drawn, with rocks (R11.T4.c)", () => {
           compared.push({ kind: "steep", gapM, failure: null, failsBare: false });
         } else {
           const { rock, cosine } = standing;
-          const below = (rockTolerance(rock.rock) + rock.halfStepM) / cosine;
+          const below = (rockToleranceM(rock.rock) + rock.halfStepM) / cosine;
           const above = rock.halfStepM / cosine + BOUND_M;
           const reach = below + contactBoundM(figure, rock.rock) + BOUND_M;
           compared.push({

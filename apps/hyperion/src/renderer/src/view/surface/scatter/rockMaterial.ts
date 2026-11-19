@@ -76,8 +76,10 @@ export const ROCK_LIT_MATERIAL = "rock-lit";
 /** The wireframe's draw's material name. */
 export const ROCK_WIRE_MATERIAL = "rock-wire";
 
-/** The ID raster's and the resolve's material names (plan R14, R14.T5.e). */
+/** The ID raster's material name (plan R14, R14.T5.e). */
 export const ROCK_ID_MATERIAL = "rock-id";
+
+/** The resolve's material name (plan R14, R14.T5.e). */
 export const ROCK_RESOLVE_MATERIAL = "rock-resolve";
 
 /** The lit `Draw`'s end, which `terrainMaterial.ts`' `withClusterBase` extends. */
