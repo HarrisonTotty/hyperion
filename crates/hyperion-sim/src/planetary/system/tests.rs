@@ -13840,6 +13840,9 @@ pub(crate) struct ThinAirBody {
     pub(crate) liquid_cover: f64,
     /// Whether its record's aerosols are modelled (a value, an inventory, empty or not).
     pub(crate) aerosols_modelled: bool,
+    /// Its record's aerosols' modes' τ(550), summed, where they are modelled (P14.T55.n's
+    /// census): NaN for a mode whose τ is not resolved.
+    pub(crate) aerosol_tau: Option<f64>,
     /// Its record's vertical structure: `None` where not modelled, else whether it holds a
     /// profile (`false`, computed as no air).
     pub(crate) structure: Option<bool>,
@@ -13956,6 +13959,7 @@ impl ThinAirBody {
             g,
             liquid_cover: figures.ocean_fraction(),
             aerosols_modelled: matches!(surface.aerosols(), Modelled::Ok(_)),
+            aerosol_tau: modes_optical_depth(surface.aerosols()),
             structure: match surface.vertical_structure() {
                 Modelled::NotModelled => None,
                 Modelled::Ok(profile) => Some(profile.is_some()),
@@ -14026,6 +14030,23 @@ impl ThinAirBody {
              [{gases}]{dominant}",
             self.state, self.t_s, self.coldest, self.p, self.column
         )
+    }
+}
+
+/// The τ(550) of the modes of `aerosols`, summed, where they are modelled: NaN for a mode whose τ
+/// is not resolved ([`ThinAirBody::aerosol_tau`]).
+fn modes_optical_depth(
+    aerosols: crate::planetary::record::Modelled<
+        &crate::planetary::hooks::aerosols::AerosolInventory,
+    >,
+) -> Option<f64> {
+    match aerosols {
+        crate::planetary::record::Modelled::Ok(inventory) => {
+            Some(inventory.modes().iter().fold(0.0, |sum, mode| {
+                sum + mode.optical_depth().map_or(f64::NAN, |depth| depth.value())
+            }))
+        }
+        crate::planetary::record::Modelled::NotModelled => None,
     }
 }
 

@@ -194,7 +194,8 @@ vertical_structure?: VerticalStructureDto | null,
  * volatiles are gone), and absent from a server whose generator does not model it, every one
  * before P14.T54.b's bump at generator version 24, and from a magma ocean that holds an air,
  * whose clouds the generator does not model. It is absent from a `tenuous` surface too, whose
- * haze and dust the generator does not model at 24 (P14.T55.n).
+ * haze and dust the generator does not model from versions 24 to 34; from 35 a `tenuous`
+ * surface sends its own (P14.T55.n).
  */
 aerosols?: AerosolInventoryDto | null, 
 /**

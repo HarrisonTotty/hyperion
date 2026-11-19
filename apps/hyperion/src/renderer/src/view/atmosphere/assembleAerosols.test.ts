@@ -12,6 +12,7 @@ import {
   EMPTY_INVENTORY,
   gammaMode,
   layerAbsorber,
+  plutoHazeAnswer,
   plutoHazeDetail,
   recordInput,
   unknownKeysDetail,
@@ -87,8 +88,27 @@ describe("a record with a key this client does not know in each keyed member", (
   });
 });
 
+/**
+ * The tenuous Pluto-like answer with no `aerosols` key, as a server below generator version 35
+ * sends a tenuous air's (decision-p14-t53c-tenuous-aerosols), which converts to not modelled.
+ */
+function plutoWithAerosolsAbsent(): DetailAnswer {
+  return withSurface(plutoHazeAnswer(), ({ aerosols: _aerosols, ...rest }) => rest);
+}
+
 describe("a tenuous Pluto-like record", () => {
   const pluto = assembleMedium(recordInput(plutoHazeDetail()));
+
+  it("gives its air, its inventory sent from version 35 (P14.T55.n), no AEROSOLS note", () => {
+    expect(pluto.medium).toBeDefined();
+    expect(pluto.labels).not.toContain("aerosolsNotYetModelled");
+  });
+
+  it("says AEROSOLS AND ABSORBERS: NOT YET MODELLED where its aerosols are absent, as before 35", () => {
+    const absent = assembleMedium(recordInput(detailOf(plutoWithAerosolsAbsent())));
+    expect(absent.medium).toBeDefined();
+    expect(absent.labels).toContain("aerosolsNotYetModelled");
+  });
 
   it("draws its tholin haze in its thin air", () => {
     expect(aerosolTerms(pluto)).toEqual(["aerosol:tholin"]);

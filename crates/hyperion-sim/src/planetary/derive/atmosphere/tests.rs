@@ -6419,9 +6419,10 @@ pub(crate) fn on_pluto_s_orbit_at(body: &DerivedBody, albedo: f64) -> Atmosphere
 ///   et al. 2017, Icarus 287, 207: 0.72 ± 0.07) by hand. Through its own passes its albedo is
 ///   T51.b's 0.84, above that range (a recorded miss: fresh frost over its whole surface, none of
 ///   its dark tholin terrain), so its ice sits near 32.4 K and its N₂ near 0.04 Pa: stated, not
-///   asserted. Its haze is not modelled at 24 (P14.T55.n; decision-p14-t53c-tenuous-aerosols): the
-///   inventory's rules are not applied to a tenuous air, and its CH₄ by T24.c's rule is stated
-///   with the aerosols' tests (`under_every_24_hold_pluto_s_haze_is_not_modelled_at_24`).
+///   asserted. Its haze is not modelled to 34 (decision-p14-t53c-tenuous-aerosols): T24.c's rules
+///   are not applied to a tenuous air, and its CH₄ by T24.c's rule is stated with the aerosols'
+///   tests (`under_the_held_rules_pluto_s_haze_is_not_modelled`); from 35 its haze is P14.T55.n's
+///   (`under_the_35_hold_pluto_s_haze_is_its_measured_one`).
 /// - **a Charon on Pluto's orbit** (1.586 × 10²¹ kg, 606 km) keeps no N₂: its vapour air has no
 ///   exobase, so its ice holds none, and T13.b's verdict, lost, stands.
 #[test]
@@ -6498,7 +6499,7 @@ fn under_the_35_hold_pluto_s_methane_lies_over_its_warmer_terrain() {
         ] {
             let ice = air.held_ice_temperature(Gas::Nitrogen);
             eprintln!(
-                "Pluto {at}, {label}: {}; CH4 {:.4e} Pa, x(CH4) {:.4e}, its N2 ice {ice:?}, its \
+                "Pluto {at}, {label}: {}; CH4's weight {:.4e} Pa, x(CH4) {:.4e}, its N2 ice {ice:?}, its \
                  methane's terrain {:?}",
                 air_line("", &air),
                 air.partial_pressures().of(Gas::Methane).value(),

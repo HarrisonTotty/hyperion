@@ -14,7 +14,7 @@ use crate::planetary::hooks::structure::{RadiativeConvective, StructureInputs};
 use crate::planetary::hooks::surface::regime::{ClimateInputs, surface_reservoirs};
 use crate::planetary::hooks::surface::tests::table;
 use crate::substance::SubstanceId;
-use crate::units::Kelvin;
+use crate::units::{Kelvin, WattsPerSquareMetre};
 
 /// Pascals per bar.
 const PASCALS_PER_BAR: f64 = 1.0e5;
@@ -56,6 +56,7 @@ impl Air {
             outgassing,
             liquid_water: self.liquid_water,
             runaway_deck: RunawayDeck::Kept,
+            stellar_flux: WattsPerSquareMetre::new(1_361.0),
         }
     }
 
@@ -141,6 +142,7 @@ fn table_inventory(name: &str) -> (AerosolInventory, f64) {
         outgassing,
         liquid_water: conditions.liquid_water(),
         runaway_deck: RunawayDeck::Kept,
+        stellar_flux: WattsPerSquareMetre::new(1_361.0),
     };
     (
         AerosolInventory::derive(&inputs).unwrap_or_else(|e| panic!("{name}: {e}")),
@@ -424,6 +426,7 @@ fn a_temperate_world_keeps_a_thin_layer_at_any_outgassing() {
                 outgassing: o,
                 liquid_water: wet,
                 runaway_deck: RunawayDeck::Kept,
+                stellar_flux: WattsPerSquareMetre::new(1_361.0),
             };
             let inventory = AerosolInventory::derive(&inputs).unwrap();
             assert_sound(&inventory);

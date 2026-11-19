@@ -2505,7 +2505,7 @@ mod tests {
             use hyperion_sim::planetary::hooks::aerosols::AerosolInputs;
             use hyperion_sim::planetary::hooks::structure::{RadiativeConvective, StructureInputs};
             use hyperion_sim::planetary::hooks::sulphur::RunawayDeck;
-            use hyperion_sim::units::{MetresPerSecondSquared, Pascals};
+            use hyperion_sim::units::{MetresPerSecondSquared, Pascals, WattsPerSquareMetre};
 
             let row = |key: &str| substance::by_key(key).expect("a registry row");
             let gases: Vec<(SubstanceId, f64)> =
@@ -2534,6 +2534,7 @@ mod tests {
                 outgassing: self.outgassing,
                 liquid_water: self.liquid_water,
                 runaway_deck: RunawayDeck::Kept,
+                stellar_flux: WattsPerSquareMetre::new(1_361.0),
             })
             .expect("an inventory")
         }

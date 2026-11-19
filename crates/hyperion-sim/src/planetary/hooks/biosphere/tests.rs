@@ -22,7 +22,7 @@ use crate::planetary::system::tests::SEED;
 use crate::planetary::testing::SAMPLE_CENTRE_LY;
 use crate::planetary::{SystemContext, generate};
 use crate::time::UniverseTime;
-use crate::units::{LightYears, Metres};
+use crate::units::{LightYears, Metres, WattsPerSquareMetre};
 
 /// Pascals per bar.
 const PASCALS_PER_BAR: f64 = 1.0e5;
@@ -172,6 +172,7 @@ fn the_inventory_of_the_biotic_air_carries_its_ozone() {
         outgassing: 1.0,
         liquid_water: true,
         runaway_deck: RunawayDeck::Kept,
+        stellar_flux: WattsPerSquareMetre::new(1_361.0),
     })
     .expect("an inventory");
     let ozone = inventory

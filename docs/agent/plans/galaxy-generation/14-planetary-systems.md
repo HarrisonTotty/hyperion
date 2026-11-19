@@ -8934,6 +8934,8 @@ Each is labelled "not yet modelled" where a console could show it:
   modelled (absent), labelled `AEROSOLS AND ABSORBERS: NOT YET MODELLED`. Recorded with it,
   P14.T55.e's figure: the model's Pluto holds 3 × 10⁻⁷ Pa of CH₄ (x 2 × 10⁻⁷, on the minor branch
   at its 32.5 K mean) against a measured x of 0.006–0.0084, so no haze could form even by T24.c.
+  _Built_ 2026-11-19, held at 35 (`TENUOUS_AIR_VERSION`, with P14.T55.e.a): Risks, "Deviations in
+  P14.T55.n, as built".
 
 #### P14.T56 Moons and their parents (decision-p14-moons, 2026-10-10)
 
@@ -34587,4 +34589,35 @@ ACTIVE HOST · HOST LEAVING MAIN SEQUENCE · EXTRAPOLATED ZONE · FROZEN SURFACE
   - _Lean (2026-11-19):_ the methane solid's extent is read at its minor branch's vapour
     (`Partitioned::cover_pressure`); read at the terrain's, Pluto's frost covered its whole surface
     (Bond 0.84 → 0.93) and its air collapsed to `Airless`.
+  - _Beyond the methane:_ the d = 1 rule moves every ice-held N₂ and Ar, a tenuous record's
+    pressure by at most ×1.06 over the census's sets, an airless body's unlisted residue under the
+    floor by up to ×1,719.
   - _At the bump:_ delete the `Held` arm; `HeldIce::on` keeps only the published branch.
+- **Deviations in P14.T55.n, as built (2026-11-19).** Behind P14.T55.e.a's hold at 35 (one hold for
+  both); 33 bit for bit.
+  - _New items:_ `hooks::aerosols::tenuous_haze_optical_depth`, with `PLUTO_HAZE_OPTICAL_DEPTH`,
+    `PLUTO_HAZE_DISTANCE_AU`, `PLUTO_HAZE_SURFACE_PRESSURE`, `PLUTO_SURFACE_GRAVITY`,
+    `PLUTO_SURFACE_METHANE`, `METHANE_LYMAN_ALPHA_CROSS_SECTION_M2`,
+    `TENUOUS_HAZE_RESIDENCE_EXPONENT`, `TENUOUS_HAZE_MONOMER_RADIUS` and `TENUOUS_HAZE_MONOMERS`.
+  - _Changed contracts:_ `AerosolInputs` gains `stellar_flux`, the conditions' own; `holds_air`
+    returns `HeldAir`; `record_aerosols`' `Tenuous` arm sends the inventory under the published
+    rules; the wire's two docs (`SurfaceStateDto::Tenuous`, `BodySurfaceDto.aerosols`) say absent
+    from 24 to 34, with no `PROTOCOL_VERSION` change.
+  - _Rule:_ τ(550) = 0.013 (F ÷ `F_P`)(A(N) ÷ A(`N_P`))((p ÷ g²) ÷ Pluto's)^0.388, A the Lyman α
+    share of the methane column; the bolometric light stands in for the far ultraviolet, as
+    `methane_outcome` takes it.
+  - _Lean (2026-11-19):_ the residence's exponent is fitted so that the law gives Titan's 8.1, a
+    second anchor for the column's slope.
+  - _Lean (2026-11-19):_ such an air takes no deck, dust or absorber, and its bulk condensable is
+    labelled `NotFormed::BulkGas`. Its haze is tholin aggregates of 1,000 monomers of 10 nm, well
+    mixed to 10⁻⁴ of its ground.
+  - _Lean (2026-11-19), open:_ the snapshot path's haze for a tenuous air stays P14.T24.h.b's
+    (`pass_haze`, about 10⁻⁴ at Pluto from 35, against the record's 10⁻²); whether the area mix
+    reads this law is for the bump.
+  - _At the bump:_ delete the `Held` arms of `holds_air` and `record_aerosols` and
+    `under_the_held_rules_pluto_s_haze_is_not_modelled`; restate
+    `a_tenuous_air_takes_no_rule_of_the_inventory`.
+  - _Tests renamed:_ `under_every_24_hold_pluto_s_haze_is_not_modelled_at_24` is
+    `under_the_held_rules_pluto_s_haze_is_not_modelled` and
+    `under_the_35_hold_pluto_s_haze_is_its_measured_one`; the census
+    `under_every_35_hold_the_tenuous_airs_are_stated` (by name) holds τ(550) ≤ 0.1.

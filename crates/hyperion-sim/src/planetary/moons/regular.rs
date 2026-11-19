@@ -6419,8 +6419,9 @@ mod tests {
     /// 3.7 nbar (Lellouch et al. 2010, A&A 512, L8, §2, in 2009, as the partition's tests read it),
     /// an x(CH₄) of about 7 × 10⁻⁴ over its 14 µbar of N₂ (a few × 10⁻⁴; Lellouch et al.'s own
     /// 2.4 × 10⁻⁴ took a 40 µbar air). Triton's terrain lies some 2–3 K over its ice, not Pluto's
-    /// 6.5 K ([`METHANE_TERRAIN_WARMING_K`]), so its methane stands above the measured, 4.3 times
-    /// over its 36.8 K ice as built: asserted within a factor of 10, the miss recorded. Under the held rules it is 33's, the minor branch's
+    /// 6.5 K ([`METHANE_TERRAIN_WARMING_K`]), so its methane's partial pressure, x p, stands above
+    /// the measured, 7.6 times over its 36.8 K ice as built: asserted within a factor of 10, the
+    /// miss recorded. Under the held rules it is 33's, the minor branch's
     /// at the mean, below 10⁻³ of the measured.
     ///
     /// [`METHANE_TERRAIN_WARMING_K`]: crate::planetary::chem::tenuous::METHANE_TERRAIN_WARMING_K
@@ -6448,7 +6449,7 @@ mod tests {
             let partials = air.partial_pressures();
             let moles = |gas: Gas| partials.of(gas).value() / gas.molar_mass_g_per_mol();
             let all = Gas::ALL.iter().fold(0.0, |sum, &gas| sum + moles(gas));
-            let methane = partials.of(Gas::Methane).value();
+            let methane = moles(Gas::Methane) / all * partials.total().value();
             eprintln!(
                 "the table's Triton, {label}: {:?} at {:.4} Pa, N2 {:.4} Pa, CH4 {methane:.4e} Pa \
                  ({:.3} times its measured 9.8 nbar), x(CH4) {:.4e}, its N2 ice {:?}",

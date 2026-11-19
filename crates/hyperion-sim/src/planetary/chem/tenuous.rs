@@ -146,13 +146,17 @@ pub fn ice_temperature(gas: Gas, equilibrium: Kelvin, heat_flow: WattsPerSquareM
 ///
 /// Methane ice is not buffered by the nitrogen's latent heat, so the terrain rich in it lies a few
 /// kelvin warmer than the nitrogen ice, whose temperature is one over the body; its vapour is
-/// that ice's saturation, ten to eighty times what the minor branch's humidity at the mean holds.
+/// that ice's saturation, some 250 times the minor branch's h `p_sat` at the nitrogen ice's
+/// temperature and some 10⁴ times its value at the mean, on the registry's curves
+/// (science-p14-t24f §1 gives 9 and 83 times for the measured Triton and Pluto at their ice).
 /// The figure is Pluto's on the registry's curves: its measured surface CH₄ ÷ N₂ of 0.006–0.0084
 /// (0.008 adopted) over its 11 ± 1 µbar (Gladstone et al. 2016, Science 351, aad8866, read) is
-/// 6.6–9.2 mPa of CH₄, saturated at 43.1–43.6 K, over β-N₂ at 36.65–36.95 K: 6.15–6.95 K warmer,
-/// 6.5 near the centre. Triton's measured 9.8 ± 3.7 nbar of CH₄ (Lellouch et al. 2010, A&A 512,
+/// 6.6–9.2 mPa of CH₄, saturated at 43.1–43.6 K, over β-N₂ at 36.65–36.95 K: 6.15–6.98 K warmer,
+/// 6.5 near the centre. Later measures of Pluto's methane are lower, 0.44% (Lellouch et al. 2015,
+/// Icarus 246, 268), which gives 5.8 K: the rule sits in the upper half of the published spread
+/// (recorded). Triton's measured 9.8 ± 3.7 nbar of CH₄ (Lellouch et al. 2010, A&A 512,
 /// L8, §2, 2009, as the partition's tests read it) is pure methane ice at 40.3 K on the same curve,
-/// some 2–3 K over its 38 ± 1 K nitrogen ice (Tryka et al. 1994, Icarus 112, 513): Triton's
+/// some 2–3 K over its 38 K nitrogen ice (Tryka et al. 1993, Science 261, 751, recalled): Triton's
 /// terrain, warmer by less, holds less methane than this rule gives it (recorded). The terrain's
 /// share and its albedo, which set the two apart, and its seasons are P14.T55.e's.
 pub const METHANE_TERRAIN_WARMING_K: f64 = 6.5;
@@ -168,7 +172,7 @@ pub const METHANE_TERRAIN_WARMING_K: f64 = 6.5;
 /// # Examples
 ///
 /// Pluto's nitrogen ice at 36.8 K, at its measured 11 µbar, holds its methane over terrain at
-/// 43.3 K, whose saturated vapour is about 0.8% of the air, as New Horizons measured:
+/// 43.3 K, whose saturated vapour is about 0.7% of the air, within New Horizons' 0.6–0.84%:
 ///
 /// ```
 /// use hyperion_sim::planetary::chem::tenuous::methane_terrain_temperature;
@@ -413,17 +417,22 @@ pub const TENUOUS_AIR_VERSION: GeneratorVersion = GeneratorVersion::new(35);
 /// Whether P14.T55.e.a's methane terrain and P14.T55.n's haze are in force: from
 /// [`TENUOUS_AIR_VERSION`], a hold (its bump folds it).
 ///
-/// Below it a `Tenuous` air's methane is the minor branch's at the mean, and its record's aerosols
-/// are not modelled (decision-p14-t53c-tenuous-aerosols), so no output moves at 33 or 34. The
+/// It switches three things. Below it a `Tenuous` air's methane is the minor branch's at the mean,
+/// its ice-held nitrogen and argon are judged on their minor branch's share, and its record's
+/// aerosols are not modelled (decision-p14-t53c-tenuous-aerosols), so no output moves at 33 or 34.
+/// From it the methane lies over its terrain, every ice-held gas is held as a dominant one is
+/// (`ColumnInventory::with_held_ice`), and the air takes its own haze (P14.T55.n, `holds_air`
+/// and `record_aerosols`). The
 /// tests reach version 35's rules through `with_tenuous_air`. The 35 bump deletes the `Held` arm,
 /// `with_tenuous_air`, this enum's reads and the tripwire
 /// (`the_tenuous_air_is_held_only_until_the_35_bump`), with its line in `testing::held`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum TenuousAirRules {
-    /// Version 33's and 34's: the methane at the mean on the minor branch, the aerosols not
-    /// modelled.
+    /// Version 33's and 34's: the methane at the mean on the minor branch, an ice-held gas judged
+    /// on its share, the aerosols not modelled.
     Held,
-    /// Version 35's: the methane over its terrain ([`methane_terrain_temperature`]).
+    /// Version 35's: the methane over its terrain ([`methane_terrain_temperature`]), an ice-held
+    /// gas held as a dominant one is, and the tenuous air's own haze.
     Published,
 }
 

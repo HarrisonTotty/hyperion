@@ -331,7 +331,7 @@ fn triton_and_pluto_hold_nitrogen_ice_with_methane() {
 /// - a terrain or an ice that is not a temperature, or a species the inventory does not name,
 ///   leaves it as it was.
 #[test]
-fn a_methane_over_its_terrain_beside_an_ice_held_nitrogen() {
+fn an_ice_held_nitrogen_stays_dominant_beside_methane_saturated_over_its_terrain() {
     let (n2, ch4) = (id("N2"), id("CH4"));
     let climate = span(30.0, 32.5, 40.0);
     let ground = gravity(0.62);
@@ -377,14 +377,13 @@ fn a_methane_over_its_terrain_beside_an_ice_held_nitrogen() {
         &ground,
         &base.clone().with_held_ice(n2, Kelvin::new(37.0)),
     );
-    let (ours, theirs) = (entry(&world), entry(&without));
-    assert_eq!(ours.map(|e| e.1), theirs.map(|e| e.1));
-    if let (Some(ours), Some(theirs)) = (ours, theirs) {
-        assert!(
-            relative(ours.0, theirs.0) < 0.01,
-            "{ours:?} against {theirs:?}"
-        );
-    }
+    let ours = entry(&world).expect("a methane sheet over its terrain");
+    let theirs = entry(&without).expect("a methane sheet with no terrain");
+    assert_eq!(ours.1, theirs.1);
+    assert!(
+        relative(ours.0, theirs.0) < 0.01,
+        "{ours:?} against {theirs:?}"
+    );
     // What is not a temperature, or not named, leaves the inventory as it was.
     for t in [f64::NAN, -1.0, f64::INFINITY] {
         assert_eq!(
@@ -807,11 +806,34 @@ fn the_fixed_sweeps_settle_on_the_partition() {
     assert_eq!(format!("{fixed:?}"), format!("{run_out:?}"));
 }
 
+/// P14.T55.e.a's inventories, a Pluto's and a Triton's by hand: nitrogen held by its ice beside
+/// methane over terrain 6.5 K warmer, with a trace of argon, under their climates.
+fn terrain_cases() -> Vec<(ClimateSpan, ColumnInventory)> {
+    let (n2, ch4) = (id("N2"), id("CH4"));
+    [(30.0, 32.5, 40.0, 37.0), (34.0, 36.0, 45.0, 38.0)]
+        .into_iter()
+        .map(|(cold, mean, warm, ice)| {
+            let held = inventory(&[("N2", 1e5), ("CH4", 1e5), ("Ar", 10.0)])
+                .with_held_ice(n2, Kelvin::new(ice))
+                .with_terrain_temperature(ch4, Kelvin::new(ice + 6.5));
+            (span(cold, mean, warm), held)
+        })
+        .collect()
+}
+
 /// The partition is the same twice and in any order of calls, with or without a shared scratch
-/// (the sim-determinism skill's order independence).
+/// (the sim-determinism skill's order independence), P14.T55.e.a's terrain and ice-held species
+/// among its inventories; and with no terrain every species' solid extent is read at its own
+/// partial pressure, to the bit ([`Partitioned::cover_pressure`]).
 #[test]
 fn the_partition_is_the_same_twice_and_in_any_order() {
-    let cases = cases();
+    for (climate, inv) in cases() {
+        for s in partition(&climate, &gravity(3.0), &inv).species() {
+            assert_same_bits(s.cover_pressure.value(), s.partial_pressure().value());
+        }
+    }
+    let mut cases = cases();
+    cases.extend(terrain_cases());
     let g = gravity(3.0);
     for (climate, inv) in &cases {
         assert_eq!(

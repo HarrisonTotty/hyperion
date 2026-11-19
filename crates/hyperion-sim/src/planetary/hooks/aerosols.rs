@@ -71,6 +71,12 @@
 //!   Titan's column.
 //! - **Dust** ([`dust_optical_depth`]): `mars_dust` on a dry, thin and liftable ground, calibrated on
 //!   Mars's background column.
+//! - **A tenuous air's haze** ([`tenuous_haze_optical_depth`], from generator version 35;
+//!   P14.T55.n): a `Tenuous` air takes none of T24.c's rules, but a haze of Pluto's tholin
+//!   aggregates whose τ(550) is its methane's photolysis supply times its residence in its air's
+//!   column, calibrated on Pluto's measured haze, with its bulk condensable labelled and no deck,
+//!   dust or absorber. To version 34 such an air takes none, and its record sends its aerosols not
+//!   modelled.
 //! - **Sulphur** (P14.T24.g, [`sulphur`](super::sulphur)): a runaway world's four-mode acid deck,
 //!   whose base the loop finds from its SO₂, a temperate or snowball world's sulphate layer, and SO₂
 //!   as an absorber.
@@ -98,12 +104,13 @@ use std::fmt;
 
 use crate::math;
 use crate::planetary::chem::condense::{
-    BuildModeError, BuildSedimentationError, Condensation, Deck, DeriveCondensationError, Mode,
-    ModeProfile, NotFormed, OpticalDepth, OpticalDepthBasis, ResolveOpticalDepthError,
-    Sedimentation, SizeModeError,
+    BULK_BOUND, BuildModeError, BuildSedimentationError, Condensation, Deck,
+    DeriveCondensationError, Mode, ModeProfile, NotFormed, OpticalDepth, OpticalDepthBasis,
+    ResolveOpticalDepthError, Sedimentation, SizeModeError,
 };
 use crate::planetary::chem::quench::{EddyDiffusion, MixingColumn};
-use crate::planetary::derive::atmosphere::SurfaceState;
+use crate::planetary::chem::tenuous::TenuousAirRules;
+use crate::planetary::derive::atmosphere::{Gas, SurfaceState};
 use crate::planetary::hooks::structure::RadiativeConvective;
 use crate::planetary::hooks::sulphur::{
     DeriveSulphurError, RunawayDeck, Sulphur, SulphurCycle, SulphurInputs,
@@ -115,7 +122,7 @@ use crate::substance::{
 };
 use crate::units::{
     Kelvin, KilogramsPerCubicMetre, KilogramsPerSquareMetre, Metres, MetresPerSecond,
-    MetresPerSecondSquared, Pascals,
+    MetresPerSecondSquared, Pascals, WattsPerSquareMetre,
 };
 
 /// The cloud layer's eddy diffusion, m² s⁻¹: 10, Ackerman and Marley's `K_min`, 10⁵ cm² s⁻¹ (2001,
@@ -390,6 +397,73 @@ pub const HAZE_TOP_RATIO: f64 = 1e-4;
 /// beneath most of the haze, as on Titan, not mixed through it, and a Titan-class disc reads
 /// orange-brown, not grey.
 pub const TITAN_HAZE_MIXING_EXPONENT: f64 = -0.83;
+
+/// Pluto's vertical haze τ, at which a tenuous air's haze law is calibrated
+/// ([`tenuous_haze_optical_depth`], P14.T55.n): 0.013, New Horizons' "vertical haze scattering
+/// optical depth of ~0.013" at LORRI's 607.6 nm, from τ ≈ 0.16 along the line of sight at a 165°
+/// phase for tholin-like particles of radius no smaller than about 0.2 µm, a column of 8 × 10⁻⁸ g
+/// cm⁻² (Gladstone et al. 2016, Science 351, aad8866, read). It is taken at 550 nm as it stands,
+/// the band's 10% apart within its "about" (recorded).
+pub const PLUTO_HAZE_OPTICAL_DEPTH: f64 = 0.013;
+
+/// Pluto's distance from the Sun when its haze was measured, au: 32.91, at New Horizons' flyby of
+/// 2015 July 14 (recalled, as JPL's ephemeris gives it), at which its light is the haze law's
+/// reference supply ([`tenuous_haze_optical_depth`]).
+pub const PLUTO_HAZE_DISTANCE_AU: f64 = 32.91;
+
+/// Pluto's surface pressure at the flyby, Pa: 1.1, REX's 11 ± 1 µbar at entry (Gladstone et al.
+/// 2016, read; 10 ± 1 at exit), the haze law's reference column with [`PLUTO_SURFACE_GRAVITY`].
+pub const PLUTO_HAZE_SURFACE_PRESSURE: Pascals = Pascals::new(1.1);
+
+/// Pluto's surface gravity, m s⁻²: GM ÷ R² of JPL's 869.3 km³ s⁻² (PLU060, Brozović and Jacobson
+/// 2024, AJ 167, 256) and its 1,188.3 km (Nimmo et al. 2017, Icarus 287, 12), 0.6156, as the
+/// tenuous air's tests take them.
+pub const PLUTO_SURFACE_GRAVITY: MetresPerSecondSquared =
+    MetresPerSecondSquared::new(869.3e9 / (1_188.3e3 * 1_188.3e3));
+
+/// Pluto's surface methane by number at the flyby: 0.008, the CH₄ ÷ N₂ to which New Horizons'
+/// solar occultation extrapolates, within 0.006–0.0084 (Gladstone et al. 2016, supplement, read),
+/// the haze law's reference methane column.
+pub const PLUTO_SURFACE_METHANE: f64 = 0.008;
+
+/// Methane's absorption cross-section at Lyman α (121.6 nm), m²: 1.8 × 10⁻²¹, 1.8 × 10⁻¹⁷ cm²
+/// (recalled, not read: Chen and Wu 2004, JQSRT 85, 195), at
+/// which a tenuous air's methane column takes the Lyman α that photolyses it
+/// ([`tenuous_haze_optical_depth`]). Lyman α carries most of the far ultraviolet that
+/// photolyses methane, and at Pluto's distance interplanetary hydrogen's scattering of it is a
+/// source comparable with the Sun's own (Gladstone et al. 2016, read), which the bolometric
+/// stand-in does not hold (recorded).
+pub const METHANE_LYMAN_ALPHA_CROSS_SECTION_M2: f64 = 1.8e-21;
+
+/// The exponent β of a tenuous air's haze in its residence, p ÷ g² over Pluto's
+/// ([`tenuous_haze_optical_depth`]): 0.388, fitted so that the same law gives Titan's own haze,
+/// [`TITAN_HAZE_OPTICAL_DEPTH`], at Titan's 1,467 hPa under 1.3543 m s⁻² and its light at 9.58 au
+/// (8.104, against 8.1; the lane's fit, 2026-11-19).
+///
+/// A haze's column is its production times its residence. In free-molecular (Epstein) drag a
+/// particle settles at ρₚ g r ÷ ρₐ v̄, so it takes v̄ Σ ÷ ρₚ g r to fall through a column Σ = p ÷ g:
+/// a residence as p ÷ g² at a fixed size. Particles grown larger in a deeper or longer-lived haze
+/// fall faster, so the residence grows more slowly than that: Pluto's are a fraction of a micron
+/// across (Gladstone et al. 2016), Titan's aggregates a few microns ([`TITAN_HAZE_MONOMERS`] of
+/// [`TITAN_HAZE_MONOMER_RADIUS`]). The two measured hazes give its slope, 0.388 over the 2.8 ×
+/// 10⁴ between their residences, where the fixed size's would be 1. The fit is empirical: the
+/// bolometric supply's Titan-to-Pluto ratio, 11.8, overstates their ultraviolet's if Pluto's
+/// interplanetary Lyman α matters (a ratio of 6 would give β 0.45), and Titan's lower column is
+/// not free-molecular, so β is the two hazes' slope, not a settling law's; Triton, whose residence
+/// lies within 21% of Pluto's, does not test it (recorded).
+pub const TENUOUS_HAZE_RESIDENCE_EXPONENT: f64 = 0.388;
+
+/// The radius of a tenuous air's haze monomers: 10 nm, the "~10-nm spheres" of which Pluto's haze
+/// aggregates, "a fraction of a micron in radius", are made, their blue colour Rayleigh
+/// scatterers' (Gladstone et al. 2016, read), with [`TENUOUS_HAZE_MONOMERS`] of them at
+/// [`TITAN_HAZE_FRACTAL_DIMENSION`].
+pub const TENUOUS_HAZE_MONOMER_RADIUS: Metres = Metres::new(1e-8);
+
+/// The number of a tenuous air's haze monomers: 1,000, whose aggregate at a fractal dimension of 2
+/// has a radius of gyration near 0.25 µm, √(N ÷ `k_f`) monomer radii at R08's `k_f` of 5 ÷ 3 (the
+/// lane's, recorded): Gladstone et al.'s "fraction of a micron", at their Mie spheres' "no smaller
+/// than ~0.2 µm".
+pub const TENUOUS_HAZE_MONOMERS: f64 = 1_000.0;
 
 /// Mars's background dust τ(550): 0.5, an annual mean read from Montabone et al. 2015's
 /// climatology's maps (Icarus 251, 65: 9.3 µm absorption referred to 610 Pa about 0.09–0.13 at
@@ -1425,6 +1499,11 @@ pub struct AerosolInputs<'a> {
     /// which with the state gives P14.T24.g's case ([`SulphurCycle::case_of`]); read only for a
     /// runaway.
     pub runaway_deck: RunawayDeck,
+    /// The light the body receives from its hosts, averaged over its orbit (P14.T24.a's
+    /// conditions' stellar flux), which stands in for the far ultraviolet that photolyses a
+    /// tenuous air's methane (P14.T55.n, [`tenuous_haze_optical_depth`]), as the passes' methane
+    /// photolysis takes it; read only for a tenuous air.
+    pub stellar_flux: WattsPerSquareMetre,
 }
 
 /// [`AerosolInventory::derive`] refused its inputs.
@@ -1562,7 +1641,7 @@ impl AerosolInventory {
     /// use hyperion_sim::planetary::hooks::structure::{RadiativeConvective, StructureInputs};
     /// use hyperion_sim::planetary::hooks::sulphur::RunawayDeck;
     /// use hyperion_sim::substance::by_key;
-    /// use hyperion_sim::units::{Kelvin, MetresPerSecondSquared, Pascals};
+    /// use hyperion_sim::units::{Kelvin, MetresPerSecondSquared, Pascals, WattsPerSquareMetre};
     ///
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let (n2, h2o) = (by_key("N2").ok_or("a row")?, by_key("H2O").ok_or("a row")?);
@@ -1587,6 +1666,7 @@ impl AerosolInventory {
     ///     outgassing: 0.0,
     ///     liquid_water: true,
     ///     runaway_deck: RunawayDeck::Kept,
+    ///     stellar_flux: WattsPerSquareMetre::new(1_361.0),
     /// })?;
     /// let water = inventory
     ///     .decks()
@@ -1603,7 +1683,8 @@ impl AerosolInventory {
         if !(0.0..=1.0).contains(&fraction) {
             return Err(DeriveAerosolsError::CloudFraction(fraction));
         }
-        if !holds_air(inputs) {
+        let air = holds_air(inputs);
+        if air == HeldAir::None {
             return Ok(Self::empty());
         }
         for (field, value) in [
@@ -1613,6 +1694,9 @@ impl AerosolInventory {
             if !(value.is_finite() && value > 0.0) {
                 return Err(DeriveAerosolsError::Column { field, value });
             }
+        }
+        if air == HeldAir::Tenuous {
+            return Self::of_tenuous_air(inputs);
         }
         let mut inventory = Self::empty();
         let sulphur_inputs = sulphur_inputs(inputs);
@@ -1631,16 +1715,7 @@ impl AerosolInventory {
         {
             inventory.absorbers.push(so2);
         }
-        let fraction_of = |key: &str| {
-            crate::substance::by_key(key).map_or(0.0, |id| {
-                inputs
-                    .gases
-                    .iter()
-                    .filter(|(gas, _)| *gas == id)
-                    .map(|&(_, x)| x)
-                    .sum()
-            })
-        };
+        let fraction_of = |key: &str| fraction_of(inputs, key);
         if let Some(haze) = methane_haze(inputs, fraction_of("CH4"), fraction_of("CO2"))? {
             inventory.modes.push(haze);
         }
@@ -1651,6 +1726,33 @@ impl AerosolInventory {
             inventory.absorbers.push(ozone);
         }
         inventory.absorbers.sort_by_key(Absorber::species);
+        Ok(inventory)
+    }
+
+    /// The inventory of a tenuous air (P14.T55.n, from generator version 35 under
+    /// `TenuousAirRules`): its methane haze by its own law ([`tenuous_haze`]), and its bulk
+    /// condensable labelled ([`NotFormed::BulkGas`]), its condensation its profile's, as the loop
+    /// labels a Triton's N₂ in a bulk air; no deck, no dust and no absorber.
+    ///
+    /// - **No deck.** The loop's decks are fitted to bulk airs' columns: such an air's minor
+    ///   condensables (its methane, under 1%) are held over their warmest terrain and its upper
+    ///   atmosphere is warmer than its ice (`UPPER_ATMOSPHERE_MULTIPLE`), so none is taken to
+    ///   condense aloft (the lane's lean, 2026-11-19).
+    /// - **No dust.** T24.c's lifting weight gives none below about a quarter of Mars's air density
+    ///   (decision-p14-t53c-tenuous-aerosols §2.1: Pluto's is about 1 ÷ 170 of it).
+    /// - **No absorber.** Its gases hold no O₂ to make ozone, and P14.T24.g's sulphur is none
+    ///   (`SulphurCycle::None`) in such an air.
+    fn of_tenuous_air(inputs: &AerosolInputs<'_>) -> Result<Self, DeriveAerosolsError> {
+        let mut inventory = Self::empty();
+        for &(id, x) in inputs.gases {
+            if x >= BULK_BOUND && law_aloft(id).is_some() {
+                inventory.not_formed.push((id, NotFormed::BulkGas));
+            }
+        }
+        inventory.not_formed.sort_by_key(|&(id, _)| id);
+        if let Some(haze) = tenuous_haze(inputs, fraction_of(inputs, "CH4"))? {
+            inventory.modes.push(haze);
+        }
         Ok(inventory)
     }
 
@@ -1837,6 +1939,192 @@ fn methane_haze(
     AerosolMode::aggregate(tholin, tholin, aggregate, tau, profile, 1.0).map(Some)
 }
 
+/// The mole fraction of the gas `key` in the air `inputs` describe, its published fractions' sum;
+/// 0 where it lists none.
+#[must_use]
+fn fraction_of(inputs: &AerosolInputs<'_>, key: &str) -> f64 {
+    crate::substance::by_key(key).map_or(0.0, |id| {
+        inputs
+            .gases
+            .iter()
+            .filter(|(gas, _)| *gas == id)
+            .map(|&(_, x)| x)
+            .sum()
+    })
+}
+
+/// The share of the Lyman α a methane column of `molecules_per_m2` takes, 1 − e^(−σN), σ
+/// [`METHANE_LYMAN_ALPHA_CROSS_SECTION_M2`]: 0 to 1, none for a column that is not one.
+#[must_use]
+fn methane_lyman_alpha_share(molecules_per_m2: f64) -> f64 {
+    if !(molecules_per_m2.is_finite() && molecules_per_m2 > 0.0) {
+        return 0.0;
+    }
+    -math::exp_m1(-METHANE_LYMAN_ALPHA_CROSS_SECTION_M2 * molecules_per_m2)
+}
+
+/// The methane molecules per m² over a surface of pressure `pressure` under gravity `gravity` in an
+/// air of mean molar mass `molar_mass_g_per_mol` holding `methane` of it by number: x p `N_A` ÷ (g
+/// μ̄), its air's column in molecules times its share.
+#[must_use]
+fn methane_column(
+    methane: f64,
+    pressure: Pascals,
+    gravity: MetresPerSecondSquared,
+    molar_mass_g_per_mol: f64,
+) -> f64 {
+    methane * pressure.value() * AVOGADRO
+        / (gravity.value() * molar_mass_g_per_mol / GRAMS_PER_KILOGRAM)
+}
+
+/// The haze τ(550) of a tenuous air (P14.T55.n; decision-p14-t53c-tenuous-aerosols §4) under its
+/// hosts' light `stellar_flux`, of methane mole fraction `methane`, surface pressure `pressure`,
+/// surface gravity `gravity` and mean molar mass `molar_mass_g_per_mol` (g mol⁻¹): its production
+/// times its residence, calibrated on Pluto's [`PLUTO_HAZE_OPTICAL_DEPTH`],
+///
+/// τ = 0.013 · (F ÷ `F_P`) · (A(N) ÷ A(`N_P`)) · ((p ÷ g²) ÷ (`p_P` ÷ `g_P`²))^β,
+///
+/// - **the supply**, methane's photolysis: the hosts' light F over Pluto's at the flyby
+///   ([`PLUTO_HAZE_DISTANCE_AU`]), the bolometric light standing in for the Lyman α and far
+///   ultraviolet that photolyse methane, as the passes' methane photolysis takes it
+///   (`chem::escape::methane_outcome`, by the light over Titan's), times the share A of the
+///   Lyman α its methane column N takes ([`METHANE_LYMAN_ALPHA_CROSS_SECTION_M2`]), over Pluto's
+///   at its measured [`PLUTO_SURFACE_METHANE`] (all of it). Gladstone et al. (2016) bound Pluto's
+///   haze production by its methane's photolysis, some 10⁻¹⁴ g cm⁻² s⁻¹;
+/// - **the residence** in its air's column, p ÷ g² over Pluto's at [`PLUTO_HAZE_SURFACE_PRESSURE`]
+///   and [`PLUTO_SURFACE_GRAVITY`], to the power [`TENUOUS_HAZE_RESIDENCE_EXPONENT`], which the
+///   same law fits to Titan's haze.
+///
+/// T24.c's index, which reads the mole fractions alone, would give a Pluto τ 6.3 and a Triton-like
+/// 1.4 Pa air at x(CH₄) 10⁻³ τ 4.3 (decision-p14-t53c-tenuous-aerosols §2.3): this law gives each
+/// about 0.01. Its photolysis is the host's light alone: an M dwarf's far ultraviolet, a larger
+/// share of its light than the Sun's, and interplanetary Lyman α are not held (recorded). 0 for a
+/// light, a pressure, a gravity or a molar mass that is not finite and positive, or no methane.
+///
+/// # Examples
+///
+/// Pluto at the flyby takes its own haze; Triton at Voyager 2's, 14 µbar over 0.779 m s⁻² with
+/// 2.5 × 10⁻⁴ of methane at Neptune's 30.1 au, about as much; an air with no methane none:
+///
+/// ```
+/// use hyperion_sim::planetary::hooks::aerosols::{
+///     PLUTO_HAZE_DISTANCE_AU, PLUTO_HAZE_OPTICAL_DEPTH, PLUTO_HAZE_SURFACE_PRESSURE,
+///     PLUTO_SURFACE_GRAVITY, PLUTO_SURFACE_METHANE, tenuous_haze_optical_depth,
+/// };
+/// use hyperion_sim::units::consts::SOLAR_CONSTANT_W_PER_M2;
+/// use hyperion_sim::units::{MetresPerSecondSquared, Pascals, WattsPerSquareMetre};
+///
+/// let at = |au: f64| WattsPerSquareMetre::new(SOLAR_CONSTANT_W_PER_M2 / (au * au));
+/// let mu = |methane: f64| (1.0 - methane) * 28.0134 + methane * 16.0425;
+/// let pluto = tenuous_haze_optical_depth(
+///     at(PLUTO_HAZE_DISTANCE_AU),
+///     PLUTO_SURFACE_METHANE,
+///     PLUTO_HAZE_SURFACE_PRESSURE,
+///     PLUTO_SURFACE_GRAVITY,
+///     mu(PLUTO_SURFACE_METHANE),
+/// );
+/// assert!((pluto / PLUTO_HAZE_OPTICAL_DEPTH - 1.0).abs() < 1e-12);
+/// let triton = tenuous_haze_optical_depth(
+///     at(30.1),
+///     2.5e-4,
+///     Pascals::new(1.4),
+///     MetresPerSecondSquared::new(0.779),
+///     mu(2.5e-4),
+/// );
+/// assert!((0.005..0.03).contains(&triton), "{triton}");
+/// let none = tenuous_haze_optical_depth(
+///     at(30.1),
+///     0.0,
+///     Pascals::new(1.4),
+///     MetresPerSecondSquared::new(0.779),
+///     28.0134,
+/// );
+/// assert!(none <= 0.0);
+/// ```
+#[must_use]
+pub fn tenuous_haze_optical_depth(
+    stellar_flux: WattsPerSquareMetre,
+    methane: f64,
+    pressure: Pascals,
+    gravity: MetresPerSecondSquared,
+    molar_mass_g_per_mol: f64,
+) -> f64 {
+    let (f, p, g, mu) = (
+        stellar_flux.value(),
+        pressure.value(),
+        gravity.value(),
+        molar_mass_g_per_mol,
+    );
+    let positive = |v: f64| v.is_finite() && v > 0.0;
+    if !(positive(f) && positive(p) && positive(g) && positive(mu) && positive(methane)) {
+        return 0.0;
+    }
+    let pluto_flux = crate::units::consts::SOLAR_CONSTANT_W_PER_M2
+        / (PLUTO_HAZE_DISTANCE_AU * PLUTO_HAZE_DISTANCE_AU);
+    let (p_p, g_p) = (
+        PLUTO_HAZE_SURFACE_PRESSURE.value(),
+        PLUTO_SURFACE_GRAVITY.value(),
+    );
+    // Pluto's reference air, N₂ with its methane, at the registry's molar masses.
+    let pluto_mu = (1.0 - PLUTO_SURFACE_METHANE) * Gas::Nitrogen.molar_mass_g_per_mol()
+        + PLUTO_SURFACE_METHANE * Gas::Methane.molar_mass_g_per_mol();
+    let pluto_share = methane_lyman_alpha_share(methane_column(
+        PLUTO_SURFACE_METHANE,
+        PLUTO_HAZE_SURFACE_PRESSURE,
+        PLUTO_SURFACE_GRAVITY,
+        pluto_mu,
+    ));
+    let share = methane_lyman_alpha_share(methane_column(methane, pressure, gravity, mu));
+    let supply = (f / pluto_flux) * (share / pluto_share);
+    let residence = (p / (g * g)) / (p_p / (g_p * g_p));
+    let tau =
+        PLUTO_HAZE_OPTICAL_DEPTH * supply * math::powf(residence, TENUOUS_HAZE_RESIDENCE_EXPONENT);
+    if tau.is_finite() && tau > 0.0 {
+        tau
+    } else {
+        0.0
+    }
+}
+
+/// The methane haze of the tenuous air `inputs` describe (P14.T55.n): a fractal-aggregate mode of
+/// `tholin` of Pluto's monomers ([`TENUOUS_HAZE_MONOMER_RADIUS`]), its τ(550)
+/// [`tenuous_haze_optical_depth`] at the air's methane `methane`, well mixed from the ground to
+/// [`HAZE_TOP_RATIO`] of its pressure over the whole sky (Pluto's haze's brightness scale height
+/// that of its air, "consistent with the decreasing atmospheric scale height", Gladstone et al.
+/// 2016); `None` with no star, whose ultraviolet photolyses the methane, or a τ of 0.
+///
+/// # Panics
+///
+/// Never: the haze's monomers are an aggregate, and `tholin` a registry row.
+fn tenuous_haze(
+    inputs: &AerosolInputs<'_>,
+    methane: f64,
+) -> Result<Option<AerosolMode>, BuildModeError> {
+    if inputs.star_temperature.is_none() {
+        return Ok(None);
+    }
+    let tau = tenuous_haze_optical_depth(
+        inputs.stellar_flux,
+        methane,
+        inputs.surface_pressure,
+        inputs.gravity,
+        inputs.mean_molar_mass_g_per_mol,
+    );
+    if tau <= 0.0 {
+        return Ok(None);
+    }
+    let aggregate = Aggregate::new(
+        TENUOUS_HAZE_MONOMER_RADIUS,
+        TENUOUS_HAZE_MONOMERS,
+        TITAN_HAZE_FRACTAL_DIMENSION,
+    )
+    .expect("Pluto's monomers are an aggregate");
+    let tholin = crate::substance::by_key("tholin").expect("tholin is a registry row");
+    let ground = inputs.surface_pressure;
+    let profile = ModeProfile::new(ground, Pascals::new(ground.value() * HAZE_TOP_RATIO), 0.0)?;
+    AerosolMode::aggregate(tholin, tholin, aggregate, tau, profile, 1.0).map(Some)
+}
+
 /// The dust's τ(550) of an air of surface pressure `pressure`, temperature `temperature` and molar
 /// mass `molar_mass_g_per_mol` under `gravity`, over a ground whose liquids cover `liquid_cover`
 /// of it, 0 to 1 (P14.T24.c's dust on arid, windy, thin-aired worlds; a stated rule):
@@ -1961,30 +2249,50 @@ const fn sulphur_inputs<'a>(inputs: &AerosolInputs<'a>) -> SulphurInputs<'a> {
     }
 }
 
-/// Whether the inputs describe an air the inventory's rules apply to: a state with a surface and a
-/// bulk air, a positive surface pressure and some gas.
+/// Which of the inventory's rules an air takes ([`holds_air`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+enum HeldAir {
+    /// None: the inventory is empty.
+    None,
+    /// A tenuous air's own (P14.T55.n, [`AerosolInventory::of_tenuous_air`]).
+    Tenuous,
+    /// T24.c's and T24.g's, a bulk air's.
+    Bulk,
+}
+
+/// Which of the inventory's rules the air the inputs describe takes: a bulk air's for a state with
+/// a surface and a bulk air, from generator version 35 a tenuous air's own for a `Tenuous` one
+/// (P14.T55.n), each with a positive surface pressure and some gas; none otherwise.
 ///
-/// The inventory's rules are not applied to a tenuous air (P14.T53.c;
-/// decision-p14-t53c-tenuous-aerosols): its methane haze's τ would read its index alone, with no
-/// column or ultraviolet supply (a 1.4 Pa N₂ air at x(CH₄) 10⁻³ would take τ 4.3, against Pluto's
-/// measured 0.013), and its dust, decks and ozone are withheld with it, none of their rules fitted
-/// to so thin a column. The record sends its aerosols not modelled until P14.T55.n.
+/// T24.c's rules are not applied to a tenuous air (P14.T53.c; decision-p14-t53c-tenuous-aerosols):
+/// its methane haze's τ would read its index alone, with no column or ultraviolet supply (a 1.4 Pa
+/// N₂ air at x(CH₄) 10⁻³ would take τ 4.3, against Pluto's measured 0.013), and its dust, decks and
+/// ozone are withheld with it, none of their rules fitted to so thin a column. Under the 35 hold's
+/// held rules (`TenuousAirRules`), the version's to 34, it takes none, and the record sends its
+/// aerosols not modelled.
 #[must_use]
-fn holds_air(inputs: &AerosolInputs<'_>) -> bool {
+fn holds_air(inputs: &AerosolInputs<'_>) -> HeldAir {
     let p = inputs.surface_pressure.value();
-    let state = match inputs.state {
+    let air = match inputs.state {
         SurfaceState::Temperate
         | SurfaceState::Desert
         | SurfaceState::Snowball
-        | SurfaceState::RunawayGreenhouse => true,
+        | SurfaceState::RunawayGreenhouse => HeldAir::Bulk,
+        SurfaceState::Tenuous => match TenuousAirRules::in_force() {
+            TenuousAirRules::Held => HeldAir::None,
+            TenuousAirRules::Published => HeldAir::Tenuous,
+        },
         // A steam envelope's air is its envelope section's, not a surface's (P14.T53.b part 3).
         SurfaceState::Airless
         | SurfaceState::MagmaOcean
         | SurfaceState::GasEnvelope
-        | SurfaceState::Tenuous
-        | SurfaceState::SteamEnvelope => false,
+        | SurfaceState::SteamEnvelope => HeldAir::None,
     };
-    state && p.is_finite() && p > 0.0 && !inputs.gases.is_empty()
+    if p.is_finite() && p > 0.0 && !inputs.gases.is_empty() {
+        air
+    } else {
+        HeldAir::None
+    }
 }
 
 #[cfg(test)]

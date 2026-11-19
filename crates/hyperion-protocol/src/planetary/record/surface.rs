@@ -127,7 +127,8 @@ pub enum SurfaceStateDto {
     /// Triton's and Pluto's nitrogen are held by their ice (P14.T53.c): from generator version 24,
     /// produced by no rule before it. Its surface is a bare one, as an airless body's; only its
     /// pressure and gases are its air's. An air below the floor is `airless`, with no gas listed.
-    /// Its aerosols are absent, not modelled at version 24 (P14.T55.n), never the empty inventory.
+    /// Its aerosols are absent, not modelled, from versions 24 to 34, never the empty inventory;
+    /// from 35 they are its own haze law's (P14.T55.n).
     Tenuous,
     /// A `temperate` world whose surface condensates list no liquid water: neither iced over half
     /// its surface nor too hot for a sea, with no liquid H₂O at its surface, a cold or warm desert
@@ -1161,7 +1162,8 @@ pub struct BodySurfaceDto {
     /// volatiles are gone), and absent from a server whose generator does not model it, every one
     /// before P14.T54.b's bump at generator version 24, and from a magma ocean that holds an air,
     /// whose clouds the generator does not model. It is absent from a `tenuous` surface too, whose
-    /// haze and dust the generator does not model at 24 (P14.T55.n).
+    /// haze and dust the generator does not model from versions 24 to 34; from 35 a `tenuous`
+    /// surface sends its own (P14.T55.n).
     #[serde(default, skip_serializing_if = "Modelled::is_not_modelled")]
     #[ts(as = "Option<Option<AerosolInventoryDto>>", optional)]
     pub aerosols: Modelled<AerosolInventoryDto>,

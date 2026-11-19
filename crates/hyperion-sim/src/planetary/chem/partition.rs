@@ -817,6 +817,37 @@ impl ColumnInventory {
     /// ([`with_terrain_temperature`](Self::with_terrain_temperature)), would be pulled off its ice
     /// toward the colder mean and collapse. A species the inventory does not name, and a
     /// temperature that is negative or not finite, leave it as it was.
+    ///
+    /// # Examples
+    ///
+    /// A Pluto's nitrogen ice at 37 K beside methane held over terrain at 43.5 K: given only its
+    /// ice's temperature, the nitrogen is judged on its share at the 32.5 K mean, where the methane
+    /// outweighs it, and is pulled off its ice; held by its ice, it is its ice's saturation:
+    ///
+    /// ```
+    /// use hyperion_sim::planetary::chem::partition::{
+    ///     ClimateSpan, ColumnInventory, Ground, partition,
+    /// };
+    /// use hyperion_sim::planetary::derive::atmosphere::Gas;
+    /// use hyperion_sim::substance::diagram;
+    /// use hyperion_sim::units::{Kelvin, MetresPerSecondSquared, Pascals};
+    ///
+    /// let (n2, ch4) = (Gas::Nitrogen.substance(), Gas::Methane.substance());
+    /// let climate = ClimateSpan::new(Kelvin::new(30.0), Kelvin::new(32.5), Kelvin::new(40.0))?;
+    /// let ground = Ground::without_basins(MetresPerSecondSquared::new(0.62));
+    /// let (ice, terrain) = (Kelvin::new(37.0), Kelvin::new(43.5));
+    /// let base = ColumnInventory::new([(n2, Pascals::new(1e5)), (ch4, Pascals::new(1e5))])?;
+    /// let nitrogen_of = |inventory: ColumnInventory| {
+    ///     let air = partition(&climate, &ground, &inventory.with_terrain_temperature(ch4, terrain));
+    ///     air.of(n2).map(|n| (n.dominance(), n.partial_pressure())).ok_or("named")
+    /// };
+    /// let (pulled, _) = nitrogen_of(base.clone().with_ice_temperature(n2, ice))?;
+    /// assert!(pulled < 1.0);
+    /// let (held, partial) = nitrogen_of(base.with_held_ice(n2, ice))?;
+    /// let at_ice = diagram::saturation_pressure(n2, ice).ok_or("N2 has a diagram")?;
+    /// assert!(held >= 1.0 && (partial.value() / at_ice.value() - 1.0).abs() < 1e-9);
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
     #[must_use]
     pub fn with_held_ice(self, substance: SubstanceId, ice: Kelvin) -> Self {
         let t = ice.value();
@@ -846,8 +877,8 @@ impl ColumnInventory {
     /// # Examples
     ///
     /// A Pluto's methane beside its nitrogen ice at 37 K, held over terrain at 43.5 K, is held at
-    /// that terrain's saturation pressure, some 0.6% of the air, where the minor branch at its 32.5 K
-    /// mean holds a few parts in ten million:
+    /// that terrain's saturation pressure, about 0.7% of the air, where the minor branch at its
+    /// 32.5 K mean holds a few parts in ten million:
     ///
     /// ```
     /// use hyperion_sim::planetary::chem::partition::{

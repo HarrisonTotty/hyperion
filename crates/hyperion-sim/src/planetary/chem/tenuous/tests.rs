@@ -224,19 +224,25 @@ fn the_tenuous_air_is_held_only_until_the_35_bump() {
     assert_eq!(TenuousAirRules::in_force(), Held);
 }
 
-/// P14.T55.e.a's census over P14.T53.c's sets (the 400 whole systems, the golden systems and
-/// LOOK72's triaged systems; a measurement, run by name), each system generated afresh under the
-/// version's rules and under each arm of the 35 hold ([`TenuousAirRules`]):
+/// P14.T55.e.a's and P14.T55.n's census over P14.T53.c's sets (the 400 whole systems, the golden
+/// systems and LOOK72's triaged systems; a measurement, run by name), each system generated afresh
+/// under the version's rules and under each arm of the 35 hold ([`TenuousAirRules`]):
 ///
-/// - asserted, the held arm is the version's, every body's state, pressure, temperature and gases
-///   to the bit (33 bit for bit);
+/// - asserted, the held arm is the version's, every body's state, pressure, temperature, gases and
+///   aerosols to the bit (33 bit for bit), and a tenuous record's aerosols not modelled under it;
 /// - stated, the bodies by state under each arm, every body whose state the published arm moves,
-///   and the tenuous airs' methane under it, its least, median and largest x(CH₄);
+///   and the tenuous airs' methane and haze under it, the least, median and largest of each, the
+///   largest hazes by name;
 /// - asserted, under the published arm no tenuous air holds a value that is not finite, its
-///   methane stays minor (x(CH₄) under 0.1, `DOMINANCE_ONSET`), and no body leaves `Tenuous` for
+///   methane stays minor (x(CH₄) under 0.1, `DOMINANCE_ONSET`), its record's aerosols are
+///   modelled, its haze's τ(550) finite and at most 0.1, and no body leaves `Tenuous` for
 ///   `Airless`.
 #[test]
-#[ignore = "a measurement for P14.T55.e.a's record, run by name"]
+#[ignore = "a measurement for P14.T55.e.a's and P14.T55.n's record, run by name"]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one census's three arms and its lists, each stated"
+)]
 fn under_every_35_hold_the_tenuous_airs_are_stated() {
     use std::collections::BTreeMap;
 
@@ -260,6 +266,20 @@ fn under_every_35_hold_the_tenuous_airs_are_stated() {
             assert_same_bits(a, b);
         }
         assert_eq!(ours.gases.len(), theirs.gases.len(), "{}", ours.label);
+        assert_eq!(
+            ours.aerosols_modelled, theirs.aerosols_modelled,
+            "{}",
+            ours.label
+        );
+        // A mode whose τ is not resolved sums to NaN on both.
+        if let (Some(a), Some(b)) = (ours.aerosol_tau, theirs.aerosol_tau)
+            && !(a.is_nan() && b.is_nan())
+        {
+            assert_same_bits(a, b);
+        }
+        if theirs.state == SurfaceState::Tenuous {
+            assert!(!theirs.aerosols_modelled, "{}", theirs.label);
+        }
         for (&(a, x), &(b, y)) in ours.gases.iter().zip(&theirs.gases) {
             assert_eq!(a, b, "{}", ours.label);
             assert_same_bits(x, y);
@@ -289,7 +309,36 @@ fn under_every_35_hold_the_tenuous_airs_are_stated() {
             }
         }
     }
+    // The ice-held gases held as dominant ones (d = 1, `ColumnInventory::with_held_ice`) and the
+    // methane over its terrain move their airs' pressure, a tenuous record's and an airless body's
+    // residue under the floor, which its record does not list: stated.
+    for (label, tenuous) in [("TENUOUS RECORDS", true), ("AIRLESS RESIDUES", false)] {
+        let mut movers: Vec<(f64, String)> = held
+            .iter()
+            .zip(&published)
+            .filter(|(was, now)| {
+                (was.state == SurfaceState::Tenuous) == tenuous
+                    && was.air_p > 0.0
+                    && now.air_p.total_cmp(&was.air_p).is_ne()
+            })
+            .map(|(was, now)| {
+                (
+                    now.air_p / was.air_p,
+                    format!("{}: {}", was.label, now.line()),
+                )
+            })
+            .collect();
+        movers.sort_by(|a, b| (a.0 - 1.0).abs().total_cmp(&(b.0 - 1.0).abs()));
+        eprintln!(
+            "{label} WHOSE PRESSURE THE PUBLISHED ARM MOVES: {}, the largest ratios:",
+            movers.len()
+        );
+        for (ratio, line) in movers.iter().rev().take(3) {
+            eprintln!("  ×{ratio:.4}: {line}");
+        }
+    }
     let mut methane: Vec<f64> = Vec::new();
+    let mut hazes: Vec<(f64, String)> = Vec::new();
     for body in published
         .iter()
         .filter(|b| b.state == SurfaceState::Tenuous)
@@ -307,6 +356,38 @@ fn under_every_35_hold_the_tenuous_airs_are_stated() {
         if x > 0.0 {
             methane.push(x);
         }
+        let tau = body
+            .aerosol_tau
+            .unwrap_or_else(|| panic!("a tenuous record's aerosols not modelled: {}", at()));
+        assert!(
+            tau.is_finite() && (0.0..=0.1).contains(&tau),
+            "τ {tau}: {}",
+            at()
+        );
+        if tau > 0.0 {
+            hazes.push((
+                tau,
+                format!(
+                    "{}: {}, flux {:.4e} S⊕",
+                    body.label,
+                    body.line(),
+                    body.flux_earths
+                ),
+            ));
+        }
+    }
+    hazes.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let haze_at = |k: usize| hazes.get(k).map_or(f64::NAN, |h| h.0);
+    eprintln!(
+        "the published tenuous airs' hazes: {} with a haze, τ(550) least {:.4e}, median {:.4e}, \
+         largest {:.4e}",
+        hazes.len(),
+        haze_at(0),
+        haze_at(hazes.len() / 2),
+        haze_at(hazes.len().saturating_sub(1))
+    );
+    for (tau, line) in hazes.iter().rev().take(5) {
+        eprintln!("  τ {tau:.4e}: {line}");
     }
     methane.sort_by(f64::total_cmp);
     let at = |k: usize| methane.get(k).copied().unwrap_or(f64::NAN);

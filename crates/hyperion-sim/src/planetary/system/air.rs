@@ -11,6 +11,7 @@
 //! gravity and the photochemistry's star ([`record_aerosols`]). Every reach of the record into
 //! `hooks::aerosols` (and through it `hooks::sulphur` and `chem::condense`) is in this file.
 
+use crate::planetary::chem::tenuous::TenuousAirRules;
 use crate::planetary::derive::atmosphere::SurfaceState;
 use crate::planetary::hooks::aerosols::{AerosolInputs, AerosolInventory};
 use crate::planetary::hooks::figures::GlobalFigures;
@@ -86,8 +87,9 @@ pub(crate) struct AirSurface<'a> {
     /// without the deck, and [`RunawayDeck::Kept`] for every other state. With the state it gives
     /// P14.T24.g's case (`SulphurCycle::case_of`).
     pub(crate) runaway_deck: RunawayDeck,
-    /// Its conditions (P14.T24.a): the surface pressure, the gases and their mean molar mass, and
-    /// the liquid-water flag P14.T24.g's SO₂ reads.
+    /// Its conditions (P14.T24.a): the surface pressure, the gases and their mean molar mass, the
+    /// liquid-water flag P14.T24.g's SO₂ reads, and the hosts' light a tenuous air's haze reads
+    /// (P14.T55.n).
     pub(crate) conditions: &'a SurfaceConditions,
     /// Its published figures (P14.T24.b, second stage): the cloud fraction the decks cover
     /// (P14.T51.b's, the snapshot path's), the share of the ground its liquids cover, which the
@@ -114,9 +116,10 @@ pub(crate) struct AirSurface<'a> {
 ///   clouds at its top, so the empty inventory would claim a cloud-free air computed as such
 ///   (R08's review of P14.T54.b.b, S5; the wire's "absent means not modelled, `null` or empty
 ///   means computed none", decision-p14-t54b-open §2.1);
-/// - a tenuous air (P14.T53.c's [`SurfaceState::Tenuous`]) is not modelled at 24: T24.c's rules
-///   are not applied to it (`holds_air`), its haze and dust are P14.T55.n's, and the empty
-///   inventory would claim an air computed clear (decision-p14-t53c-tenuous-aerosols);
+/// - a tenuous air (P14.T53.c's [`SurfaceState::Tenuous`]) is not modelled to generator version
+///   34: T24.c's rules are not applied to it (`holds_air`), and the empty inventory would claim an
+///   air computed clear (decision-p14-t53c-tenuous-aerosols); from 35 it takes its own inventory,
+///   P14.T55.n's haze law (under `TenuousAirRules`);
 /// - a structure not modelled leaves the inventory not modelled;
 /// - an air the inventory refuses is not modelled: its error carries nothing a reader could act
 ///   on, and the generated sample gives none (this module's tests, which re-derive and print any).
@@ -128,9 +131,11 @@ pub(crate) fn record_aerosols(
     match surface.state {
         // A steam envelope's air is its envelope section's, whose surface never holds it
         // (P14.T53.b part 3).
-        SurfaceState::Tenuous | SurfaceState::SteamEnvelope => {
-            return Modelled::NotModelled;
-        }
+        SurfaceState::SteamEnvelope => return Modelled::NotModelled,
+        SurfaceState::Tenuous => match TenuousAirRules::in_force() {
+            TenuousAirRules::Held => return Modelled::NotModelled,
+            TenuousAirRules::Published => {}
+        },
         SurfaceState::MagmaOcean if !surface.conditions.gases().is_empty() => {
             return Modelled::NotModelled;
         }
@@ -163,7 +168,7 @@ pub(crate) fn record_aerosols(
 /// gases (P14.T24.a's published fractions at the ground), mean molar mass and liquid-water flag,
 /// the bulk section's gravity, the structure, the figures' cloud fraction, the share of the ground
 /// their surface liquids cover (their summed cover held at 1, the ocean fraction) and their
-/// outgassing, and the photochemistry's star. `None` for gases with no molar mass, a surface with
+/// outgassing, the photochemistry's star and the conditions' stellar flux (P14.T55.n's supply). `None` for gases with no molar mass, a surface with
 /// no gas, whose inventory is empty.
 #[must_use]
 fn aerosol_inputs<'a>(
@@ -185,6 +190,7 @@ fn aerosol_inputs<'a>(
         outgassing: figures.outgassing(),
         liquid_water: conditions.liquid_water(),
         runaway_deck: surface.runaway_deck,
+        stellar_flux: conditions.stellar_flux(),
     })
 }
 

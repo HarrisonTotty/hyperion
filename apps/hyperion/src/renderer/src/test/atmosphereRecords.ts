@@ -273,6 +273,11 @@ export function venus58Detail(): BodyDetail {
  * 10 nm), τ(550) 0.01, well mixed from the ground to 10⁻³ Pa.
  */
 export function plutoHazeDetail(): BodyDetail {
+  return detailOf(plutoHazeAnswer());
+}
+
+/** The answer {@link plutoHazeDetail} converts: a tenuous Pluto-like record with a tholin haze. */
+export function plutoHazeAnswer(): DetailAnswer {
   const body = withBody(titanDetail(), {
     radiusM: 1_188_300,
     gravityMS2: 0.62,
@@ -289,37 +294,35 @@ export function plutoHazeDetail(): BodyDetail {
     ],
     meanMolarMassGPerMol: 0.995 * 28.0134 + 0.005 * 16.0425,
   });
-  return detailOf(
-    withInventory(air, {
-      modes: [
-        {
-          material: "tholin",
-          phase: "solid",
-          deck: null,
-          shape: "aggregate",
-          size_distribution: {
-            type: "aggregate",
-            monomer_radius_m: 1e-8,
-            monomer_count: 1_000,
-            fractal_dimension: 2,
-            // optool's and Tazaki's k_f = (5 ÷ 3)^(D_f ÷ 2), at D_f 2 (`aggregate.ts`).
-            fractal_prefactor: 5 / 3,
-          },
-          column_mass_kg_m2: 1e-6,
-          tau_550: 0.01,
-          tau_basis: "rule",
-          base_pa: 1,
-          top_pa: 1e-3,
-          f_sed: 0,
-          coverage: 1,
-          temperature_k: 40,
+  return withInventory(air, {
+    modes: [
+      {
+        material: "tholin",
+        phase: "solid",
+        deck: null,
+        shape: "aggregate",
+        size_distribution: {
+          type: "aggregate",
+          monomer_radius_m: 1e-8,
+          monomer_count: 1_000,
+          fractal_dimension: 2,
+          // optool's and Tazaki's k_f = (5 ÷ 3)^(D_f ÷ 2), at D_f 2 (`aggregate.ts`).
+          fractal_prefactor: 5 / 3,
         },
-      ],
-      decks: [],
-      absorbers: [],
-      not_formed: [],
-    }),
-  );
+        column_mass_kg_m2: 1e-6,
+        tau_550: 0.01,
+        tau_basis: "rule",
+        base_pa: 1,
+        top_pa: 1e-3,
+        f_sed: 0,
+        coverage: 1,
+        temperature_k: 40,
+      },
+    ],
+    decks: [],
+    absorbers: [],
+    not_formed: [],
+  });
 }
 
 /**
