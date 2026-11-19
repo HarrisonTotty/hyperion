@@ -1251,7 +1251,8 @@ tests. Acceptance: `pnpm test`, `just ci`, `just test-render`, by hand at the su
   fields identical and the cell-mean brightness within the T7.c tolerance. By hand, recorded: an
   Earth-like world from orbit, from within the layer and from below, on both settings, and its zonal
   mean cover against ISCCP's or MODIS's pattern (high at the ITCZ, minima near ±20–30°, high near
-  ±55°).
+  ±55°). _Built 2026-11-18._
+  Records: [11-surface-detail-clouds-oceans-rings-stills/records/R11.T7.d.md](11-surface-detail-clouds-oceans-rings-stills/records/R11.T7.d.md).
 
 Files: `clouds/*`, R10's hooks, R01's `WGSL_CATALOGUE`, tests. Acceptance: `pnpm test`, `just ci`,
 `just test-render`, and the recorded runs.

@@ -35,6 +35,7 @@ import { CLOUD_ENTRIES } from "../view/engine/catalogue";
 import { BUFFER_USAGE, TEXTURE_USAGE } from "../view/engine/gpuFlags";
 import type { BufferHandle, RenderEngine, RenderTarget, TextureHandle } from "../view/engine/types";
 import {
+  cloudFieldAt,
   cloudFieldParams,
   cloudSeedOf,
   normalDensity,
@@ -72,6 +73,8 @@ import {
   CloudVolumes,
 } from "../view/clouds/cloudVolumePass";
 import { toHalfBits } from "../view/sky/half";
+import type { CapturedImage } from "./atmosphere";
+import { hdrCapture } from "./hdrCapture";
 import { type CloudCondensate, STAND_IN_CONDENSATES } from "../view/clouds/condensates";
 import type { GraphicsStatusStore } from "../view/engine/status";
 import { checkCatalogue } from "./catalogue";
@@ -811,6 +814,207 @@ export async function checkCloudVolumeDraw(engine: RenderEngine, checks: Checks)
     volumes.dispose();
     layers.dispose();
   }
+}
+
+/** The place of 0–30° N, 0–60° E whose clouds' share is the largest at a 20 km footprint. */
+function cloudiestPlace(twin: CloudLightInput): {
+  readonly latitudeDeg: number;
+  readonly longitudeDeg: number;
+} {
+  let best = { latitudeDeg: 15, longitudeDeg: 25 };
+  let most = -1;
+  for (let latitudeDeg = 0; latitudeDeg <= 30; latitudeDeg += 1) {
+    for (let longitudeDeg = 0; longitudeDeg <= 60; longitudeDeg += 1) {
+      const u = directionAt(latitudeDeg, longitudeDeg);
+      const r = twin.shell.equatorialRadiusM;
+      const share = cloudFieldAt(
+        twin.coverage,
+        twin.noise,
+        twin.params,
+        { x: u.x * r, y: u.y * r, z: u.z * r },
+        20_000,
+      ).fraction;
+      if (share > most) {
+        most = share;
+        best = { latitudeDeg, longitudeDeg };
+      }
+    }
+  }
+  return best;
+}
+
+/** The clouds' captures' side, px. */
+const CAPTURE_SIDE_PX = 384;
+
+/** The frames a captured volume is drawn, for its history to settle. */
+const CAPTURE_VOLUME_FRAMES = 24;
+
+/**
+ * The clouds' captures' views (plan R11, R11.T7.d's check by hand): the Earth-like body from orbit,
+ * its disc whole, at an equinox; from 400 km; from within the layer; and from the ground beneath it.
+ */
+const CAPTURE_VIEWS = [
+  { name: "orbit", heightM: 3 * FIGURE.equatorialRadiusM, pitchRad: -Math.PI / 2, fovXRad: 0.62 },
+  { name: "above", heightM: 400_000, pitchRad: -0.35, fovXRad: 1.2 },
+  { name: "within", heightM: cloudLayerHeightM(CONDENSATE), pitchRad: 0.02, fovXRad: 1.2 },
+  { name: "below", heightM: 300, pitchRad: 0.6, fovXRad: 1.2 },
+] as const;
+
+/**
+ * R11.T7.d's captures by hand: the Earth-like body's clouds over black at an equinox, from each of
+ * {@link CAPTURE_VIEWS}, on each setting (the layer at the low setting's 9 octaves, the volume at
+ * the high setting's 12, its history settled), with no air, for the zonal check against ISCCP's
+ * pattern: from orbit over 15° N, 25° E, the sun over the equator at 25° E; from nearer, over the
+ * cloudiest place of 0–30° N, 0–60° E by the field's twin at a 20 km footprint, the sun a little
+ * east of its zenith.
+ */
+export async function captureClouds(engine: RenderEngine): Promise<CapturedImage[]> {
+  const frame = { ...FRAME, season: { subsolarLatitudeRad: 0 } };
+  const layers = new CloudLayers(engine, "capture clouds");
+  layers.step(() => performance.now(), Number.POSITIVE_INFINITY);
+  const volumes = new CloudVolumes(engine, "capture clouds");
+  const correction = volumes.correction(
+    CONDENSATE,
+    () => performance.now(),
+    Number.POSITIVE_INFINITY,
+  );
+  const tables = createAirlessTables(engine, "cloud captures: no air");
+  const size = { widthPx: CAPTURE_SIDE_PX, heightPx: CAPTURE_SIDE_PX };
+  const blueNoise = engine.createTexture({
+    name: "cloud captures blue noise",
+    size: { width: 4, height: 4 },
+    dimension: "2d",
+    format: "r16float",
+    mips: 1,
+    usage: TEXTURE_USAGE.TEXTURE_BINDING | TEXTURE_USAGE.COPY_DST,
+    category: "other",
+  });
+  engine.writeTexture(
+    blueNoise,
+    { x: 0, y: 0 },
+    { width: 4, height: 4 },
+    Uint16Array.from({ length: 16 }, (_, i) => toHalfBits(i / 16)),
+  );
+  const scene = engine.createRenderTarget({
+    name: "cloud captures scene",
+    size,
+    format: "rgba16float",
+    mips: 1,
+    depth: true,
+    category: "render-targets",
+  });
+  const target = engine.createRenderTarget({
+    name: "cloud captures",
+    size,
+    format: "rgba16float",
+    mips: 1,
+    depth: false,
+    category: "render-targets",
+  });
+  const images: CapturedImage[] = [];
+  try {
+    // One body's rows a frame: each setting's are written just before its draws.
+    const rowsOn = (octaves: number): ReturnType<CloudLayers["frame"]> =>
+      layers.frame({ ...frame, octaves });
+    if (rowsOn(9) === null || scene.depth === null || correction === null) {
+      throw new Error("the clouds' state, their correction or the scene's depth was not made");
+    }
+    scene.render(frameOf("cloud captures scene", []));
+    const layer = engine.createMaterial(CLOUD_LAYER_MATERIAL);
+    const materials = {
+      march: engine.createMaterial(CLOUD_VOLUME_MATERIAL),
+      resolve: engine.createMaterial(CLOUD_RESOLVE_MATERIAL),
+      composite: engine.createMaterial(CLOUD_COMPOSITE_MATERIAL),
+      triangle: fullScreenMesh(engine, "cloud captures' triangle"),
+    };
+    const shell = cloudShellOf(FIGURE, cloudLayerHeightM(CONDENSATE));
+    const { viewRotation, projection } = frameOf("cloud captures", []);
+    const sun = directionAt(0, 25);
+    const cloudiest = cloudiestPlace(twinOf(cloudNoiseTexels(), { ...frame, octaves: 12 }));
+    for (const view of CAPTURE_VIEWS) {
+      const orbit = view.name === "orbit";
+      const base = {
+        ...layerViewOf(view, shell, size, 9, orbit ? undefined : cloudiest),
+        deck: { baseM: CONDENSATE.baseAltitudeM, topM: CONDENSATE.topAltitudeM },
+      };
+      const camera = { ...base.camera, fovXRad: view.fovXRad };
+      const lit = orbit
+        ? {
+            ...base,
+            camera,
+            suns: [
+              {
+                directionBodyFixed: sun,
+                illuminanceLx: [120_000, 118_000, 110_000] as const,
+                angularRadiusRad: 4.65e-3,
+                curveSlot: 0,
+              },
+            ],
+          }
+        : { ...base, camera };
+      // The layer at the low setting's octaves.
+      const low = rowsOn(9);
+      if (low === null) {
+        throw new Error("the clouds' rows were not made");
+      }
+      target.render(frameOf(`cloud captures ${view.name} low`, []));
+      target.render({
+        ...frameOf(`cloud captures ${view.name} layer`, [
+          cloudLayerDraw(
+            materials.triangle,
+            layer,
+            low,
+            scene.depth,
+            tables,
+            cloudLayerUniforms(lit),
+          ),
+        ]),
+        colourLoad: "load",
+      });
+      // The harness's captures run in order: each reads the GPU back before the next draws.
+      // oxlint-disable-next-line no-await-in-loop
+      const layerTexels = halfTexels(await engine.readTexture(target.colour));
+      images.push(hdrCapture(`clouds-${view.name}-low-layer`, layerTexels, size, 1, 1));
+      // The volume at the high setting's, its history settled.
+      const high = rowsOn(12);
+      if (high === null) {
+        throw new Error("the clouds' rows were not made");
+      }
+      volumes.cut();
+      for (let at = 0; at < CAPTURE_VOLUME_FRAMES; at += 1) {
+        target.render(frameOf(`cloud captures ${view.name} high`, []));
+        volumes.draw(
+          {
+            id: frame.id,
+            gpu: high,
+            condensate: CONDENSATE,
+            view: { ...lit, octaves: 12 },
+            lighting: tables,
+            sceneDepth: scene.depth,
+            blueNoise,
+            correction,
+          },
+          materials,
+          target,
+          size,
+          { viewRotation, projection },
+          null,
+        );
+      }
+      // The harness's captures run in order: each reads the GPU back before the next draws.
+      // oxlint-disable-next-line no-await-in-loop
+      const volumeTexels = halfTexels(await engine.readTexture(target.colour));
+      images.push(hdrCapture(`clouds-${view.name}-high-volume`, volumeTexels, size, 1, 1));
+    }
+  } finally {
+    target.dispose();
+    scene.dispose();
+    engine.releaseTexture(tables.body);
+    engine.releaseTexture(blueNoise);
+    volumes.dispose();
+    layers.dispose();
+  }
+  return images;
 }
 
 /** R11.T7.b's kernels compiled: the layer, the probe and the terrain's cloudy forms (`CLOUD_ENTRIES`). */

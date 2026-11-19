@@ -165,6 +165,7 @@ import {
   checkCloudLayerDraw,
   checkCloudTwins,
   checkCloudVolumeDraw,
+  captureClouds,
 } from "./clouds";
 import { BROKEN_ENTRY, checkCatalogue, makeExternalRequests, type SmokeFixture } from "./catalogue";
 import { checkIdTarget } from "./idTarget";
@@ -843,6 +844,18 @@ async function run(
   );
   await group(26, "R11.T7.b the cloud layer drawn", () => checkCloudLayerDraw(engine, checks));
   await group(26, "R11.T7.c the cloud volume drawn", () => checkCloudVolumeDraw(engine, checks));
+  // R11.T7.d's clouds by hand, both settings, for the zonal check against ISCCP's pattern.
+  if (captures) {
+    await group(26, "R11.T7.d the clouds' captures", async () => {
+      const frames = await captureClouds(engine);
+      images = [...images, ...frames];
+      checks.check(
+        "R11.T7.d the clouds' captures",
+        frames.length > 0,
+        `${String(frames.length)} frames`,
+      );
+    });
+  }
   // In part 28, alone: R11.T10.c's PNG round trip through the harness's main process and VIEW's
   // still mount, whose R11.T10.b job draws a small still of flat colours into targets of its own,
   // then a small still of a lit body through the photorealistic renderer's hook (R11.T10.b), each

@@ -26,6 +26,9 @@
 // irradiance E_sky. So the blend is
 // out = T_c dst + (1 − T_c) S_f + T_f C, T_c the background's share, C the cloud's light.
 //
+// A camera within the deck, which a shell of no depth cannot show, sees the deck's fog in front of
+// the shell (`cloud_deck_fog`; R11.T7.d), from its own column's cover and τ.
+//
 // Composed after frame.wgsl, R08's surface lighting (`SURFACE_LIGHTING_WGSL`: preciseTrig.wgsl,
 // common.wgsl, oblate.wgsl, belowDeck.wgsl, surfaceLighting.wgsl), `cloudField.wgsl` and
 // `cloudOptics.wgsl`.
@@ -51,7 +54,8 @@ struct Draw {
   sourceLight0 : vec4f,
   source1 : vec4f,
   sourceLight1 : vec4f,
-  // x: the octaves the layer draws at most.
+  // x: the octaves the layer draws at most; y, z: the deck's base and top above the datum, m, for
+  // its fog about a camera within it, both 0 for none.
   levers : vec4f,
 }
 
@@ -80,6 +84,12 @@ const CLOUD_SKY_MU : f32 = 0.6;
 const CLOUD_LEAST_TRANSMITTANCE : f32 = 1e-6;
 // The share below which a pixel draws nothing.
 const CLOUD_LEAST_DRAWN : f32 = 1e-4;
+// The deck's fog about a camera within it: the most of the deck's depth a ray's path through it is
+// taken at, the least cosine against the vertical a ray's path is bounded by the deck's faces at,
+// and the footprint of the camera's column, m.
+const CLOUD_FOG_MOST_DEPTHS : f32 = 10.0;
+const CLOUD_FOG_LEAST_MU : f32 = 1e-3;
+const CLOUD_FOG_FOOTPRINT_M : f32 = 100.0;
 
 struct VertexOut {
   @builtin(position) position : vec4f,
@@ -124,6 +134,75 @@ fn fragmentMain(@builtin(position) position : vec4f) -> @location(0) vec4f {
   let ndc = vec2f(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
   let unnormalised = draw.forward.xyz + ndc.x * draw.right.xyz + ndc.y * draw.upRay.xyz;
   let d = normalize(unnormalised);
+  // The deck's fog about a camera within it, in front of the shell, which has no depth (R11.T7.d).
+  let fog = cloud_deck_fog(d);
+  let out = fog + (1.0 - fog.a) * cloud_layer_light(position, d, unnormalised);
+  if (out.a < CLOUD_LEAST_DRAWN && !any(out.rgb > vec3f(0.0))) {
+    discard;
+  }
+  return out;
+}
+
+// The deck's light along `d` from a camera within it (R11.T7.d's check: a shell of no depth at the
+// camera's own height draws a floor and no sky): the covered share of the camera's column times
+// 1 − e^(−τ L ÷ D), L the ray's path through the deck, the deck taken flat about the camera, at most
+// CLOUD_FOG_MOST_DEPTHS of its depth D; its light the slab's at the camera's depth in it, its
+// transmittance at the base going to its reflectance at the top (lean, 2026-11-18). Premultiplied;
+// none outside the deck, or with no deck given.
+fn cloud_deck_fog(d : vec3f) -> vec4f {
+  let base = draw.levers.y;
+  let top = draw.levers.z;
+  let h = draw.camera.w;
+  if (!(top > base) || h <= base || h >= top) {
+    return vec4f(0.0);
+  }
+  let deck = top - base;
+  let up = draw.cameraNormal.xyz;
+  let mu = dot(d, up);
+  var path = CLOUD_FOG_MOST_DEPTHS * deck;
+  if (mu > CLOUD_FOG_LEAST_MU) {
+    path = min(path, (top - h) / mu);
+  } else if (mu < -CLOUD_FOG_LEAST_MU) {
+    path = min(path, (h - base) / -mu);
+  }
+  // The camera's column, on the layer's shell along its radius.
+  let o = draw.camera.xyz;
+  let k = draw.shell.y;
+  let shell = cloud_row(CLOUD_ROW_SHELL);
+  let column = cloud_field_at(o * (shell.x / length(vec3f(o.xy, o.z * k))), CLOUD_FOG_FOOTPRINT_M, u32(draw.levers.x));
+  if (column.fraction < CLOUD_LEAST_DRAWN) {
+    return vec4f(0.0);
+  }
+  let tau = column.in_cloud_tau;
+  let alpha = column.fraction * (1.0 - exp(-tau * path / deck));
+  let optics = cloud_row(CLOUD_ROW_OPTICS);
+  let place = cloud_place(up);
+  let z = (h - base) / deck;
+  let sky_slab = cloud_delta_eddington(tau, optics.x, optics.y, CLOUD_SKY_MU);
+  var radiance = vec3f(0.0);
+  let sources = min(u32(draw.view.w), 2u);
+  for (var j = 0u; j < sources; j = j + 1u) {
+    var direction = draw.source0;
+    var light = draw.sourceLight0.xyz;
+    if (j == 1u) {
+      direction = draw.source1;
+      light = draw.sourceLight1.xyz;
+    }
+    let s = direction.xyz;
+    let slot = u32(direction.w);
+    let mu0 = dot(up, s);
+    let transmitted = atmosphere_sun_transmittance(h, mu0, place.latitude, cloud_azimuth(place, s), slot);
+    let sky = atmosphere_sky_irradiance(h, mu0, place.latitude, slot);
+    let slab = cloud_delta_eddington(tau, optics.x, optics.y, max(mu0, CLOUD_LEAST_MU));
+    radiance = radiance + light * (mix(slab.diffuse, slab.reflectance, z) * max(mu0, 0.0) * transmitted
+      + mix(sky_slab.diffuse, sky_slab.reflectance, z) * sky);
+  }
+  return vec4f(alpha * radiance * 0.31830989, alpha);
+}
+
+// The layer's light along `d` (the module's header), premultiplied; none where its ray meets no
+// shell, or meets it behind the scene, or where the field covers none of its footprint.
+fn cloud_layer_light(position : vec4f, d : vec3f, unnormalised : vec3f) -> vec4f {
   let o = draw.camera.xyz;
   let k = draw.shell.y;
   let so = vec3f(o.xy, o.z * k);
@@ -133,14 +212,14 @@ fn fragmentMain(@builtin(position) position : vec4f) -> @location(0) vec4f {
   let c = draw.shell.x;
   let disc = b * b - a * c;
   if (disc < 0.0) {
-    discard;
+    return vec4f(0.0);
   }
   let root = sqrt(disc);
   let above = c > 0.0;
   var t : f32;
   if (above) {
     if (b >= 0.0) {
-      discard;
+      return vec4f(0.0);
     }
     t = c / (-b + root);
   } else {
@@ -149,7 +228,7 @@ fn fragmentMain(@builtin(position) position : vec4f) -> @location(0) vec4f {
   // The scene's depth stands in front: reversed-Z, 0 at infinity.
   let depth = textureLoad(sceneDepth, vec2i(position.xy), 0);
   if (depth > 0.0 && t >= draw.shell.z / depth * length(unnormalised)) {
-    discard;
+    return vec4f(0.0);
   }
   let p = o + t * d;
   let shell = cloud_row(CLOUD_ROW_SHELL);
@@ -158,7 +237,7 @@ fn fragmentMain(@builtin(position) position : vec4f) -> @location(0) vec4f {
   let footprint = max(t * draw.shell.w / mu_view, 1.0);
   let field = cloud_field_at(p, footprint, u32(draw.levers.x));
   if (field.fraction < CLOUD_LEAST_DRAWN) {
-    discard;
+    return vec4f(0.0);
   }
   let tau = field.in_cloud_tau;
   let optics = cloud_row(CLOUD_ROW_OPTICS);

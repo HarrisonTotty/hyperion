@@ -250,6 +250,31 @@ describe("cloudLayerUniforms", () => {
     expect(lit([])["levers"]?.[0]).toBe(9);
   });
 
+  it("carries the deck's base and top for its fog about a camera within it, none if not given (R11.T7.d)", () => {
+    const deck = cloudLayerUniforms({
+      camera: {
+        positionM: { x: FIGURE.equatorialRadiusM + 5_000, y: 0, z: 0 },
+        orientation: IDENTITY_QUATERNION,
+        fovXRad: 1,
+        viewport: { widthPx: 200, heightPx: 100 },
+      },
+      figure: FIGURE,
+      shell: cloudShellOf(FIGURE, 1_500),
+      airTopM: 100_000,
+      suns: [],
+      exposureScale: 1e-3,
+      octaves: 9,
+      deck: { baseM: 1_000, topM: 3_000 },
+    });
+    expect([
+      [...(lit([])["levers"] ?? [])].slice(1, 3),
+      [...(deck["levers"] ?? [])].slice(1, 3),
+    ]).toEqual([
+      [0, 0],
+      [1_000, 3_000],
+    ]);
+  });
+
   it("forms the shell's quadric in f64, positive above the shell and negative below", () => {
     const shell = cloudShellOf(FIGURE, 1_500);
     const view = (heightM: number): Record<string, Float32Array> =>

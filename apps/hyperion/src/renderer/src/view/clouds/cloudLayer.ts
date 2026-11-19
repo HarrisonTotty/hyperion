@@ -265,6 +265,11 @@ export interface CloudLayerView {
   readonly suns: ReadonlyArray<SunState>;
   readonly exposureScale: number;
   readonly octaves: number;
+  /**
+   * The deck's base and top above the datum, m, whose fog a camera within it sees
+   * (`cloudLayer.wgsl`'s `cloud_deck_fog`; R11.T7.d); absent, none.
+   */
+  readonly deck?: { readonly baseM: number; readonly topM: number };
 }
 
 /**
@@ -319,7 +324,7 @@ export function cloudLayerUniforms(view: CloudLayerView): Readonly<Record<string
     sourceLight0,
     source1,
     sourceLight1,
-    levers: new Float32Array([view.octaves, 0, 0, 0]),
+    levers: new Float32Array([view.octaves, view.deck?.baseM ?? 0, view.deck?.topM ?? 0, 0]),
   };
 }
 

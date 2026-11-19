@@ -1816,6 +1816,7 @@ export class PhotorealRenderer {
           suns,
           exposureScale: frame.exposureScale,
           octaves: LAYER_OCTAVES[frame.setting],
+          deck: { baseM: own.condensate.baseAltitudeM, topM: own.condensate.topAltitudeM },
         };
         const scissor = area === null ? null : rectWithin(area, resources.size);
         // The volume of the body it draws as one (plan R11, R11.T7.c), else the layer.
