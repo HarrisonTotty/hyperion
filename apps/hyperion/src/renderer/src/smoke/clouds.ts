@@ -76,12 +76,11 @@ import {
   cloudMapTwinFromTexels,
   cloudMapUniforms,
   mapTexelM,
-  narrowedColumn,
   texelPlace,
 } from "../view/clouds/cloudMap";
 import { type CloudMarchScene, deckStretch } from "../view/clouds/cloudMarch";
 import {
-  cloudColumnAt,
+  cloudMapTexelAt,
   cloudShapeFrame,
   cloudShapeKindOf,
   normalisationTable,
@@ -103,7 +102,6 @@ import {
   VOLUME_LEVERS,
   windAtM,
 } from "../view/clouds/cloudVolumePass";
-import { toHalfBits } from "../view/sky/half";
 import type { CapturedImage } from "./atmosphere";
 import { hdrCapture } from "./hdrCapture";
 import { type CloudCondensate, STAND_IN_CONDENSATES } from "../view/clouds/condensates";
@@ -388,7 +386,7 @@ async function volumeProbeOf(
           shape: new Float32Array([
             shell.equatorialRadiusM / shell.polarRadiusM,
             FRAME.octaves,
-            kind.cumuliform ? 1 : 0,
+            0,
             0,
           ]),
         },
@@ -412,6 +410,8 @@ async function volumeProbeOf(
   );
   const scene: CloudMarchScene = {
     map: cloudMapTwinFromTexels(frame, mapTexels),
+    field: { noise: twin.noise, params: twin.params },
+    shellRadiusM: shell.equatorialRadiusM,
     noises,
     frame: shapeFrame,
     inputs: {
@@ -618,6 +618,7 @@ export async function checkCloudTwins(engine: RenderEngine, checks: Checks): Pro
               [CLOUD_PROBE_NAMES.baseNoise]: volume.noises.base,
               [CLOUD_PROBE_NAMES.detailNoise]: volume.noises.detail,
               [CLOUD_PROBE_NAMES.curlNoise]: volume.noises.curl,
+              [CLOUD_PROBE_NAMES.fieldNoise]: gpu.noise,
             },
             storageBuffers: {
               [CLOUD_PROBE_NAMES.layer]: gpu.layer,
@@ -674,21 +675,21 @@ export async function checkCloudTwins(engine: RenderEngine, checks: Checks): Pro
 
 /** The map's texels sampled a level: an 8 × 8 grid of them. */
 const MAP_SAMPLES = 8;
-/** The sampled texels' mean share and mean τ, GPU against the twin, relative. */
-const MAP_MEAN_TOLERANCE = 0.03;
+/** A texel's resolved sum, absolute: the noise's trilinear filter over twelve octaves and `f16`. */
+const MAP_SUM_TOLERANCE = 0.05;
+/** A texel's threshold and wind, absolute: the coverage's bilinear weights and `f16`. */
+const MAP_THRESHOLD_TOLERANCE = 0.01;
+const MAP_WIND_TOLERANCE_MPS = 0.1;
 
 /**
  * R11.T7.c's cloud map as its pass drew it against its twin's texels (`cloudShape.ts`'
- * `cloudColumnAt`, narrowed): every texel finite, its top share in [0.02, 1], and over 64 texels a
- * level the mean share and mean τ to {@link MAP_MEAN_TOLERANCE}, the field's own threshold sharp at
- * a texel's footprint, so that a texel at a cloud's edge may take either side.
+ * `cloudMapTexelAt`): over 64 texels a level, the resolved sum to {@link MAP_SUM_TOLERANCE}, the
+ * threshold to {@link MAP_THRESHOLD_TOLERANCE} and the wind to {@link MAP_WIND_TOLERANCE_MPS}.
  */
 function checkMap(checks: Checks, volume: VolumeProbe, twin: CloudLightInput): void {
-  const kind = cloudShapeKindOf(CONDENSATE);
-  let gpuShare = 0;
-  let cpuShare = 0;
-  let gpuTau = 0;
-  let cpuTau = 0;
+  let sum = 0;
+  let threshold = 0;
+  let wind = 0;
   let sound = true;
   for (let level = 0; level < CLOUD_MAP_LEVELS; level += 1) {
     for (let a = 0; a < MAP_SAMPLES; a += 1) {
@@ -698,24 +699,33 @@ function checkMap(checks: Checks, volume: VolumeProbe, twin: CloudLightInput): v
         const at = 4 * ((level * CLOUD_MAP_SIDE + j) * CLOUD_MAP_SIDE + i);
         const texel = Array.from(volume.mapTexels.subarray(at, at + 4));
         const place = texelPlace(volume.frame, twin.shell, level, i, j);
-        const cpu = narrowedColumn(
-          cloudColumnAt(twin.coverage, twin.noise, twin.params, kind, place, mapTexelM(level)),
+        const cpu = cloudMapTexelAt(
+          twin.coverage,
+          twin.noise,
+          twin.params,
+          place,
+          mapTexelM(level),
         );
-        const [f = Number.NaN, tau = Number.NaN, top = Number.NaN] = texel;
-        sound &&= texel.every(Number.isFinite) && top >= 0.02 && top <= 1 && f >= 0 && f <= 1;
-        gpuShare += f;
-        cpuShare += cpu.fraction;
-        gpuTau += tau;
-        cpuTau += cpu.meanTau;
+        const [
+          gpuSum = Number.NaN,
+          gpuThreshold = Number.NaN,
+          east = Number.NaN,
+          north = Number.NaN,
+        ] = texel;
+        sound &&= texel.every(Number.isFinite);
+        sum = Math.max(sum, Math.abs(gpuSum - cpu.resolvedSum));
+        threshold = Math.max(threshold, Math.abs(gpuThreshold - cpu.threshold));
+        wind = Math.max(wind, Math.abs(east - cpu.eastMps), Math.abs(north - cpu.northMps));
       }
     }
   }
-  const shareOff = Math.abs(gpuShare - cpuShare) / Math.max(cpuShare, 1e-9);
-  const tauOff = Math.abs(gpuTau - cpuTau) / Math.max(cpuTau, 1e-9);
   checks.check(
-    "R11.T7.c the cloud map's pass draws its twin's columns",
-    sound && shareOff <= MAP_MEAN_TOLERANCE && tauOff <= MAP_MEAN_TOLERANCE,
-    `mean share ${(gpuShare / 320).toFixed(4)} against ${(cpuShare / 320).toFixed(4)} (${shareOff.toExponential(2)}), mean τ ${(gpuTau / 320).toFixed(3)} against ${(cpuTau / 320).toFixed(3)} (${tauOff.toExponential(2)}; ≤ ${MAP_MEAN_TOLERANCE}), every texel ${sound ? "sound" : "NOT sound"}`,
+    "R11.T7.c the cloud map's pass draws its twin's texels",
+    sound &&
+      sum <= MAP_SUM_TOLERANCE &&
+      threshold <= MAP_THRESHOLD_TOLERANCE &&
+      wind <= MAP_WIND_TOLERANCE_MPS,
+    `largest |Δ| of the resolved sum ${sum.toExponential(2)} (≤ ${MAP_SUM_TOLERANCE}), the threshold ${threshold.toExponential(2)} (≤ ${MAP_THRESHOLD_TOLERANCE}), the wind ${wind.toExponential(2)} m/s (≤ ${MAP_WIND_TOLERANCE_MPS}), over ${5 * MAP_SAMPLES * MAP_SAMPLES} texels, every one ${sound ? "finite" : "NOT finite"}`,
   );
 }
 
@@ -1036,21 +1046,6 @@ export async function checkCloudVolumeDraw(engine: RenderEngine, checks: Checks)
   );
   const tables = createAirlessTables(engine, "cloud volume: no air");
   const size = { widthPx: LAYER_SIDE_PX, heightPx: LAYER_SIDE_PX };
-  const blueNoise = engine.createTexture({
-    name: "cloud volume blue noise",
-    size: { width: 4, height: 4 },
-    dimension: "2d",
-    format: "r16float",
-    mips: 1,
-    usage: TEXTURE_USAGE.TEXTURE_BINDING | TEXTURE_USAGE.COPY_DST,
-    category: "other",
-  });
-  engine.writeTexture(
-    blueNoise,
-    { x: 0, y: 0 },
-    { width: 4, height: 4 },
-    Uint16Array.from({ length: 16 }, (_, i) => toHalfBits(i / 16)),
-  );
   const scene = engine.createRenderTarget({
     name: "cloud volume scene",
     size,
@@ -1097,7 +1092,6 @@ export async function checkCloudVolumeDraw(engine: RenderEngine, checks: Checks)
               view: layerViewOf(view, shell, size, 12),
               lighting: tables,
               sceneDepth: scene.depth,
-              blueNoise,
               correction,
               timeS: MARCH_TIME_S,
               rate: FRAME.rate,
@@ -1130,12 +1124,10 @@ export async function checkCloudVolumeDraw(engine: RenderEngine, checks: Checks)
     target.dispose();
     scene.dispose();
     engine.releaseTexture(tables.body);
-    engine.releaseTexture(blueNoise);
     volumes.dispose();
     layers.dispose();
   }
 }
-
 /** The place of 0–30° N, 0–60° E whose clouds' share is the largest at a 20 km footprint. */
 function cloudiestPlace(twin: CloudLightInput): {
   readonly latitudeDeg: number;
@@ -1200,21 +1192,6 @@ export async function captureClouds(engine: RenderEngine): Promise<CapturedImage
   );
   const tables = createAirlessTables(engine, "cloud captures: no air");
   const size = { widthPx: CAPTURE_SIDE_PX, heightPx: CAPTURE_SIDE_PX };
-  const blueNoise = engine.createTexture({
-    name: "cloud captures blue noise",
-    size: { width: 4, height: 4 },
-    dimension: "2d",
-    format: "r16float",
-    mips: 1,
-    usage: TEXTURE_USAGE.TEXTURE_BINDING | TEXTURE_USAGE.COPY_DST,
-    category: "other",
-  });
-  engine.writeTexture(
-    blueNoise,
-    { x: 0, y: 0 },
-    { width: 4, height: 4 },
-    Uint16Array.from({ length: 16 }, (_, i) => toHalfBits(i / 16)),
-  );
   const scene = engine.createRenderTarget({
     name: "cloud captures scene",
     size,
@@ -1313,7 +1290,6 @@ export async function captureClouds(engine: RenderEngine): Promise<CapturedImage
             view: { ...lit, octaves: 12 },
             lighting: tables,
             sceneDepth: scene.depth,
-            blueNoise,
             correction,
             timeS: MARCH_TIME_S,
             rate: FRAME.rate,
@@ -1335,7 +1311,6 @@ export async function captureClouds(engine: RenderEngine): Promise<CapturedImage
     target.dispose();
     scene.dispose();
     engine.releaseTexture(tables.body);
-    engine.releaseTexture(blueNoise);
     volumes.dispose();
     layers.dispose();
   }

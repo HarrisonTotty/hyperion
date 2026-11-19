@@ -186,6 +186,7 @@ import {
   checkCloudVolumeDraw,
   captureClouds,
 } from "./clouds";
+import { captureCloudScenes } from "./cloudScenes";
 import { BROKEN_ENTRY, checkCatalogue, makeExternalRequests, type SmokeFixture } from "./catalogue";
 import { checkIdTarget } from "./idTarget";
 import { checkInstanceCull, checkInstancesAboveClusters, checkParticleFaces } from "./instances";
@@ -959,6 +960,17 @@ async function run(
       images = [...images, ...frames];
       checks.check(
         "R11.T7.d the clouds' captures",
+        frames.length > 0,
+        `${String(frames.length)} frames`,
+      );
+    });
+    // R11.T7.c's 3D clouds through the photorealistic renderer under R05's air, at the owner's
+    // views from the ground to orbit, for the eye check (2026-11-19).
+    await group(26, "R11.T7.c the clouds' scenes", async () => {
+      const frames = await captureCloudScenes(engine);
+      images = [...images, ...frames];
+      checks.check(
+        "R11.T7.c the clouds' scenes",
         frames.length > 0,
         `${String(frames.length)} frames`,
       );

@@ -172,6 +172,8 @@ struct CloudMarchDeck {
   co_albedo : f32,
   // φ, the flattening towards the layer's slab.
   flat : f32,
+  // a_s, the layer's shell's equatorial radius, m, on which the map's columns stand.
+  shell_m : f32,
 }
 
 // A march's levers (`cloudMarch.ts`' CloudMarchLevers): the view's samples, each march towards
@@ -193,35 +195,55 @@ struct CloudMarchResult {
   share : f32,
 }
 
-// A sample's density, its column (x f, y the mean τ, z η_top, w s) and its column's share above it.
+// A sample's density, its column's in-cloud τ over the share and the share of that above it
+// (`cloudMarch.ts`' SampleDensity).
 struct CloudSampleDensity {
   sigma : f32,
-  column : vec4f,
+  column_tau : f32,
   above : f32,
+  // The region's column the cells read, and whether they read one.
+  region : CloudColumn,
+  has_region : bool,
 }
 
 fn cloud_height_of(x : vec3f, deck : CloudMarchDeck) -> f32 {
   return length(vec3f(x.xy, x.z * deck.k)) - deck.datum;
 }
 
-// The density at a place and footprint (`cloudMarch.ts`' `densityAt`).
+// The column above or below a place at a footprint (`cloudMarch.ts`' `columnAt`): read at the
+// place's direction on the layer's shell, refined to the footprint where `refine` holds.
+fn cloud_column_at(m : CloudMapPlane, deck : CloudMarchDeck, x : vec3f, footprint : f32, refine : bool) -> CloudColumn {
+  let p = x * (deck.shell_m / length(vec3f(x.xy, x.z * deck.k)));
+  return cloud_column_from_map(m, p, footprint, refine);
+}
+
+// The field's footprint a column is read at: a liquid deck's at least half a cell's
+// (`cloudMarch.ts`' `fieldFootprintM`).
+fn cloud_field_footprint(footprint : f32) -> f32 {
+  let features = cloud_shape_row(CLOUD_SHAPE_ROW_FEATURES);
+  return select(footprint, max(footprint, 0.5 * features.w), features.z > 0.5);
+}
+
+// The density at a place and footprint (`cloudMarch.ts`' `densityAt`): its column as a sheet,
+// mixed with its cumulus cells by their share, the cells' region `region_in` where `has_region`.
 fn cloud_density_at(
   m : CloudMapPlane, deck : CloudMarchDeck, x : vec3f, footprint : f32, share : f32, detail : bool,
+  refine : bool, region_in : CloudColumn, has_region : bool,
 ) -> CloudSampleDensity {
-  let column = cloud_map_column(m, x, footprint);
-  let height = cloud_height_of(x, deck);
-  let top = column.z + deck.flat * (1.0 - column.z);
-  let u = (height - deck.base_m) / (deck.depth_m * top);
-  let above = cloud_share_above(u, deck.flat);
-  if (!(column.y > 0.0) || !(u >= 0.0 && u < 1.0)) {
-    return CloudSampleDensity(0.0, column, above);
+  let column = cloud_column_at(m, deck, x, cloud_field_footprint(footprint), refine);
+  if (!(column.mean_tau > 0.0)) {
+    return CloudSampleDensity(0.0, 0.0, 0.0, region_in, has_region);
   }
+  let height = cloud_height_of(x, deck);
   let features = cloud_shape_row(CLOUD_SHAPE_ROW_FEATURES);
-  let wb = cloud_noise_share(features.x, footprint) * cloud_shape_row(CLOUD_SHAPE_ROW_BASE).w;
+  let base_rate = cloud_shape_row(CLOUD_SHAPE_ROW_BASE).w;
+  let wb = cloud_noise_share(features.x, footprint) * base_rate;
   var wd = 0.0;
   if (detail) {
     wd = cloud_noise_share(features.y, footprint) * cloud_shape_row(CLOUD_SHAPE_ROW_DETAIL).w;
   }
+  let w_cell = cloud_cumulus_share(column.cover) * cloud_noise_share(features.w, footprint) * base_rate
+    * (1.0 - deck.flat);
   var nb = 0.5;
   if (wb > 0.0) {
     nb = cloud_base_at(x);
@@ -231,14 +253,39 @@ fn cloud_density_at(
     let plane = cloud_map_plane_at(m, x);
     nd = cloud_detail_at(x, plane.xy, m.east.xyz, m.north.xyz);
   }
-  let sigma = cloud_density(column.y / share, u, top, deck.depth_m, nb, nd, wb, wd, deck.flat);
-  return CloudSampleDensity(sigma, column, above);
+  let sheet_top = column.top + deck.flat * (1.0 - column.top);
+  let sheet_u = (height - deck.base_m) / (deck.depth_m * sheet_top);
+  let sheet_tau = column.mean_tau / share;
+  let sheet = cloud_density(sheet_tau, sheet_u, sheet_top, deck.depth_m, nb, nd, wb, wd, deck.flat);
+  let sheet_above = cloud_share_above(sheet_u, deck.flat);
+  if (!(w_cell > 0.0)) {
+    return CloudSampleDensity(sheet, sheet_tau, sheet_above, region_in, has_region);
+  }
+  // The cell's pattern is the cells' noise on the layer's shell above or below the sample, its
+  // cover and τ the region's.
+  let on_shell = x * (deck.shell_m / length(vec3f(x.xy, x.z * deck.k)));
+  var region = region_in;
+  if (!has_region) {
+    region = cloud_column_at(m, deck, x, max(footprint, CLOUD_CELL_REGION_M), false);
+  }
+  let cell = cloud_cell_of(region, column.fraction, cloud_cell_noise_at(on_shell));
+  let cell_top = cell.z + deck.flat * (1.0 - cell.z);
+  let cell_u = (height - deck.base_m) / (deck.depth_m * cell_top);
+  let cell_tau = cell.x / share;
+  let cell_sigma = cloud_density(cell_tau, cell_u, cell_top, deck.depth_m, nb, nd, wb, wd, deck.flat);
+  return CloudSampleDensity(
+    sheet + w_cell * (cell_sigma - sheet),
+    sheet_tau + w_cell * (cell_tau - sheet_tau),
+    sheet_above + w_cell * (cloud_share_above(cell_u, deck.flat) - sheet_above),
+    region,
+    true,
+  );
 }
 
 // The sun's optical depth to a sample by the march towards it (`cloudMarch.ts`' `sunDepth`).
 fn cloud_sun_depth(
   m : CloudMapPlane, deck : CloudMarchDeck, x : vec3f, height : f32, mu_sun : f32, sun : vec3f,
-  footprint : f32, share : f32, steps : u32,
+  footprint : f32, share : f32, steps : u32, region : CloudColumn, has_region : bool,
 ) -> f32 {
   let reach = min(
     max(deck.top_m - height, 0.0) / max(mu_sun, CLOUD_LIGHT_LEAST_MU),
@@ -249,18 +296,24 @@ fn cloud_sun_depth(
   for (var j = 0u; j < steps; j = j + 1u) {
     let f = (f32(j) + 0.5) / n;
     let step = reach * (2.0 * f32(j) + 1.0) / (n * n);
-    tau = tau + cloud_density_at(m, deck, x + reach * f * f * sun, footprint, share, false).sigma * step;
+    tau = tau
+      + cloud_density_at(m, deck, x + reach * f * f * sun, footprint, share, false, false, region, has_region).sigma * step;
   }
   return tau;
 }
 
-// The column at a ray's entry into the deck, over the pixel's footprint there, which sets the ray's
-// share (`cloudMarch.ts`' `marchEntry`).
-fn cloud_march_entry(m : CloudMapPlane, o : vec3f, d : vec3f, t0 : f32, k : f32, footprint_per_m : f32) -> vec4f {
+// The pixel's footprint at a ray's entry into the deck, m (`cloudMarch.ts`' `entryFootprintM`).
+fn cloud_entry_footprint(deck : CloudMarchDeck, o : vec3f, d : vec3f, t0 : f32, footprint_per_m : f32) -> f32 {
   let x0 = o + t0 * d;
-  let normal = normalize(vec3f(x0.xy, x0.z * k * k));
+  let normal = normalize(vec3f(x0.xy, x0.z * deck.k * deck.k));
   let mu_view = max(abs(dot(d, normal)), CLOUD_VOLUME_LEAST_MU);
-  return cloud_map_column(m, x0, max(footprint_per_m * t0 / mu_view, 1.0));
+  return max(footprint_per_m * t0 / mu_view, 1.0);
+}
+
+// The column at a ray's entry into the deck (`cloudMarch.ts`' `marchEntry`).
+fn cloud_march_entry(m : CloudMapPlane, deck : CloudMarchDeck, o : vec3f, d : vec3f, t0 : f32, footprint_per_m : f32) -> CloudColumn {
+  let footprint = cloud_entry_footprint(deck, o, d, t0, footprint_per_m);
+  return cloud_column_at(m, deck, o + t0 * d, cloud_field_footprint(footprint), true);
 }
 
 // The conservative two-stream's diffuse reflectance (`cloudMarch.ts`' `diffuseReflectance`).
@@ -274,11 +327,15 @@ fn cloud_diffuse_reflectance(tau : f32, g : f32) -> f32 {
 fn cloud_march(
   m : CloudMapPlane, deck : CloudMarchDeck, levers : CloudMarchLevers, o : vec3f, d : vec3f,
   t0 : f32, t1 : f32, sun0 : vec3f, sun1 : vec3f, suns : u32, footprint_per_m : f32, jitter : f32,
-  entry : vec4f,
+  entry : CloudColumn,
 ) -> CloudMarchResult {
-  let w = smoothstep(CLOUD_SHARE_SD_LEAST, CLOUD_SHARE_SD_MOST, entry.w);
+  // The layer's share by the field's unresolved weight or the cells' (`cloudMarch.ts`' `rayShare`).
+  let entry_footprint = cloud_entry_footprint(deck, o, d, t0, footprint_per_m);
+  let cells = cloud_cumulus_share(entry.cover)
+    * (1.0 - cloud_noise_share(cloud_shape_row(CLOUD_SHAPE_ROW_FEATURES).w, entry_footprint));
+  let w = max(smoothstep(CLOUD_SHARE_SD_LEAST, CLOUD_SHARE_SD_MOST, entry.sd), cells);
   let weight_share = w + deck.flat * (1.0 - w);
-  let share = 1.0 - weight_share * (1.0 - entry.x);
+  let share = 1.0 - weight_share * (1.0 - entry.fraction);
   var result = CloudMarchResult(vec2f(0.0), 0.0, 1.0, t0, share);
   if (!(share >= CLOUD_MARCH_LEAST_SHARE) || !(t1 > t0)) {
     return result;
@@ -286,7 +343,7 @@ fn cloud_march(
   // δ-Eddington's R and T_diff at the sky's cosine of the entry's column, which the flattening
   // mixes the sky's light to.
   var entry_slab = vec2f(0.0);
-  let entry_tau = entry.y / share;
+  let entry_tau = entry.mean_tau / share;
   if (deck.flat > 0.0 && entry_tau > 0.0) {
     let slab = cloud_delta_eddington(entry_tau, deck.asymmetry, deck.co_albedo, CLOUD_MARCH_SKY_COSINE);
     entry_slab = vec2f(slab.reflectance, slab.diffuse);
@@ -308,11 +365,13 @@ fn cloud_march(
     let dt = length_m * p * pow(max(v, 0.5 / n), p - 1.0) / n;
     let x = o + t * d;
     let footprint = max(footprint_per_m * t, 1.0);
-    let sample = cloud_density_at(m, deck, x, footprint, share, levers.detail > 0.5);
+    let sample = cloud_density_at(
+      m, deck, x, footprint, share, levers.detail > 0.5, true, CloudColumn(0.0, 0.0, 1.0, 0.0, 0.0, 0.0), false
+    );
     if (!(sample.sigma > 0.0)) {
       continue;
     }
-    let column_tau = sample.column.y / share;
+    let column_tau = sample.column_tau;
     let height = cloud_height_of(x, deck);
     let normal = normalize(vec3f(x.xy, x.z * deck.k * deck.k));
     let view_step = sample.sigma * dt;
@@ -333,7 +392,9 @@ fn cloud_march(
       let plane_parallel = column_tau * sample.above / mu_sun;
       var marched = plane_parallel;
       if (j == 0u && deck.flat < 1.0) {
-        marched = cloud_sun_depth(m, deck, x, height, raw_mu, sun, footprint, share, levers.light_steps);
+        marched = cloud_sun_depth(
+          m, deck, x, height, raw_mu, sun, footprint, share, levers.light_steps, sample.region, sample.has_region
+        );
       }
       let tau_sun = marched + deck.flat * (plane_parallel - marched);
       let multiple = cloud_octave_correction_at(column_tau, mu_sun);

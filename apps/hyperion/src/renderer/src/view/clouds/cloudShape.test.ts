@@ -5,6 +5,8 @@ import { CLOUD_OCTAVES_MAX, cloudFieldParams, cloudSeedOf, coverageTexels } from
 import { cloudNoiseTexels } from "./cloudNoise";
 import {
   baseNoiseAt,
+  cellNoiseAt,
+  cellOf,
   cloudColumnAt,
   cloudShapeFrame,
   cloudShapeKindOf,
@@ -225,5 +227,66 @@ describe("the shape noises' reading", () => {
       sampleTile(SHAPES.base, 128, u),
       9,
     );
+  });
+});
+
+describe("a column's cumulus cells (R11.T7.c)", () => {
+  it("cover the region's share and keep its mean τ over many places, to 3%", () => {
+    // Measured 2026-11-19 over 2 × 10⁵ places: cover 0.196, 0.397 and 0.699 of 0.2, 0.4 and 0.7,
+    // mean τ 0.978, 0.987 and 0.995 of the region's: the filtered noise's tails a little light
+    // (its deviation 1.002 and mean 0.0004), so that the high thresholds of thin cover take a
+    // little less.
+    const frame = cloudShapeFrame(2_000, { x: 0, y: 0, z: 0 }, 0, 0);
+    for (const fraction of [0.2, 0.4, 0.7]) {
+      const region = { fraction, meanTau: 8 * fraction, excess: 0.8 };
+      let covered = 0;
+      let tau = 0;
+      const n = 20_000;
+      for (let i = 0; i < n; i += 1) {
+        const cell = cellOf(region, region, cellNoiseAt(SHAPES.base, frame, fibonacciPoint(i, n)));
+        covered += cell.inCloudTau > 0 ? 1 : 0;
+        tau += cell.inCloudTau;
+      }
+      expect(Math.abs(covered / n - fraction)).toBeLessThan(0.01);
+      expect(Math.abs(tau / n / region.meanTau - 1)).toBeLessThan(0.03);
+    }
+  });
+
+  it("follow the field's own masses by half, never solid where the region is broken", () => {
+    const region = { fraction: 0.4, meanTau: 3.2, excess: 0.8 };
+    const zeta = 0.2;
+    const inMass = cellOf(region, { fraction: 1 }, zeta);
+    const inClearing = cellOf(region, { fraction: 0 }, zeta);
+    expect(inMass.inCloudTau).toBeGreaterThan(0);
+    expect(inClearing.inCloudTau).toBe(0);
+    // In a mass the cells cover 0.7 of it, ζ_c = Φ⁻¹(0.3); a ζ below that is a gap.
+    expect(cellOf(region, { fraction: 1 }, -0.6).inCloudTau).toBe(0);
+  });
+
+  it("rise steeply from their edges to a plateau, their tops flat at their cores", () => {
+    const region = { fraction: 0.4, meanTau: 3.2, excess: 0.8 };
+    const edge = cellOf(region, region, 0.3);
+    const core = cellOf(region, region, 2.5);
+    const deeper = cellOf(region, region, 3.5);
+    expect(edge.inCloudTau).toBeGreaterThan(0);
+    expect(core.inCloudTau).toBeGreaterThan(2 * edge.inCloudTau);
+    expect(deeper.inCloudTau).toBe(core.inCloudTau);
+    expect(deeper.topShare).toBe(core.topShare);
+    expect(core.topShare).toBeGreaterThan(edge.topShare);
+    expect(cellOf(region, region, 0).inCloudTau).toBe(0);
+  });
+
+  it("hide their noise's tile: two readings a tile apart differ", () => {
+    const frame = cloudShapeFrame(2_000, { x: 0, y: 0, z: 0 }, 0, 0);
+    let same = 0;
+    for (let i = 0; i < 200; i += 1) {
+      const p = { x: 6.4e6, y: 137 * i, z: 291 * i };
+      const q = { ...p, y: p.y + frame.baseTileM };
+      same +=
+        Math.abs(cellNoiseAt(SHAPES.base, frame, p) - cellNoiseAt(SHAPES.base, frame, q)) < 1e-6
+          ? 1
+          : 0;
+    }
+    expect(same).toBe(0);
   });
 });

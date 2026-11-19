@@ -9,7 +9,8 @@
  * @remarks
  * - **The base noise** is Nubis's Perlin–Worley shape: a Perlin fbm (Perlin 2002's improved
  *   gradient noise at 4, 8 and 16 cells a tile, each octave half the last's amplitude) dilated by a
- *   Worley fbm (Worley 1996's inverted F1 at 4, 8 and 16 cells, weighed 0.625, 0.25 and 0.125, as
+ *   Worley fbm (Worley 1996's F1 at 4, 8 and 16 cells as 1 − F1², rounded billows where Nubis's
+ *   1 − F1 makes cones, weighed 0.625, 0.25 and 0.125, as
  *   Nubis weighs its three channels), PW = W + P (1 − W), then remapped by the next Worley fbm, at
  *   8, 16 and 32 cells, as Nubis's shader remaps its base by its fbm: (PW − (W₂ − 1)) ÷ (2 − W₂).
  * - **The detail noise** is a Worley fbm at 2, 4 and 8 cells a tile, the same weights.
@@ -175,9 +176,11 @@ function featurePoints(cells: number, seed: number): Float64Array {
 }
 
 /**
- * Adds `weight` × (1 − F1) of a periodic Worley lattice of `cells` a tile to slice `z` of a
+ * Adds `weight` × (1 − F1²) of a periodic Worley lattice of `cells` a tile to slice `z` of a
  * `size`³ field, F1 the distance in cells to the nearest feature point, held to 1 (Worley 1996,
- * inverted, as Nubis takes it): each texel's 27 neighbouring cells, gathered once a cell.
+ * inverted as Nubis takes it, and squared, so that each point's bulge is a rounded dome rather than
+ * Nubis's cone, a cumulus's billow with creases between them): each texel's 27 neighbouring cells,
+ * gathered once a cell.
  */
 function addWorleySlice(
   out: Float32Array,
@@ -226,7 +229,7 @@ function addWorleySlice(
             }
           }
           const t = slice + y * size + x;
-          out[t] = (out[t] ?? 0) + weight * (1 - Math.min(Math.sqrt(best), 1));
+          out[t] = (out[t] ?? 0) + weight * (1 - Math.min(best, 1));
         }
       }
     }

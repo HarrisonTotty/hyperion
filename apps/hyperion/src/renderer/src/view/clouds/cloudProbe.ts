@@ -269,14 +269,7 @@ export function expectedCloudProbe(
         const direction = f32Of(probe.direction);
         const footprintPerM = Math.fround(probe.footprintPerM);
         const t0 = Math.fround(probe.t0);
-        const entry = marchEntry(
-          march.map,
-          originM,
-          direction,
-          t0,
-          march.flattening,
-          footprintPerM,
-        );
+        const entry = marchEntry(march, originM, direction, t0, footprintPerM);
         const result = marchCloudRay(
           march,
           { viewSteps: probe.viewSteps, lightSteps: probe.lightSteps, detail: probe.detail },
@@ -329,6 +322,7 @@ export const CLOUD_PROBE_BINDINGS = {
   curlNoise: 11,
   noiseSampler: 12,
   marchRows: 13,
+  fieldNoise: 14,
 } as const;
 
 /** The probe's names for the buffer of its cases and its textures, as a draw binds them. */
@@ -347,14 +341,15 @@ export const CLOUD_PROBE_NAMES = {
   curlNoise: "cloudCurlNoise",
   noiseSampler: "cloudNoiseRepeat",
   marchRows: "cloudProbeMarch",
+  fieldNoise: "cloudFieldNoise",
 } as const;
 
 /** The rows of the probe's march buffer: the map's plane, then the deck. */
-export const CLOUD_PROBE_MARCH_ROWS = CLOUD_MAP_MEMBERS.length + 2;
+export const CLOUD_PROBE_MARCH_ROWS = CLOUD_MAP_MEMBERS.length + 3;
 
 /**
  * The probe's march rows for a scene: the map's plane (`cloudMapUniforms`, its members in order),
- * then (base, top, depth, datum a, m) and (k, g, 1 − ϖ₀, φ).
+ * then (base, top, depth, datum a, m), (k, g, 1 − ϖ₀, φ) and (a_s, m).
  */
 export function packCloudProbeMarch(scene: CloudMarchScene): Float32Array {
   const out = new Float32Array(4 * CLOUD_PROBE_MARCH_ROWS);
@@ -368,6 +363,7 @@ export function packCloudProbeMarch(scene: CloudMarchScene): Float32Array {
     [scene.flattening, scene.optics.asymmetry, scene.optics.coAlbedo, scene.inputs.flat],
     at + 4,
   );
+  out.set([scene.shellRadiusM, 0, 0, 0], at + 8);
   return out;
 }
 
@@ -391,6 +387,7 @@ struct Draw {
 @group(2) @binding(11) var cloud_curl_noise : texture_2d<f32>;
 @group(2) @binding(12) var cloud_noise_repeat : sampler;
 @group(2) @binding(13) var<storage, read> cloud_probe_march : array<vec4f>;
+@group(2) @binding(14) var cloud_field_noise : texture_3d<f32>;
 
 @vertex fn vertexMain(@location(0) position : vec3f) -> @builtin(position) vec4f {
   return frame.clipProjection * frame.viewRotation * vec4f(position + draw.offsetFromCameraM, 1.0);
@@ -441,7 +438,7 @@ struct Draw {
     let optics_row = cloud_probe_march[7];
     let deck = CloudMarchDeck(
       deck_row.x, deck_row.y, deck_row.z, deck_row.w, optics_row.x, optics_row.y, optics_row.z,
-      optics_row.w
+      optics_row.w, cloud_probe_march[8].x
     );
     let f = cloud_probe_cases[5u * row + 4u];
     let o = head.yzw;
@@ -449,7 +446,7 @@ struct Draw {
     let sun = vec3f(a.w, b.xy);
     // The case's levers, its footprint's growth and its jitter (\`packCloudProbeCases\`).
     let levers = CloudMarchLevers(u32(e.x), u32(e.y), e.z);
-    let entry = cloud_march_entry(m, o, d, b.z, deck.k, e.w);
+    let entry = cloud_march_entry(m, deck, o, d, b.z, e.w);
     let march = cloud_march(m, deck, levers, o, d, b.z, b.w, sun, sun, 1u, e.w, f.x, entry);
     values[0] = march.sun.x;
     values[1] = march.sky;
@@ -514,6 +511,11 @@ export const CLOUD_PROBE_MATERIAL: WgslMaterialSpec = {
       viewDimension: "3d",
     },
     { name: CLOUD_PROBE_NAMES.curlNoise, binding: CLOUD_PROBE_BINDINGS.curlNoise },
+    {
+      name: CLOUD_PROBE_NAMES.fieldNoise,
+      binding: CLOUD_PROBE_BINDINGS.fieldNoise,
+      viewDimension: "3d",
+    },
   ],
   storageBuffers: [
     { name: CLOUD_PROBE_NAMES.layer, binding: CLOUD_PROBE_BINDINGS.layer, stages: ["fragment"] },

@@ -42,10 +42,20 @@ import { log2, pow } from "../../lib/pinnedMath";
 import {
   type CloudFieldParams,
   cloudFieldAt,
+  CLOUD_OCTAVE_RATIO,
+  OCTAVE_ROTATION,
   type CoverageTexels,
+  fieldFromParts,
+  normalDensity,
   normalTail,
+  octaveNoisesAt,
+  octavePowerOf,
+  octaveWeightAt,
   sampleCoverage,
+  scaleOfThreshold,
 } from "./cloudDensity";
+import type { CloudMapRead, CloudMapTexel } from "./cloudMap";
+import { inverseNormal } from "./cloudNoise";
 import { BASE_NOISE_SIZE, CURL_NOISE_SIZE, DETAIL_NOISE_SIZE } from "./cloudShapeNoise";
 import type { CloudCondensate } from "./condensates";
 import { timeRateFade } from "./coverage";
@@ -116,6 +126,187 @@ export function deckTopShare(excess: number, coverage: number, cumuliform: boole
     ? clamp01((STRATUS_COVER - coverage) / (STRATUS_COVER - CUMULUS_COVER))
     : 0;
   return Math.max(sheet + cumulus * (thickness - sheet), LEAST_TOP_SHARE);
+}
+
+/** A cumuliform column's top share at an excess: an adiabatic dome's, (ē ÷ ē_full)^(3/5). */
+export function domeTopShare(excess: number): number {
+  return Math.max(pow(clamp01(excess / EXCESS_FULL), TOP_EXPONENT), LEAST_TOP_SHARE);
+}
+
+/** A stratiform column's top share at an excess: most of the deck, a little lower where thin. */
+export function sheetTopShare(excess: number): number {
+  return (
+    STRATIFORM_LEAST_TOP +
+    (1 - STRATIFORM_LEAST_TOP) * pow(clamp01(excess / EXCESS_FULL), TOP_EXPONENT)
+  );
+}
+
+/**
+ * w_cu, the cumuliform share of a column at its coverage C: a liquid deck's, 1 at and below
+ * {@link CUMULUS_COVER}, 0 at and above {@link STRATUS_COVER}, linear between; an ice deck's 0.
+ */
+export function cumulusShare(cover: number, kind: CloudShapeKind): number {
+  return kind.cumuliform ? clamp01((STRATUS_COVER - cover) / (STRATUS_COVER - CUMULUS_COVER)) : 0;
+}
+
+/** A cumulus cell's feature, in the base noise's tiles: its coarsest octave's cell, a quarter. */
+export const CELL_FEATURE_TILES = 1 / 4;
+
+/**
+ * The footprint the cells' regional share and τ are read at, m (lean, 2026-11-19): 40 km, where the
+ * field's share is fractional (its variance lies in its 1,000 km to 100 km octaves, so that at a
+ * cell's footprint it is a solid mass or clear sky).
+ */
+export const CELL_REGION_M = 40_000;
+
+/**
+ * The share of the field's own structure at a cell's footprint the cells' cover follows over the
+ * region's (lean, 2026-11-19): a half, the mesoscale's organisation of a cumulus field into its
+ * masses and clearings, never solid where the region is broken.
+ */
+export const CELL_MESOSCALE = 0.5;
+
+/** The second sampling's scale of the cells' noise over the first's: √3, incommensurate with 1. */
+export const CELL_SECOND_SCALE = 1.7320508075688772;
+
+/** The second sampling's offset, in its tiles. */
+export const CELL_SECOND_OFFSET: Vec3 = { x: 0.371, y: 0.613, z: 0.129 };
+
+/** The least share a column's cells are formed at, and the most, the threshold's limits. */
+const CELL_LEAST_SHARE = 1e-6;
+
+/**
+ * The cells' standard normal noise at a place on the layer's shell, m: the base noise read twice,
+ * at its tile and turned by `OCTAVE_ROTATION` at √3 of it, each Gaussianised (Φ⁻¹ of its uniform
+ * value) and their sum over √2, so that its marginal stays standard normal and its tile's repeat,
+ * 8 km on an Earth, is not seen.
+ */
+export function cellNoiseAt(texels: Uint8Array, frame: CloudShapeFrame, placeM: Vec3): number {
+  const k = 1 / frame.baseTileM;
+  const first = sampleTile(texels, BASE_NOISE_SIZE, {
+    x: placeM.x * k + frame.baseDrift.x,
+    y: placeM.y * k + frame.baseDrift.y,
+    z: placeM.z * k + frame.baseDrift.z,
+  });
+  const [m0, m1, m2, m3, m4, m5, m6, m7, m8] = OCTAVE_ROTATION;
+  const k2 = k / CELL_SECOND_SCALE;
+  const second = sampleTile(texels, BASE_NOISE_SIZE, {
+    x: (m0 * placeM.x + m1 * placeM.y + m2 * placeM.z) * k2 + CELL_SECOND_OFFSET.x,
+    y: (m3 * placeM.x + m4 * placeM.y + m5 * placeM.z) * k2 + CELL_SECOND_OFFSET.y,
+    z: (m6 * placeM.x + m7 * placeM.y + m8 * placeM.z) * k2 + CELL_SECOND_OFFSET.z,
+  });
+  return (inverseNormal(heldShare(first)) + inverseNormal(heldShare(second))) * Math.SQRT1_2;
+}
+
+/**
+ * The ratio of a cell's τ to its region's in-cloud τ at which its dome reaches its full height
+ * (lean, 2026-11-19): 1.5, so that the cores of most cells stand flat-topped, as a cumulus's, and
+ * the base noise's erosion carves their tops into billows.
+ */
+export const CELL_SATURATION = 1.5;
+
+/**
+ * A cumulus cell's top share at its τ's ratio to its region's (the module's remarks): the region's
+ * tall cell's, a dome of the region's excess times {@link CELL_SATURATION}, times
+ * 1 − (1 − min(ratio ÷ saturation, 1))², which rises steeply from the cell's edge to a rounded top,
+ * where an adiabatic dome of the cell's own τ would follow the noise's peaks into cones.
+ */
+export function cellTopShare(regionExcess: number, ratio: number): number {
+  return Math.max(domeTopShare(regionExcess * CELL_SATURATION) * cellRise(ratio), LEAST_TOP_SHARE);
+}
+
+/** A cell's rise from its edge at a ratio, 1 − (1 − min(ratio ÷ saturation, 1))²: its top's, its τ's. */
+export function cellRise(ratio: number): number {
+  return 1 - (1 - clamp01(ratio / CELL_SATURATION)) ** 2;
+}
+
+/** The cells' shares the rise's mean is tabled at: f = (i + ½) ÷ 32. */
+export const CELL_RISE_STEPS = 32;
+
+/** The quadrature's points over a cell's tail of ζ, to 8 standard deviations past its threshold. */
+const RISE_QUADRATURE = 512;
+
+/**
+ * E[rise | ζ > ζ_c], the mean of {@link cellRise} over the cells at a share f, ζ ~ N(0, 1), ζ_c =
+ * Φ⁻¹(1 − f), its ratio (ζ − ζ_c) ÷ E[ζ − ζ_c | ζ > ζ_c]: by the midpoint rule over the tail.
+ */
+export function cellRiseMean(f: number): number {
+  const share = Math.min(Math.max(f, 1e-6), 1 - 1e-6);
+  const threshold = inverseNormal(1 - share);
+  const q = normalTail(threshold);
+  const mean = (normalDensity(threshold) - threshold * q) / q;
+  const h = 8 / RISE_QUADRATURE;
+  let total = 0;
+  for (let i = 0; i < RISE_QUADRATURE; i += 1) {
+    const zeta = threshold + (i + 0.5) * h;
+    total += cellRise((zeta - threshold) / mean) * normalDensity(zeta) * h;
+  }
+  return total / q;
+}
+
+/** {@link cellRiseMean} tabled at the cells' shares, made once. */
+let riseTable: Float32Array | null = null;
+
+/** {@link cellRiseMean} at f = (i + ½) ÷ {@link CELL_RISE_STEPS}, made once. */
+export function cellRiseTable(): Float32Array {
+  if (riseTable === null) {
+    riseTable = Float32Array.from({ length: CELL_RISE_STEPS }, (_, i) =>
+      cellRiseMean((i + 0.5) / CELL_RISE_STEPS),
+    );
+  }
+  return riseTable;
+}
+
+/** {@link cellRiseMean} at a share, linear between the table's, held at its ends. */
+export function cellRiseMeanAt(table: Float32Array, f: number): number {
+  const x = Math.min(Math.max(f * CELL_RISE_STEPS - 0.5, 0), CELL_RISE_STEPS - 1);
+  const i = Math.min(Math.floor(x), CELL_RISE_STEPS - 2);
+  const t = x - i;
+  const a = table[i] ?? 1;
+  return a + t * ((table[i + 1] ?? a) - a);
+}
+
+/** A share held within the cells' limits, so that its quantile is finite. */
+function heldShare(u: number): number {
+  return Math.min(Math.max(u, CELL_LEAST_SHARE), 1 - CELL_LEAST_SHARE);
+}
+
+/**
+ * A column's cumulus cell at a place (the module's remarks): the cells cover f_c = f_R + m (f − f_R)
+ * of the place's surroundings, f_R the region's share ({@link CELL_REGION_M}), f the field's at the
+ * cell's footprint and m {@link CELL_MESOSCALE}: where ζ, the cells' noise, exceeds ζ_c =
+ * Φ⁻¹(1 − f_c). Its ratio r = (ζ − ζ_c) ÷ E[ζ − ζ_c | ζ > ζ_c] (mean 1 over the cells) sets its
+ * excess, the region's ē_R r, and its top ({@link cellTopShare}); its in-cloud τ is the region's,
+ * τ_R ÷ f_R, times its rise ({@link cellRise}) over the rise's mean over the cells at f_c
+ * ({@link cellRiseMean}), nearly uniform within it and rising steeply at its edge, as a cumulus's. Since the field's
+ * share at a fine footprint averages to its share at a coarse one, the cells' mean cover over a
+ * region is f_R and their mean τ τ_R, the layer's there.
+ *
+ * @param zeta - The cells' noise at the place, standard normal ({@link cellNoiseAt}).
+ */
+export function cellOf(
+  region: Pick<CloudColumn, "fraction" | "meanTau" | "excess">,
+  local: Pick<CloudColumn, "fraction">,
+  zeta: number,
+): { readonly inCloudTau: number; readonly excess: number; readonly topShare: number } {
+  if (!(region.meanTau > 0)) {
+    return { inCloudTau: 0, excess: 0, topShare: LEAST_TOP_SHARE };
+  }
+  const fR = Math.min(Math.max(region.fraction, CELL_LEAST_SHARE), 1 - CELL_LEAST_SHARE);
+  const f = Math.min(
+    Math.max(fR + CELL_MESOSCALE * (local.fraction - fR), CELL_LEAST_SHARE),
+    1 - CELL_LEAST_SHARE,
+  );
+  const threshold = inverseNormal(1 - f);
+  const q = normalTail(threshold);
+  const mean = (normalDensity(threshold) - threshold * q) / q;
+  const ratio = Math.max(zeta - threshold, 0) / mean;
+  const rise = ratio > 0 ? cellRise(ratio) / cellRiseMeanAt(cellRiseTable(), f) : 0;
+  return {
+    inCloudTau: (region.meanTau / fR) * rise,
+    excess: region.excess * ratio,
+    topShare: cellTopShare(region.excess, ratio),
+  };
 }
 
 /**
@@ -233,6 +424,10 @@ export interface CloudColumn {
   readonly topShare: number;
   /** s, the field's unresolved standard deviation there. */
   readonly unresolvedSd: number;
+  /** ē, the covered part's mean excess, in standard deviations of z. */
+  readonly excess: number;
+  /** C, the coverage's share there, Q(z_c). */
+  readonly cover: number;
 }
 
 /** The least τ̄ N an excess is divided by. */
@@ -256,11 +451,108 @@ export function cloudColumnAt(
   const sample = cloudFieldAt(coverage, noise, params, point, footprintM, octaveCap);
   const cell = sampleCoverage(coverage, point);
   const excess = sample.inCloudTau / Math.max(params.meanTau * cell.scale, LEAST_SCALE);
+  const cover = normalTail(cell.threshold);
   return {
     fraction: sample.fraction,
     meanTau: sample.meanTau,
-    topShare: deckTopShare(excess, normalTail(cell.threshold), kind.cumuliform),
+    topShare: deckTopShare(excess, cover, kind.cumuliform),
     unresolvedSd: sample.unresolvedSd,
+    excess,
+    cover,
+  };
+}
+
+/**
+ * A cloud map's texel at a place over a footprint (`cloudMap.ts`' remarks): the field's resolved
+ * sum there, Σ w_k ρᵏ n_k = z_r √(Σρ²ᵏ), and the coverage's threshold and wind.
+ *
+ * @param point - On the layer, body-fixed, m.
+ */
+export function cloudMapTexelAt(
+  coverage: CoverageTexels,
+  noise: Uint8Array,
+  params: CloudFieldParams,
+  point: Vec3,
+  footprintM: number,
+): CloudMapTexel {
+  const sample = cloudFieldAt(coverage, noise, params, point, footprintM);
+  const cell = sampleCoverage(coverage, point);
+  return {
+    resolvedSum: sample.resolved * Math.sqrt(octavePowerOf(params)),
+    threshold: cell.threshold,
+    eastMps: cell.eastMps,
+    northMps: cell.northMps,
+  };
+}
+
+/** What a column read from the map needs of its body's field: its noise tile and parameters. */
+export interface ColumnField {
+  readonly noise: Uint8Array;
+  readonly params: CloudFieldParams;
+}
+
+/**
+ * A sample's column from a read of the cloud map (`cloudMap.ts`' remarks): the map's resolved sum
+ * at its levels' weights, w̄_k = w_k(fine) + blend (w_k(coarse) − w_k(fine)), with, where `refine`
+ * holds, each octave whose weight at `footprintM` differs from w̄_k added at the place,
+ * (w_k(F) − w̄_k) ρᵏ n_k, so that the sum is the field's at F; then the field's share, mean τ and
+ * unresolved deviation from it (`cloudDensity.ts`' `fieldFromParts`) and the top share from its
+ * excess. Without `refine`, the map's own footprint's column: a march towards the source's.
+ *
+ * @param point - On the layer, body-fixed, m.
+ */
+export function columnFromMap(
+  field: ColumnField,
+  kind: CloudShapeKind,
+  point: Vec3,
+  footprintM: number,
+  read: CloudMapRead,
+  refine: boolean,
+): CloudColumn {
+  const { params } = field;
+  const { texel } = read;
+  const n = params.octaves;
+  const mapWeights = new Float64Array(n);
+  const weights = new Float64Array(n);
+  let from = n;
+  let to = 0;
+  for (let k = 0; k < n; k += 1) {
+    const fine = octaveWeightAt(params, k, read.fineM);
+    const mapped = fine + read.blend * (octaveWeightAt(params, k, read.coarseM) - fine);
+    mapWeights[k] = mapped;
+    const own = refine ? octaveWeightAt(params, k, footprintM) : mapped;
+    weights[k] = own;
+    if (own !== mapped) {
+      from = Math.min(from, k);
+      to = k + 1;
+    }
+  }
+  const noises =
+    to > from
+      ? octaveNoisesAt(field.noise, params, point, texel.eastMps, texel.northMps, from, to)
+      : null;
+  let sum = texel.resolvedSum;
+  let variance = 0;
+  let amplitude = 1;
+  for (let k = 0; k < n; k += 1) {
+    const w = weights[k] ?? 0;
+    if (noises !== null && k >= from && k < to) {
+      sum += (w - (mapWeights[k] ?? 0)) * amplitude * (noises[k] ?? 0);
+    }
+    variance += (w * amplitude) ** 2;
+    amplitude *= CLOUD_OCTAVE_RATIO;
+  }
+  const scale = scaleOfThreshold(texel.threshold);
+  const sample = fieldFromParts(params, texel.threshold, scale, sum, variance);
+  const excess = sample.inCloudTau / Math.max(params.meanTau * scale, LEAST_SCALE);
+  const cover = normalTail(texel.threshold);
+  return {
+    fraction: sample.fraction,
+    meanTau: sample.meanTau,
+    topShare: deckTopShare(excess, cover, kind.cumuliform),
+    unresolvedSd: sample.unresolvedSd,
+    excess,
+    cover,
   };
 }
 

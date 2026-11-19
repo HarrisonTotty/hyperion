@@ -39,8 +39,15 @@ import { deltaEddington } from "./cloudOptics";
 import {
   baseNoiseAt,
   BASE_FEATURE_TILES,
+  CELL_FEATURE_TILES,
+  CELL_REGION_M,
+  cellNoiseAt,
+  cellOf,
   type CloudColumn,
   type CloudShapeFrame,
+  type ColumnField,
+  columnFromMap,
+  cumulusShare,
   columnPlace,
   type DensityInputs,
   densityPerM,
@@ -136,32 +143,104 @@ export function stepWarp(lengthM: number, depthM: number): number {
   return 1 + clamp01(Math.log2(Math.max(lengthM / (8 * depthM), 1)) / 3);
 }
 
-/** The share a ray is drawn in from its entry's column (the module's remarks). */
-export function rayShare(entry: CloudColumn, flat: number): number {
-  const w = smoothstep(SHARE_SD_RANGE[0], SHARE_SD_RANGE[1], entry.unresolvedSd);
+/**
+ * The share a ray is drawn in from its entry's column (the module's remarks): the layer's share f
+ * by the larger of the field's unresolved weight and the share of its cumulus cells the entry's
+ * footprint leaves unresolved, `unresolvedCells` (`cellsUnresolved`).
+ */
+export function rayShare(entry: CloudColumn, flat: number, unresolvedCells = 0): number {
+  const w = Math.max(
+    smoothstep(SHARE_SD_RANGE[0], SHARE_SD_RANGE[1], entry.unresolvedSd),
+    unresolvedCells,
+  );
   const weight = w + flat * (1 - w);
   return 1 - weight * (1 - entry.fraction);
 }
 
 /**
- * The column at a ray's entry into the deck at `t0`, over the pixel's footprint there, its growth
- * with distance over the view's cosine against the deck, which sets the ray's share.
+ * The share of a column's cumulus cells a footprint leaves unresolved: its cumuliform share times
+ * one less the cells' noise share there (`cloudShape.ts`' `cumulusShare` and `noiseShare`).
  */
-export function marchEntry(
-  map: CloudMapTwin,
+export function cellsUnresolved(
+  scene: Pick<CloudMarchScene, "inputs" | "frame">,
+  column: Pick<CloudColumn, "cover">,
+  footprintM: number,
+): number {
+  const cellM = scene.frame.baseTileM * CELL_FEATURE_TILES;
+  return cumulusShare(column.cover, scene.inputs.kind) * (1 - noiseShare(cellM, footprintM));
+}
+
+/** A column with no clouds: beyond the map. */
+const CLEAR: CloudColumn = {
+  fraction: 0,
+  meanTau: 0,
+  topShare: 1,
+  unresolvedSd: 0,
+  excess: 0,
+  cover: 0,
+};
+
+/**
+ * The column above or below a place, body-fixed, m, at a footprint: read from the map at the
+ * place's direction on the layer's shell, its octaves finer than the map's added where `refine`
+ * holds (`cloudShape.ts`' `columnFromMap`); clear beyond the map.
+ */
+export function columnAt(
+  scene: Pick<CloudMarchScene, "map" | "field" | "inputs" | "flattening" | "shellRadiusM">,
+  x: Vec3,
+  footprintM: number,
+  refine: boolean,
+): CloudColumn {
+  const k = scene.flattening;
+  const onShell = scene.shellRadiusM / Math.hypot(x.x, x.y, x.z * k);
+  const p = { x: x.x * onShell, y: x.y * onShell, z: x.z * onShell };
+  const read = scene.map.readAt(p, footprintM);
+  return read === null
+    ? CLEAR
+    : columnFromMap(scene.field, scene.inputs.kind, p, footprintM, read, refine);
+}
+
+/**
+ * The pixel's footprint at a ray's entry into the deck at `t0`, m: its growth with distance over
+ * the view's cosine against the deck.
+ */
+export function entryFootprintM(
+  scene: Pick<CloudMarchScene, "flattening">,
   originM: Vec3,
   direction: Vec3,
   t0: number,
-  k: number,
   footprintPerM: number,
-): CloudColumn {
+): number {
+  const k = scene.flattening;
   const x0 = along(originM, direction, t0);
   const n = { x: x0.x, y: x0.y, z: x0.z * k * k };
   const muView = Math.max(
     Math.abs(dot3(direction, n)) / Math.hypot(n.x, n.y, n.z),
     CLOUD_VOLUME_LEAST_MU,
   );
-  return map.columnAt(x0, Math.max((footprintPerM * t0) / muView, 1));
+  return Math.max((footprintPerM * t0) / muView, 1);
+}
+
+/** The field's footprint a column is read at: a liquid deck's at least half a cell's. */
+function fieldFootprintM(
+  scene: Pick<CloudMarchScene, "inputs" | "frame">,
+  footprintM: number,
+): number {
+  return scene.inputs.kind.cumuliform
+    ? Math.max(footprintM, (scene.frame.baseTileM * CELL_FEATURE_TILES) / 2)
+    : footprintM;
+}
+
+/** The column at a ray's entry into the deck at `t0`, over the pixel's footprint there. */
+export function marchEntry(
+  scene: CloudMarchScene,
+  originM: Vec3,
+  direction: Vec3,
+  t0: number,
+  footprintPerM: number,
+): CloudColumn {
+  const footprintM = entryFootprintM(scene, originM, direction, t0, footprintPerM);
+  return columnAt(scene, along(originM, direction, t0), fieldFootprintM(scene, footprintM), true);
 }
 
 /** The conservative two-stream's diffuse reflectance of a slab (the module's remarks). */
@@ -173,6 +252,10 @@ export function diffuseReflectance(tau: number, asymmetry: number): number {
 /** What a scene's march reads: its map, noises, density and light. */
 export interface CloudMarchScene {
   readonly map: CloudMapTwin;
+  /** The body's field, whose finer octaves each view sample adds to the map's. */
+  readonly field: ColumnField;
+  /** a_s, the layer's shell's equatorial radius, m, on which the map's columns stand. */
+  readonly shellRadiusM: number;
   readonly noises: CloudShapeNoises;
   readonly frame: CloudShapeFrame;
   readonly inputs: DensityInputs;
@@ -246,8 +329,23 @@ function dot3(a: Vec3, b: Vec3): number {
 }
 
 /**
- * The density at a place and footprint (the module's remarks), the detail read where its share is
- * above 0 and `detail` holds.
+ * A sample's density, its column's in-cloud τ over the share, the share of it above, and the
+ * region's column its cells read, `null` where it read none.
+ */
+interface SampleDensity {
+  readonly sigma: number;
+  readonly columnTau: number;
+  readonly above: number;
+  readonly region: CloudColumn | null;
+}
+
+/**
+ * The density at a place and footprint (the module's remarks): its column, read at the field's
+ * footprint and refined to it where `refine` holds, laid through the deck as a sheet, mixed with
+ * its cumulus cells by their share (`cloudShape.ts`' `cellOf`, `cumulusShare`), the detail read
+ * where its share is above 0 and `detail` holds; the cells' region `regionIn` where given (a march
+ * towards the source's, whose path of at most three deck depths the 40 km region does not see),
+ * else read at the place from the map alone.
  */
 function densityAt(
   scene: CloudMarchScene,
@@ -255,18 +353,25 @@ function densityAt(
   footprintM: number,
   share: number,
   detail: boolean,
-): { readonly sigma: number; readonly column: CloudColumn; readonly above: number } {
+  refine: boolean,
+  regionIn: CloudColumn | null,
+): SampleDensity {
   const { inputs, frame, noises, map } = scene;
   const { height } = heightAndNormal(x, scene.flattening, scene.datumRadiusM);
-  const column = map.columnAt(x, footprintM);
-  const place = columnPlace(height, column.topShare, inputs);
-  if (!(column.meanTau > 0) || !(place.u >= 0 && place.u < 1)) {
-    return { sigma: 0, column, above: shareAbove(place, inputs) };
+  const column = columnAt(scene, x, fieldFootprintM(scene, footprintM), refine);
+  if (!(column.meanTau > 0)) {
+    return { sigma: 0, columnTau: 0, above: 0, region: regionIn };
   }
   const wb = noiseShare(frame.baseTileM * BASE_FEATURE_TILES, footprintM) * frame.baseRateShare;
   const wd = detail
     ? noiseShare(frame.detailTileM * DETAIL_FEATURE_TILES, footprintM) * frame.detailRateShare
     : 0;
+  const cellM = frame.baseTileM * CELL_FEATURE_TILES;
+  const wCell =
+    cumulusShare(column.cover, inputs.kind) *
+    noiseShare(cellM, footprintM) *
+    frame.baseRateShare *
+    (1 - inputs.flat);
   const nb = wb > 0 ? baseNoiseAt(noises.base, frame, x) : 0.5;
   let nd = 0.5;
   if (wd > 0) {
@@ -281,13 +386,33 @@ function densityAt(
       map.frame.north,
     );
   }
-  const sigma = densityPerM(
-    column.meanTau / share,
-    place,
-    { base: nb, detail: nd, baseShare: wb, detailShare: wd },
-    inputs,
+  const noise = { base: nb, detail: nd, baseShare: wb, detailShare: wd };
+  const sheetPlace = columnPlace(height, column.topShare, inputs);
+  const sheetTau = column.meanTau / share;
+  const sheet = densityPerM(sheetTau, sheetPlace, noise, inputs);
+  const sheetAbove = shareAbove(sheetPlace, inputs);
+  if (!(wCell > 0)) {
+    return { sigma: sheet, columnTau: sheetTau, above: sheetAbove, region: regionIn };
+  }
+  // The cell's pattern is the cells' noise on the layer's shell above or below the sample, its
+  // cover and τ the region's.
+  const k = scene.flattening;
+  const onShell = scene.shellRadiusM / Math.hypot(x.x, x.y, x.z * k);
+  const region = regionIn ?? columnAt(scene, x, Math.max(footprintM, CELL_REGION_M), false);
+  const cell = cellOf(
+    region,
+    column,
+    cellNoiseAt(noises.base, frame, { x: x.x * onShell, y: x.y * onShell, z: x.z * onShell }),
   );
-  return { sigma, column, above: shareAbove(place, inputs) };
+  const cellPlace = columnPlace(height, cell.topShare, inputs);
+  const cellTau = cell.inCloudTau / share;
+  const cellSigma = densityPerM(cellTau, cellPlace, noise, inputs);
+  return {
+    sigma: sheet + wCell * (cellSigma - sheet),
+    columnTau: sheetTau + wCell * (cellTau - sheetTau),
+    above: sheetAbove + wCell * (shareAbove(cellPlace, inputs) - sheetAbove),
+    region,
+  };
 }
 
 /** The sun's optical depth to a sample by the march towards it (the module's remarks). */
@@ -300,6 +425,7 @@ function sunDepth(
   footprintM: number,
   share: number,
   lightSteps: number,
+  region: CloudColumn | null,
 ): number {
   const depth = scene.inputs.depthM;
   const reach = Math.min(
@@ -310,7 +436,8 @@ function sunDepth(
   for (let j = 0; j < lightSteps; j += 1) {
     const at = reach * ((j + 0.5) / lightSteps) ** 2;
     const step = (reach * (2 * j + 1)) / (lightSteps * lightSteps);
-    tau += densityAt(scene, along(x, sun, at), footprintM, share, false).sigma * step;
+    tau +=
+      densityAt(scene, along(x, sun, at), footprintM, share, false, false, region).sigma * step;
   }
   return tau;
 }
@@ -324,7 +451,11 @@ export function marchCloudRay(
 ): CloudMarch {
   const { originM: o, direction: d, t0, t1, footprintPerM } = ray;
   const flat = scene.inputs.flat;
-  const share = rayShare(entry, flat);
+  const share = rayShare(
+    entry,
+    flat,
+    cellsUnresolved(scene, entry, entryFootprintM(scene, o, d, t0, footprintPerM)),
+  );
   const none = { sun: [0, 0] as const, sky: 0, transmittance: 1, meanDistanceM: t0, share };
   if (!(share >= LEAST_SHARE) || !(t1 > t0)) {
     return none;
@@ -358,11 +489,18 @@ export function marchCloudRay(
     const dt = (length * p * Math.max(v, 0.5 / n) ** (p - 1)) / n;
     const x = along(o, d, t);
     const footprint = Math.max(footprintPerM * t, 1);
-    const { sigma, column, above } = densityAt(scene, x, footprint, share, levers.detail);
+    const { sigma, columnTau, above, region } = densityAt(
+      scene,
+      x,
+      footprint,
+      share,
+      levers.detail,
+      true,
+      null,
+    );
     if (!(sigma > 0)) {
       continue;
     }
-    const columnTau = column.meanTau / share;
     const { height, normal } = heightAndNormal(x, scene.flattening, scene.datumRadiusM);
     const viewStep = sigma * dt;
     const scattered = view * sigma * dt * escape(viewStep);
@@ -378,7 +516,7 @@ export function marchCloudRay(
       const planeParallel = (columnTau * above) / muSun;
       const marched =
         j === 0 && flat < 1
-          ? sunDepth(scene, x, height, rawMu, sun, footprint, share, levers.lightSteps)
+          ? sunDepth(scene, x, height, rawMu, sun, footprint, share, levers.lightSteps, region)
           : planeParallel;
       const tauSun = marched + flat * (planeParallel - marched);
       const multiple = octaveCorrectionAt(scene.correction, columnTau, muSun);

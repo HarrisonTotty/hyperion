@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { norm, type Vec3 } from "../../geometry/vec3";
 import {
+  type CloudMapTexel,
   CLOUD_MAP_FINEST_M,
   CLOUD_MAP_LEVELS,
   CLOUD_MAP_REANCHOR_RAD,
@@ -14,7 +15,6 @@ import {
   onMapPlane,
   texelPlace,
 } from "./cloudMap";
-import type { CloudColumn } from "./cloudShape";
 
 const A = 6_378_137;
 const C = 6_356_752.3;
@@ -93,35 +93,34 @@ describe("the cloud map's plane and levels (R11.T7.c)", () => {
   });
 });
 
-/** A field whose share grows across the plane with y, and whose τ is ten times it. */
-const field = (point: Vec3, footprintM: number): CloudColumn => ({
-  fraction: Math.min(Math.max(point.y / 50_000 + 0.5, 0), 1),
-  meanTau: 10 * Math.min(Math.max(point.y / 50_000 + 0.5, 0), 1),
-  topShare: 0.5,
-  unresolvedSd: footprintM / 1e5,
+/** A texel whose resolved sum grows across the plane with y, still air, threshold 0. */
+const field = (point: Vec3): CloudMapTexel => ({
+  resolvedSum: point.y / 50_000,
+  threshold: 0,
+  eastMps: 0,
+  northMps: 0,
 });
 
 describe("the cloud map's twin (R11.T7.c)", () => {
-  it("reads a texel's own column at its centre", () => {
+  it("reads a texel's own at its centre, at level 0's size", () => {
     const frame = new CloudMapAnchor().frameFor(placeAt(0, 0, 2_000), SHELL.equatorialRadiusM);
     const twin = cloudMapTwinOf(frame, SHELL, field);
     const place = texelPlace(frame, SHELL, 0, 128, 128);
-    const column = twin.columnAt(place, 10);
-    expect(column.fraction).toBeCloseTo(twin.texel(0, 128, 128).fraction, 9);
-    expect(column.unresolvedSd).toBeCloseTo(CLOUD_MAP_FINEST_M / 1e5, 4);
+    const read = twin.readAt(place, 10);
+    expect(read?.texel.resolvedSum).toBeCloseTo(twin.texel(0, 128, 128).resolvedSum, 9);
+    expect([read?.fineM, read?.blend]).toEqual([CLOUD_MAP_FINEST_M, 0]);
   });
 
-  it("blends a field that is linear across the plane linearly", () => {
+  it("blends a field that is linear across the plane linearly, to f16's step", () => {
     const frame = new CloudMapAnchor().frameFor(placeAt(0, 0, 2_000), SHELL.equatorialRadiusM);
     const twin = cloudMapTwinOf(frame, SHELL, field);
     const between = placeAt(0, 0.05, 1_500);
-    const column = twin.columnAt(between, 10);
-    expect(column.fraction).toBeCloseTo(field(between, 10).fraction, 2);
+    expect(twin.readAt(between, 10)?.texel.resolvedSum).toBeCloseTo(field(between).resolvedSum, 3);
   });
 
-  it("has no clouds beyond its last level", () => {
+  it("reads nothing beyond its last level", () => {
     const frame = new CloudMapAnchor().frameFor(placeAt(0, 0, 2_000), SHELL.equatorialRadiusM);
     const twin = cloudMapTwinOf(frame, SHELL, field);
-    expect(twin.columnAt(placeAt(0, 170, 1_500), 10).meanTau).toBe(0);
+    expect(twin.readAt(placeAt(0, 170, 1_500), 10)).toBeNull();
   });
 });

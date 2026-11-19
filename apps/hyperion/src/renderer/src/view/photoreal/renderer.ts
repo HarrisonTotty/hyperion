@@ -2588,7 +2588,6 @@ export class PhotorealRenderer {
               view,
               lighting,
               sceneDepth: depth,
-              blueNoise: resources.blueNoise,
               correction: own.volume,
               timeS: (frame.time ?? CLOCK_ZERO).seconds + (frame.time ?? CLOCK_ZERO).nanos * 1e-9,
               rate: frame.timeRate ?? 0,

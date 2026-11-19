@@ -1,9 +1,12 @@
 // The cloud volume's density (plan R11, R11.T7.c; Design note 10): the cloud map's column at a place
-// (`cloudMap.wgsl`), laid through the deck by its kind's profile and eroded by the shape noises, the
-// twin of `clouds/cloudShape.ts` (whose remarks give the model) and of `clouds/cloudMap.ts`'
-// reading. Its includer declares, at its own group and bindings:
+// (`cloudMap.wgsl`), refined to the sample's own footprint by the field's finer octaves, laid
+// through the deck by its kind's profile and eroded by the shape noises; the twin of
+// `clouds/cloudShape.ts` (whose remarks give the model, and whose `columnFromMap` the refinement)
+// and of `clouds/cloudMap.ts`' reading. Its includer declares, at its own group and bindings:
 //   - `cloud_map : texture_2d<f32>`, the map, and `cloud_map_sampler : sampler`, linear and
 //     `clamp-to-edge`;
+//   - `cloud_layer : array<vec4f>`, read-only storage, the body's field's rows (`cloudField.wgsl`'s
+//     layout), and `cloud_field_noise : texture_3d<f32>`, the field's noise tile (`cloudNoise.ts`);
 //   - `cloud_shape : array<vec4f>`, read-only storage, CLOUD_SHAPE_ROWS rows (`cloudVolumePass.ts`'
 //     `packCloudShape`);
 //   - `cloud_base_noise : texture_3d<f32>` and `cloud_detail_noise : texture_3d<f32>`, the 128³ and
@@ -13,14 +16,17 @@
 // The shape's rows: 0 x 1 ÷ the base tile, y 1 ÷ the detail tile, z 1 ÷ the curl tile, each m⁻¹,
 // w κ; 1 the base noise's drift in its tiles, w its time-rate share; 2 the detail's, w its share; 3
 // x and y the base's and the detail's features for their fades, m, z 1 where the deck may be
-// cumuliform, w unused; 4 to 24 the normalisation G at w_b = i ÷ 8, w_d = j ÷ 8, at 9 i + j, four a
-// row (`cloudShape.ts`' `normalisationTable`).
+// cumuliform, w a cumulus cell's feature, m; 4 to 24 the normalisation G at w_b = i ÷ 8, w_d = j ÷ 8,
+// at 9 i + j, four a row (`cloudShape.ts`' `normalisationTable`); 25 to 32 the cells' rise's mean at
+// f = (i + ½) ÷ 32, four a row (`cloudShape.ts`' `cellRiseTable`).
 const CLOUD_SHAPE_ROW_TILES : u32 = 0u;
 const CLOUD_SHAPE_ROW_BASE : u32 = 1u;
 const CLOUD_SHAPE_ROW_DETAIL : u32 = 2u;
 const CLOUD_SHAPE_ROW_FEATURES : u32 = 3u;
 const CLOUD_SHAPE_ROW_TABLE : u32 = 4u;
-const CLOUD_SHAPE_ROWS : u32 = 25u;
+const CLOUD_SHAPE_ROW_RISE : u32 = 25u;
+const CLOUD_SHAPE_ROWS : u32 = 33u;
+const CLOUD_CELL_RISE_STEPS : u32 = 32u;
 const CLOUD_SHAPE_TABLE_STEPS : u32 = 9u;
 
 // `cloudShape.ts`' BASE_EROSION, DETAIL_EROSION, EDGE_SHARPNESS, WISP_SHARE, CURL_GAIN and
@@ -96,23 +102,328 @@ fn cloud_map_read_level(m : CloudMapPlane, level : u32, plane : vec2f) -> vec4f 
   return textureSampleLevel(cloud_map, cloud_map_sampler, at, 0.0);
 }
 
-// The column at a body-fixed place and footprint, m (`CloudMapTwin.columnAt`): clear beyond the map.
-fn cloud_map_column(m : CloudMapPlane, p : vec3f, footprint : f32) -> vec4f {
+// A read of the map at a place (`CloudMapTwin.readAt`): its texel (x the resolved sum, y z_c, z and w
+// the wind eastward and northward), blended between its two nearest levels, their texels' sizes,
+// m, and the coarser's share; `valid` false beyond the map.
+struct CloudMapRead {
+  texel : vec4f,
+  fine_m : f32,
+  coarse_m : f32,
+  blend : f32,
+  valid : bool,
+}
+
+fn cloud_map_read(m : CloudMapPlane, p : vec3f, footprint : f32) -> CloudMapRead {
   let plane = cloud_map_plane_at(m, p);
   if (plane.z < 0.5) {
-    return vec4f(0.0, 0.0, 1.0, 0.0);
+    return CloudMapRead(vec4f(0.0), 1.0, 1.0, 0.0, false);
   }
   let level = cloud_map_level_at(m, plane.xy, footprint);
   if (level < 0.0) {
-    return vec4f(0.0, 0.0, 1.0, 0.0);
+    return CloudMapRead(vec4f(0.0), 1.0, 1.0, 0.0, false);
   }
   let k0 = u32(floor(level));
   let k1 = min(k0 + 1u, u32(m.north.w) - 1u);
   let fine = cloud_map_read_level(m, k0, plane.xy);
+  let fine_m = m.east.w * exp2(2.0 * f32(k0));
+  let coarse_m = m.east.w * exp2(2.0 * f32(k1));
   if (k1 == k0) {
-    return fine;
+    return CloudMapRead(fine, fine_m, coarse_m, 0.0, true);
   }
-  return mix(fine, cloud_map_read_level(m, k1, plane.xy), level - f32(k0));
+  let blend = level - f32(k0);
+  return CloudMapRead(mix(fine, cloud_map_read_level(m, k1, plane.xy), blend), fine_m, coarse_m, blend, true);
+}
+
+// The field's rows (`cloudField.wgsl`'s CLOUD_ROW_*), under names of their own so that this library
+// composes beside it.
+const CLOUD_FINE_ROW_SHELL : u32 = 0u;
+const CLOUD_FINE_ROW_OPTICS : u32 = 1u;
+const CLOUD_FINE_ROW_FLOW : u32 = 2u;
+const CLOUD_FINE_ROW_NORM : u32 = 3u;
+const CLOUD_FINE_ROW_FADES : u32 = 4u;
+const CLOUD_FINE_ROW_ROTATION : u32 = 7u;
+const CLOUD_FINE_ROW_OFFSETS : u32 = 10u;
+const CLOUD_FINE_RATIO : f32 = 0.7;
+const CLOUD_FINE_LEAST_SD : f32 = 1e-3;
+const CLOUD_FINE_LEAST_SHARE : f32 = 1e-6;
+const CLOUD_FINE_NOISE_STD : f32 = 0.974;
+const CLOUD_FINE_NOISE_RANGE : f32 = 4.0;
+const CLOUD_FINE_PI : f32 = 3.14159265358979;
+// `cloudShape.ts`' EXCESS_FULL, TOP_EXPONENT, STRATIFORM_LEAST_TOP, CUMULUS_COVER, STRATUS_COVER
+// and LEAST_TOP_SHARE, and its least scale an excess is divided by.
+const CLOUD_EXCESS_FULL : f32 = 2.0;
+const CLOUD_TOP_EXPONENT : f32 = 0.6;
+const CLOUD_STRATIFORM_LEAST_TOP : f32 = 0.7;
+const CLOUD_CUMULUS_COVER : f32 = 0.5;
+const CLOUD_STRATUS_COVER : f32 = 0.85;
+const CLOUD_LEAST_TOP_SHARE : f32 = 0.02;
+const CLOUD_LEAST_EXCESS_SCALE : f32 = 1e-9;
+
+fn cloud_fine_row(i : u32) -> vec4f {
+  return cloud_layer[i];
+}
+
+// w_k at a footprint (`cloudDensity.ts`' `octaveWeightAt`).
+fn cloud_fine_weight(k : u32, footprint : f32) -> f32 {
+  let optics = cloud_fine_row(CLOUD_FINE_ROW_OPTICS);
+  if (k >= u32(optics.z)) {
+    return 0.0;
+  }
+  let cell = optics.w * exp2(-f32(k));
+  let reach = clamp(log2(cell / (2.0 * footprint)), 0.0, 1.0);
+  return reach * cloud_fine_row(CLOUD_FINE_ROW_FADES + k / 4u)[k % 4u];
+}
+
+// sin and cos as (sin, cos), the angle first taken into [−π, π] (`cloudField.wgsl`'s `cloud_sin_cos`).
+fn cloud_fine_sin_cos(angle : f32) -> vec2f {
+  let reduced = angle - 2.0 * CLOUD_FINE_PI * round(angle / (2.0 * CLOUD_FINE_PI));
+  let magnitude = preciseSinCos(min(abs(reduced), CLOUD_FINE_PI));
+  return vec2f(select(magnitude.x, -magnitude.x, reduced < 0.0), magnitude.y);
+}
+
+// `cloudField.wgsl`'s `cloud_advected`.
+fn cloud_fine_advected(p : vec3f, wind : vec2f, advection_s : f32) -> vec3f {
+  let rho = length(p.xy);
+  var q = p;
+  if (rho > 0.0) {
+    let sc = cloud_fine_sin_cos(-wind.x * advection_s / rho);
+    q = vec3f(sc.y * p.x - sc.x * p.y, sc.x * p.x + sc.y * p.y, p.z);
+  }
+  let r = length(q);
+  if (wind.y == 0.0 || !(rho > 0.0) || !(r > 0.0)) {
+    return q;
+  }
+  let sc = cloud_fine_sin_cos(wind.y * advection_s / r);
+  let scale = (sc.y * rho + sc.x * q.z) / rho;
+  return vec3f(q.xy * scale, sc.y * q.z - sc.x * rho);
+}
+
+// `cloudField.wgsl`'s `cloud_octave_turn` and `cloud_body_turn`.
+fn cloud_fine_octave_turn(c : vec3f) -> vec3f {
+  return vec3f(
+    dot(vec3f(0.0, 0.8, 0.6), c),
+    dot(vec3f(-0.8, 0.36, -0.48), c),
+    dot(vec3f(-0.6, -0.48, 0.64), c),
+  );
+}
+
+fn cloud_fine_body_turn(p : vec3f) -> vec3f {
+  return vec3f(
+    dot(cloud_fine_row(CLOUD_FINE_ROW_ROTATION).xyz, p),
+    dot(cloud_fine_row(CLOUD_FINE_ROW_ROTATION + 1u).xyz, p),
+    dot(cloud_fine_row(CLOUD_FINE_ROW_ROTATION + 2u).xyz, p),
+  );
+}
+
+fn cloud_fine_noise_at(c : vec3f) -> f32 {
+  let stored = textureSampleLevel(cloud_field_noise, cloud_noise_repeat, c, 0.0).r;
+  return (stored * 2.0 * CLOUD_FINE_NOISE_RANGE - CLOUD_FINE_NOISE_RANGE) / CLOUD_FINE_NOISE_STD;
+}
+
+// Q(x) and φ(x) (`cloudField.wgsl`'s).
+fn cloud_fine_tail(x : f32) -> f32 {
+  let z = abs(x) * 0.70710678;
+  let t = 1.0 / (1.0 + 0.5 * z);
+  let poly = -z * z - 1.26551223 + t * (1.00002368 + t * (0.37409196 + t * (0.09678418
+    + t * (-0.18628806 + t * (0.27886807 + t * (-1.13520398 + t * (1.48851587
+    + t * (-0.82215223 + t * 0.17087277))))))));
+  let erfc = t * exp(poly);
+  return select(1.0 - 0.5 * erfc, 0.5 * erfc, x >= 0.0);
+}
+
+fn cloud_fine_density(x : f32) -> f32 {
+  return exp(-0.5 * x * x) * 0.39894228;
+}
+
+// `cloudShape.ts`' `deckTopShare`.
+fn cloud_top_share(excess : f32, coverage : f32, cumuliform : bool) -> f32 {
+  let thickness = pow(max(clamp(excess / CLOUD_EXCESS_FULL, 0.0, 1.0), 1e-9), CLOUD_TOP_EXPONENT);
+  let sheet = CLOUD_STRATIFORM_LEAST_TOP + (1.0 - CLOUD_STRATIFORM_LEAST_TOP) * thickness;
+  var cumulus = 0.0;
+  if (cumuliform) {
+    cumulus = clamp((CLOUD_STRATUS_COVER - coverage) / (CLOUD_STRATUS_COVER - CLOUD_CUMULUS_COVER), 0.0, 1.0);
+  }
+  return max(sheet + cumulus * (thickness - sheet), CLOUD_LEAST_TOP_SHARE);
+}
+
+// A column (`cloudShape.ts`' CloudColumn): the covered share f, the mean τ, η_top, s, the covered
+// part's mean excess ē and the coverage's share C.
+struct CloudColumn {
+  fraction : f32,
+  mean_tau : f32,
+  top : f32,
+  sd : f32,
+  excess : f32,
+  cover : f32,
+}
+
+// A sample's column at a place on the layer's shell and a footprint (`cloudShape.ts`'
+// `columnFromMap`): the map's resolved sum, with, where `refine` holds, each octave whose weight at
+// the footprint differs from the map's blended weight added at the place; clear beyond the map.
+fn cloud_column_from_map(m : CloudMapPlane, p : vec3f, footprint : f32, refine : bool) -> CloudColumn {
+  let read = cloud_map_read(m, p, footprint);
+  if (!read.valid) {
+    return CloudColumn(0.0, 0.0, 1.0, 0.0, 0.0, 0.0);
+  }
+  let optics = cloud_fine_row(CLOUD_FINE_ROW_OPTICS);
+  let n = min(u32(optics.z), 12u);
+  var refine_lo = n;
+  var refine_hi = 0u;
+  if (refine) {
+    for (var k = 0u; k < n; k = k + 1u) {
+      let fine = cloud_fine_weight(k, read.fine_m);
+      let mapped = fine + read.blend * (cloud_fine_weight(k, read.coarse_m) - fine);
+      if (cloud_fine_weight(k, footprint) != mapped) {
+        refine_lo = min(refine_lo, k);
+        refine_hi = k + 1u;
+      }
+    }
+  }
+  var sum = read.texel.x;
+  var variance = 0.0;
+  var amplitude = 1.0;
+  let flow = cloud_fine_row(CLOUD_FINE_ROW_FLOW);
+  let norm = 1.0 / length(flow.zw);
+  let tile = 1.0 / (8.0 * optics.w);
+  var c0 = vec3f(0.0);
+  var c1 = vec3f(0.0);
+  if (refine_hi > refine_lo) {
+    c0 = cloud_fine_body_turn(cloud_fine_advected(p, read.texel.zw, flow.x)) * tile;
+    c1 = cloud_fine_body_turn(cloud_fine_advected(p, read.texel.zw, flow.y)) * tile;
+  }
+  for (var k = 0u; k < n; k = k + 1u) {
+    let fine = cloud_fine_weight(k, read.fine_m);
+    let mapped = fine + read.blend * (cloud_fine_weight(k, read.coarse_m) - fine);
+    var own = mapped;
+    if (refine) {
+      own = cloud_fine_weight(k, footprint);
+    }
+    if (k >= refine_lo && k < refine_hi) {
+      let n0 = cloud_fine_noise_at(c0 + cloud_fine_row(CLOUD_FINE_ROW_OFFSETS + 2u * k).xyz);
+      let n1 = cloud_fine_noise_at(c1 + cloud_fine_row(CLOUD_FINE_ROW_OFFSETS + 2u * k + 1u).xyz);
+      sum = sum + (own - mapped) * amplitude * (flow.z * n0 + flow.w * n1) * norm;
+    }
+    variance = variance + (own * amplitude) * (own * amplitude);
+    if (refine_hi > refine_lo) {
+      c0 = cloud_fine_octave_turn(c0) * 2.0;
+      c1 = cloud_fine_octave_turn(c1) * 2.0;
+    }
+    amplitude = amplitude * CLOUD_FINE_RATIO;
+  }
+  let threshold = read.texel.y;
+  let cover = cloud_fine_tail(threshold);
+  let scale = cover / (cloud_fine_density(threshold) - threshold * cover);
+  let inverse_total = cloud_fine_row(CLOUD_FINE_ROW_NORM).x;
+  let zr = sum * inverse_total;
+  let s = max(sqrt(max(1.0 - variance * inverse_total * inverse_total, 0.0)), CLOUD_FINE_LEAST_SD);
+  let d = (threshold - zr) / s;
+  let q = cloud_fine_tail(d);
+  let mean_tau_bar = cloud_fine_row(CLOUD_FINE_ROW_SHELL).w;
+  let mean_tau = max(mean_tau_bar * scale * s * (cloud_fine_density(d) - d * q), 0.0);
+  let in_cloud = mean_tau / max(q, CLOUD_FINE_LEAST_SHARE);
+  let excess = in_cloud / max(mean_tau_bar * scale, CLOUD_LEAST_EXCESS_SCALE);
+  let cumuliform = cloud_shape_row(CLOUD_SHAPE_ROW_FEATURES).z > 0.5;
+  return CloudColumn(q, mean_tau, cloud_top_share(excess, cover, cumuliform), s, excess, cover);
+}
+
+// `cloudShape.ts`' `domeTopShare`.
+fn cloud_dome_top(excess : f32) -> f32 {
+  return max(pow(max(clamp(excess / CLOUD_EXCESS_FULL, 0.0, 1.0), 1e-9), CLOUD_TOP_EXPONENT), CLOUD_LEAST_TOP_SHARE);
+}
+
+// `cloudShape.ts`' `cumulusShare`.
+fn cloud_cumulus_share(cover : f32) -> f32 {
+  if (!(cloud_shape_row(CLOUD_SHAPE_ROW_FEATURES).z > 0.5)) {
+    return 0.0;
+  }
+  return clamp((CLOUD_STRATUS_COVER - cover) / (CLOUD_STRATUS_COVER - CLOUD_CUMULUS_COVER), 0.0, 1.0);
+}
+
+// Φ⁻¹(p), by Acklam's rational approximation (`cloudNoise.ts`' `inverseNormal`).
+fn cloud_inverse_normal(p : f32) -> f32 {
+  let low = 0.02425;
+  if (p < low || p > 1.0 - low) {
+    let q = sqrt(-2.0 * log(min(p, 1.0 - p)));
+    let tail = (((((-0.007784894002430293 * q - 0.3223964580411365) * q - 2.400758277161838) * q
+      - 2.549732539343734) * q + 4.374664141464968) * q + 2.938163982698783)
+      / ((((0.007784695709041462 * q + 0.3224671290700398) * q + 2.445134137142996) * q
+      + 3.754408661907416) * q + 1.0);
+    return select(-tail, tail, p < low);
+  }
+  let q = p - 0.5;
+  let r = q * q;
+  return (((((-39.69683028665376 * r + 220.9460984245205) * r - 275.9285104469687) * r
+    + 138.357751867269) * r - 30.66479806614716) * r + 2.506628277459239) * q
+    / (((((-54.47609879822406 * r + 161.5858368580409) * r - 155.6989798598866) * r
+    + 66.80131188771972) * r - 13.28068155288572) * r + 1.0);
+}
+
+// The least share a column's cells are formed at (`cloudShape.ts`' CELL_LEAST_SHARE), the cells'
+// region's footprint, m, their mesoscale share, and the second reading's scale and offset of
+// their noise (`cloudShape.ts`' CELL_REGION_M, CELL_MESOSCALE, CELL_SECOND_SCALE and
+// CELL_SECOND_OFFSET).
+const CLOUD_CELL_LEAST_SHARE : f32 = 1e-6;
+const CLOUD_CELL_REGION_M : f32 = 40000.0;
+const CLOUD_CELL_MESOSCALE : f32 = 0.5;
+const CLOUD_CELL_SECOND_SCALE : f32 = 1.7320508;
+const CLOUD_CELL_SECOND_OFFSET : vec3f = vec3f(0.371, 0.613, 0.129);
+
+// The cells' standard normal noise at a place on the layer's shell (`cloudShape.ts`' `cellNoiseAt`).
+fn cloud_cell_noise_at(p : vec3f) -> f32 {
+  let first = cloud_base_at(p);
+  let k2 = cloud_shape_row(CLOUD_SHAPE_ROW_TILES).x / CLOUD_CELL_SECOND_SCALE;
+  let turned = vec3f(
+    dot(vec3f(0.0, 0.8, 0.6), p),
+    dot(vec3f(-0.8, 0.36, -0.48), p),
+    dot(vec3f(-0.6, -0.48, 0.64), p),
+  );
+  let second = textureSampleLevel(cloud_base_noise, cloud_noise_repeat, turned * k2 + CLOUD_CELL_SECOND_OFFSET, 0.0).r;
+  let lo = CLOUD_CELL_LEAST_SHARE;
+  return (cloud_inverse_normal(clamp(first, lo, 1.0 - lo)) + cloud_inverse_normal(clamp(second, lo, 1.0 - lo)))
+    * 0.70710678;
+}
+
+// `cloudShape.ts`' CELL_SATURATION and `cellTopShare`.
+const CLOUD_CELL_SATURATION : f32 = 1.5;
+
+fn cloud_cell_rise(ratio : f32) -> f32 {
+  let below = 1.0 - clamp(ratio / CLOUD_CELL_SATURATION, 0.0, 1.0);
+  return 1.0 - below * below;
+}
+
+fn cloud_cell_top(region_excess : f32, ratio : f32) -> f32 {
+  return max(cloud_dome_top(region_excess * CLOUD_CELL_SATURATION) * cloud_cell_rise(ratio), CLOUD_LEAST_TOP_SHARE);
+}
+
+// The cells' rise's mean at a share, linear between the table's (`cloudShape.ts`' `cellRiseMeanAt`).
+fn cloud_cell_rise_mean(f : f32) -> f32 {
+  let n = CLOUD_CELL_RISE_STEPS;
+  let x = clamp(f * f32(n) - 0.5, 0.0, f32(n - 1u));
+  let i = min(u32(x), n - 2u);
+  let t = x - f32(i);
+  let a = cloud_shape_row(CLOUD_SHAPE_ROW_RISE + i / 4u)[i % 4u];
+  let b = cloud_shape_row(CLOUD_SHAPE_ROW_RISE + (i + 1u) / 4u)[(i + 1u) % 4u];
+  return a + t * (b - a);
+}
+
+// A column's cumulus cell at a place (`cloudShape.ts`' `cellOf`): x its in-cloud τ, y its excess, z
+// its top share, from the region's column, the local one's share and the cells' noise there.
+fn cloud_cell_of(region : CloudColumn, local_fraction : f32, zeta : f32) -> vec3f {
+  if (!(region.mean_tau > 0.0)) {
+    return vec3f(0.0, 0.0, CLOUD_LEAST_TOP_SHARE);
+  }
+  let lo = CLOUD_CELL_LEAST_SHARE;
+  let f_region = clamp(region.fraction, lo, 1.0 - lo);
+  let f = clamp(f_region + CLOUD_CELL_MESOSCALE * (local_fraction - f_region), lo, 1.0 - lo);
+  let threshold = cloud_inverse_normal(1.0 - f);
+  let q = cloud_fine_tail(threshold);
+  let mean = (cloud_fine_density(threshold) - threshold * q) / q;
+  let ratio = max(zeta - threshold, 0.0) / mean;
+  var rise = 0.0;
+  if (ratio > 0.0) {
+    rise = cloud_cell_rise(ratio) / cloud_cell_rise_mean(f);
+  }
+  return vec3f(region.mean_tau / f_region * rise, region.excess * ratio, cloud_cell_top(region.excess, ratio));
 }
 
 // G at (w_b, w_d), bilinear in the table (`cloudShape.ts`' `normalisationAt`).

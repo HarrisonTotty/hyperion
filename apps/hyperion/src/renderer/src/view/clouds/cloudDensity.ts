@@ -473,3 +473,97 @@ export function cloudFieldParams(input: CloudFieldInput): CloudFieldParams {
     octaveFades,
   };
 }
+
+/**
+ * w_k, octave k's weight at a footprint (`cloudFieldAt`'s): its reach over the footprint,
+ * clamp(log₂(ℓ_k ÷ 2F), 0, 1), times its time-rate fade; 0 past the octaves drawn.
+ */
+export function octaveWeightAt(params: CloudFieldParams, k: number, footprintM: number): number {
+  if (k >= params.octaves) {
+    return 0;
+  }
+  const cellM = params.baseCellM * 0.5 ** k;
+  const reach = Math.min(Math.max(log2(cellM / (2 * footprintM)), 0), 1);
+  return reach * (params.octaveFades[k] ?? 0);
+}
+
+/**
+ * Each octave's noise n_k of unit variance at `point` under the wind there, its two phases
+ * blended (`cloudFieldAt`'s), octaves `from` to `to` − 1 sampled and the rest left 0: the coordinates
+ * of every octave are formed in turn, as the field forms them.
+ *
+ * @param point - On the layer, body-fixed, m.
+ */
+export function octaveNoisesAt(
+  noise: Uint8Array,
+  params: CloudFieldParams,
+  point: Vec3,
+  eastMps: number,
+  northMps: number,
+  from: number,
+  to: number,
+): Float64Array {
+  const out = new Float64Array(params.octaves);
+  const [w0, w1] = params.phaseWeights;
+  const norm = 1 / Math.hypot(w0, w1);
+  const starts = params.advectionS.map((s) =>
+    turned(params.rotation, advected(point, eastMps, northMps, s)),
+  );
+  const tile = 1 / (8 * params.baseCellM);
+  let c0 = scaled(starts[0] ?? point, tile);
+  let c1 = scaled(starts[1] ?? point, tile);
+  const last = Math.min(to, params.octaves);
+  for (let k = 0; k < last; k += 1) {
+    if (k >= from) {
+      const n0 = sampleCloudNoise(noise, offsetBy(c0, params.offsets, 6 * k)) / CLOUD_NOISE_STD;
+      const n1 = sampleCloudNoise(noise, offsetBy(c1, params.offsets, 6 * k + 3)) / CLOUD_NOISE_STD;
+      out[k] = (w0 * n0 + w1 * n1) * norm;
+    }
+    c0 = scaled(turned(OCTAVE_ROTATION, c0), 2);
+    c1 = scaled(turned(OCTAVE_ROTATION, c1), 2);
+  }
+  return out;
+}
+
+/** Σ ρ²ᵏ over the octaves drawn, the field's normalisation's square. */
+export function octavePowerOf(params: Pick<CloudFieldParams, "octaves">): number {
+  let total = 0;
+  let power = 1;
+  for (let k = 0; k < params.octaves; k += 1) {
+    total += power;
+    power *= CLOUD_OCTAVE_RATIO * CLOUD_OCTAVE_RATIO;
+  }
+  return total;
+}
+
+/**
+ * The field's answer from its parts (`cloudFieldAt`'s last steps): the coverage's threshold z_c
+ * and scale N there, the resolved sum Σ w_k ρᵏ n_k, and the resolved variance Σ (w_k ρᵏ)².
+ */
+export function fieldFromParts(
+  params: Pick<CloudFieldParams, "meanTau" | "octaves">,
+  threshold: number,
+  scale: number,
+  resolvedSum: number,
+  resolvedVariance: number,
+): CloudSample {
+  const total = octavePowerOf(params);
+  const zr = resolvedSum / Math.sqrt(total);
+  const s = Math.max(Math.sqrt(Math.max(1 - resolvedVariance / total, 0)), LEAST_UNRESOLVED_SD);
+  const d = (threshold - zr) / s;
+  const q = normalTail(d);
+  const meanTau = Math.max(params.meanTau * scale * s * (normalDensity(d) - d * q), 0);
+  return {
+    fraction: q,
+    meanTau,
+    inCloudTau: meanTau / Math.max(q, LEAST_SHARE),
+    resolved: zr,
+    unresolvedSd: s,
+  };
+}
+
+/** N of a threshold z_c: Q ÷ (φ − z_c Q) (`thresholdOf`'s scale). */
+export function scaleOfThreshold(threshold: number): number {
+  const share = normalTail(threshold);
+  return share / (normalDensity(threshold) - threshold * share);
+}

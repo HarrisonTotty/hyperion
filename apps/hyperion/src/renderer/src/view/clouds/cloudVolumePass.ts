@@ -79,6 +79,8 @@ import {
 import type { CloudMarchLevers } from "./cloudMarch";
 import {
   BASE_FEATURE_TILES,
+  CELL_FEATURE_TILES,
+  cellRiseTable,
   type CloudShapeFrame,
   cloudShapeFrame,
   type CloudShapeKind,
@@ -206,7 +208,7 @@ export const CLOUD_VOLUME_BINDINGS = {
   /** The first of R08's surface lighting's nine tables. */
   atmosphere: 5,
   correction: 14,
-  blueNoise: 15,
+  fieldNoise: 15,
   baseNoise: 16,
   detailNoise: 17,
   curlNoise: 18,
@@ -216,7 +218,7 @@ export const CLOUD_VOLUME_BINDINGS = {
 /** The names a volume's draws bind their own textures, samplers and rows under. */
 export const CLOUD_VOLUME_TEXTURES = {
   correction: "cloudOctaveCorrection",
-  blueNoise: "blueNoise",
+  fieldNoise: "cloudFieldNoise",
   march: "cloudMarch",
   history: "cloudHistory",
   historySampler: "cloudHistorySampler",
@@ -286,7 +288,11 @@ export const CLOUD_VOLUME_MATERIAL: WgslMaterialSpec = {
       binding: CLOUD_VOLUME_BINDINGS.correction,
       sampleType: "unfilterable-float",
     },
-    { name: CLOUD_VOLUME_TEXTURES.blueNoise, binding: CLOUD_VOLUME_BINDINGS.blueNoise },
+    {
+      name: CLOUD_VOLUME_TEXTURES.fieldNoise,
+      binding: CLOUD_VOLUME_BINDINGS.fieldNoise,
+      viewDimension: "3d",
+    },
     {
       name: CLOUD_VOLUME_TEXTURES.baseNoise,
       binding: CLOUD_VOLUME_BINDINGS.baseNoise,
@@ -507,7 +513,6 @@ export interface CloudVolumeDraw {
   readonly view: CloudLayerView;
   readonly lighting: SurfaceLightingTables;
   readonly sceneDepth: TextureHandle;
-  readonly blueNoise: TextureHandle;
   readonly correction: TextureHandle;
   /** The scene's time, s on the universe clock, by which the noises drift with the wind. */
   readonly timeS: number;
@@ -543,12 +548,12 @@ interface VolumeTargets {
 export const CORRECTION_STEP_BUDGET_MS = 1;
 
 /** The shape's rows (`cloudShape.wgsl`'s CLOUD_SHAPE_ROWS). */
-export const CLOUD_SHAPE_ROWS = 25;
+export const CLOUD_SHAPE_ROWS = 33;
 
 /**
  * A deck's shape rows (`cloudShape.wgsl`'s layout), into `out`, {@link CLOUD_SHAPE_ROWS} × 4 `f32`s:
- * its noises' tiles and drifts, their features and time-rate shares, its kind, and κ's
- * normalisation table.
+ * its noises' tiles and drifts, their features and time-rate shares, its kind, κ's normalisation
+ * table and the cells' rise's means.
  */
 export function packCloudShape(
   frame: CloudShapeFrame,
@@ -573,11 +578,12 @@ export function packCloudShape(
       frame.baseTileM * BASE_FEATURE_TILES,
       frame.detailTileM * DETAIL_FEATURE_TILES,
       kind.cumuliform ? 1 : 0,
-      0,
+      frame.baseTileM * CELL_FEATURE_TILES,
     ],
     12,
   );
   out.set(normalisationTable(kind.profileExponent), 16);
+  out.set(cellRiseTable(), 4 * 25);
   return out;
 }
 
@@ -887,7 +893,7 @@ export class CloudVolumes {
             [CLOUD_VOLUME_TEXTURES.map]: mapTarget.colour,
             ...surfaceLightingDrawTextures(volume.lighting),
             [CLOUD_VOLUME_TEXTURES.correction]: volume.correction,
-            [CLOUD_VOLUME_TEXTURES.blueNoise]: volume.blueNoise,
+            [CLOUD_VOLUME_TEXTURES.fieldNoise]: gpu.noise,
             [CLOUD_VOLUME_TEXTURES.baseNoise]: noises.base,
             [CLOUD_VOLUME_TEXTURES.detailNoise]: noises.detail,
             [CLOUD_VOLUME_TEXTURES.curlNoise]: noises.curl,

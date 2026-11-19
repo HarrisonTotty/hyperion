@@ -66,8 +66,8 @@ struct Draw {
 @group(2) @binding(13) var atmosphere_source_table : texture_2d_array<f32>;
 // The condensate's correction of its octaves (`cloudVolume.ts`' `octaveCorrectionOf`), `r32float`.
 @group(2) @binding(14) var cloud_octave_correction : texture_2d<f32>;
-// The view's blue-noise tile (`post/blueNoise.ts`), `r16float`, by textureLoad.
-@group(2) @binding(15) var blue_noise : texture_2d<f32>;
+// The body's field's noise tile (`cloudNoise.ts`), whose finer octaves the samples add.
+@group(2) @binding(15) var cloud_field_noise : texture_3d<f32>;
 // The world's shape noises (`cloudShapeNoise.ts`) and their sampler, linear and `repeat`.
 @group(2) @binding(16) var cloud_base_noise : texture_3d<f32>;
 @group(2) @binding(17) var cloud_detail_noise : texture_3d<f32>;
@@ -159,18 +159,20 @@ fn fragmentMain(@builtin(position) position : vec4f) -> @location(0) vec4f {
   if (!(t1 > t0)) {
     return vec4f(0.0);
   }
-  let noise_size = vec2u(textureDimensions(blue_noise));
-  let noise = textureLoad(blue_noise, vec2u(position.xy) % noise_size, 0).r;
+  // Interleaved gradient noise at the pixel (Jimenez 2014, "Next generation post processing in Call
+  // of Duty: Advanced Warfare", SIGGRAPH), moved by the frame's jitter: the view's blue-noise tile
+  // would take the stage's sixteenth sampled texture, which the field's noise tile takes.
+  let noise = fract(52.9829189 * fract(dot(floor(position.xy), vec2f(0.06711056, 0.00583715))));
   let jitter = fract(noise + draw.levers.z);
   let footprint_per_m = draw.shell.w;
   let m = CloudMapPlane(
     draw.mapAnchor, draw.mapEast, draw.mapNorth, draw.mapOrigins01, draw.mapOrigins23, draw.mapOrigins4
   );
-  // The column at the entry, over the pixel's footprint there, which sets the ray's share.
-  let entry = cloud_march_entry(m, o, d, t0, k, footprint_per_m);
   let deck = CloudMarchDeck(
-    base_m, top_m, max(top_m - base_m, 1.0), datum, k, optics.x, optics.y, draw.march.x
+    base_m, top_m, max(top_m - base_m, 1.0), datum, k, optics.x, optics.y, draw.march.x, shell.x
   );
+  // The column at the entry, over the pixel's footprint there, which sets the ray's share.
+  let entry = cloud_march_entry(m, deck, o, d, t0, footprint_per_m);
   let levers = CloudMarchLevers(max(u32(draw.levers.x), 1u), max(u32(draw.levers.y), 1u), draw.levers.w);
   let sources = min(u32(draw.view.w), 2u);
   let march = cloud_march(

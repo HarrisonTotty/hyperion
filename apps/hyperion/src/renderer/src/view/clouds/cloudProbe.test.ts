@@ -14,7 +14,12 @@ import {
 } from "./cloudProbe";
 import { CloudMapAnchor, cloudMapTwinOf } from "./cloudMap";
 import { type CloudMarchScene, marchCloudRay, marchEntry } from "./cloudMarch";
-import { cloudColumnAt, cloudShapeFrame, cloudShapeKindOf, normalisationTable } from "./cloudShape";
+import {
+  cloudMapTexelAt,
+  cloudShapeFrame,
+  cloudShapeKindOf,
+  normalisationTable,
+} from "./cloudShape";
 import { cloudShapeNoises } from "./cloudShapeNoise";
 import type { CloudLightInput } from "./cloudShadow";
 import { marchColumn, octaveCorrectionAt, octaveCorrectionOf } from "./cloudVolume";
@@ -65,8 +70,10 @@ function sceneOf(clouds: CloudLightInput): CloudMarchScene {
   );
   return {
     map: cloudMapTwinOf(frame, clouds.shell, (point, footprintM) =>
-      cloudColumnAt(clouds.coverage, clouds.noise, clouds.params, kind, point, footprintM),
+      cloudMapTexelAt(clouds.coverage, clouds.noise, clouds.params, point, footprintM),
     ),
+    field: { noise: clouds.noise, params: clouds.params },
+    shellRadiusM: clouds.shell.equatorialRadiusM,
     noises: cloudShapeNoises(7),
     frame: cloudShapeFrame(2_000, { x: 0, y: 5, z: 0 }, 100, 1),
     inputs: {
@@ -177,7 +184,7 @@ describe("the clouds' probe", () => {
     const originM = { x: 6.39e6, y: 0, z: 0 };
     const direction = { x: -1, y: 0, z: 0 };
     const footprintPerM = Math.fround(0.05);
-    const entry = marchEntry(scene.map, originM, direction, 9_000, scene.flattening, footprintPerM);
+    const entry = marchEntry(scene, originM, direction, 9_000, footprintPerM);
     const result = marchCloudRay(
       scene,
       { viewSteps: 8, lightSteps: 3, detail: true },

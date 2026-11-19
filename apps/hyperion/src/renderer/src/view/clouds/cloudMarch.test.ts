@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import type { Vec3 } from "../../geometry/vec3";
-import { CLOUD_OCTAVES_MAX, cloudFieldParams, cloudSeedOf, coverageTexels } from "./cloudDensity";
+import {
+  CLOUD_OCTAVES_MAX,
+  cloudFieldParams,
+  cloudSeedOf,
+  coverageTexels,
+  thresholdOf,
+} from "./cloudDensity";
 import { cloudShellOf } from "./cloudLayer";
 import { CloudMapAnchor, CloudMapTwin } from "./cloudMap";
 import {
@@ -30,6 +36,7 @@ const K = A / C;
 const WATER = STAND_IN_CONDENSATES.liquidWater;
 const CORRECTION = octaveCorrectionOf(WATER);
 const NOISES = cloudShapeNoises(cloudSeedOf("0200080020000000.0103"));
+const FIELD_NOISE = cloudNoiseTexels();
 const LIQUID = cloudShapeKindOf({ phase: "liquid" });
 
 /** A place over the equator at 0° E, `heightM` above the datum. */
@@ -40,11 +47,27 @@ function over(heightM: number): Vec3 {
 const UP = { x: 1, y: 0, z: 0 };
 const DOWN = { x: -1, y: 0, z: 0 };
 
-/** A scene whose every column is `column`, the deck 1–3 km, flattened by `flat`. */
-function uniformScene(column: CloudColumn, flat: number): CloudMarchScene {
+/**
+ * A scene whose every column covers `cover` of its footprint at in-cloud τ `tau`, the deck 1–3 km,
+ * flattened by `flat`: a map of still air at `cover`'s threshold whose field's octaves a time rate
+ * fades out, so that each column is the calibrated mean.
+ */
+function uniformScene(cover: number, tau: number, flat: number): CloudMarchScene {
   const frame = new CloudMapAnchor().frameFor(over(2_000), A + 1_500);
+  const { threshold } = thresholdOf(cover);
+  const params = cloudFieldParams({
+    seed: 1,
+    condensate: { inCloudOpticalDepth550: tau },
+    radiusM: A,
+    time: { seconds: 0, nanos: 0 },
+    rate: 1e9,
+    windMps: 20,
+    octaves: CLOUD_OCTAVES_MAX,
+  });
   return {
-    map: new CloudMapTwin(frame, () => column),
+    map: new CloudMapTwin(frame, () => ({ resolvedSum: 0, threshold, eastMps: 0, northMps: 0 })),
+    field: { noise: FIELD_NOISE, params },
+    shellRadiusM: A + 1_500,
     noises: NOISES,
     frame: cloudShapeFrame(2_000, { x: 0, y: 0, z: 0 }, 0, 0),
     inputs: {
@@ -61,8 +84,6 @@ function uniformScene(column: CloudColumn, flat: number): CloudMarchScene {
     correction: CORRECTION,
   };
 }
-
-const OVERCAST: CloudColumn = { fraction: 1, meanTau: 8, topShare: 1, unresolvedSd: 0 };
 
 /** A ray's march through its deck's stretch, at a footprint that leaves the noises out. */
 function marched(
@@ -81,7 +102,7 @@ function marched(
     throw new Error("the ray misses the deck");
   }
   const footprintPerM = options.footprintPerM ?? 10;
-  const entry = marchEntry(scene.map, originM, direction, stretch[0], K, footprintPerM);
+  const entry = marchEntry(scene, originM, direction, stretch[0], footprintPerM);
   return marchCloudRay(
     scene,
     { viewSteps: options.steps ?? 64, lightSteps: 6, detail: true },
@@ -121,7 +142,7 @@ describe("a ray's stretch of the deck (R11.T7.c)", () => {
 
 /** An entry's column of share `fraction` and unresolved deviation `unresolvedSd`. */
 function entryOf(fraction: number, unresolvedSd: number): CloudColumn {
-  return { fraction, meanTau: 4, topShare: 1, unresolvedSd };
+  return { fraction, meanTau: 4, topShare: 1, unresolvedSd, excess: 1, cover: fraction };
 }
 
 describe("a ray's share (R11.T7.c)", () => {
@@ -170,19 +191,19 @@ describe("the volume's march through its 3D density (R11.T7.c)", () => {
       steps: 48,
       footprintPerM: 10,
     });
-    const flat = marched(uniformScene({ ...OVERCAST, meanTau: 4 }, 1), over(10_000), DOWN, sun, {
+    const flat = marched(uniformScene(1, 4, 1), over(10_000), DOWN, sun, {
       steps: 48,
     });
     expect(flat.sun[0]).toBeCloseTo(reference.radiance, 6);
     expect(flat.transmittance).toBeCloseTo(reference.transmittance, 6);
-    expect(flat.share).toBe(1);
+    expect(flat.share).toBeCloseTo(1, 6);
   });
 
   it("finds the sun's path through a uniform deck by its march towards it to 5% of the plane-parallel's", () => {
     // Unflattened, the profile's u^(2/3) and the march towards the source; the plane-parallel twin
     // is the same with the source's path taken through the column alone.
     const sun = { x: 0.8, y: 0.6, z: 0 };
-    const scene = uniformScene(OVERCAST, 0);
+    const scene = uniformScene(1, 8, 0);
     const marchedSun = marched(scene, over(10_000), DOWN, sun);
     const planeParallel = marched(
       { ...scene, inputs: { ...scene.inputs, flat: 1e-9 } },
@@ -196,23 +217,18 @@ describe("the volume's march through its 3D density (R11.T7.c)", () => {
 
   it("darkens a cloud's base seen from beneath against its top seen from above, and lets the sky through its gaps", () => {
     const sun = { x: 0.8, y: 0.6, z: 0 };
-    const scene = uniformScene({ ...OVERCAST, meanTau: 20 }, 0);
+    const scene = uniformScene(1, 20, 0);
     const top = marched(scene, over(10_000), DOWN, sun);
     const base = marched(scene, over(2), UP, sun);
     expect(base.sun[0]).toBeLessThan(0.5 * top.sun[0]);
     expect(base.transmittance).toBeLessThan(0.01);
-    const clear = marched(
-      uniformScene({ ...OVERCAST, fraction: 0, meanTau: 0 }, 0),
-      over(2),
-      UP,
-      sun,
-    );
-    expect(clear.transmittance).toBe(1);
-    expect(clear.sun[0]).toBe(0);
+    const clear = marched(uniformScene(0, 8, 0), over(2), UP, sun);
+    expect(clear.transmittance).toBeCloseTo(1, 6);
+    expect(clear.sun[0]).toBeLessThan(1e-6);
   });
 
   it("brightens a thin edge towards the sun, its forward lobe's silver lining", () => {
-    const thin = uniformScene({ ...OVERCAST, meanTau: 0.5 }, 0);
+    const thin = uniformScene(1, 0.5, 0);
     const towards = marched(thin, over(2), UP, { x: 0.95, y: 0.312, z: 0 });
     const away = marched(thin, over(2), UP, { x: 0.3, y: -0.954, z: 0 });
     expect(towards.sun[0]).toBeGreaterThan(3 * away.sun[0]);
@@ -221,7 +237,7 @@ describe("the volume's march through its 3D density (R11.T7.c)", () => {
   it("lights its sky by the slab's reflectance at the top and its transmittance at the base", () => {
     // The opacity is weighed a little within the cloud, where the share of its τ above grows:
     // measured 0.91 of R from above and 1.04 of 1 − R from beneath (2026-11-19).
-    const scene = uniformScene({ ...OVERCAST, meanTau: 20 }, 0);
+    const scene = uniformScene(1, 20, 0);
     const sun = { x: 0.8, y: 0.6, z: 0 };
     const top = marched(scene, over(10_000), DOWN, sun);
     const base = marched(scene, over(2), UP, sun);
@@ -231,14 +247,14 @@ describe("the volume's march through its 3D density (R11.T7.c)", () => {
   });
 
   it("weighs its opacity where it meets the cloud, within the stretch", () => {
-    const scene = uniformScene({ ...OVERCAST, meanTau: 20 }, 0);
+    const scene = uniformScene(1, 20, 0);
     const from = marched(scene, over(2), UP, { x: 0.8, y: 0.6, z: 0 });
     expect(from.meanDistanceM).toBeGreaterThan(998);
     expect(from.meanDistanceM).toBeLessThan(2_998);
   });
 
   it("stays finite and within [0, 1] in transmittance with the noises at full share", () => {
-    const scene = uniformScene({ fraction: 0.8, meanTau: 6, topShare: 0.6, unresolvedSd: 0 }, 0);
+    const scene = uniformScene(0.8, 6, 0);
     for (const [origin, direction] of [
       [over(2), UP],
       [over(2), { x: Math.SQRT1_2, y: Math.SQRT1_2, z: 0 }],

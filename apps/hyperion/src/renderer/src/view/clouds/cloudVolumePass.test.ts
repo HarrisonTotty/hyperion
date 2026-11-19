@@ -254,7 +254,6 @@ describe("CloudVolumes (R11.T7.c)", () => {
         view: viewFrom(4_000),
         lighting: createAirlessTables(engine, "no air"),
         sceneDepth: texture("depth"),
-        blueNoise: texture("blue noise"),
         correction,
         timeS: 1_000,
         rate: 1,

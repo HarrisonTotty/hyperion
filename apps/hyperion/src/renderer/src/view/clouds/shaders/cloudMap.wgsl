@@ -1,9 +1,10 @@
-// The cloud map's pass (plan R11, R11.T7.c; Design note 10): the layer's field about the camera at
-// five scales into one `rgba16float` texture, its levels stacked in rows, which the volume's march
-// reads (`cloudShape.wgsl`). The twin of `clouds/cloudMap.ts`' `CloudMapTwin`, whose remarks give
-// the plane and the levels: each texel holds the column at its centre's place on the shell over a
-// footprint of its size, its covered share f, mean τ, top share η_top and unresolved deviation s
-// (`cloudShape.ts`' `cloudColumnAt`).
+// The cloud map's pass (plan R11, R11.T7.c; Design note 10): the layer's field's coarse parts about
+// the camera at five scales into one `rgba16float` texture, its levels stacked in rows, which the
+// volume's march reads and refines (`cloudShape.wgsl`). The twin of `clouds/cloudMap.ts`'
+// `CloudMapTwin`, whose remarks give the plane and the levels: each texel holds, at its centre's
+// place on the shell over a footprint of its size, the field's resolved sum Σ w_k ρᵏ n_k, z_r ÷
+// the normalisation, and the coverage's threshold z_c and wind there, eastward and northward
+// (`cloudShape.ts`' `cloudMapTexelAt`).
 //
 // Composed after frame.wgsl, `view/shaders/preciseTrig.wgsl` and `cloudField.wgsl`, whose bindings
 // it declares.
@@ -18,7 +19,7 @@ struct Draw {
   mapOrigins01 : vec4f,
   mapOrigins23 : vec4f,
   mapOrigins4 : vec4f,
-  // x: the shell's a_s ÷ c_s; y: the octaves drawn at most; z: 1 where the deck may be cumuliform.
+  // x: the shell's a_s ÷ c_s; y: the octaves drawn at most.
   shape : vec4f,
 }
 
@@ -28,16 +29,6 @@ struct Draw {
 @group(2) @binding(2) var cloud_sampler : sampler;
 @group(2) @binding(3) var<storage, read> cloud_layer : array<vec4f>;
 
-// `cloudShape.ts`' EXCESS_FULL, TOP_EXPONENT, STRATIFORM_LEAST_TOP, CUMULUS_COVER, STRATUS_COVER
-// and LEAST_TOP_SHARE.
-const CLOUD_MAP_EXCESS_FULL : f32 = 2.0;
-const CLOUD_MAP_TOP_EXPONENT : f32 = 0.6;
-const CLOUD_MAP_STRATIFORM_LEAST_TOP : f32 = 0.7;
-const CLOUD_MAP_CUMULUS_COVER : f32 = 0.5;
-const CLOUD_MAP_STRATUS_COVER : f32 = 0.85;
-const CLOUD_MAP_LEAST_TOP_SHARE : f32 = 0.02;
-const CLOUD_MAP_LEAST_SCALE : f32 = 1e-9;
-
 struct VertexOut {
   @builtin(position) position : vec4f,
 }
@@ -45,19 +36,6 @@ struct VertexOut {
 @vertex
 fn vertexMain(@location(0) position : vec3f) -> VertexOut {
   return VertexOut(vec4f(position.xy, 1.0, 1.0));
-}
-
-// `cloudShape.ts`' `deckTopShare`.
-fn cloud_map_top_share(excess : f32, coverage : f32, cumuliform : bool) -> f32 {
-  let thickness = pow(max(clamp(excess / CLOUD_MAP_EXCESS_FULL, 0.0, 1.0), 1e-9), CLOUD_MAP_TOP_EXPONENT);
-  let sheet = CLOUD_MAP_STRATIFORM_LEAST_TOP + (1.0 - CLOUD_MAP_STRATIFORM_LEAST_TOP) * thickness;
-  var cumulus = 0.0;
-  if (cumuliform) {
-    cumulus = clamp(
-      (CLOUD_MAP_STRATUS_COVER - coverage) / (CLOUD_MAP_STRATUS_COVER - CLOUD_MAP_CUMULUS_COVER), 0.0, 1.0
-    );
-  }
-  return max(sheet + cumulus * (thickness - sheet), CLOUD_MAP_LEAST_TOP_SHARE);
 }
 
 @fragment
@@ -85,7 +63,5 @@ fn fragmentMain(@builtin(position) position : vec4f) -> @location(0) vec4f {
   let place = v * (a_s / length(vec3f(v.xy, v.z * k)));
   let field = cloud_field_at(place, size, u32(draw.shape.y));
   let cell = cloud_coverage_at(place);
-  let excess = field.in_cloud_tau / max(cloud_row(CLOUD_ROW_SHELL).w * cell.y, CLOUD_MAP_LEAST_SCALE);
-  let top = cloud_map_top_share(excess, cloud_normal_tail(cell.x), draw.shape.z > 0.5);
-  return vec4f(field.fraction, field.mean_tau, top, field.unresolved_sd);
+  return vec4f(field.resolved / cloud_row(CLOUD_ROW_NORM).x, cell.x, cell.zw);
 }
