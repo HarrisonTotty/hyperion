@@ -964,17 +964,6 @@ async function run(
         `${String(frames.length)} frames`,
       );
     });
-    // R11.T7.c's 3D clouds through the photorealistic renderer under R05's air, at the owner's
-    // views from the ground to orbit, for the eye check (2026-11-19).
-    await group(26, "R11.T7.c the clouds' scenes", async () => {
-      const frames = await captureCloudScenes(engine);
-      images = [...images, ...frames];
-      checks.check(
-        "R11.T7.c the clouds' scenes",
-        frames.length > 0,
-        `${String(frames.length)} frames`,
-      );
-    });
   }
   // In part 28, alone: R11.T10.c's PNG round trip through the harness's main process and VIEW's
   // still mount, whose R11.T10.b job draws a small still of flat colours into targets of its own,
@@ -1296,6 +1285,21 @@ async function run(
   if (captures) {
     await group(1, "R08.T8.c the far limb captures", async () => {
       images = [...images, ...(await captureFarLimb(engine, checks))];
+    });
+  }
+
+  // R11.T7.c's 3D clouds through the photorealistic renderer under R05's air, at the owner's views
+  // from the ground to orbit, for the eye check (2026-11-19): in part 1, whose watchdog grows with
+  // the captures, where part 26's does not (some 270 s on a pod took it past its watchdog).
+  if (captures) {
+    await group(1, "R11.T7.c the clouds' scenes", async () => {
+      const frames = await captureCloudScenes(engine);
+      images = [...images, ...frames];
+      checks.check(
+        "R11.T7.c the clouds' scenes",
+        frames.length > 0,
+        `${String(frames.length)} frames`,
+      );
     });
   }
 

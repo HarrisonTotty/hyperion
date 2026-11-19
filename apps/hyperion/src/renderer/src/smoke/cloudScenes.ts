@@ -6,7 +6,8 @@
  * base; from within the deck; from just above its tops; from 10 km up; and from orbit, where the
  * layer draws. Each is drawn on high, its volume's history settled over frames, and the views from
  * the ground, beneath and within the deck on low too, where the layer draws, all through one
- * renderer prepared on high (a second's compiling would pass the part's watchdog on SwiftShader).
+ * renderer prepared on high (a second's compiling would cost SwiftShader minutes). In part 1, with
+ * the captures, whose watchdog grows with them.
  * For a research agent's eye check against photographs; nothing is asserted but that each frame is
  * finite.
  *
@@ -52,7 +53,7 @@ const VIEWPORT = { widthPx: 320, heightPx: 180 };
 
 /**
  * The frames each scene is drawn, for the volume's history to settle (TEMPORAL_WEIGHT 1/8: 66% of
- * the way at 8), within part 26's watchdog on SwiftShader (12 took the part to 354 s of its 360).
+ * the way at 8), the scenes some 270 s on a pod's SwiftShader (12 took them some 350 s).
  */
 const SCENE_FRAMES = 8;
 

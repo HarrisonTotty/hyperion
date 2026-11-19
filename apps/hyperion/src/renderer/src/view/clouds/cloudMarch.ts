@@ -41,6 +41,7 @@ import {
   BASE_FEATURE_TILES,
   CELL_FEATURE_TILES,
   CELL_REGION_M,
+  cellHeightNoiseAt,
   cellNoiseAt,
   cellOf,
   type CloudColumn,
@@ -415,10 +416,12 @@ function densityAt(
   const k = scene.flattening;
   const onShell = scene.shellRadiusM / Math.hypot(x.x, x.y, x.z * k);
   const region = regionIn ?? columnAt(scene, x, Math.max(footprintM, CELL_REGION_M), false);
+  const shell = { x: x.x * onShell, y: x.y * onShell, z: x.z * onShell };
   const cell = cellOf(
     region,
     column,
-    cellNoiseAt(noises.base, frame, { x: x.x * onShell, y: x.y * onShell, z: x.z * onShell }),
+    cellNoiseAt(noises.base, frame, shell),
+    cellHeightNoiseAt(noises.base, frame, shell),
     scene.field.params.meanTau,
   );
   const cellPlace = columnPlace(height, cell.topShare, inputs);

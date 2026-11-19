@@ -5,6 +5,8 @@ import { CLOUD_OCTAVES_MAX, cloudFieldParams, cloudSeedOf, coverageTexels } from
 import { cloudNoiseTexels } from "./cloudNoise";
 import {
   baseNoiseAt,
+  CELL_LEAST_HEIGHT,
+  cellHeightNoiseAt,
   cellNoiseAt,
   cellOf,
   cloudColumnAt,
@@ -232,8 +234,9 @@ describe("the shape noises' reading", () => {
 
 describe("a column's cumulus cells (R11.T7.c)", () => {
   it("cover the region's share and keep its mean τ over many places, to 3%", () => {
-    // Measured 2026-11-19 over 2 × 10⁵ places: cover 0.196, 0.397 and 0.699 of 0.2, 0.4 and 0.7,
-    // mean τ 0.978, 0.987 and 0.995 of the region's: the filtered noise's tails a little light
+    // Measured 2026-11-19 over 2 × 10⁵ places, the cells at their own heights: cover 0.198, 0.397
+    // and 0.699 of 0.2, 0.4 and 0.7, mean τ 0.983, 0.989 and 0.995 of the region's, the heights'
+    // noise's mean 0.500: the filtered noise's tails a little light
     // (its deviation 1.002 and mean 0.0004), so that the high thresholds of thin cover take a
     // little less.
     const frame = cloudShapeFrame(2_000, { x: 0, y: 0, z: 0 }, 0, 0);
@@ -243,10 +246,12 @@ describe("a column's cumulus cells (R11.T7.c)", () => {
       let tau = 0;
       const n = 20_000;
       for (let i = 0; i < n; i += 1) {
+        const p = fibonacciPoint(i, n);
         const cell = cellOf(
           region,
           region,
-          cellNoiseAt(SHAPES.base, frame, fibonacciPoint(i, n)),
+          cellNoiseAt(SHAPES.base, frame, p),
+          cellHeightNoiseAt(SHAPES.base, frame, p),
           8,
         );
         covered += cell.inCloudTau > 0 ? 1 : 0;
@@ -260,9 +265,9 @@ describe("a column's cumulus cells (R11.T7.c)", () => {
   it("follow the field's own masses by half, never solid where the region is broken", () => {
     const region = { fraction: 0.4, meanTau: 3.2, excess: 0.8 };
     // In a mass the cells cover 0.7 of it, beyond u = 0.3; in a clearing 0.2, beyond 0.8.
-    expect(cellOf(region, { fraction: 1 }, 0.6, 8).inCloudTau).toBeGreaterThan(0);
-    expect(cellOf(region, { fraction: 0 }, 0.6, 8).inCloudTau).toBe(0);
-    expect(cellOf(region, { fraction: 1 }, 0.25, 8).inCloudTau).toBe(0);
+    expect(cellOf(region, { fraction: 1 }, 0.6, 0.5, 8).inCloudTau).toBeGreaterThan(0);
+    expect(cellOf(region, { fraction: 0 }, 0.6, 0.5, 8).inCloudTau).toBe(0);
+    expect(cellOf(region, { fraction: 1 }, 0.25, 0.5, 8).inCloudTau).toBe(0);
   });
 
   it("keep at least 0.6 τ̄ in cloud about a mass's thin edge, fewer, their mean τ still the region's", () => {
@@ -272,7 +277,14 @@ describe("a column's cumulus cells (R11.T7.c)", () => {
     let tau = 0;
     const n = 20_000;
     for (let i = 0; i < n; i += 1) {
-      const cell = cellOf(region, region, cellNoiseAt(SHAPES.base, frame, fibonacciPoint(i, n)), 8);
+      const p = fibonacciPoint(i, n);
+      const cell = cellOf(
+        region,
+        region,
+        cellNoiseAt(SHAPES.base, frame, p),
+        cellHeightNoiseAt(SHAPES.base, frame, p),
+        8,
+      );
       covered += cell.inCloudTau > 0 ? 1 : 0;
       tau += cell.inCloudTau;
     }
@@ -285,15 +297,29 @@ describe("a column's cumulus cells (R11.T7.c)", () => {
   it("rise steeply from their edges to a plateau, their tops flat at their cores", () => {
     const region = { fraction: 0.4, meanTau: 3.2, excess: 0.8 };
     // The cells cover 0.4, beyond u = 0.6.
-    const edge = cellOf(region, region, 0.62, 8);
-    const core = cellOf(region, region, 0.9, 8);
-    const deeper = cellOf(region, region, 0.99, 8);
+    const edge = cellOf(region, region, 0.62, 0.5, 8);
+    const core = cellOf(region, region, 0.9, 0.5, 8);
+    const deeper = cellOf(region, region, 0.99, 0.5, 8);
     expect(edge.inCloudTau).toBeGreaterThan(0);
     expect(core.inCloudTau).toBeGreaterThan(2 * edge.inCloudTau);
     expect(deeper.inCloudTau).toBe(core.inCloudTau);
     expect(deeper.topShare).toBe(core.topShare);
     expect(core.topShare).toBeGreaterThan(edge.topShare);
-    expect(cellOf(region, region, 0.5, 8).inCloudTau).toBe(0);
+    expect(cellOf(region, region, 0.5, 0.5, 8).inCloudTau).toBe(0);
+  });
+
+  it("stand at their own heights, 0.4 to 1 of the tall cell's, a taller cell the deeper", () => {
+    const region = { fraction: 0.6, meanTau: 4.8, excess: 0.8 };
+    const low = cellOf(region, region, 0.99, 0, 8);
+    const tall = cellOf(region, region, 0.99, 1, 8);
+    expect(low.topShare / tall.topShare).toBeCloseTo(CELL_LEAST_HEIGHT, 12);
+    expect(low.inCloudTau / tall.inCloudTau).toBeCloseTo(CELL_LEAST_HEIGHT, 12);
+    // Neighbouring cells, a cell's feature apart, stand at different heights.
+    const frame = cloudShapeFrame(2_000, { x: 0, y: 0, z: 0 }, 0, 0);
+    const heights = Array.from({ length: 64 }, (_, i) =>
+      cellHeightNoiseAt(SHAPES.base, frame, { x: 6.4e6, y: (i * frame.baseTileM) / 4, z: 0 }),
+    );
+    expect(Math.max(...heights) - Math.min(...heights)).toBeGreaterThan(0.5);
   });
 
   it("stand lower where sparse: their excess is at most their cover", () => {
@@ -301,9 +327,16 @@ describe("a column's cumulus cells (R11.T7.c)", () => {
       { fraction: 0.1, meanTau: 0.8, excess: 0.8 },
       { fraction: 0.1 },
       0.999,
+      0.5,
       8,
     );
-    const dense = cellOf({ fraction: 0.6, meanTau: 4.8, excess: 0.8 }, { fraction: 0.6 }, 0.999, 8);
+    const dense = cellOf(
+      { fraction: 0.6, meanTau: 4.8, excess: 0.8 },
+      { fraction: 0.6 },
+      0.999,
+      0.5,
+      8,
+    );
     expect(sparse.topShare).toBeLessThan(dense.topShare);
   });
 

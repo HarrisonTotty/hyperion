@@ -207,6 +207,46 @@ export function cellNoiseAt(texels: Uint8Array, frame: CloudShapeFrame, placeM: 
   return triangularCdf(first + second);
 }
 
+/** The scale of the cells' heights' noise over the cells': twice a cell's feature. */
+export const CELL_HEIGHT_SCALE = 2;
+
+/** The cells' heights' noise's offset, in its tiles. */
+export const CELL_HEIGHT_OFFSET: Vec3 = { x: 0.587, y: 0.211, z: 0.743 };
+
+/**
+ * The least height of a cell over the region's tall cell's (lean, 2026-11-19): 0.4, so that the
+ * cells' tops stand at 0.4–1 of it, each its own, where one height for all had stood the far cells
+ * up as boxes of one height (the eye check of 2026-11-19).
+ */
+export const CELL_LEAST_HEIGHT = 0.4;
+
+/**
+ * The cells' heights' uniform noise at a place on the layer's shell, m: the base noise read once,
+ * turned by `OCTAVE_ROTATION`'s transpose, at {@link CELL_HEIGHT_SCALE} times its features, so
+ * that a cell's top rises and falls across it and its neighbours stand at their own.
+ */
+export function cellHeightNoiseAt(
+  texels: Uint8Array,
+  frame: CloudShapeFrame,
+  placeM: Vec3,
+): number {
+  const [m0, m1, m2, m3, m4, m5, m6, m7, m8] = OCTAVE_ROTATION;
+  const k = 1 / (frame.baseTileM * CELL_HEIGHT_SCALE);
+  return sampleTile(texels, BASE_NOISE_SIZE, {
+    x: (m0 * placeM.x + m3 * placeM.y + m6 * placeM.z) * k + CELL_HEIGHT_OFFSET.x,
+    y: (m1 * placeM.x + m4 * placeM.y + m7 * placeM.z) * k + CELL_HEIGHT_OFFSET.y,
+    z: (m2 * placeM.x + m5 * placeM.y + m8 * placeM.z) * k + CELL_HEIGHT_OFFSET.z,
+  });
+}
+
+/**
+ * A cell's height over the region's tall cell's at its heights' noise v:
+ * {@link CELL_LEAST_HEIGHT} + (1 − it) v, whose mean over v uniform is (1 + it) ÷ 2.
+ */
+export function cellHeight(v: number): number {
+  return CELL_LEAST_HEIGHT + (1 - CELL_LEAST_HEIGHT) * clamp01(v);
+}
+
 /** The CDF of the sum of two independent uniforms on [0, 1], at s in [0, 2]. */
 export function triangularCdf(s: number): number {
   const t = Math.min(Math.max(s, 0), 2);
@@ -225,13 +265,17 @@ export const CELL_TALL_SHARE = 1.5;
 export const CELL_SATURATION = 0.25;
 
 /**
- * A cumulus cell's top share at its excess Δu (the module's remarks): the region's tall cell's, a
- * dome of the cells' mean excess times {@link CELL_TALL_SHARE}, times its rise ({@link cellRise}),
- * steep from the cell's edge to a rounded top, where an adiabatic dome of the cell's own τ would
- * follow the noise's peaks into cones.
+ * A cumulus cell's top share at its excess Δu and its height h ({@link cellHeight}) (the module's
+ * remarks): the region's tall cell's, a dome of the cells' mean excess times
+ * {@link CELL_TALL_SHARE}, times h and its rise ({@link cellRise}), steep from the cell's edge to a
+ * rounded top, where an adiabatic dome of the cell's own τ would follow the noise's peaks into
+ * cones.
  */
-export function cellTopShare(meanExcess: number, du: number): number {
-  return Math.max(domeTopShare(meanExcess * CELL_TALL_SHARE) * cellRise(du), LEAST_TOP_SHARE);
+export function cellTopShare(meanExcess: number, du: number, height: number): number {
+  return Math.max(
+    domeTopShare(meanExcess * CELL_TALL_SHARE) * height * cellRise(du),
+    LEAST_TOP_SHARE,
+  );
 }
 
 /** A cell's rise from its edge at its excess Δu, 1 − (1 − min(Δu ÷ saturation, 1))²: its top's, its τ's. */
@@ -255,18 +299,21 @@ export function cellRiseMean(f: number): number {
  * cell's footprint and m {@link CELL_MESOSCALE}, where the cells' uniform noise u exceeds 1 − f_c.
  * The cells' mean in-cloud τ is the region's, τ_R ÷ f_R, but at least
  * {@link CELL_LEAST_TAU_SHARE} of τ̄, their cover shrunk by as much, so that their mean τ over the
- * region is the field's. A cell's excess Δu = u − (1 − f_c) sets its top ({@link cellTopShare}) and
- * its in-cloud τ, the cells' mean times its rise ({@link cellRise}) over the rise's mean over the
- * cells ({@link cellRiseMean}), nearly uniform within it and rising steeply at its edge, as a
- * cumulus's; its excess is the cells' mean times the same share.
+ * region is the field's. A cell's excess Δu = u − (1 − f_c) and its height h ({@link cellHeight})
+ * set its top ({@link cellTopShare}) and its in-cloud τ, the cells' mean times h and its rise
+ * ({@link cellRise}) over their means over the cells ({@link cellRiseMean}, (1 + h₀) ÷ 2), nearly
+ * uniform within it and rising steeply at its edge, as a cumulus's, a taller cell the deeper; its
+ * excess is the cells' mean times the same share.
  *
  * @param u - The cells' noise at the place, uniform on [0, 1] ({@link cellNoiseAt}).
+ * @param v - The cells' heights' noise there, uniform on [0, 1] ({@link cellHeightNoiseAt}).
  * @param meanTauBar - τ̄, the condensate's mean in-cloud τ(550).
  */
 export function cellOf(
   region: Pick<CloudColumn, "fraction" | "meanTau" | "excess">,
   local: Pick<CloudColumn, "fraction">,
   u: number,
+  v: number,
   meanTauBar: number,
 ): { readonly inCloudTau: number; readonly excess: number; readonly topShare: number } {
   if (!(region.meanTau > 0)) {
@@ -278,12 +325,14 @@ export function cellOf(
   const cellMean = Math.max(inCloud, CELL_LEAST_TAU_SHARE * meanTauBar);
   const f = Math.min(Math.max((fC * inCloud) / cellMean, CELL_LEAST_SHARE), 1);
   const du = Math.max(u - (1 - f), 0);
-  const share = du > 0 ? cellRise(du) / cellRiseMean(f) : 0;
+  const height = cellHeight(v);
+  const share =
+    du > 0 ? (cellRise(du) * height) / (cellRiseMean(f) * ((1 + CELL_LEAST_HEIGHT) / 2)) : 0;
   const excess = (region.excess * cellMean) / inCloud;
   return {
     inCloudTau: cellMean * share,
     excess: excess * share,
-    topShare: cellTopShare(excess, du),
+    topShare: cellTopShare(excess, du, height),
   };
 }
 

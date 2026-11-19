@@ -72,14 +72,15 @@ export const SMOKE_WATCHDOG_BASE_MS = 180_000;
  * 756.1 s. Twice 670.9 s is 1,341.8 s, 23 minutes rounded up. fix-view-light's two groups, measured
  * since on a lane's pod (SwiftShader, the default variant alone, its watchdog scale 2), the view's
  * light with the Sun in frame 53.4 s and the Sun's glare through the air 192.8 s (2026-11-02), add
- * twice their 246.2 s: 1,834.2 s, 31 minutes rounded up, until the development machine measures
- * them.
+ * twice their 246.2 s: 1,834.2 s. R11.T7.c's clouds' scenes, 267.7 s on a lane's pod (both
+ * variants side by side, its watchdog scale 2, 2026-11-19), add twice theirs: 2,369.6 s, 40
+ * minutes rounded up, until the development machine measures them.
  *
  * `scripts/testRender.sh` adds the same allowance to its outer limit, as `captures_allowance_s`
  * (each times the same scale, {@link SmokeWatchdogInputs.scale}), so that the outer limit stays
  * 120 s over the watchdog; `result.test.ts` holds the two equal.
  */
-export const CAPTURES_WATCHDOG_MS = 1_860_000;
+export const CAPTURES_WATCHDOG_MS = 2_400_000;
 
 /**
  * What part 1's watchdog gains when the run lifts timestamp quantization (`--smoke-gpu-timing=1`,
@@ -128,7 +129,7 @@ export const THICK_READ_WATCHDOG_MS = 720_000;
  * 9 to 17, with no check failing; at a scale of 2 the longest, part 7, took 255 s of its 360 s. A
  * scale is a hang detector's margin, not a budget: no check reads it. Four is a cap, so that a
  * hung part of `just test-render` still ends within 12 minutes (part 1 with the captures within
- * 104).
+ * 172).
  */
 export const SMOKE_WATCHDOG_SCALE_MAX = 4;
 

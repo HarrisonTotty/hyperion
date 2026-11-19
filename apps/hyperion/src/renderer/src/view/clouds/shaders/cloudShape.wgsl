@@ -349,6 +349,9 @@ const CLOUD_CELL_SECOND_SCALE : f32 = 1.7320508;
 const CLOUD_CELL_SECOND_OFFSET : vec3f = vec3f(0.371, 0.613, 0.129);
 const CLOUD_CELL_TALL_SHARE : f32 = 1.5;
 const CLOUD_CELL_SATURATION : f32 = 0.25;
+const CLOUD_CELL_HEIGHT_SCALE : f32 = 2.0;
+const CLOUD_CELL_HEIGHT_OFFSET : vec3f = vec3f(0.587, 0.211, 0.743);
+const CLOUD_CELL_LEAST_HEIGHT : f32 = 0.4;
 
 // The cells' uniform noise at a place on the layer's shell (`cloudShape.ts`' `cellNoiseAt`).
 fn cloud_cell_noise_at(p : vec3f) -> f32 {
@@ -365,14 +368,30 @@ fn cloud_cell_noise_at(p : vec3f) -> f32 {
   return select(1.0 - 0.5 * (2.0 - t) * (2.0 - t), 0.5 * t * t, t <= 1.0);
 }
 
-// `cloudShape.ts`' `cellRise`, `cellTopShare` and `cellRiseMean`.
+// The cells' heights' uniform noise at a place on the layer's shell (`cloudShape.ts`'
+// `cellHeightNoiseAt`): the base noise turned by the octaves' rotation's transpose.
+fn cloud_cell_height_noise_at(p : vec3f) -> f32 {
+  let k = cloud_shape_row(CLOUD_SHAPE_ROW_TILES).x / CLOUD_CELL_HEIGHT_SCALE;
+  let turned = vec3f(
+    dot(vec3f(0.0, -0.8, -0.6), p),
+    dot(vec3f(0.8, 0.36, -0.48), p),
+    dot(vec3f(0.6, -0.48, 0.64), p),
+  );
+  return textureSampleLevel(cloud_base_noise, cloud_noise_repeat, turned * k + CLOUD_CELL_HEIGHT_OFFSET, 0.0).r;
+}
+
+// `cloudShape.ts`' `cellHeight`, `cellRise`, `cellTopShare` and `cellRiseMean`.
+fn cloud_cell_height(v : f32) -> f32 {
+  return CLOUD_CELL_LEAST_HEIGHT + (1.0 - CLOUD_CELL_LEAST_HEIGHT) * clamp(v, 0.0, 1.0);
+}
+
 fn cloud_cell_rise(du : f32) -> f32 {
   let below = 1.0 - clamp(du / CLOUD_CELL_SATURATION, 0.0, 1.0);
   return 1.0 - below * below;
 }
 
-fn cloud_cell_top(mean_excess : f32, du : f32) -> f32 {
-  return max(cloud_dome_top(mean_excess * CLOUD_CELL_TALL_SHARE) * cloud_cell_rise(du), CLOUD_LEAST_TOP_SHARE);
+fn cloud_cell_top(mean_excess : f32, du : f32, height : f32) -> f32 {
+  return max(cloud_dome_top(mean_excess * CLOUD_CELL_TALL_SHARE) * height * cloud_cell_rise(du), CLOUD_LEAST_TOP_SHARE);
 }
 
 fn cloud_cell_rise_mean(f_in : f32) -> f32 {
@@ -382,8 +401,8 @@ fn cloud_cell_rise_mean(f_in : f32) -> f32 {
 }
 
 // A column's cumulus cell at a place (`cloudShape.ts`' `cellOf`): x its in-cloud τ, y its excess, z
-// its top share, from the region's column, the local one's share and the cells' noise there.
-fn cloud_cell_of(region : CloudColumn, local_fraction : f32, u : f32) -> vec3f {
+// its top share, from the region's column, the local one's share and the cells' noises there.
+fn cloud_cell_of(region : CloudColumn, local_fraction : f32, u : f32, v : f32) -> vec3f {
   if (!(region.mean_tau > 0.0)) {
     return vec3f(0.0, 0.0, CLOUD_LEAST_TOP_SHARE);
   }
@@ -394,12 +413,13 @@ fn cloud_cell_of(region : CloudColumn, local_fraction : f32, u : f32) -> vec3f {
   let cell_mean = max(in_cloud, CLOUD_CELL_LEAST_TAU_SHARE * cloud_fine_row(CLOUD_FINE_ROW_SHELL).w);
   let f = clamp(f_cover * in_cloud / cell_mean, lo, 1.0);
   let du = max(u - (1.0 - f), 0.0);
+  let height = cloud_cell_height(v);
   var share = 0.0;
   if (du > 0.0) {
-    share = cloud_cell_rise(du) / cloud_cell_rise_mean(f);
+    share = cloud_cell_rise(du) * height / (cloud_cell_rise_mean(f) * 0.5 * (1.0 + CLOUD_CELL_LEAST_HEIGHT));
   }
   let excess = region.excess * cell_mean / in_cloud;
-  return vec3f(cell_mean * share, excess * share, cloud_cell_top(excess, du));
+  return vec3f(cell_mean * share, excess * share, cloud_cell_top(excess, du, height));
 }
 
 // G at (w_b, w_d), bilinear in the table (`cloudShape.ts`' `normalisationAt`).

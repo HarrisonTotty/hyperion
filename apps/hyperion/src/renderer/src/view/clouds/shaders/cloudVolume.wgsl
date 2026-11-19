@@ -268,7 +268,9 @@ fn cloud_density_at(
   if (!has_region) {
     region = cloud_column_at(m, deck, x, max(footprint, CLOUD_CELL_REGION_M), false);
   }
-  let cell = cloud_cell_of(region, column.fraction, cloud_cell_noise_at(on_shell));
+  let cell = cloud_cell_of(
+    region, column.fraction, cloud_cell_noise_at(on_shell), cloud_cell_height_noise_at(on_shell)
+  );
   let cell_top = cell.z + deck.flat * (1.0 - cell.z);
   let cell_u = (height - deck.base_m) / (deck.depth_m * cell_top);
   let cell_tau = cell.x / share;
