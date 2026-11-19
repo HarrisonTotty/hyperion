@@ -97,6 +97,11 @@ export class RockMeshes {
     return this.#refused;
   }
 
+  /** Whether resident patch `keyString`'s mesh is being built now, asked by a sync. */
+  isBuilding(keyString: string): boolean {
+    return this.#building.has(keyString);
+  }
+
   /**
    * Whether the pool refused resident patch `keyString`'s mesh, its rocks then not drawn, until a
    * later sync holds it or its patch leaves.

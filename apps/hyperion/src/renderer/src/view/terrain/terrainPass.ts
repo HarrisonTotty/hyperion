@@ -3853,8 +3853,45 @@ export class TerrainPass {
       (drawSet.standingInViews & mask) === 0 &&
       this.settled &&
       this.refining === 0 &&
-      this.bandsAtTarget(id)
+      this.bandsAtTarget(id) &&
+      this.#rocksBuiltFor(drawSet, mask)
     );
+  }
+
+  /**
+   * Whether no rock mesh of a finest patch that view bit `mask` sees whole is still being built
+   * (plan R11, R11.T4.b): each held, refused or failed, so that a still's samples, which wait for
+   * {@link TerrainPass.streamedFor}, draw the same rocks (plan R11, R11.T10.e, its terrain frozen
+   * at the request). It brings the meshes to the resident layers first, as a frame does; it holds
+   * where the pass draws no rocks, and fails where a layer in view has rocks but no frame has made
+   * the device's rocks yet.
+   */
+  #rocksBuiltFor(drawSet: DrawSet, mask: number): boolean {
+    const geometry = this.#geometry;
+    if (this.#rockSource === null || !geometry.clusterPath || geometry.pageBytes <= 0) {
+      return true;
+    }
+    const meshes = this.#device.rocks?.meshes ?? null;
+    meshes?.sync(this.#rocks);
+    for (let n = 0; n < drawSet.count; n += 1) {
+      const drawn = drawSet.patches[n];
+      if (
+        drawn === undefined ||
+        ((drawSet.views[n] ?? 0) & mask) === 0 ||
+        drawn.patch.key.level !== this.#planet.finestLevel ||
+        drawn.within !== null
+      ) {
+        continue;
+      }
+      const resident = this.#rocks.get(drawn.keyString);
+      if (resident === undefined || resident.layer.count === 0) {
+        continue;
+      }
+      if (meshes === null || meshes.isBuilding(drawn.keyString)) {
+        return false;
+      }
+    }
+    return true;
   }
 
   /**

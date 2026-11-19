@@ -112,7 +112,7 @@ import {
   PARENT_MIX_SLOT,
 } from "./gpu/uniforms";
 import { MAX_LEVEL, type PatchKey } from "./patchKey";
-import { InThreadRockPageBuilder } from "../clusters/meshPageProducer";
+import { InThreadRockPageBuilder, type RockPageBuilder } from "../clusters/meshPageProducer";
 import type { RockLayer } from "../surface/scatter/rockLayer";
 import { rockLayerFrom, rocksAbout } from "../../test/rockFixtures";
 import { type PlanetGeometry, planetGeometry, spheroidNormal, surfacePoint } from "./planet";
@@ -4127,6 +4127,36 @@ describe("the authoritative rocks in the lit pass (plan R11, R11.T4.b; plan R14,
       await settle();
     }
   }
+
+  it("has a view streamed only once the rocks' meshes of the finest patches it sees are built (plan R11, R11.T10.e)", async () => {
+    // A builder whose builds wait until the test lets them go.
+    const waiting: Array<() => void> = [];
+    const inThread = new InThreadRockPageBuilder();
+    const held: RockPageBuilder = {
+      build: (input) =>
+        new Promise((resolve) => {
+          waiting.push(() => {
+            resolve(inThread.build(input));
+          });
+        }),
+      dispose: () => {
+        inThread.dispose();
+      },
+    };
+    const made = await litPass("high", undefined, () => 8_000, {
+      rocks: { createBuilder: () => held },
+    });
+    made.pass.setGeometry({ ...SETTINGS.high.geometry, strides: "off" });
+    made.pass.setReducedMotion(true);
+    await streamRocks(made, "high", []);
+    const building = made.pass.streamedFor(PRIMARY);
+    const asked = waiting.length;
+    for (const build of waiting.splice(0)) {
+      build();
+    }
+    await settle();
+    expect([asked > 0, building, made.pass.streamedFor(PRIMARY)]).toEqual([true, false, true]);
+  });
 
   it("draws the rocks of the finest patches it draws on the high setting, out to a pixel, through the cluster path", async () => {
     const made = await rockyPass("high");
