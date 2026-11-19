@@ -130,7 +130,7 @@ export class SkyCubeCache {
   readonly #waiting = new Map<string, Bake>();
   /** Whether a task of steps is queued. */
   #queued = false;
-  /** The solid angles every bake of the device reads, held from bake to bake (perf-long-tasks-4). */
+  /** The solid angles the device's bakes read, held from bake to bake (perf-long-tasks-4). */
   readonly #solidAngles: HeldSolidAngles;
 
   constructor(engine: RenderEngine, options: SkyCubeCacheOptions = {}) {
@@ -199,7 +199,8 @@ export class SkyCubeCache {
    * where one fits, else a bake begun, or joined, in the tasks after the frame, the view keeping
    * the cube it holds meanwhile ({@link SkyCubeCache.held}); once baked, the view takes it up at
    * its next ask, and lets its old one go. A bake whose next step is a frame's runs it here, in
-   * the asking frame: its uploads and scratch, or the CPU bake's cube and levels written.
+   * the asking frame: the held solid angles' first upload, its uploads and scratch, or the CPU
+   * bake's cube and levels written.
    *
    * @param view - The view's name, which holds its cube until released or given another.
    */

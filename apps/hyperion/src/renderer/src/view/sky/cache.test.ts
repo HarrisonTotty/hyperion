@@ -562,20 +562,6 @@ describe("SkyCubeCache's solid angles, held from bake to bake (lane perf-long-ta
     expect(anglesWritten(releasedBuffers)).toEqual(["sky bake 4² solid angles"]);
   });
 
-  it("keeps a face size's solid angles that a bake under way reads while another size's are taken", async () => {
-    const { engine, releasedBuffers } = await gpuCubes();
-    const { cache, runTasks } = steppedCache(engine);
-    // The cockpit's bake past its uploads, reading the 4² solid angles.
-    cache.want("cockpit", requestOf());
-    runTasks();
-    cache.want("cockpit", requestOf());
-    cache.want("cockpit", requestOf());
-    // The instrument's bake takes the 8² ones while the cockpit's still reads the 4².
-    bakeThrough(cache, "instrument", requestOf(aSky(), 8), runTasks);
-    expect(cache.want("cockpit", requestOf()).kind).toBe("baked");
-    expect(anglesWritten(releasedBuffers)).toEqual(["sky bake 4² solid angles"]);
-  });
-
   it("writes them anew after a device loss's restore, the old buffer having died with the device", async () => {
     const { engine, written, releasedBuffers, restore } = await gpuCubes();
     const { cache, runTasks } = steppedCache(engine);

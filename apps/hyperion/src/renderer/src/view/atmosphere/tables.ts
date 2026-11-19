@@ -2421,7 +2421,7 @@ export async function prepareAtmosphereTables(
   const steps = packingSteps(medium, bottomRadiusM, curves, body, columnTables, thickSlots);
   let packed: PackedMediumTables | null = null;
   while (packed === null) {
-    // One step a task, in order.
+    // One step a task, in order: each waits for the last.
     // oxlint-disable-next-line no-await-in-loop
     await between();
     const next = steps.next();
@@ -2437,16 +2437,12 @@ export async function prepareAtmosphereTables(
     SOURCE_TRANSMITTANCE_KERNEL,
     ...(packed.refusal === null ? [SLOT_DEPTHS_KERNEL] : []),
   ];
-  const making: Array<Promise<ComputeHandle>> = [];
-  for (const pair of pairs) {
-    // oxlint-disable-next-line no-await-in-loop
-    await between();
-    const kernel = engine.createComputeAsync(pair);
-    // Its failure is the `Promise.all` below's, which the caller takes: none goes unhandled
-    // while a later kernel's task is awaited.
-    kernel.catch(() => undefined);
-    making.push(kernel);
-  }
+  let turn: Promise<void> = Promise.resolve();
+  const making = pairs.map(async (pair) => {
+    turn = turn.then(between);
+    await turn;
+    return engine.createComputeAsync(pair);
+  });
   const [transmittance, multiScattering, irradiance, sourceTable, slotDepths] =
     await Promise.all(making);
   if (

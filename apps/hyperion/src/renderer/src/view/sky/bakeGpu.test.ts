@@ -489,6 +489,26 @@ describe("startSkyBake over held solid angles (lane perf-long-tasks-4)", () => {
     expect([angles.holds(TILED.faceSizePx), angles.holds(INPUT.faceSizePx)]).toEqual([false, true]);
   });
 
+  it("keeps a size's solid angles that a bake under way reads while a bake of another size takes its own", async () => {
+    const { engine, seen } = await gpuEngine();
+    const angles = new HeldSolidAngles(engine);
+    const reading = startSkyBake(engine, bakeSourceOf(TILED), angles);
+    const now = expiring();
+    // Its stars' layout, the step that hands over to its solid angles' frame, and that frame's,
+    // which takes the 48² buffer.
+    for (let step = 0; step < 3; step += 1) {
+      expect(reading.step(0, now, true)).toBeNull();
+    }
+    expect(angles.holds(TILED.faceSizePx)).toBe(true);
+    stepThrough(startSkyBake(engine, bakeSourceOf(INPUT), angles));
+    const releasedAngles = (): string[] => seen.released.filter((name) => !notTheAngles(name));
+    expect(releasedAngles()).toEqual([]);
+    while (reading.step(0, now, true) === null) {
+      // Its splats and levels, a step a call.
+    }
+    expect(releasedAngles()).toEqual(["sky bake 48² solid angles"]);
+  });
+
   it("releases them once no bake reads them, at its owner's release", async () => {
     const { engine, seen } = await gpuEngine();
     const angles = new HeldSolidAngles(engine);

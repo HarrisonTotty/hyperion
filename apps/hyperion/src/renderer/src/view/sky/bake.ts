@@ -592,9 +592,10 @@ function placed(size: Uint32Array, origin: readonly [number, number, number, num
  * @remarks
  * A step is the stars' layout of {@link BAKE_STARS_A_STEP}; then, over held solid angles that hold
  * none of its size, a frame's, their upload; then a frame's, the kernels', the uploads' and the
- * scratch's making, the solid angles formed there where the worker has not answered; then a tile's splat and peak, a tile's splat and levels, or a face's last levels. The
- * CPU bake, the fallback, lays its stars out and packs its levels in tasks, then makes and writes
- * its cube in a frame's step.
+ * scratch's making, the solid angles formed there where the worker has not answered; then a
+ * tile's splat and peak, a tile's splat and levels, or a face's last levels. The CPU bake, the
+ * fallback, lays its stars out and packs its levels in tasks, then makes and writes its cube in a
+ * frame's step.
  */
 export interface SkyBakeJob {
   /**
@@ -733,9 +734,12 @@ function* bakeOnGpu(
   let taken: BufferHandle | null = null;
   try {
     yield* layOutPoints(source, headed);
-    if (solidAngles !== undefined && !solidAngles.holds(size)) {
-      // The held solid angles' first upload, in a frame's step of its own (`BakeStepPlace`).
-      yield "frame";
+    if (solidAngles !== undefined) {
+      if (!solidAngles.holds(size)) {
+        // The held solid angles' first upload, in a frame's step of its own (`BakeStepPlace`).
+        yield "frame";
+      }
+      // Taken at once where held, so that no bake of another size releases them meanwhile.
       taken = solidAngles.take(size);
     }
     // The uploads and the scratch, in a frame (`BakeStepPlace`).
@@ -759,7 +763,6 @@ function* bakeOnGpu(
     // Written into the queue's own copy: the page's array is free for the next bake.
     givePoints(headed);
     headed = null;
-    taken ??= solidAngles?.take(size) ?? null;
     const omega = taken ?? ownSolidAngles(engine, size, source.name, made);
     const usage =
       TEXTURE_USAGE.RENDER_ATTACHMENT | TEXTURE_USAGE.STORAGE_BINDING | TEXTURE_USAGE.COPY_SRC;

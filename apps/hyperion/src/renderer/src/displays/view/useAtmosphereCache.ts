@@ -103,6 +103,7 @@ export function useAtmosphereCache(input: AtmosphereCacheInput): AtmosphereCache
       // A landed build's tables prepared in tasks, made in the first frame after (lane
       // perf-long-tasks-4): their making held the first frame with air 64 to 70 ms on a pod.
       prepare: atmosphereTablesPreparedOn(engine),
+      onRestored: (listener) => engine.onRestored(listener),
       giantRoute,
     });
     holder.set(made);

@@ -636,6 +636,12 @@ export interface AtmosphereCacheOptions<T extends CachedTables> {
   readonly prepare?: AtmosphereTablesPreparer<T>;
   /** What the thick slots' task waits for, `untilNextTask` if absent; a test's otherwise. */
   readonly between?: () => Promise<void>;
+  /**
+   * Follows the engine's restores after a device loss (`RenderEngine.onRestored`), returning what
+   * stops it: each restore drops every preparation under way or ended and not yet made, whose
+   * kernels were the lost device's, so that the body's tables are prepared again at its next frame.
+   */
+  readonly onRestored?: (listener: () => void) => () => void;
   /** How the busy re-asks wait; `setTimeout` if absent. */
   readonly schedule?: AtmosphereSchedule;
   /**
@@ -910,6 +916,8 @@ interface HeldBody<T> {
   problem: AtmosphereProblem | null;
   /** Its landed build's tables being prepared (`AtmosphereCacheOptions.prepare`), or `null`. */
   making: TablesMaking<T> | null;
+  /** Whether its waiting disc table's ask is queued for a task (`AtmosphereCacheOptions.prepare`). */
+  discAsked: boolean;
 }
 
 /**
@@ -1562,6 +1570,8 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
   readonly #tables: AtmosphereTablesFactory<T>;
   readonly #prepare: AtmosphereTablesPreparer<T> | undefined;
   readonly #between: () => Promise<void>;
+  /** Stops following the engine's restores (`AtmosphereCacheOptions.onRestored`). */
+  readonly #offRestored: () => void;
   readonly #schedule: AtmosphereSchedule;
   readonly #routes: (
     regime: AtmosphereRegime,
@@ -1589,6 +1599,13 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
     this.#tables = opts.tables;
     this.#prepare = opts.prepare;
     this.#between = opts.between ?? untilNextTask;
+    this.#offRestored =
+      opts.onRestored?.(() => {
+        // The lost device's kernels, which a preparation made: none is made into tables.
+        for (const held of this.#bodies.values()) {
+          held.making = null;
+        }
+      }) ?? (() => undefined);
     this.#schedule = opts.schedule ?? scheduleTimeout;
     const giantRoute = opts.giantRoute ?? GIANT_ROUTE;
     this.#giantRoute = giantRoute;
@@ -1763,6 +1780,7 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
       return;
     }
     this.#disposed = true;
+    this.#offRestored();
     for (const held of this.#bodies.values()) {
       this.#release(held);
     }
@@ -1876,6 +1894,7 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
       disc: null,
       problem: null,
       making: null,
+      discAsked: false,
     };
     this.#bodies.set(body.id, held);
     return held;
@@ -2756,8 +2775,49 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
     this.#askWaitingDisc(held);
   }
 
-  /** Asks a waiting disc table once neither the thick bake nor the correction is under way. */
+  /**
+   * Asks a waiting disc table once neither the thick bake nor the correction is under way: at once,
+   * or, with a preparer (lane perf-long-tasks-4), in a task after the frame, its request's medium
+   * resampled and posted there (18 to 43 ms of the first frame with air on a pod), from the body's
+   * state as that task finds it.
+   */
   #askWaitingDisc(held: HeldBody<T>): void {
+    if (!this.#discAsks(held)) {
+      return;
+    }
+    if (this.#prepare === undefined) {
+      this.#askDisc(held);
+      return;
+    }
+    if (held.discAsked) {
+      return;
+    }
+    held.discAsked = true;
+    void this.#between()
+      .then(() => {
+        held.discAsked = false;
+        if (!this.#disposed && this.#bodies.get(held.id) === held && this.#discAsks(held)) {
+          this.#askDisc(held);
+        }
+        return undefined;
+      })
+      .catch((error: unknown) => {
+        console.error(`the disc table of ${held.id} could not be asked:`, error);
+      });
+  }
+
+  /** Whether a body's disc table waits, with its tables made, and no bake under way. */
+  #discAsks(held: HeldBody<T>): boolean {
+    return (
+      held.disc?.kind === "waiting" &&
+      (held.drawn?.tables ?? null) !== null &&
+      held.bake?.state.kind !== "baking" &&
+      held.correction?.state.kind !== "baking"
+    );
+  }
+
+  /** Asks a waiting disc table ({@link #discAsks}). */
+  #askDisc(held: HeldBody<T>): void {
     const { disc } = held;
     const tables = held.drawn?.tables ?? null;
     if (
@@ -2969,7 +3029,11 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
     const making: TablesMaking<T> = { entry, outcome: null };
     held.making = making;
     const read = (): boolean =>
-      !this.#disposed && held.making === making && this.#bodies.get(held.id) === held;
+      !this.#disposed &&
+      held.making === making &&
+      this.#bodies.get(held.id) === held &&
+      held.build?.kind === "landed" &&
+      held.build.entry === entry;
     void (async () => {
       await this.#between();
       if (!read()) {
@@ -2981,6 +3045,8 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
         making.outcome = { kind: "ready", make, thickSlots };
       }
     })().catch((error: unknown) => {
+      // A preparation the body has moved on from is dropped with its failure: a bug in preparing
+      // fails the body's current build too, which holds it `failed` and says so.
       if (read()) {
         making.outcome =
           error instanceof EngineUnavailable ? { kind: "unavailable" } : { kind: "failed", error };

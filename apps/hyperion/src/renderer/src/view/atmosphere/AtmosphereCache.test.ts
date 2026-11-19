@@ -3924,17 +3924,29 @@ interface HeldPreparation {
   readonly refuse: (error: unknown) => void;
 }
 
+/** The stepped harness's own parts: its preparations, its tasks and its engine's restores. */
+interface SteppedParts {
+  readonly preparations: HeldPreparation[];
+  /** Runs the tasks the cache waits on (`between`), where the harness holds them. */
+  readonly runTasks: () => void;
+  /** Raises the engine's restore after a device loss. */
+  readonly restore: () => void;
+}
+
 /**
  * A cache over the fakes whose tables are prepared ({@link AtmosphereCacheOptions.prepare}): each
- * preparation held until the test settles it, and its frame's step making a fake's tables.
+ * preparation held until the test settles it, its frame's step making a fake's tables; the tasks
+ * it waits on run at once, or, `heldTasks`, when the test runs them.
  */
-function steppedHarness(): Harness & { readonly preparations: HeldPreparation[] } {
+function steppedHarness(heldTasks = false): Harness & SteppedParts {
   const seam = new BodyDetailSeam();
   const builder = new ScriptedBuilder();
   const made: FakeTables[] = [];
   const thickSlots: number[] = [];
   const factory: { throws: Error | null } = { throws: null };
   const preparations: HeldPreparation[] = [];
+  const tasks: Array<() => void> = [];
+  const restores: Array<() => void> = [];
   const make = (built: BuiltAtmosphere, slots: number): FakeTables => {
     if (factory.throws !== null) {
       throw factory.throws;
@@ -3961,9 +3973,39 @@ function steppedHarness(): Harness & { readonly preparations: HeldPreparation[] 
           refuse: reject,
         });
       }),
-    between: () => Promise.resolve(),
+    between: () =>
+      heldTasks
+        ? new Promise<void>((resolve) => {
+            tasks.push(resolve);
+          })
+        : Promise.resolve(),
+    onRestored: (listener) => {
+      restores.push(listener);
+      return () => {
+        restores.splice(restores.indexOf(listener), 1);
+      };
+    },
   });
-  return { seam, builder, made, thickSlots, cache, view: cache.openView(), factory, preparations };
+  return {
+    seam,
+    builder,
+    made,
+    thickSlots,
+    cache,
+    view: cache.openView(),
+    factory,
+    preparations,
+    runTasks: () => {
+      for (let task = tasks.shift(); task !== undefined; task = tasks.shift()) {
+        task();
+      }
+    },
+    restore: () => {
+      for (const listener of restores.slice()) {
+        listener();
+      }
+    },
+  };
 }
 
 /** Asks for, answers and lands `body`'s build as R05's Earth. */
@@ -4030,15 +4072,66 @@ describe("a landed build's tables prepared in tasks (lane perf-long-tasks-4)", (
     expect([h.cache.entryOf(A)?.tables, first?.disposed]).toEqual([h.made[1], true]);
   });
 
-  it("makes no tables of a preparation whose build was let go before it ended", async () => {
+  it("asks a drawn entry's disc table in a task after the frame that made its tables, and once", async () => {
+    const h = steppedHarness();
+    note(h, [lit(A)]);
+    await answer(h, A);
+    await land(h, A, { kind: "built", assembled: airAssembly() });
+    note(h, [lit(A)]);
+    await microtasks();
+    h.preparations[0]?.ready();
+    await microtasks();
+    note(h, [lit(A)]);
+    note(h, [lit(A)]);
+    const inFrames = h.builder.discs.length;
+    await microtasks();
+    note(h, [lit(A)]);
+    expect([inFrames, h.builder.discs.length, h.made.length]).toEqual([0, 1, 1]);
+  });
+
+  it("prepares nothing for a build replaced, a body let go or a cache disposed before its first task", async () => {
+    const replaced = steppedHarness(true);
+    await landEarth(replaced, A);
+    note(replaced, [lit(A)]);
+    // Another light set: rebuilt from the reply held, the landed build replaced.
+    const relit = [lit(A, "disc", [SUN_LIGHT, { ...SUN_LIGHT, star: `${FIXTURE_SYSTEM}.0101` }])];
+    note(replaced, relit);
+    replaced.runTasks();
+    await microtasks();
+    const before = replaced.preparations.length;
+    const letGo = steppedHarness(true);
+    await landEarth(letGo, A);
+    note(letGo, [lit(A)]);
+    letGo.view.close();
+    // A new arrival lets go every body no view wants.
+    letGo.cache.openView().noteFrame({ nowMs: 0, scene: sceneOf({ arrival: {} }), bodies: [] });
+    letGo.runTasks();
+    await microtasks();
+    const disposed = steppedHarness(true);
+    await landEarth(disposed, A);
+    note(disposed, [lit(A)]);
+    disposed.cache.dispose();
+    disposed.runTasks();
+    await microtasks();
+    expect([before, letGo.preparations.length, disposed.preparations.length]).toEqual([0, 0, 0]);
+  });
+
+  it("prepares again a body whose preparation ended before a restore, with no problem", async () => {
     const h = steppedHarness();
     await landEarth(h, A);
     note(h, [lit(A)]);
     await microtasks();
-    h.cache.dispose();
+    expect(h.preparations).toHaveLength(1);
     h.preparations[0]?.ready();
     await microtasks();
-    expect(h.made).toEqual([]);
+    h.restore();
+    const restored = note(h, [lit(A)]);
+    await microtasks();
+    expect([restored.problems.size, h.made.length, h.preparations.length]).toEqual([0, 0, 2]);
+    h.preparations[1]?.ready();
+    await microtasks();
+    note(h, [lit(A)]);
+    expect(h.cache.entryOf(A)?.tables).toBe(h.made[0]);
   });
 
   it("holds a refused preparation as the body's failed problem, with one console.error", async () => {

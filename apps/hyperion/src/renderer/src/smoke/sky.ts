@@ -651,6 +651,7 @@ export async function checkSkyBake(engine: RenderEngine, checks: Checks): Promis
     }
     const atOnce = bakeSkyCube(engine, { ...each, name: `${each.name} at once` });
     const sizes = mipSizes(each.faceSizePx);
+    // The harness's checks run in order: each reads the GPU back before the next draws.
     // oxlint-disable-next-line no-await-in-loop
     const reads = await Promise.all([
       engine.readBuffer(over.peak, "tolerance"),
