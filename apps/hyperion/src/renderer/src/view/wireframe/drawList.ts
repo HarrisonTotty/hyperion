@@ -40,7 +40,7 @@ import {
   isSymbolSized,
   ringEllipse,
 } from "./bodies";
-import { behindLimb, sphereInFrustum } from "./cull";
+import { behindLimb, frustumOf } from "./cull";
 import type { Polyline } from "./curve";
 import { hullBoundingRadiusM, hullEdges, hullFaces, hullOnView } from "./hulls";
 import type { MeshOccluder } from "./meshOccluders";
@@ -724,6 +724,9 @@ export function buildWireframeDrawList(
     orientation: camera.pose.orientation,
     fovXRad: camera.fovXRad,
   };
+  // The frustum's planes taken once for every sphere the list tests (lane perf-long-tasks-4): taken
+  // a body, they held a terrain frame some 37 ms on a pod. The same sums, so the same answers.
+  const inFrustum = frustumOf(projection, viewport);
   const fromCamera = (p: ViewPosition): Vec3 => relativeToCamera(p, camera.pose, origins);
   const bodyCentre = (body: ViewBody): Vec3 =>
     fromCamera({ kind: "body", body: body.id, m: vec3(0, 0, 0) });
@@ -781,7 +784,7 @@ export function buildWireframeDrawList(
 
   for (const body of scene.bodies) {
     const centreM = bodyCentre(body);
-    if (!sphereInFrustum(centreM, body.radiusM, projection, viewport)) {
+    if (!inFrustum(centreM, body.radiusM)) {
       continue;
     }
     // Its datum on its figure's spheroid (R02.T19); with no rotation, a flattened body's drawn
@@ -870,7 +873,7 @@ export function buildWireframeDrawList(
 
   for (const ring of scene.rings) {
     const centreM = fromCamera({ kind: "body", body: ring.body, m: vec3(0, 0, 0) });
-    if (!sphereInFrustum(centreM, ring.outerRadiusM, projection, viewport)) {
+    if (!inFrustum(centreM, ring.outerRadiusM)) {
       continue;
     }
     const selected = sameTarget(options.selection, { kind: "body", body: ring.body });
@@ -895,7 +898,7 @@ export function buildWireframeDrawList(
         ? fromCamera({ kind: "system", system: scene.system, m: vec3(0, 0, 0) })
         : fromCamera({ kind: "body", body: orbit.parent, m: vec3(0, 0, 0) });
     const extentM = orbit.orbit.semiMajorAxisM * (1 + orbit.orbit.eccentricity);
-    if (!sphereInFrustum(parentM, extentM, projection, viewport)) {
+    if (!inFrustum(parentM, extentM)) {
       continue;
     }
     const selected = sameTarget(options.selection, { kind: "body", body: orbit.body });
@@ -920,7 +923,7 @@ export function buildWireframeDrawList(
       continue;
     }
     const originM = fromCamera(craft.pose.position);
-    if (!sphereInFrustum(originM, craft.hull.lengthM, projection, viewport)) {
+    if (!inFrustum(originM, craft.hull.lengthM)) {
       continue;
     }
     const originF32 = originMinusCamera(
