@@ -7,19 +7,33 @@ import type { MaterialHandle, MeshHandle, RenderTarget, ViewSize } from "../engi
 import { CLOUD_LAYER_PASS, type CloudLayerView, cloudShellOf } from "./cloudLayer";
 import { CLOUD_LEAST_MU, CLOUD_SKY_MU } from "./cloudShadow";
 import { octaveCorrectionOf } from "./cloudVolume";
+import { BASE_NOISE_SIZE, CURL_NOISE_SIZE, DETAIL_NOISE_SIZE } from "./cloudShapeNoise";
+import type { ShapeNoiseReply, ShapeNoiseRequest } from "./cloudShapeNoise";
 import {
+  CLOUD_MAP_PASS,
   CLOUD_RESOLVE_PASS,
+  CLOUD_SHAPE_ROWS,
   CLOUD_VOLUME_PASS,
   CLOUD_VOLUME_WGSL,
   CloudVolumes,
   compositeUniforms,
+  heightAboveDeckM,
   OctaveCorrectionBuilder,
+  packCloudShape,
   reprojectedUv,
   TEMPORAL_WEIGHT,
+  VOLUME_FLAT_FROM_M,
+  VOLUME_LEVERS,
+  VOLUME_REACH_M,
   volumeCameraOf,
+  volumeFlatteningAt,
   volumeJitter,
+  volumeStepOf,
   volumeTargetSize,
+  volumeWanted,
+  windAtM,
 } from "./cloudVolumePass";
+import { cloudShapeFrame, cloudShapeKindOf, normalisationTable } from "./cloudShape";
 import { type CloudCondensate, STAND_IN_CONDENSATES } from "./condensates";
 
 const FIGURE = { equatorialRadiusM: 6_378_137, polarRadiusM: 6_356_752.3 };
@@ -54,6 +68,31 @@ function viewFrom(heightM: number, direction = { x: -1, y: 0, z: 0 }): CloudLaye
     exposureScale: 1e-4,
     octaves: 12,
   };
+}
+
+/** A shape-noise worker that answers at once with blank noises of the right sizes. */
+class InstantNoiseWorker {
+  readonly #listeners: Array<(event: MessageEvent<ShapeNoiseReply>) => void> = [];
+
+  addEventListener(
+    _type: "message",
+    listener: (event: MessageEvent<ShapeNoiseReply>) => void,
+  ): void {
+    this.#listeners.push(listener);
+  }
+
+  postMessage(message: ShapeNoiseRequest): void {
+    const noises = {
+      base: new Uint8Array(BASE_NOISE_SIZE ** 3),
+      detail: new Uint8Array(DETAIL_NOISE_SIZE ** 3),
+      curl: new Uint8Array(CURL_NOISE_SIZE ** 2),
+    };
+    for (const listener of this.#listeners) {
+      listener(new MessageEvent("message", { data: { kind: "made", seed: message.seed, noises } }));
+    }
+  }
+
+  terminate(): void {}
 }
 
 /** A clock that moves a second each time it is read. */
@@ -158,7 +197,7 @@ describe("the volume's march WGSL (R11.T7.c)", () => {
       `const CLOUD_MARCH_LEAST_MU : f32 = ${String(CLOUD_LEAST_MU)};`,
     );
     expect(CLOUD_VOLUME_WGSL).toContain(
-      `const CLOUD_MARCH_SKY_MU : f32 = ${String(CLOUD_SKY_MU)};`,
+      `const CLOUD_MARCH_SKY_COSINE : f32 = ${String(CLOUD_SKY_MU)};`,
     );
   });
 });
@@ -168,11 +207,13 @@ describe("CloudVolumes (R11.T7.c)", () => {
     march: { kind: "material", name: "cloud volume" },
     resolve: { kind: "material", name: "cloud volume resolve" },
     composite: { kind: "material", name: "cloud volume composite" },
+    map: { kind: "material", name: "cloud map" },
     triangle: { kind: "mesh", name: "triangle" },
   } as const satisfies {
     readonly march: MaterialHandle;
     readonly resolve: MaterialHandle;
     readonly composite: MaterialHandle;
+    readonly map: MaterialHandle;
     readonly triangle: MeshHandle;
   };
   const PASS = { viewRotation: new Float32Array(16), projection: new Float32Array(16) };
@@ -180,7 +221,7 @@ describe("CloudVolumes (R11.T7.c)", () => {
   /** A volume on the counting engine, its draw's inputs, and the air target it composites into. */
   async function volumeOn() {
     const engine = await countingRenderEngine();
-    const volumes = new CloudVolumes(engine, "view");
+    const volumes = new CloudVolumes(engine, "view", new InstantNoiseWorker());
     const texture = (name: string) =>
       engine.createTexture({
         name,
@@ -204,16 +245,22 @@ describe("CloudVolumes (R11.T7.c)", () => {
       depth: false,
       category: "render-targets",
     });
-    const draw = (id: string, correction = texture("correction")) => ({
-      id,
-      gpu,
-      condensate: CONDENSATE,
-      view: viewFrom(400_000),
-      lighting: createAirlessTables(engine, "no air"),
-      sceneDepth: texture("depth"),
-      blueNoise: texture("blue noise"),
-      correction,
-    });
+    const draw = (id: string, correction = texture("correction")) => {
+      volumes.noisesReady(id, () => 0);
+      return {
+        id,
+        gpu,
+        condensate: CONDENSATE,
+        view: viewFrom(4_000),
+        lighting: createAirlessTables(engine, "no air"),
+        sceneDepth: texture("depth"),
+        blueNoise: texture("blue noise"),
+        correction,
+        timeS: 1_000,
+        rate: 1,
+        levers: VOLUME_LEVERS.full,
+      };
+    };
     return { engine, volumes, air, draw };
   }
 
@@ -227,15 +274,18 @@ describe("CloudVolumes (R11.T7.c)", () => {
     expect(volumes.correction(CONDENSATE, clock)).toBe(made[15]);
   });
 
-  it("marches and resolves into its own targets, then composites over the air, loading it", async () => {
+  it("maps, marches and resolves into its own targets, then composites over the air, loading it", async () => {
     const { engine, volumes, air, draw } = await volumeOn();
     volumes.draw(draw("A"), MATERIALS, air, SIZE, PASS, null);
     expect(engine.targetFrames.map((f) => f.label)).toEqual([
+      CLOUD_MAP_PASS,
       CLOUD_VOLUME_PASS,
       CLOUD_RESOLVE_PASS,
       CLOUD_LAYER_PASS,
     ]);
-    const [march, resolve, composite] = engine.targetFrames;
+    const [map, march, resolve, composite] = engine.targetFrames;
+    expect(march?.draws[0]?.textures["cloudMap"]).toBeDefined();
+    expect(map?.draws[0]?.uniforms["mapOrigins4"]?.[2]).toBe(256);
     expect(march?.draws[0]?.uniforms["view"]?.slice(0, 2)).toEqual(new Float32Array([33, 18]));
     expect(composite?.colourLoad).toBe("load");
     expect(resolve?.draws[0]?.textures["cloudMarch"]).toBeDefined();
@@ -274,16 +324,38 @@ describe("CloudVolumes (R11.T7.c)", () => {
     expect(composites[1]?.draws[0]?.textures["cloudResolved"]).not.toBe(first);
   });
 
-  it("makes three targets and a correction, and lets go of the correction and its targets", async () => {
+  it("makes four targets, a correction and the world's noises, and lets go of them all", async () => {
     const { engine, volumes, air, draw } = await volumeOn();
-    const inputs = draw("A");
     const before = engine.live.textures;
+    // The draw's inputs: its correction, depth, blue noise and airless tables, and the world's
+    // base, detail and curl noises, made as it asks for them.
+    const inputs = draw("A");
+    const asked = engine.live.textures;
     volumes.correction(CONDENSATE, () => 0, Number.POSITIVE_INFINITY);
     volumes.draw(inputs, MATERIALS, air, SIZE, PASS, null);
-    expect(engine.live.textures).toBe(before + 4);
+    // The correction; the march's target, two histories and the map.
+    expect(engine.live.textures).toBe(asked + 5);
     volumes.dispose();
-    // The fake's targets keep their textures while it lives (`CountingRenderEngine.live`).
-    expect(engine.live.textures).toBe(before + 3);
+    // The noises and the correction let go; the fake's targets keep their textures while it lives
+    // (`CountingRenderEngine.live`).
+    expect(engine.live.textures).toBe(asked + 4 - 3);
+    expect(asked - before).toBeGreaterThanOrEqual(3);
+  });
+
+  it("refuses to draw a world whose noises are not made", async () => {
+    const { volumes, air, draw } = await volumeOn();
+    const inputs = draw("A");
+    expect(() => {
+      volumes.draw({ ...inputs, id: "B" }, MATERIALS, air, SIZE, PASS, null);
+    }).toThrow(/noises/);
+  });
+
+  it("draws with the levers the floor's step gives it", async () => {
+    const { engine, volumes, air, draw } = await volumeOn();
+    volumes.draw({ ...draw("A"), levers: VOLUME_LEVERS.stepped }, MATERIALS, air, SIZE, PASS, null);
+    const march = engine.targetFrames.findLast((f) => f.label === CLOUD_VOLUME_PASS);
+    const levers = march?.draws[0]?.uniforms["levers"];
+    expect([levers?.[0], levers?.[1], levers?.[3]]).toEqual([40, 4, 0]);
   });
 
   it("makes its targets again at a new size, its history dropped", async () => {
@@ -294,5 +366,63 @@ describe("CloudVolumes (R11.T7.c)", () => {
     const resolve = engine.targetFrames.findLast((f) => f.label === CLOUD_RESOLVE_PASS);
     expect(march?.draws[0]?.uniforms["view"]?.slice(0, 2)).toEqual(new Float32Array([65, 36]));
     expect(resolve?.draws[0]?.uniforms["camera"]?.[3]).toBe(0);
+  });
+});
+
+describe("when the volume draws (R11.T7.c; the owner's requirement, 2026-11-19)", () => {
+  it("keeps the volume within the deck's reach whatever the floor's step, on high alone", () => {
+    for (const height of [2, 500, 2_000, 10_000, VOLUME_REACH_M - 1]) {
+      expect(volumeWanted("high", height)).toBe(true);
+      expect(volumeWanted("low", height)).toBe(false);
+    }
+    expect(volumeWanted("high", VOLUME_REACH_M)).toBe(false);
+  });
+
+  it("degrades the volume at each step of the floor and never sheds it", () => {
+    expect(volumeStepOf("high", undefined, undefined)).toBe("full");
+    expect(volumeStepOf("high", "high", false)).toBe("full");
+    expect(volumeStepOf("high", "low", false)).toBe("stepped");
+    expect(volumeStepOf("high", "low", true)).toBe("lowest");
+    const { full, stepped, lowest } = VOLUME_LEVERS;
+    expect(full.viewSteps > stepped.viewSteps && stepped.viewSteps > lowest.viewSteps).toBe(true);
+    expect(full.lightSteps > stepped.lightSteps && stepped.lightSteps > lowest.lightSteps).toBe(
+      true,
+    );
+    expect([full.detail, stepped.detail, lowest.detail]).toEqual([true, false, false]);
+  });
+
+  it("flattens towards the layer's slab from 100 km above the tops to its reach, where the layer takes over", () => {
+    expect(volumeFlatteningAt(0)).toBe(0);
+    expect(volumeFlatteningAt(VOLUME_FLAT_FROM_M)).toBe(0);
+    expect(volumeFlatteningAt((VOLUME_FLAT_FROM_M + VOLUME_REACH_M) / 2)).toBeCloseTo(0.5, 9);
+    expect(volumeFlatteningAt(VOLUME_REACH_M)).toBe(1);
+  });
+
+  it("measures the camera's height above the deck's top on the datum", () => {
+    const camera = { x: FIGURE.equatorialRadiusM + 3_500, y: 0, z: 0 };
+    expect(heightAboveDeckM(camera, FIGURE, CONDENSATE)).toBeCloseTo(500, 6);
+  });
+});
+
+describe("the volume's shape rows (R11.T7.c)", () => {
+  it("packs the noises' tiles and drifts, the kind and κ's normalisation", () => {
+    const frame = cloudShapeFrame(2_000, { x: 10, y: 0, z: 0 }, 100, 1);
+    const kind = cloudShapeKindOf(CONDENSATE);
+    const rows = packCloudShape(frame, kind);
+    expect(rows.length).toBe(4 * CLOUD_SHAPE_ROWS);
+    expect(rows[0]).toBeCloseTo(1 / 8_000, 9);
+    expect(rows[1]).toBeCloseTo(1 / 1_000, 9);
+    expect(rows[3]).toBeCloseTo(2 / 3, 6);
+    // 10 m s⁻¹ eastward for 100 s against an 8 km tile: an eighth of a tile upwind.
+    expect(rows[4]).toBeCloseTo(1 - 1_000 / 8_000, 6);
+    expect(rows[14]).toBe(1);
+    expect(rows.slice(16, 16 + 81)).toEqual(normalisationTable(kind.profileExponent));
+  });
+
+  it("takes the coverage's wind at the camera along its east", () => {
+    const coverage = { widthCells: 1, heightCells: 1, texels: new Float32Array([0, 1, 12, 0]) };
+    const wind = windAtM(coverage, { x: FIGURE.equatorialRadiusM, y: 0, z: 0 });
+    expect(wind.y).toBeCloseTo(12, 9);
+    expect(Math.abs(wind.x) + Math.abs(wind.z)).toBeLessThan(1e-9);
   });
 });

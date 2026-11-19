@@ -79,10 +79,13 @@ import {
   seasonOf,
 } from "../clouds/cloudLayer";
 import {
-  CLOUD_COMPOSITE_MATERIAL,
-  CLOUD_RESOLVE_MATERIAL,
-  CLOUD_VOLUME_MATERIAL,
+  CLOUD_VOLUME_MATERIALS,
   CloudVolumes,
+  heightAboveDeckM,
+  VOLUME_LEVERS,
+  volumeStepOf,
+  volumeWanted,
+  withinVolumeReach,
 } from "../clouds/cloudVolumePass";
 import type { BodyClouds, CloudCondensate } from "../clouds/condensates";
 import {
@@ -736,13 +739,14 @@ interface Resources {
    */
   readonly cloudLayer: MaterialHandle | null;
   /**
-   * The cloud volume's march, resolve and composite (plan R11, R11.T7.c; `cloudVolumePass.ts`), made
+   * The cloud volume's march, resolve, composite and map (plan R11, R11.T7.c; `cloudVolumePass.ts`), made
    * with the rest; `null` where its compiler refused any, when the high setting draws the layer.
    */
   readonly cloudVolume: {
     readonly march: MaterialHandle;
     readonly resolve: MaterialHandle;
     readonly composite: MaterialHandle;
+    readonly map: MaterialHandle;
   } | null;
   /**
    * The `ocean` pass's far sea (plan R11, R11.T8.b), made with the rest; `null` where its compiler
@@ -957,14 +961,16 @@ function volumeMaterialsOf(
   engine: Pick<RenderEngine, "releaseMaterial">,
   made: ReadonlyArray<MaterialHandle | null>,
 ): Resources["cloudVolume"] {
-  const [march, resolve, composite] = made;
+  const [march, resolve, composite, map] = made;
   if (
     march === undefined ||
     march === null ||
     resolve === undefined ||
     resolve === null ||
     composite === undefined ||
-    composite === null
+    composite === null ||
+    map === undefined ||
+    map === null
   ) {
     for (const material of made) {
       if (material !== null) {
@@ -973,7 +979,7 @@ function volumeMaterialsOf(
     }
     return null;
   }
-  return { march, resolve, composite };
+  return { march, resolve, composite, map };
 }
 
 /** `rect` held to a target of `size`, its pixels from the top left. */
@@ -1261,7 +1267,7 @@ export class PhotorealRenderer {
           }),
         // A refused volume leaves the high setting the layer (plan R11, R11.T7.c).
         Promise.all(
-          [CLOUD_VOLUME_MATERIAL, CLOUD_RESOLVE_MATERIAL, CLOUD_COMPOSITE_MATERIAL].map((spec) =>
+          CLOUD_VOLUME_MATERIALS.map((spec) =>
             engine
               .createMaterialAsync(spec, [HDR_COLOUR_FORMAT], [triangle])
               .catch((error: unknown) => {
@@ -2584,6 +2590,14 @@ export class PhotorealRenderer {
               sceneDepth: depth,
               blueNoise: resources.blueNoise,
               correction: own.volume,
+              timeS: (frame.time ?? CLOCK_ZERO).seconds + (frame.time ?? CLOCK_ZERO).nanos * 1e-9,
+              rate: frame.timeRate ?? 0,
+              // The frame-rate floor's step degrades the volume and never sheds it (plan R11,
+              // R11.T7.c; the owner's requirement, 2026-11-19).
+              levers:
+                VOLUME_LEVERS[
+                  volumeStepOf(frame.setting, frame.atmosphereSetting, frame.floorLowest)
+                ],
             },
             { ...resources.cloudVolume, triangle: resources.triangle },
             target,
@@ -2672,14 +2686,23 @@ export class PhotorealRenderer {
       }
     }
     this.#clouds.keepOnly(new Set(drawn.keys()));
-    // The nearest such body as the volume, where the setting's clouds are one and the frame-rate
-    // floor has not stepped the air down (plan R11, R11.T7.c), once its correction is made.
+    // The nearest such body as the volume, where the setting's clouds are one and the camera
+    // stands within the deck's reach, whatever the frame-rate floor's step, which takes the
+    // volume's coarser levers instead (plan R11, R11.T7.c; the owner's requirement, 2026-11-19),
+    // once its correction and its world's noises are made.
     const volume =
-      SETTINGS[frame.setting].clouds === "volume" &&
-      (frame.atmosphereSetting ?? frame.setting) === frame.setting &&
-      resources.cloudVolume !== null
-        ? nearestOf(wanted.filter(({ air }) => drawn.has(air.id)))
-        : null;
+      resources.cloudVolume === null
+        ? null
+        : nearestOf(
+            wanted.filter(
+              ({ air, condensate }) =>
+                drawn.has(air.id) &&
+                volumeWanted(
+                  frame.setting,
+                  heightAboveDeckM(air.camera.positionM, tablesFigureOf(air.tables), condensate),
+                ),
+            ),
+          );
     if (volume === null) {
       // A frame without the volume ends its history; its corrections, 2 KiB each, are kept.
       this.#volumes.cut();
@@ -2687,26 +2710,41 @@ export class PhotorealRenderer {
     }
     const correction = this.#volumes.correction(volume.condensate, this.#nowMs);
     this.#volumes.keepOnly([volume.condensate]);
+    const noises = this.#volumes.noisesReady(volume.air.id, this.#nowMs);
     const own = drawn.get(volume.air.id);
-    if (correction !== null && own !== undefined) {
+    if (correction !== null && noises && own !== undefined) {
       drawn.set(volume.air.id, { ...own, volume: correction });
     }
     return drawn;
   }
 
   /**
-   * Makes the clouds' noise tile at once, and the volume's correction of each of `atmospheres`'
-   * condensates, so that a still's first sample draws its bodies' clouds as its frames would (plan
+   * Makes the clouds' noise tile at once, the volume's correction of each of `atmospheres`'
+   * condensates and the nearest's world's shape noises, so that a still's first sample draws its bodies' clouds as its frames would (plan
    * R11, R11.T10.b's still renderer, made at each still); a view's frames make them over frames.
    */
   prepareClouds(atmospheres: ReadonlyArray<FrameAtmosphere> = []): void {
     this.#clouds.step(this.#nowMs, Number.POSITIVE_INFINITY);
+    const near: Array<{ readonly air: FrameAtmosphere }> = [];
     for (const air of atmospheres) {
       const clouds = air.clouds ?? null;
       const condensate = clouds === null ? null : layerCondensateOf(clouds);
       if (condensate !== null) {
         this.#volumes.correction(condensate, this.#nowMs, Number.POSITIVE_INFINITY);
+        const height = heightAboveDeckM(
+          air.camera.positionM,
+          tablesFigureOf(air.tables),
+          condensate,
+        );
+        if (withinVolumeReach(height)) {
+          near.push({ air });
+        }
       }
+    }
+    // The world's noises of the body the volume would draw (R11.T7.c).
+    const nearest = nearestOf(near);
+    if (nearest !== null) {
+      this.#volumes.prepareNoises(nearest.air.id);
     }
   }
 
@@ -3018,6 +3056,7 @@ export class PhotorealRenderer {
         resources.cloudVolume?.march ?? null,
         resources.cloudVolume?.resolve ?? null,
         resources.cloudVolume?.composite ?? null,
+        resources.cloudVolume?.map ?? null,
       ]) {
         if (material !== null) {
           this.#engine.releaseMaterial(material);

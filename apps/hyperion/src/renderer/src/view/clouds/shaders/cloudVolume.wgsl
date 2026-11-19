@@ -1,18 +1,12 @@
 // The cloud volume's light (plan R11, R11.T7.c; Design note 10): the high setting's march through a
 // condensate's deck, its two-lobe phase, Wrenninge et al. 2013's multiple-scattering octaves and
 // their correction to δ-Eddington. The twin of `clouds/cloudVolume.ts`, its f64 reference, whose
-// remarks give the model. Composed after `view/shaders/preciseTrig.wgsl`, `cloudField.wgsl` and
-// `cloudOptics.wgsl`; its includer declares, besides `cloudField.wgsl`'s bindings:
+// remarks give the model, and of `clouds/cloudMarch.ts`' `marchCloudRay`, whose remarks give the
+// march (`cloud_march`). Composed after `cloudShape.wgsl` and `cloudOptics.wgsl`; its includer
+// declares, besides `cloudShape.wgsl`'s bindings:
 //   - `cloud_octave_correction : texture_2d<f32>`, the condensate's K(τ, μ₀) on the octaves'
 //     multiple scattering, `r32float`, CLOUD_CORRECTION_TAUS × CLOUD_CORRECTION_MUS, read by
 //     `textureLoad` (`cloudVolume.ts`' `octaveCorrectionOf`).
-//
-// A column's τ is the field's mean τ over its footprint (`cloud_field_at`), read on the layer's shell
-// above the sample so that every height of a column reads the same, and spread uniformly through the
-// deck's depth: the layer is the volume's independent-pixel approximation. The sun's optical depth
-// from a sample to the deck's top is the column's share above it over the sun's local zenith cosine,
-// a plane-parallel column's (lean, 2026-11-13); a sample whose sun is below its horizon takes none.
-// R08's transmittance to the deck is its caller's.
 
 // `cloudVolume.ts`' CLOUD_OCTAVES, BACKWARD_LOBE_ASYMMETRY and FORWARD_LOBE_SHARE: octave i's
 // extinction, on the sun's path and the view's, a^i; its scattering b^i ≤ a^i; its phase's c^i.
@@ -132,85 +126,251 @@ fn cloud_spheroid_hits(o : vec3f, d : vec3f, k : f32, r : f32) -> vec2f {
   return vec2f((-b - root) / a, (-b + root) / a);
 }
 
-// The march of a view ray from `o` along unit `d`, body-fixed m, through the deck between `base_m`
-// and `top_m` above the datum, lit by the source along unit `sun`: x the radiance towards the camera
-// per unit of the source's irradiance face-on, sr⁻¹; y the view's transmittance through the deck.
-// Its footprint grows as `footprint_per_m` of the distance, at least 1 m. The deck's surfaces are
-// spheroids of the layer's flattening, of semi-axes a + h and (a + h) ÷ k for the layer's k = a_s ÷
-// c_s; the ray's first stretch through the deck is marched.
-fn cloud_volume_march(
-  o : vec3f, d : vec3f, sun : vec3f, base_m : f32, top_m : f32, steps : u32, footprint_per_m : f32,
-) -> vec2f {
-  let shell = cloud_row(CLOUD_ROW_SHELL);
-  let optics = cloud_row(CLOUD_ROW_OPTICS);
-  let datum = cloud_row(CLOUD_ROW_NORM).y;
-  let k = shell.x / shell.y;
+// The ray's first stretch through the deck between `base_m` and `top_m` above the datum `datum`
+// (`cloudMarch.ts`' `deckStretch`); (−1, −1) where it has none.
+fn cloud_deck_stretch(o : vec3f, d : vec3f, k : f32, datum : f32, base_m : f32, top_m : f32) -> vec2f {
   let outer = cloud_spheroid_hits(o, d, k, datum + top_m);
   if (outer.y <= 0.0) {
-    return vec2f(0.0, 1.0);
+    return vec2f(-1.0);
   }
   let inner = cloud_spheroid_hits(o, d, k, datum + base_m);
   var t0 = max(outer.x, 0.0);
   var t1 = outer.y;
   if (inner.x > t0) {
-    // From above: the stretch ends where the ray meets the deck's base.
     t1 = inner.x;
   } else if (inner.x < 0.0 && inner.y > t0) {
-    // From beneath the base: the deck begins where the ray leaves it.
     t0 = inner.y;
   }
-  return cloud_volume_march_between(o, d, sun, base_m, top_m, t0, t1, steps, footprint_per_m, k, shell, optics, datum, 1.0);
+  if (!(t1 > t0)) {
+    return vec2f(-1.0);
+  }
+  return vec2f(t0, t1);
 }
 
-// `cloud_volume_march`'s march between `t0` and `t1` along the ray, each sample's column the field's
-// mean τ over `share`, the covered share of the view's footprint it is drawn in: 1 for the column
-// spread over its whole footprint; the footprint's f for its covered part alone, whose light and
-// opacity the caller weighs by f, the layer's independent-pixel form (Design note 10).
-fn cloud_volume_march_between(
-  o : vec3f, d : vec3f, sun : vec3f, base_m : f32, top_m : f32, t0 : f32, t1 : f32, steps : u32,
-  footprint_per_m : f32, k : f32, shell : vec4f, optics : vec4f, datum : f32, share : f32,
-) -> vec2f {
-  let depth = max(top_m - base_m, 1.0);
-  let dt = (t1 - t0) / f32(steps);
-  let cos_theta = dot(sun, d);
-  let albedo = 1.0 - optics.y;
-  var view = 1.0;
-  var radiance = 0.0;
-  for (var s = 0u; s < steps; s = s + 1u) {
-    let t = t0 + (f32(s) + 0.5) * dt;
-    let x = o + t * d;
-    let sx = vec3f(x.xy, x.z * k);
-    let scaled = length(sx);
-    let height = scaled - datum;
-    // The column above the sample, read on the layer's shell.
-    let on_shell = x * (shell.x / scaled);
-    let field = cloud_field_at(on_shell, max(footprint_per_m * t, 1.0), CLOUD_OCTAVES_MAX);
-    let column = field.mean_tau / share;
-    let sigma = column / depth;
-    let normal = normalize(vec3f(x.xy, x.z * k * k));
-    let raw_mu = dot(normal, sun);
-    // Below its horizon a sample takes no sun.
-    let lit = raw_mu >= -sqrt(2.0 * max(height, 0.0) / datum);
-    let mu_sun = max(raw_mu, CLOUD_VOLUME_LEAST_MU);
-    let above = column * clamp((top_m - height) / depth, 0.0, 1.0);
-    let multiple = cloud_octave_correction_at(column, mu_sun);
-    // One view transmittance, the medium's own extinction's; the octaves' a^i on the sun's path.
-    let view_step = sigma * dt;
-    var a = 1.0;
-    var b = 1.0;
-    var c = 1.0;
-    var source = 0.0;
-    for (var i = 0u; i < CLOUD_OCTAVE_COUNT; i = i + 1u) {
-      let weight = select(multiple, 1.0, i == 0u);
-      if (lit) {
-        source = source + weight * b * albedo * cloud_two_lobe(cos_theta, optics.x, c) * exp(-a * above / mu_sun);
-      }
-      a = a * CLOUD_OCTAVE_EXTINCTION;
-      b = b * CLOUD_OCTAVE_SCATTERING;
-      c = c * CLOUD_OCTAVE_PHASE;
-    }
-    radiance = radiance + view * source * sigma * dt * cloud_escape(view_step);
-    view = view * exp(-view_step);
+// `cloudMarch.ts`' LIGHT_REACH_DEPTHS, LIGHT_LEAST_MU, LEAST_TRANSMITTANCE, SHARE_SD_RANGE and
+// LEAST_SHARE.
+const CLOUD_LIGHT_REACH_DEPTHS : f32 = 3.0;
+const CLOUD_LIGHT_LEAST_MU : f32 = 0.33333333;
+const CLOUD_MARCH_LEAST_VIEW : f32 = 3e-3;
+const CLOUD_SHARE_SD_LEAST : f32 = 0.1;
+const CLOUD_SHARE_SD_MOST : f32 = 0.5;
+const CLOUD_MARCH_LEAST_SHARE : f32 = 1e-4;
+// `cloudMarch.ts`' SKY_MU, the two-stream diffusivity's cosine.
+const CLOUD_MARCH_SKY_COSINE : f32 = 0.6;
+
+// What a march reads of its deck and its condensate.
+struct CloudMarchDeck {
+  // The deck's base and top above the datum, its depth, and the datum's equatorial radius, m.
+  base_m : f32,
+  top_m : f32,
+  depth_m : f32,
+  datum : f32,
+  // k, the deck's spheroids' a ÷ c.
+  k : f32,
+  // g and 1 − ϖ₀.
+  asymmetry : f32,
+  co_albedo : f32,
+  // φ, the flattening towards the layer's slab.
+  flat : f32,
+}
+
+// A march's levers (`cloudMarch.ts`' CloudMarchLevers): the view's samples, each march towards
+// the source's, and 1 where the detail noise is read.
+struct CloudMarchLevers {
+  view_steps : u32,
+  light_steps : u32,
+  detail : f32,
+}
+
+// A march's result (`cloudMarch.ts`' CloudMarch): each source's radiance per unit of its
+// irradiance face-on, sr⁻¹, the sky's per unit of its irradiance ÷ π, the view's transmittance and
+// the distance its opacity is weighed at, each before the share, and the share.
+struct CloudMarchResult {
+  sun : vec2f,
+  sky : f32,
+  transmittance : f32,
+  mean_t : f32,
+  share : f32,
+}
+
+// A sample's density, its column (x f, y the mean τ, z η_top, w s) and its column's share above it.
+struct CloudSampleDensity {
+  sigma : f32,
+  column : vec4f,
+  above : f32,
+}
+
+fn cloud_height_of(x : vec3f, deck : CloudMarchDeck) -> f32 {
+  return length(vec3f(x.xy, x.z * deck.k)) - deck.datum;
+}
+
+// The density at a place and footprint (`cloudMarch.ts`' `densityAt`).
+fn cloud_density_at(
+  m : CloudMapPlane, deck : CloudMarchDeck, x : vec3f, footprint : f32, share : f32, detail : bool,
+) -> CloudSampleDensity {
+  let column = cloud_map_column(m, x, footprint);
+  let height = cloud_height_of(x, deck);
+  let top = column.z + deck.flat * (1.0 - column.z);
+  let u = (height - deck.base_m) / (deck.depth_m * top);
+  let above = cloud_share_above(u, deck.flat);
+  if (!(column.y > 0.0) || !(u >= 0.0 && u < 1.0)) {
+    return CloudSampleDensity(0.0, column, above);
   }
-  return vec2f(radiance, view);
+  let features = cloud_shape_row(CLOUD_SHAPE_ROW_FEATURES);
+  let wb = cloud_noise_share(features.x, footprint) * cloud_shape_row(CLOUD_SHAPE_ROW_BASE).w;
+  var wd = 0.0;
+  if (detail) {
+    wd = cloud_noise_share(features.y, footprint) * cloud_shape_row(CLOUD_SHAPE_ROW_DETAIL).w;
+  }
+  var nb = 0.5;
+  if (wb > 0.0) {
+    nb = cloud_base_at(x);
+  }
+  var nd = 0.5;
+  if (wd > 0.0) {
+    let plane = cloud_map_plane_at(m, x);
+    nd = cloud_detail_at(x, plane.xy, m.east.xyz, m.north.xyz);
+  }
+  let sigma = cloud_density(column.y / share, u, top, deck.depth_m, nb, nd, wb, wd, deck.flat);
+  return CloudSampleDensity(sigma, column, above);
+}
+
+// The sun's optical depth to a sample by the march towards it (`cloudMarch.ts`' `sunDepth`).
+fn cloud_sun_depth(
+  m : CloudMapPlane, deck : CloudMarchDeck, x : vec3f, height : f32, mu_sun : f32, sun : vec3f,
+  footprint : f32, share : f32, steps : u32,
+) -> f32 {
+  let reach = min(
+    max(deck.top_m - height, 0.0) / max(mu_sun, CLOUD_LIGHT_LEAST_MU),
+    CLOUD_LIGHT_REACH_DEPTHS * deck.depth_m,
+  );
+  let n = f32(steps);
+  var tau = 0.0;
+  for (var j = 0u; j < steps; j = j + 1u) {
+    let f = (f32(j) + 0.5) / n;
+    let step = reach * (2.0 * f32(j) + 1.0) / (n * n);
+    tau = tau + cloud_density_at(m, deck, x + reach * f * f * sun, footprint, share, false).sigma * step;
+  }
+  return tau;
+}
+
+// The column at a ray's entry into the deck, over the pixel's footprint there, which sets the ray's
+// share (`cloudMarch.ts`' `marchEntry`).
+fn cloud_march_entry(m : CloudMapPlane, o : vec3f, d : vec3f, t0 : f32, k : f32, footprint_per_m : f32) -> vec4f {
+  let x0 = o + t0 * d;
+  let normal = normalize(vec3f(x0.xy, x0.z * k * k));
+  let mu_view = max(abs(dot(d, normal)), CLOUD_VOLUME_LEAST_MU);
+  return cloud_map_column(m, x0, max(footprint_per_m * t0 / mu_view, 1.0));
+}
+
+// The conservative two-stream's diffuse reflectance (`cloudMarch.ts`' `diffuseReflectance`).
+fn cloud_diffuse_reflectance(tau : f32, g : f32) -> f32 {
+  let x = 0.75 * (1.0 - g) * max(tau, 0.0);
+  return x / (1.0 + x);
+}
+
+// A view ray's march between `t0` and `t1` (`cloudMarch.ts`' `marchCloudRay`), lit by `sun0`,
+// marched towards, and `sun1`, plane-parallel, where `suns` is 2; `entry` the column at its entry.
+fn cloud_march(
+  m : CloudMapPlane, deck : CloudMarchDeck, levers : CloudMarchLevers, o : vec3f, d : vec3f,
+  t0 : f32, t1 : f32, sun0 : vec3f, sun1 : vec3f, suns : u32, footprint_per_m : f32, jitter : f32,
+  entry : vec4f,
+) -> CloudMarchResult {
+  let w = smoothstep(CLOUD_SHARE_SD_LEAST, CLOUD_SHARE_SD_MOST, entry.w);
+  let weight_share = w + deck.flat * (1.0 - w);
+  let share = 1.0 - weight_share * (1.0 - entry.x);
+  var result = CloudMarchResult(vec2f(0.0), 0.0, 1.0, t0, share);
+  if (!(share >= CLOUD_MARCH_LEAST_SHARE) || !(t1 > t0)) {
+    return result;
+  }
+  // δ-Eddington's R and T_diff at the sky's cosine of the entry's column, which the flattening
+  // mixes the sky's light to.
+  var entry_slab = vec2f(0.0);
+  let entry_tau = entry.y / share;
+  if (deck.flat > 0.0 && entry_tau > 0.0) {
+    let slab = cloud_delta_eddington(entry_tau, deck.asymmetry, deck.co_albedo, CLOUD_MARCH_SKY_COSINE);
+    entry_slab = vec2f(slab.reflectance, slab.diffuse);
+  }
+  let length_m = t1 - t0;
+  let p = 1.0 + clamp(log2(max(length_m / (8.0 * deck.depth_m), 1.0)) / 3.0, 0.0, 1.0);
+  let n = f32(levers.view_steps);
+  let albedo = 1.0 - deck.co_albedo;
+  let cos0 = dot(sun0, d);
+  let cos1 = dot(sun1, d);
+  var light = vec2f(0.0);
+  var sky = 0.0;
+  var view = 1.0;
+  var weighed = 0.0;
+  var weight = 0.0;
+  for (var s = 0u; s < levers.view_steps; s = s + 1u) {
+    let v = (f32(s) + jitter) / n;
+    let t = t0 + length_m * pow(max(v, 1e-9), p);
+    let dt = length_m * p * pow(max(v, 0.5 / n), p - 1.0) / n;
+    let x = o + t * d;
+    let footprint = max(footprint_per_m * t, 1.0);
+    let sample = cloud_density_at(m, deck, x, footprint, share, levers.detail > 0.5);
+    if (!(sample.sigma > 0.0)) {
+      continue;
+    }
+    let column_tau = sample.column.y / share;
+    let height = cloud_height_of(x, deck);
+    let normal = normalize(vec3f(x.xy, x.z * deck.k * deck.k));
+    let view_step = sample.sigma * dt;
+    let scattered = view * sample.sigma * dt * cloud_escape(view_step);
+    let horizon = -sqrt(2.0 * max(height, 0.0) / deck.datum);
+    for (var j = 0u; j < suns; j = j + 1u) {
+      var sun = sun0;
+      var cos_theta = cos0;
+      if (j == 1u) {
+        sun = sun1;
+        cos_theta = cos1;
+      }
+      let raw_mu = dot(normal, sun);
+      if (raw_mu < horizon) {
+        continue;
+      }
+      let mu_sun = max(raw_mu, CLOUD_VOLUME_LEAST_MU);
+      let plane_parallel = column_tau * sample.above / mu_sun;
+      var marched = plane_parallel;
+      if (j == 0u && deck.flat < 1.0) {
+        marched = cloud_sun_depth(m, deck, x, height, raw_mu, sun, footprint, share, levers.light_steps);
+      }
+      let tau_sun = marched + deck.flat * (plane_parallel - marched);
+      let multiple = cloud_octave_correction_at(column_tau, mu_sun);
+      var a = 1.0;
+      var b = 1.0;
+      var c = 1.0;
+      var source = 0.0;
+      for (var i = 0u; i < CLOUD_OCTAVE_COUNT; i = i + 1u) {
+        let octave_weight = select(multiple, 1.0, i == 0u);
+        source = source + octave_weight * b * albedo * cloud_two_lobe(cos_theta, deck.asymmetry, c) * exp(-a * tau_sun);
+        a = a * CLOUD_OCTAVE_EXTINCTION;
+        b = b * CLOUD_OCTAVE_SCATTERING;
+        c = c * CLOUD_OCTAVE_PHASE;
+      }
+      if (j == 0u) {
+        light.x = light.x + scattered * source;
+      } else {
+        light.y = light.y + scattered * source;
+      }
+    }
+    let reflect = cloud_diffuse_reflectance(column_tau, deck.asymmetry);
+    let slab_r = reflect + deck.flat * (entry_slab.x - reflect);
+    let slab_t = 1.0 - reflect + deck.flat * (entry_slab.y - (1.0 - reflect));
+    let opacity = 1.0 - exp(-view_step);
+    sky = sky + view * opacity * (slab_r + sample.above * (slab_t - slab_r));
+    weighed = weighed + view * opacity * t;
+    weight = weight + view * opacity;
+    view = view * exp(-view_step);
+    if (view < CLOUD_MARCH_LEAST_VIEW) {
+      break;
+    }
+  }
+  result.sun = light;
+  result.sky = sky;
+  result.transmittance = view;
+  if (weight > 0.0) {
+    result.mean_t = weighed / weight;
+  }
+  return result;
 }

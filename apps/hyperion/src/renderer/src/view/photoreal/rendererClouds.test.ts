@@ -9,7 +9,12 @@ import { AtmosphereTables } from "../atmosphere/tables";
 import type { BodyFramePlan, LitBodyInput } from "../bodies/draw";
 import { IDENTITY_QUATERNION } from "../camera/quaternion";
 import { CLOUD_LAYER_MATERIAL, CLOUD_LAYER_PASS, CLOUD_TEXTURES } from "../clouds/cloudLayer";
-import { CLOUD_RESOLVE_PASS, CLOUD_VOLUME_PASS } from "../clouds/cloudVolumePass";
+import {
+  CLOUD_MAP_PASS,
+  CLOUD_RESOLVE_PASS,
+  CLOUD_VOLUME_PASS,
+  VOLUME_LEVERS,
+} from "../clouds/cloudVolumePass";
 import type { BodyClouds } from "../clouds/condensates";
 import type { DrawItem, FrameSubmission, RenderView } from "../engine/types";
 import { AU_M } from "../scenes/kept";
@@ -253,56 +258,104 @@ describe("the photorealistic renderer's clouds (R11.T7.b)", () => {
 });
 
 describe("the photorealistic renderer's cloud volume (R11.T7.c)", () => {
-  /** The labels of the last of `frames` renders of `planet`'s clouds on `setting`. */
-  async function lastFrameLabels(
+  /** A planet whose centre puts the camera `heightM` above its tables' ground. */
+  const planetBelow = (heightM: number): LitBodyInput =>
+    bodyAt("0200080020000000.0300", vec3(0, 0, -(EARTH_RADIUS_M + heightM)));
+
+  /**
+   * The last of `frames` renders of a planet's clouds from `heightM` on `setting`, its world's
+   * noises made at once where `noises` holds, else a step a frame: the labels drawn and the
+   * march's levers.
+   */
+  async function lastFrame(
     setting: "high" | "low",
     frames: number,
-    atmosphereSetting?: "low",
-  ): Promise<ReadonlyArray<string>> {
+    options: {
+      readonly heightM?: number;
+      readonly noises?: boolean;
+      readonly atmosphereSetting?: "low";
+      readonly floorLowest?: boolean;
+    } = {},
+  ): Promise<{
+    readonly labels: ReadonlyArray<string>;
+    readonly levers: Float32Array | undefined;
+  }> {
     const { engine, view, renderer } = await preparedRenderer();
     renderer.prepareClouds();
-    const planet = bodyAt("0200080020000000.0300", vec3(0, 0, -1e8));
+    const planet = planetBelow(options.heightM ?? 4_000);
     const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, EARTH_RADIUS_M);
     const frame = {
       ...frameOf(planet, tables, EARTH_CLOUDS),
       setting,
-      ...(atmosphereSetting === undefined ? {} : { atmosphereSetting }),
+      ...(options.atmosphereSetting === undefined
+        ? {}
+        : { atmosphereSetting: options.atmosphereSetting }),
+      ...(options.floorLowest === undefined ? {} : { floorLowest: options.floorLowest }),
     };
+    if (options.noises === true) {
+      // The noises at once and the correction with them, as a still's first sample takes them.
+      renderer.prepareClouds(frame.atmospheres);
+    }
     let from = 0;
     for (let i = 0; i < frames; i += 1) {
       from = engine.targetFrames.length;
       renderer.render(view, frame);
     }
-    const labels = engine.targetFrames.slice(from).map((f) => f.label);
+    const drawn = engine.targetFrames.slice(from);
+    const levers = drawn.find((f) => f.label === CLOUD_VOLUME_PASS)?.draws[0]?.uniforms["levers"];
     renderer.dispose();
     tables.dispose();
-    return labels;
+    return { labels: drawn.map((f) => f.label), levers };
   }
 
-  it("draws the nearest body's clouds as the volume on high once its correction is made, the layer until then", async () => {
-    const early = await lastFrameLabels("high", 1);
-    const made = await lastFrameLabels("high", 16);
-    expect([early.includes(CLOUD_VOLUME_PASS), made.includes(CLOUD_VOLUME_PASS)]).toEqual([
-      false,
-      true,
-    ]);
-    const at = made.indexOf(CLOUD_VOLUME_PASS);
-    expect(made.slice(at - 1, at + 3)).toEqual([
+  it("draws the nearest body's clouds as the volume on high once its world's noises and correction are made, the layer until then", async () => {
+    const early = await lastFrame("high", 16);
+    const made = await lastFrame("high", 1, { noises: true });
+    expect([
+      early.labels.includes(CLOUD_VOLUME_PASS),
+      made.labels.includes(CLOUD_VOLUME_PASS),
+    ]).toEqual([false, true]);
+    expect(early.labels).toContain(CLOUD_LAYER_PASS);
+    const at = made.labels.indexOf(CLOUD_VOLUME_PASS);
+    expect(made.labels.slice(at - 2, at + 3)).toEqual([
       ATMOSPHERE_COMPOSITE_PASS,
+      CLOUD_MAP_PASS,
       CLOUD_VOLUME_PASS,
       CLOUD_RESOLVE_PASS,
       CLOUD_LAYER_PASS,
     ]);
   });
 
-  it("draws the layer on low, and on high while the frame-rate floor steps the air down", async () => {
-    const low = await lastFrameLabels("low", 16);
-    const stepped = await lastFrameLabels("high", 16, "low");
-    expect([low.includes(CLOUD_VOLUME_PASS), stepped.includes(CLOUD_VOLUME_PASS)]).toEqual([
-      false,
-      false,
-    ]);
-    expect([low.includes(CLOUD_LAYER_PASS), stepped.includes(CLOUD_LAYER_PASS)]).toEqual([
+  it("keeps the volume within the deck's reach while the frame-rate floor steps the air down, at coarser levers", async () => {
+    // The owner's requirement (2026-11-19): the floor's step degrades the volume, never swapping
+    // the layer in, from 2 m on the ground to above the tops.
+    for (const heightM of [2, 1_500, 10_000]) {
+      // Each height's renderer is made, drawn and let go in turn.
+      // oxlint-disable-next-line no-await-in-loop
+      const stepped = await lastFrame("high", 1, {
+        heightM,
+        noises: true,
+        atmosphereSetting: "low",
+      });
+      expect(stepped.labels).toContain(CLOUD_VOLUME_PASS);
+      expect(stepped.levers?.[0]).toBe(VOLUME_LEVERS.stepped.viewSteps);
+    }
+    const lowest = await lastFrame("high", 1, {
+      noises: true,
+      atmosphereSetting: "low",
+      floorLowest: true,
+    });
+    expect(lowest.levers?.[0]).toBe(VOLUME_LEVERS.lowest.viewSteps);
+  });
+
+  it("draws the layer on low, and on high beyond the deck's reach", async () => {
+    const low = await lastFrame("low", 1, { noises: true });
+    const far = await lastFrame("high", 1, { heightM: 1e8, noises: true });
+    expect([
+      low.labels.includes(CLOUD_VOLUME_PASS),
+      far.labels.includes(CLOUD_VOLUME_PASS),
+    ]).toEqual([false, false]);
+    expect([low.labels.includes(CLOUD_LAYER_PASS), far.labels.includes(CLOUD_LAYER_PASS)]).toEqual([
       true,
       true,
     ]);
@@ -310,7 +363,12 @@ describe("the photorealistic renderer's cloud volume (R11.T7.c)", () => {
 });
 
 describe("the cloud volume's materials and history in the renderer (R11.T7.c)", () => {
-  const VOLUME_NAMES = ["cloud volume", "cloud volume resolve", "cloud volume composite"];
+  const VOLUME_NAMES = [
+    "cloud volume",
+    "cloud volume resolve",
+    "cloud volume composite",
+    "cloud map",
+  ];
 
   it("releases the volume's materials with the view", async () => {
     const { engine, renderer } = await preparedRenderer();
@@ -333,7 +391,7 @@ describe("the cloud volume's materials and history in the renderer (R11.T7.c)", 
       fovXRad: Math.PI / 3,
     });
     expect(released.mock.calls.map(([material]) => material.name)).toEqual(
-      expect.arrayContaining(["cloud volume", "cloud volume composite"]),
+      expect.arrayContaining(["cloud volume", "cloud volume composite", "cloud map"]),
     );
     expect(warned).toHaveBeenCalled();
     renderer.prepareClouds();
@@ -350,7 +408,7 @@ describe("the cloud volume's materials and history in the renderer (R11.T7.c)", 
 
   it("begins the volume's history again after a cut", async () => {
     const { engine, view, renderer } = await preparedRenderer();
-    const planet = bodyAt("0200080020000000.0300", vec3(0, 0, -1e8));
+    const planet = bodyAt("0200080020000000.0300", vec3(0, 0, -(EARTH_RADIUS_M + 4_000)));
     const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, EARTH_RADIUS_M);
     const air = frameOf(planet, tables, EARTH_CLOUDS);
     renderer.prepareClouds(air.atmospheres);

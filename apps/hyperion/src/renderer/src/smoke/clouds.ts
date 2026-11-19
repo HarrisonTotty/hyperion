@@ -64,14 +64,44 @@ import {
   decodeCloudProbe,
   expectedCloudProbe,
   packCloudProbeCases,
+  packCloudProbeMarch,
 } from "../view/clouds/cloudProbe";
 import type { CloudLightInput } from "../view/clouds/cloudShadow";
 import { CORRECTION_MUS, CORRECTION_TAUS, octaveCorrectionOf } from "../view/clouds/cloudVolume";
 import {
+  CLOUD_MAP_LEVELS,
+  CLOUD_MAP_SIDE,
+  CloudMapAnchor,
+  type CloudMapFrame,
+  cloudMapTwinFromTexels,
+  cloudMapUniforms,
+  mapTexelM,
+  narrowedColumn,
+  texelPlace,
+} from "../view/clouds/cloudMap";
+import { type CloudMarchScene, deckStretch } from "../view/clouds/cloudMarch";
+import {
+  cloudColumnAt,
+  cloudShapeFrame,
+  cloudShapeKindOf,
+  normalisationTable,
+} from "../view/clouds/cloudShape";
+import {
+  BASE_NOISE_SIZE,
+  type CloudShapeNoises,
+  cloudShapeNoises,
+  CURL_NOISE_SIZE,
+  DETAIL_NOISE_SIZE,
+} from "../view/clouds/cloudShapeNoise";
+import {
   CLOUD_COMPOSITE_MATERIAL,
+  CLOUD_MAP_MATERIAL,
   CLOUD_RESOLVE_MATERIAL,
   CLOUD_VOLUME_MATERIAL,
   CloudVolumes,
+  packCloudShape,
+  VOLUME_LEVERS,
+  windAtM,
 } from "../view/clouds/cloudVolumePass";
 import { toHalfBits } from "../view/sky/half";
 import type { CapturedImage } from "./atmosphere";
@@ -262,10 +292,228 @@ function probeCases(twin: CloudLightInput): CloudProbeCase[] {
   return [...field, ...optics, ...ground, ...volumeCases()];
 }
 
-/** The volume's deck, from 1 km to 3 km (T7.c), as {@link CONDENSATE}'s. */
-const DECK = { baseM: CONDENSATE.baseAltitudeM, topM: CONDENSATE.topAltitudeM };
+/** The place the volume's probe stands over, the map's anchor's nadir: 10° N, 20° E. */
+const MARCH_PLACE = directionAt(10, 20);
 
-/** The volume's cases (R11.T7.c): homogeneous columns, then view rays through the deck. */
+/** The scene's time the probe's noises drift to, s. */
+const MARCH_TIME_S = FRAME.time.seconds + FRAME.time.nanos * 1e-9;
+
+/** A world's three shape noises on the GPU, `r8unorm`. */
+interface NoiseTextureSet {
+  readonly base: TextureHandle;
+  readonly detail: TextureHandle;
+  readonly curl: TextureHandle;
+}
+
+/** A world's shape noises as textures, as `CloudVolumes` makes them. */
+function noiseTexturesOf(engine: RenderEngine, noises: CloudShapeNoises): NoiseTextureSet {
+  const cube = (what: string, side: number, texels: Uint8Array): TextureHandle => {
+    const size = { width: side, height: side, depthOrArrayLayers: side };
+    const texture = engine.createTexture({
+      name: `smoke cloud ${what} noise`,
+      size,
+      dimension: "3d",
+      format: "r8unorm",
+      mips: 1,
+      usage: TEXTURE_USAGE.TEXTURE_BINDING | TEXTURE_USAGE.COPY_DST,
+      category: "clouds",
+    });
+    engine.writeTexture(texture, { x: 0, y: 0, z: 0 }, size, texels);
+    return texture;
+  };
+  const curlSize = { width: CURL_NOISE_SIZE, height: CURL_NOISE_SIZE };
+  const curl = engine.createTexture({
+    name: "smoke cloud curl noise",
+    size: curlSize,
+    dimension: "2d",
+    format: "r8unorm",
+    mips: 1,
+    usage: TEXTURE_USAGE.TEXTURE_BINDING | TEXTURE_USAGE.COPY_DST,
+    category: "clouds",
+  });
+  engine.writeTexture(curl, { x: 0, y: 0 }, curlSize, noises.curl);
+  return {
+    base: cube("base", BASE_NOISE_SIZE, noises.base),
+    detail: cube("detail", DETAIL_NOISE_SIZE, noises.detail),
+    curl,
+  };
+}
+
+/** The volume's probe's GPU state and its twin's scene (R11.T7.c). */
+interface VolumeProbe {
+  readonly scene: CloudMarchScene;
+  /** The map's frame and texels as the GPU's map pass drew them, read back. */
+  readonly frame: CloudMapFrame;
+  readonly mapTexels: Float32Array;
+  readonly map: RenderTarget;
+  readonly noises: NoiseTextureSet;
+  readonly shape: BufferHandle;
+  readonly march: BufferHandle;
+  readonly release: () => void;
+}
+
+/**
+ * The volume's probe over the body's clouds (R11.T7.c): the map drawn by its own pass about a camera
+ * over {@link MARCH_PLACE} and read back, the world's noises, the shape's rows at the frame's time,
+ * and the twin's scene over the map as the GPU drew it, so that a march case's GPU and twin read the
+ * same columns.
+ */
+async function volumeProbeOf(
+  engine: RenderEngine,
+  gpu: NonNullable<ReturnType<CloudLayers["frame"]>>,
+  twin: CloudLightInput,
+): Promise<VolumeProbe> {
+  const shell = twin.shell;
+  const cameraM = onSpheroid(
+    MARCH_PLACE,
+    FIGURE.equatorialRadiusM + 2_000,
+    FIGURE.polarRadiusM + 2_000,
+  );
+  const frame = new CloudMapAnchor().frameFor(cameraM, shell.equatorialRadiusM);
+  const kind = cloudShapeKindOf(CONDENSATE);
+  const map = engine.createRenderTarget({
+    name: "smoke cloud map",
+    size: { widthPx: CLOUD_MAP_SIDE, heightPx: CLOUD_MAP_SIDE * CLOUD_MAP_LEVELS },
+    format: "rgba16float",
+    mips: 1,
+    depth: false,
+    category: "clouds",
+  });
+  const material = engine.createMaterial(CLOUD_MAP_MATERIAL);
+  map.render(
+    frameOf("smoke cloud map", [
+      drawOf(fullScreenMesh(engine, "smoke cloud map's triangle"), material, [0, 0, 0, 0], {
+        uniforms: {
+          ...cloudMapUniforms(frame),
+          shape: new Float32Array([
+            shell.equatorialRadiusM / shell.polarRadiusM,
+            FRAME.octaves,
+            kind.cumuliform ? 1 : 0,
+            0,
+          ]),
+        },
+        textures: {
+          [CLOUD_PROBE_NAMES.coverage]: gpu.coverage,
+          [CLOUD_PROBE_NAMES.noise]: gpu.noise,
+        },
+        storageBuffers: { [CLOUD_PROBE_NAMES.layer]: gpu.layer },
+      }),
+    ]),
+  );
+  const mapTexels = halfTexels(await engine.readTexture(map.colour));
+  const noises = cloudShapeNoises(cloudSeedOf(FRAME.id));
+  const noiseTextures = noiseTexturesOf(engine, noises);
+  const depthM = CONDENSATE.topAltitudeM - CONDENSATE.baseAltitudeM;
+  const shapeFrame = cloudShapeFrame(
+    depthM,
+    windAtM(twin.coverage, cameraM),
+    MARCH_TIME_S,
+    FRAME.rate,
+  );
+  const scene: CloudMarchScene = {
+    map: cloudMapTwinFromTexels(frame, mapTexels),
+    noises,
+    frame: shapeFrame,
+    inputs: {
+      baseM: CONDENSATE.baseAltitudeM,
+      depthM,
+      kind,
+      table: normalisationTable(kind.profileExponent),
+      flat: 0,
+    },
+    topM: CONDENSATE.topAltitudeM,
+    datumRadiusM: FIGURE.equatorialRadiusM,
+    flattening: shell.equatorialRadiusM / shell.polarRadiusM,
+    optics: CONDENSATE,
+    correction: octaveCorrectionOf(CONDENSATE),
+  };
+  const buffer = (name: string, data: Float32Array): BufferHandle => {
+    const made = engine.createBuffer({
+      name,
+      bytes: data.byteLength,
+      usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST,
+      category: "other",
+    });
+    engine.writeBuffer(made, 0, data);
+    return made;
+  };
+  const shape = buffer("smoke cloud shape", packCloudShape(shapeFrame, kind));
+  const march = buffer("smoke cloud march", packCloudProbeMarch(scene));
+  return {
+    scene,
+    frame,
+    mapTexels,
+    map,
+    noises: noiseTextures,
+    shape,
+    march,
+    release: () => {
+      map.dispose();
+      engine.releaseTexture(noiseTextures.base);
+      engine.releaseTexture(noiseTextures.detail);
+      engine.releaseTexture(noiseTextures.curl);
+      engine.releaseBuffer(shape);
+      engine.releaseBuffer(march);
+    },
+  };
+}
+
+/**
+ * The volume's march cases (R11.T7.c) about {@link MARCH_PLACE}: from 2 m on the ground straight up
+ * and at 45°, from 500 m below the base at 30° up, from within the deck along the horizon, from just
+ * above the tops straight down and slanting, and from 10 km up slanting down, each through its
+ * stretch of the deck, at the full levers and the stepped floor's.
+ */
+function marchCases(scene: CloudMarchScene): CloudProbeCase[] {
+  const u = MARCH_PLACE;
+  const east = unit({ x: -u.y, y: u.x, z: 0 });
+  const at = (heightM: number): Vec3 =>
+    onSpheroid(u, FIGURE.equatorialRadiusM + heightM, FIGURE.polarRadiusM + heightM);
+  const towards = (up: number, along: number): Vec3 =>
+    unit({
+      x: up * u.x + along * east.x,
+      y: up * u.y + along * east.y,
+      z: up * u.z + along * east.z,
+    });
+  const sun = towards(0.8, 0.6);
+  const rays: ReadonlyArray<readonly [Vec3, Vec3]> = [
+    [at(2), towards(1, 0)],
+    [at(2), towards(1, 1)],
+    [at(CONDENSATE.baseAltitudeM - 500), towards(0.58, 1)],
+    [at(2_000), towards(0, 1)],
+    [at(CONDENSATE.topAltitudeM + 100), towards(-1, 0)],
+    [at(CONDENSATE.topAltitudeM + 100), towards(-0.5, 1)],
+    [at(10_000), towards(-0.6, 1)],
+  ];
+  return rays.flatMap(([originM, direction]) => {
+    const stretch = deckStretch(
+      originM,
+      direction,
+      scene.flattening,
+      scene.datumRadiusM,
+      scene.inputs.baseM,
+      scene.topM,
+    );
+    if (stretch === null) {
+      return [];
+    }
+    return [VOLUME_LEVERS.full, VOLUME_LEVERS.stepped].map((levers, i): CloudProbeCase => ({
+      kind: "march",
+      originM,
+      direction,
+      sun,
+      t0: stretch[0],
+      t1: stretch[1],
+      viewSteps: levers.viewSteps,
+      lightSteps: levers.lightSteps,
+      detail: levers.detail,
+      footprintPerM: 2e-3,
+      jitter: 0.37 + 0.25 * i,
+    }));
+  });
+}
+
+/** The volume's column cases (R11.T7.c): homogeneous columns of the octaves' march. */
 function volumeCases(): CloudProbeCase[] {
   const columns: CloudProbeCase[] = [];
   for (const tau of [0.5, 1, 10, 50]) {
@@ -286,37 +534,7 @@ function volumeCases(): CloudProbeCase[] {
       });
     }
   }
-  const decks = PLACES.flatMap(([lat, lon]): CloudProbeCase[] => {
-    const u = directionAt(lat, lon);
-    const east = unit({ x: -u.y, y: u.x, z: 0 });
-    const ground = onSpheroid(u, FIGURE.equatorialRadiusM, FIGURE.polarRadiusM);
-    const above = onSpheroid(u, FIGURE.equatorialRadiusM + 8_000, FIGURE.polarRadiusM + 8_000);
-    const sun = unit({ x: u.x + 0.5 * east.x, y: u.y + 0.5 * east.y, z: u.z + 0.5 * east.z });
-    const slant = unit({ x: -u.x + 0.4 * east.x, y: -u.y + 0.4 * east.y, z: -u.z + 0.4 * east.z });
-    return [
-      // From above, straight down and slanting; from the ground, straight up.
-      {
-        kind: "deck",
-        originM: above,
-        direction: { x: -u.x, y: -u.y, z: -u.z },
-        sun,
-        ...DECK,
-        steps: 48,
-        footprintPerM: 0.05,
-      },
-      {
-        kind: "deck",
-        originM: above,
-        direction: slant,
-        sun,
-        ...DECK,
-        steps: 48,
-        footprintPerM: 0.05,
-      },
-      { kind: "deck", originM: ground, direction: u, sun, ...DECK, steps: 48, footprintPerM: 0.05 },
-    ];
-  });
-  return [...columns, ...decks];
+  return columns;
 }
 
 /** The largest of `values`, 0 for none. */
@@ -345,7 +563,8 @@ export async function checkCloudTwins(engine: RenderEngine, checks: Checks): Pro
   }
   const twin = twinOf(cloudNoiseTexels());
   const correction = octaveCorrectionOf(CONDENSATE);
-  const cases = probeCases(twin);
+  const volume = await volumeProbeOf(engine, gpu, twin);
+  const cases = [...probeCases(twin), ...marchCases(volume.scene)];
   const packed = packCloudProbeCases(cases);
   // Made one by one, each released however a later one fails.
   const made: { texture?: TextureHandle; buffer?: BufferHandle; target?: RenderTarget } = {};
@@ -395,10 +614,16 @@ export async function checkCloudTwins(engine: RenderEngine, checks: Checks): Pro
               [CLOUD_PROBE_NAMES.coverage]: gpu.coverage,
               [CLOUD_PROBE_NAMES.noise]: gpu.noise,
               [CLOUD_PROBE_NAMES.correction]: correctionTexture,
+              [CLOUD_PROBE_NAMES.map]: volume.map.colour,
+              [CLOUD_PROBE_NAMES.baseNoise]: volume.noises.base,
+              [CLOUD_PROBE_NAMES.detailNoise]: volume.noises.detail,
+              [CLOUD_PROBE_NAMES.curlNoise]: volume.noises.curl,
             },
             storageBuffers: {
               [CLOUD_PROBE_NAMES.layer]: gpu.layer,
               [CLOUD_PROBE_NAMES.cases]: caseBuffer,
+              [CLOUD_PROBE_NAMES.shape]: volume.shape,
+              [CLOUD_PROBE_NAMES.marchRows]: volume.march,
             },
           }),
         ],
@@ -417,9 +642,10 @@ export async function checkCloudTwins(engine: RenderEngine, checks: Checks): Pro
     if (made.texture !== undefined) {
       engine.releaseTexture(made.texture);
     }
+    volume.release();
     layers.dispose();
   }
-  const expected = expectedCloudProbe(cases, twin, correction);
+  const expected = expectedCloudProbe(cases, twin, correction, volume.scene);
   const compared: Compared[] = cases.map((probe, i) => ({
     gpu: results[i] ?? [],
     cpu: expected[i] ?? [],
@@ -441,7 +667,55 @@ export async function checkCloudTwins(engine: RenderEngine, checks: Checks): Pro
   checkVolume(
     checks,
     compared.filter(({ probe }) => probe.kind === "column"),
-    compared.filter(({ probe }) => probe.kind === "deck"),
+    compared.filter(({ probe }) => probe.kind === "march"),
+  );
+  checkMap(checks, volume, twin);
+}
+
+/** The map's texels sampled a level: an 8 × 8 grid of them. */
+const MAP_SAMPLES = 8;
+/** The sampled texels' mean share and mean τ, GPU against the twin, relative. */
+const MAP_MEAN_TOLERANCE = 0.03;
+
+/**
+ * R11.T7.c's cloud map as its pass drew it against its twin's texels (`cloudShape.ts`'
+ * `cloudColumnAt`, narrowed): every texel finite, its top share in [0.02, 1], and over 64 texels a
+ * level the mean share and mean τ to {@link MAP_MEAN_TOLERANCE}, the field's own threshold sharp at
+ * a texel's footprint, so that a texel at a cloud's edge may take either side.
+ */
+function checkMap(checks: Checks, volume: VolumeProbe, twin: CloudLightInput): void {
+  const kind = cloudShapeKindOf(CONDENSATE);
+  let gpuShare = 0;
+  let cpuShare = 0;
+  let gpuTau = 0;
+  let cpuTau = 0;
+  let sound = true;
+  for (let level = 0; level < CLOUD_MAP_LEVELS; level += 1) {
+    for (let a = 0; a < MAP_SAMPLES; a += 1) {
+      for (let b = 0; b < MAP_SAMPLES; b += 1) {
+        const i = Math.floor(((a + 0.5) * CLOUD_MAP_SIDE) / MAP_SAMPLES);
+        const j = Math.floor(((b + 0.5) * CLOUD_MAP_SIDE) / MAP_SAMPLES);
+        const at = 4 * ((level * CLOUD_MAP_SIDE + j) * CLOUD_MAP_SIDE + i);
+        const texel = Array.from(volume.mapTexels.subarray(at, at + 4));
+        const place = texelPlace(volume.frame, twin.shell, level, i, j);
+        const cpu = narrowedColumn(
+          cloudColumnAt(twin.coverage, twin.noise, twin.params, kind, place, mapTexelM(level)),
+        );
+        const [f = Number.NaN, tau = Number.NaN, top = Number.NaN] = texel;
+        sound &&= texel.every(Number.isFinite) && top >= 0.02 && top <= 1 && f >= 0 && f <= 1;
+        gpuShare += f;
+        cpuShare += cpu.fraction;
+        gpuTau += tau;
+        cpuTau += cpu.meanTau;
+      }
+    }
+  }
+  const shareOff = Math.abs(gpuShare - cpuShare) / Math.max(cpuShare, 1e-9);
+  const tauOff = Math.abs(gpuTau - cpuTau) / Math.max(cpuTau, 1e-9);
+  checks.check(
+    "R11.T7.c the cloud map's pass draws its twin's columns",
+    sound && shareOff <= MAP_MEAN_TOLERANCE && tauOff <= MAP_MEAN_TOLERANCE,
+    `mean share ${(gpuShare / 320).toFixed(4)} against ${(cpuShare / 320).toFixed(4)} (${shareOff.toExponential(2)}), mean τ ${(gpuTau / 320).toFixed(3)} against ${(cpuTau / 320).toFixed(3)} (${tauOff.toExponential(2)}; ≤ ${MAP_MEAN_TOLERANCE}), every texel ${sound ? "sound" : "NOT sound"}`,
   );
 }
 
@@ -449,10 +723,13 @@ export async function checkCloudTwins(engine: RenderEngine, checks: Checks): Pro
 const COLUMN_TOLERANCE = 2e-4;
 /** The correction's interpolation, relative. */
 const CORRECTION_TOLERANCE = 1e-5;
-/** A deck's march, relative to its radiance, beside 10⁻⁶ sr⁻¹ absolute. */
-const DECK_TOLERANCE = 0.02;
-/** A deck's view transmittance, absolute. */
-const DECK_TRANSMITTANCE_TOLERANCE = 0.01;
+/**
+ * A march's radiance, relative beside 10⁻⁶ sr⁻¹ absolute: the noises' GPU filtering against the
+ * twins' f64, through the erosion's remaps; 2.8 × 10⁻³ measured on SwiftShader (2026-11-19).
+ */
+const DECK_TOLERANCE = 0.01;
+/** A march's view transmittance, absolute; 1.5 × 10⁻⁴ measured. */
+const DECK_TRANSMITTANCE_TOLERANCE = 0.005;
 
 /** A GPU value's difference from its twin's, relative to the twin's beside `floor`. */
 function relative(gpu: number | undefined, cpu: number | undefined, floor: number): number {
@@ -476,15 +753,19 @@ function checkVolume(
     `largest relative difference ${largest(marched).toExponential(2)} (≤ ${COLUMN_TOLERANCE}) and ${largest(corrected).toExponential(2)} (≤ ${CORRECTION_TOLERANCE}) over ${columns.length} columns`,
   );
   const radiance = decks.map(({ gpu, cpu }) => relative(gpu[0], cpu[0], 1e-6 / DECK_TOLERANCE));
-  const transmittance = decks.map(({ gpu, cpu }) => off(gpu, cpu, 1));
+  const sky = decks.map(({ gpu, cpu }) => relative(gpu[1], cpu[1], 1e-6 / DECK_TOLERANCE));
+  const transmittance = decks.map(({ gpu, cpu }) => off(gpu, cpu, 2));
+  const share = decks.map(({ gpu, cpu }) => off(gpu, cpu, 4));
   const lit = decks.filter(({ cpu }) => (cpu[0] ?? 0) > 0).length;
   checks.check(
-    "R11.T7.c the volume's march through a deck equals its twin",
+    "R11.T7.c the volume's march through its 3D density equals its twin",
     allFinite(decks) &&
       lit >= decks.length / 2 &&
       largest(radiance) <= DECK_TOLERANCE &&
-      largest(transmittance) <= DECK_TRANSMITTANCE_TOLERANCE,
-    `largest relative difference ${largest(radiance).toExponential(2)} (≤ ${DECK_TOLERANCE}), |ΔT| ${largest(transmittance).toExponential(2)} (≤ ${DECK_TRANSMITTANCE_TOLERANCE}), ${lit} of ${decks.length} rays lit`,
+      largest(sky) <= DECK_TOLERANCE &&
+      largest(transmittance) <= DECK_TRANSMITTANCE_TOLERANCE &&
+      largest(share) <= 1e-3,
+    `largest relative difference ${largest(radiance).toExponential(2)} in the sun's and ${largest(sky).toExponential(2)} in the sky's (≤ ${DECK_TOLERANCE}), |ΔT| ${largest(transmittance).toExponential(2)} (≤ ${DECK_TRANSMITTANCE_TOLERANCE}), |Δshare| ${largest(share).toExponential(2)}, ${lit} of ${decks.length} rays lit`,
   );
 }
 
@@ -795,8 +1076,10 @@ export async function checkCloudVolumeDraw(engine: RenderEngine, checks: Checks)
       march: engine.createMaterial(CLOUD_VOLUME_MATERIAL),
       resolve: engine.createMaterial(CLOUD_RESOLVE_MATERIAL),
       composite: engine.createMaterial(CLOUD_COMPOSITE_MATERIAL),
+      map: engine.createMaterial(CLOUD_MAP_MATERIAL),
       triangle: fullScreenMesh(engine, "cloud volume's triangle"),
     };
+    volumes.prepareNoises(FRAME.id);
     const shell = cloudShellOf(FIGURE, cloudLayerHeightM(CONDENSATE));
     const { viewRotation, projection } = frameOf("cloud volume", []);
     const pass = { viewRotation, projection };
@@ -816,6 +1099,9 @@ export async function checkCloudVolumeDraw(engine: RenderEngine, checks: Checks)
               sceneDepth: scene.depth,
               blueNoise,
               correction,
+              timeS: MARCH_TIME_S,
+              rate: FRAME.rate,
+              levers: VOLUME_LEVERS.full,
             },
             materials,
             target,
@@ -837,6 +1123,7 @@ export async function checkCloudVolumeDraw(engine: RenderEngine, checks: Checks)
       engine.releaseMaterial(materials.march);
       engine.releaseMaterial(materials.resolve);
       engine.releaseMaterial(materials.composite);
+      engine.releaseMaterial(materials.map);
       engine.releaseMesh(materials.triangle);
     }
   } finally {
@@ -958,8 +1245,10 @@ export async function captureClouds(engine: RenderEngine): Promise<CapturedImage
       march: engine.createMaterial(CLOUD_VOLUME_MATERIAL),
       resolve: engine.createMaterial(CLOUD_RESOLVE_MATERIAL),
       composite: engine.createMaterial(CLOUD_COMPOSITE_MATERIAL),
+      map: engine.createMaterial(CLOUD_MAP_MATERIAL),
       triangle: fullScreenMesh(engine, "cloud captures' triangle"),
     };
+    volumes.prepareNoises(frame.id);
     const shell = cloudShellOf(FIGURE, cloudLayerHeightM(CONDENSATE));
     const { viewRotation, projection } = frameOf("cloud captures", []);
     const sun = directionAt(0, 25);
@@ -1026,6 +1315,9 @@ export async function captureClouds(engine: RenderEngine): Promise<CapturedImage
             sceneDepth: scene.depth,
             blueNoise,
             correction,
+            timeS: MARCH_TIME_S,
+            rate: FRAME.rate,
+            levers: VOLUME_LEVERS.full,
           },
           materials,
           target,

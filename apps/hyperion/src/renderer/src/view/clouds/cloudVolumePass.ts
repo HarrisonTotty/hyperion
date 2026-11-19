@@ -1,34 +1,42 @@
 /**
  * The cloud volume's passes (plan R11, R11.T7.c; Design notes 10 and 18): the high setting's clouds
- * of one body marched at a quarter of the view's pixels with temporal reprojection, then laid over
- * the body's air at the view's own resolution, as the two-dimensional layer is laid.
+ * of one body marched through their three-dimensional density at a quarter of the view's pixels
+ * with temporal reprojection, then laid over the body's air at the view's own resolution, as the
+ * two-dimensional layer is laid.
  *
  * @remarks
- * - **Three passes a frame** (`cloudVolumeMarch.wgsl`, `cloudVolumeResolve.wgsl`,
- *   `cloudVolumeComposite.wgsl`): the march of each pixel's ray through the deck into the volume's
- *   target, at half the view's width and height ({@link volumeTargetSize}), its steps offset by the
- *   blue noise moved by the frame's jitter ({@link volumeJitter}); the resolve, which blends it with
- *   the last frame's resolved clouds where the same cloud stood then ({@link reprojectedUv}), held to
- *   the march's 3 × 3 range, into the other of two histories; and the composite, bilinear, over the
- *   target the body's composite drew, where the scene stands no nearer than the deck.
+ * - **Four passes a frame** (`cloudMap.wgsl`, `cloudVolumeMarch.wgsl`, `cloudVolumeResolve.wgsl`,
+ *   `cloudVolumeComposite.wgsl`): the cloud map, the layer's field about the camera at five scales
+ *   (`cloudMap.ts`); the march of each pixel's ray through the deck's density (`cloudShape.ts`,
+ *   `cloudMarch.ts`) into the volume's target, at half the view's width and height
+ *   ({@link volumeTargetSize}), its steps offset by the blue noise moved by the frame's jitter
+ *   ({@link volumeJitter}); the resolve, which blends it with the last frame's resolved clouds
+ *   where the same cloud stood then ({@link reprojectedUv}), held to the march's 3 × 3 range, into
+ *   the other of two histories; and the composite, bilinear, over the target the body's composite
+ *   drew, where the scene stands no nearer than the deck.
  * - **Which body.** The nearest of the frame's bodies whose clouds the layer would draw, on a
- *   setting whose `clouds` is `volume` while the frame-rate floor has not stepped the air down;
- *   every other body, and that one until its condensate's correction is made, draws the layer
- *   (lean, 2026-11-18: one body's history a view).
+ *   setting whose `clouds` is `volume`, while the camera stands within {@link VOLUME_REACH_M} of
+ *   its deck's top ({@link withinVolumeReach}); farther, and for every other body, the layer, which
+ *   the volume has become by then ({@link volumeFlatteningAt}), so that the hand-over shows no
+ *   switch (the owner's requirement, 2026-11-19: one volumetric field from orbit to the ground).
+ *   The frame-rate floor's step no longer sheds the volume for the layer; it takes its coarser
+ *   levers ({@link VOLUME_LEVERS}). Until the condensate's correction and the world's noises are
+ *   made, the layer stands in.
  * - **The correction** of the octaves to δ-Eddington (`cloudVolume.ts`' `octaveCorrectionOf`) is
  *   made a μ₀ row a step over frames within the frame's budget ({@link OctaveCorrectionBuilder}),
- *   per condensate's optics, into an `r32float` texture of 2 KiB in the `clouds` category, beside the
- *   volume's three quarter-resolution `rgba16float` targets.
+ *   per condensate's optics, into an `r32float` texture of 2 KiB in the `clouds` category.
+ * - **The world's noises** (`cloudShapeNoise.ts`), about 2 MiB, are made by a worker from its
+ *   cloud seed, one world at a time, the last the volume drew.
  * - **The history** holds where the last frame resolved the same body at the same size; a cut, a
  *   new body or a new size begins again from the march alone.
- * - **Its density** is the layer's field (`cloud_field_at`), the deck's column spread uniformly
- *   through its depth (`cloudVolume.wgsl`); Design note 10's 128³, 32³ and 128² noises are not built
- *   (plan R11's T7.c records).
+ * - Memory, in `clouds`: three quarter-resolution `rgba16float` targets, about 12.4 MiB at 1080p;
+ *   the map, 2.5 MiB; the noises, 2.05 MiB; 2 KiB a condensate.
  */
 import type { BodyIdHex } from "@hyperion/protocol";
 
-import { dot, norm, sub, type Vec3 } from "../../geometry/vec3";
+import { cross, dot, norm, scale, sub, type Vec3 } from "../../geometry/vec3";
 import { tan } from "../../lib/pinnedMath";
+import { type SpheroidFigure, geodeticOf } from "../atmosphere/hillaire";
 import {
   SURFACE_LIGHTING_WGSL,
   type SurfaceLightingTables,
@@ -37,8 +45,9 @@ import {
 } from "../atmosphere/surfaceLighting";
 import { NEAR_PLANE_M } from "../camera/projection";
 import { rotate } from "../camera/quaternion";
-import { TEXTURE_USAGE } from "../engine/gpuFlags";
+import { BUFFER_USAGE, TEXTURE_USAGE } from "../engine/gpuFlags";
 import type {
+  BufferHandle,
   MaterialHandle,
   MeshHandle,
   RenderEngine,
@@ -49,7 +58,9 @@ import type {
   WgslMaterialSpec,
 } from "../engine/types";
 import { HDR_COLOUR_FORMAT } from "../photometry/toneCurve";
+import { type QualitySetting, SETTINGS } from "../quality/qualitySetting";
 import frameWgsl from "../shaders/frame.wgsl?raw";
+import preciseTrigWgsl from "../shaders/preciseTrig.wgsl?raw";
 import {
   CLOUD_LAYER_PASS,
   CLOUD_TEXTURES,
@@ -57,9 +68,37 @@ import {
   type CloudLayerView,
   cloudLayerUniforms,
 } from "./cloudLayer";
+import { cloudSeedOf, type CoverageTexels, sampleCoverage } from "./cloudDensity";
+import {
+  CLOUD_MAP_LEVELS,
+  CLOUD_MAP_MEMBERS,
+  CLOUD_MAP_SIDE,
+  CloudMapAnchor,
+  cloudMapUniforms,
+} from "./cloudMap";
+import type { CloudMarchLevers } from "./cloudMarch";
+import {
+  BASE_FEATURE_TILES,
+  type CloudShapeFrame,
+  cloudShapeFrame,
+  type CloudShapeKind,
+  cloudShapeKindOf,
+  CURL_TILES,
+  DETAIL_FEATURE_TILES,
+  normalisationTable,
+} from "./cloudShape";
+import {
+  BASE_NOISE_SIZE,
+  CloudShapeNoiseSource,
+  CURL_NOISE_SIZE,
+  DETAIL_NOISE_SIZE,
+  type ShapeNoiseWorkerLike,
+} from "./cloudShapeNoise";
 import { CORRECTION_MUS, CORRECTION_TAUS, octaveCorrectionRow } from "./cloudVolume";
 import type { CloudCondensate, CloudOptics } from "./condensates";
 import cloudFieldWgsl from "./shaders/cloudField.wgsl?raw";
+import cloudMapWgsl from "./shaders/cloudMap.wgsl?raw";
+import cloudShapeWgsl from "./shaders/cloudShape.wgsl?raw";
 import cloudOpticsWgsl from "./shaders/cloudOptics.wgsl?raw";
 import cloudVolumeWgsl from "./shaders/cloudVolume.wgsl?raw";
 import cloudVolumeCompositeWgsl from "./shaders/cloudVolumeComposite.wgsl?raw";
@@ -72,11 +111,81 @@ export const CLOUD_VOLUME_PASS = "clouds volume";
 /** The label of its temporal resolve. */
 export const CLOUD_RESOLVE_PASS = "clouds resolve";
 
+/** The volume's levers at each step of the frame-rate floor. */
+export type VolumeStep = "full" | "stepped" | "lowest";
+
 /**
- * The march's steps through a ray's stretch of the deck (lean, 2026-11-18): 32, the march's twin's
- * deck cases' count, which the frames' jitter spreads over the stretch.
+ * The march's levers at each step of the frame-rate floor (lean, 2026-11-19): in full, 64 view
+ * samples, 6 towards the source and the detail noise; once the floor steps the air down, 40, 4 and
+ * no detail; at its lowest step, 24 and 3. The floor degrades the volume and never sheds it
+ * (the owner's requirement, 2026-11-19); the levers are the owner's Mac pair (`--cloud-steps`).
  */
-export const VOLUME_STEPS = 32;
+export const VOLUME_LEVERS: Readonly<Record<VolumeStep, CloudMarchLevers>> = {
+  full: { viewSteps: 64, lightSteps: 6, detail: true },
+  stepped: { viewSteps: 40, lightSteps: 4, detail: false },
+  lowest: { viewSteps: 24, lightSteps: 3, detail: false },
+};
+
+/**
+ * The floor's step a frame's volume takes: `stepped` while the floor draws its air at a lower
+ * setting's sizes than the frame's (`PhotorealFrame.atmosphereSetting`), `lowest` at its lowest
+ * step (`PhotorealFrame.floorLowest`), else `full`.
+ */
+export function volumeStepOf(
+  setting: QualitySetting,
+  atmosphereSetting: QualitySetting | undefined,
+  floorLowest: boolean | undefined,
+): VolumeStep {
+  if (floorLowest === true) {
+    return "lowest";
+  }
+  return (atmosphereSetting ?? setting) === setting ? "full" : "stepped";
+}
+
+/**
+ * The camera's height above its deck's top within which the volume is drawn, m (lean, 2026-11-19):
+ * 300 km, below most low orbits' clouds seen from above, where the volume has flattened to the
+ * layer's slab ({@link volumeFlatteningAt}); above it the layer, from orbit and for distant discs.
+ */
+export const VOLUME_REACH_M = 300_000;
+
+/** The height above the deck's top from which the volume flattens towards the layer, m. */
+export const VOLUME_FLAT_FROM_M = 100_000;
+
+/**
+ * φ, the volume's flattening towards the layer's slab (`cloudShape.ts`' remarks) at the camera's
+ * height above its deck's top: 0 within {@link VOLUME_FLAT_FROM_M}, rising smoothly to 1 at
+ * {@link VOLUME_REACH_M}, where the layer takes over.
+ */
+export function volumeFlatteningAt(heightAboveTopM: number): number {
+  const t = Math.min(
+    Math.max((heightAboveTopM - VOLUME_FLAT_FROM_M) / (VOLUME_REACH_M - VOLUME_FLAT_FROM_M), 0),
+    1,
+  );
+  return t * t * (3 - 2 * t);
+}
+
+/** Whether a camera stands within the volume's reach of a deck (the module's remarks). */
+export function withinVolumeReach(heightAboveTopM: number): boolean {
+  return heightAboveTopM < VOLUME_REACH_M;
+}
+
+/**
+ * Whether a frame draws a body's clouds as the volume (the module's remarks): on a setting whose
+ * `clouds` is `volume`, within the deck's reach, whatever the frame-rate floor's step.
+ */
+export function volumeWanted(setting: QualitySetting, heightAboveTopM: number): boolean {
+  return SETTINGS[setting].clouds === "volume" && withinVolumeReach(heightAboveTopM);
+}
+
+/** A camera's height above a deck's top, m, from its place, body-fixed, on the body's datum. */
+export function heightAboveDeckM(
+  cameraM: Vec3,
+  figure: SpheroidFigure,
+  condensate: Pick<CloudCondensate, "topAltitudeM">,
+): number {
+  return geodeticOf(cameraM, figure).heightM - condensate.topAltitudeM;
+}
 
 /**
  * The weight of a frame's march in its resolve, the rest the reprojected history's (lean,
@@ -90,17 +199,21 @@ const JITTER_STEP = 0.6180339887498949;
 /** The march's bindings in `@group(2)` (`cloudVolumeMarch.wgsl`'s). */
 export const CLOUD_VOLUME_BINDINGS = {
   sceneDepth: 0,
-  coverage: 1,
-  noise: 2,
-  sampler: 3,
-  layer: 4,
+  map: 1,
+  mapSampler: 2,
+  layer: 3,
+  shape: 4,
   /** The first of R08's surface lighting's nine tables. */
   atmosphere: 5,
   correction: 14,
   blueNoise: 15,
+  baseNoise: 16,
+  detailNoise: 17,
+  curlNoise: 18,
+  noiseSampler: 19,
 } as const;
 
-/** The names a volume's draws bind their own textures under. */
+/** The names a volume's draws bind their own textures, samplers and rows under. */
 export const CLOUD_VOLUME_TEXTURES = {
   correction: "cloudOctaveCorrection",
   blueNoise: "blueNoise",
@@ -109,6 +222,13 @@ export const CLOUD_VOLUME_TEXTURES = {
   historySampler: "cloudHistorySampler",
   resolved: "cloudResolved",
   resolvedSampler: "cloudResolvedSampler",
+  map: "cloudMap",
+  mapSampler: "cloudMapSampler",
+  shape: "cloudShape",
+  baseNoise: "cloudBaseNoise",
+  detailNoise: "cloudDetailNoise",
+  curlNoise: "cloudCurlNoise",
+  noiseSampler: "cloudNoiseRepeat",
 } as const;
 
 /** The march's `Draw` members after `offsetFromCameraM`, each a `vec4f`. */
@@ -126,10 +246,15 @@ const MARCH_MEMBERS = [
   "sourceLight1",
   "levers",
   "deck",
+  ...CLOUD_MAP_MEMBERS,
+  "march",
 ] as const;
 
-/** The march's WGSL: `frame.wgsl`, R08's surface lighting, the field, the optics, the volume. */
-export const CLOUD_VOLUME_WGSL = `${frameWgsl}\n${SURFACE_LIGHTING_WGSL}\n${cloudFieldWgsl}\n${cloudOpticsWgsl}\n${cloudVolumeWgsl}\n${cloudVolumeMarchWgsl}`;
+/**
+ * The march's WGSL: `frame.wgsl`, R08's surface lighting, the density, the optics, the volume's
+ * light and the pass.
+ */
+export const CLOUD_VOLUME_WGSL = `${frameWgsl}\n${SURFACE_LIGHTING_WGSL}\n${cloudShapeWgsl}\n${cloudOpticsWgsl}\n${cloudVolumeWgsl}\n${cloudVolumeMarchWgsl}`;
 
 /** The volume's march: a full-screen triangle into the volume's quarter-resolution target. */
 export const CLOUD_VOLUME_MATERIAL: WgslMaterialSpec = {
@@ -140,16 +265,21 @@ export const CLOUD_VOLUME_MATERIAL: WgslMaterialSpec = {
   uniforms: MARCH_MEMBERS.map((name) => ({ name, type: "vec4f" as const })),
   samplers: [
     {
-      name: CLOUD_TEXTURES.sampler,
+      name: CLOUD_VOLUME_TEXTURES.mapSampler,
+      filter: "linear",
+      address: "clamp-to-edge",
+      binding: CLOUD_VOLUME_BINDINGS.mapSampler,
+    },
+    {
+      name: CLOUD_VOLUME_TEXTURES.noiseSampler,
       filter: "linear",
       address: "repeat",
-      binding: CLOUD_VOLUME_BINDINGS.sampler,
+      binding: CLOUD_VOLUME_BINDINGS.noiseSampler,
     },
   ],
   textures: [
     { name: "sceneDepth", binding: CLOUD_VOLUME_BINDINGS.sceneDepth, sampleType: "depth" },
-    { name: CLOUD_TEXTURES.coverage, binding: CLOUD_VOLUME_BINDINGS.coverage },
-    { name: CLOUD_TEXTURES.noise, binding: CLOUD_VOLUME_BINDINGS.noise, viewDimension: "3d" },
+    { name: CLOUD_VOLUME_TEXTURES.map, binding: CLOUD_VOLUME_BINDINGS.map },
     ...surfaceLightingTextures(CLOUD_VOLUME_BINDINGS.atmosphere),
     {
       name: CLOUD_VOLUME_TEXTURES.correction,
@@ -157,13 +287,52 @@ export const CLOUD_VOLUME_MATERIAL: WgslMaterialSpec = {
       sampleType: "unfilterable-float",
     },
     { name: CLOUD_VOLUME_TEXTURES.blueNoise, binding: CLOUD_VOLUME_BINDINGS.blueNoise },
+    {
+      name: CLOUD_VOLUME_TEXTURES.baseNoise,
+      binding: CLOUD_VOLUME_BINDINGS.baseNoise,
+      viewDimension: "3d",
+    },
+    {
+      name: CLOUD_VOLUME_TEXTURES.detailNoise,
+      binding: CLOUD_VOLUME_BINDINGS.detailNoise,
+      viewDimension: "3d",
+    },
+    { name: CLOUD_VOLUME_TEXTURES.curlNoise, binding: CLOUD_VOLUME_BINDINGS.curlNoise },
   ],
-  storageBuffers: [{ name: CLOUD_TEXTURES.layer, binding: CLOUD_VOLUME_BINDINGS.layer }],
+  storageBuffers: [
+    { name: CLOUD_TEXTURES.layer, binding: CLOUD_VOLUME_BINDINGS.layer },
+    { name: CLOUD_VOLUME_TEXTURES.shape, binding: CLOUD_VOLUME_BINDINGS.shape },
+  ],
   cullMode: "none",
   depthWrite: false,
   colourWrites: true,
   blend: "none",
 };
+
+/** The map pass's `Draw` members after `offsetFromCameraM`. */
+const MAP_MEMBERS = [...CLOUD_MAP_MEMBERS, "shape"] as const;
+
+/** The cloud map's pass (`cloudMap.wgsl`): a full-screen triangle into the map's levels. */
+export const CLOUD_MAP_MATERIAL: WgslMaterialSpec = {
+  name: "cloud map",
+  displayName: "CLOUD MAP",
+  vertexWgsl: `${frameWgsl}\n${preciseTrigWgsl}\n${cloudFieldWgsl}\n${cloudMapWgsl}`,
+  fragmentWgsl: `${frameWgsl}\n${preciseTrigWgsl}\n${cloudFieldWgsl}\n${cloudMapWgsl}`,
+  uniforms: MAP_MEMBERS.map((name) => ({ name, type: "vec4f" as const })),
+  samplers: [{ name: CLOUD_TEXTURES.sampler, filter: "linear", address: "repeat", binding: 2 }],
+  textures: [
+    { name: CLOUD_TEXTURES.coverage, binding: 0 },
+    { name: CLOUD_TEXTURES.noise, binding: 1, viewDimension: "3d" },
+  ],
+  storageBuffers: [{ name: CLOUD_TEXTURES.layer, binding: 3 }],
+  cullMode: "none",
+  depthWrite: false,
+  colourWrites: true,
+  blend: "none",
+};
+
+/** The label of the cloud map's pass in `PassTimes`. */
+export const CLOUD_MAP_PASS = "clouds map";
 
 /** The resolve's `Draw` members after `offsetFromCameraM`. */
 const RESOLVE_MEMBERS = [
@@ -232,11 +401,15 @@ export const CLOUD_COMPOSITE_MATERIAL: WgslMaterialSpec = {
   blend: "premultiplied",
 };
 
-/** The volume's three materials, for the catalogue (compiled in the smoke's part 26). */
+/**
+ * The volume's four materials, in the order the renderer makes them (`march`, `resolve`,
+ * `composite`, `map`), for the catalogue (compiled in the smoke's part 26).
+ */
 export const CLOUD_VOLUME_MATERIALS: ReadonlyArray<WgslMaterialSpec> = [
   CLOUD_VOLUME_MATERIAL,
   CLOUD_RESOLVE_MATERIAL,
   CLOUD_COMPOSITE_MATERIAL,
+  CLOUD_MAP_MATERIAL,
 ];
 
 /** The volume's targets' size for a view of `size`: half its width and height, rounded up. */
@@ -325,7 +498,7 @@ export function reprojectedUv(
   return { u: 0.5 + 0.5 * x, v: 0.5 - 0.5 * y };
 }
 
-/** A body's volume this frame: what its march, resolve and composite draw from. */
+/** A body's volume this frame: what its map, march, resolve and composite draw from. */
 export interface CloudVolumeDraw {
   readonly id: BodyIdHex;
   readonly gpu: CloudBodyGpu;
@@ -336,6 +509,12 @@ export interface CloudVolumeDraw {
   readonly sceneDepth: TextureHandle;
   readonly blueNoise: TextureHandle;
   readonly correction: TextureHandle;
+  /** The scene's time, s on the universe clock, by which the noises drift with the wind. */
+  readonly timeS: number;
+  /** Simulation seconds per real second, which fades the noises as the field's octaves. */
+  readonly rate: number;
+  /** The march's levers at the frame-rate floor's step ({@link VOLUME_LEVERS}). */
+  readonly levers: CloudMarchLevers;
 }
 
 /** The volume's materials and the full-screen triangle they draw. */
@@ -343,6 +522,7 @@ export interface CloudVolumeMaterials {
   readonly march: MaterialHandle;
   readonly resolve: MaterialHandle;
   readonly composite: MaterialHandle;
+  readonly map: MaterialHandle;
   readonly triangle: MeshHandle;
 }
 
@@ -362,22 +542,117 @@ interface VolumeTargets {
 /** The time a correction table's making may take a frame, ms. */
 export const CORRECTION_STEP_BUDGET_MS = 1;
 
+/** The shape's rows (`cloudShape.wgsl`'s CLOUD_SHAPE_ROWS). */
+export const CLOUD_SHAPE_ROWS = 25;
+
+/**
+ * A deck's shape rows (`cloudShape.wgsl`'s layout), into `out`, {@link CLOUD_SHAPE_ROWS} × 4 `f32`s:
+ * its noises' tiles and drifts, their features and time-rate shares, its kind, and κ's
+ * normalisation table.
+ */
+export function packCloudShape(
+  frame: CloudShapeFrame,
+  kind: CloudShapeKind,
+  out: Float32Array = new Float32Array(4 * CLOUD_SHAPE_ROWS),
+): Float32Array {
+  out.fill(0);
+  out.set(
+    [
+      1 / frame.baseTileM,
+      1 / frame.detailTileM,
+      1 / (frame.detailTileM * CURL_TILES),
+      kind.profileExponent,
+    ],
+    0,
+  );
+  const { baseDrift: b, detailDrift: d } = frame;
+  out.set([b.x, b.y, b.z, frame.baseRateShare], 4);
+  out.set([d.x, d.y, d.z, frame.detailRateShare], 8);
+  out.set(
+    [
+      frame.baseTileM * BASE_FEATURE_TILES,
+      frame.detailTileM * DETAIL_FEATURE_TILES,
+      kind.cumuliform ? 1 : 0,
+      0,
+    ],
+    12,
+  );
+  out.set(normalisationTable(kind.profileExponent), 16);
+  return out;
+}
+
+/**
+ * The wind at a camera's place from its body's coverage texels, as a body-fixed velocity, m s⁻¹:
+ * the texels' eastward and northward wind there along the place's east and north.
+ */
+export function windAtM(coverage: CoverageTexels, cameraM: Vec3): Vec3 {
+  const cell = sampleCoverage(coverage, cameraM);
+  const up = scale(cameraM, 1 / norm(cameraM));
+  let east = cross({ x: 0, y: 0, z: 1 }, up);
+  if (norm(east) < 1e-9) {
+    east = { x: 0, y: 1, z: 0 };
+  }
+  east = scale(east, 1 / norm(east));
+  const north = cross(up, east);
+  return {
+    x: cell.eastMps * east.x + cell.northMps * north.x,
+    y: cell.eastMps * east.y + cell.northMps * north.y,
+    z: cell.eastMps * east.z + cell.northMps * north.z,
+  };
+}
+
+/** The engine's calls a view's cloud volume makes. */
+type VolumeEngine = Pick<
+  RenderEngine,
+  | "createRenderTarget"
+  | "createTexture"
+  | "writeTexture"
+  | "releaseTexture"
+  | "createBuffer"
+  | "writeBuffer"
+  | "releaseBuffer"
+>;
+
+/** A world's shape noises on the GPU. */
+interface NoiseTextures {
+  readonly seed: number;
+  readonly base: TextureHandle;
+  readonly detail: TextureHandle;
+  readonly curl: TextureHandle;
+}
+
+/** Starts the shape-noise worker on the renderer's own module, where workers run. */
+export function browserShapeNoiseWorker(): ShapeNoiseWorkerLike {
+  return new Worker(new URL("./shapeNoise.worker.ts", import.meta.url), {
+    type: "module",
+    name: "cloud shape noise",
+  });
+}
+
+/** The page's worker where one can run, else none, so that the builder makes the noises. */
+function defaultWorker(): ShapeNoiseWorkerLike | null {
+  return typeof Worker === "function" ? browserShapeNoiseWorker() : null;
+}
+
 /**
  * A view's cloud volume (the module's remarks): its targets and history, made at its first frame
- * and at a new size, and each condensate's correction texture, made over frames; it owns them and
- * none of the materials.
+ * and at a new size; its map; each condensate's correction texture, made over frames; and the
+ * drawn world's noises; it owns them and none of the materials.
  */
 export class CloudVolumes {
-  readonly #engine: Pick<
-    RenderEngine,
-    "createRenderTarget" | "createTexture" | "writeTexture" | "releaseTexture"
-  >;
+  readonly #engine: VolumeEngine;
   readonly #name: string;
   readonly #corrections = new Map<
     string,
     { builder: OctaveCorrectionBuilder | null; texture: TextureHandle | null }
   >();
+  readonly #anchor = new CloudMapAnchor();
+  readonly #noises: CloudShapeNoiseSource;
+  readonly #shapeRows = new Float32Array(4 * CLOUD_SHAPE_ROWS);
   #targets: VolumeTargets | null = null;
+  #map: RenderTarget | null = null;
+  #shape: BufferHandle | null = null;
+  #noiseTextures: NoiseTextures | null = null;
   /** The history the last frame resolved into, and what it resolved; `null` where none holds. */
   #last: {
     readonly at: 0 | 1;
@@ -386,15 +661,18 @@ export class CloudVolumes {
   } | null = null;
   #frames = 0;
 
+  /**
+   * @param worker - The shape-noise worker, `null` for none, when the noises are made a step a
+   *   frame; the page's own where it can run by default.
+   */
   constructor(
-    engine: Pick<
-      RenderEngine,
-      "createRenderTarget" | "createTexture" | "writeTexture" | "releaseTexture"
-    >,
+    engine: VolumeEngine,
     name: string,
+    worker: ShapeNoiseWorkerLike | null = defaultWorker(),
   ) {
     this.#engine = engine;
     this.#name = name;
+    this.#noises = new CloudShapeNoiseSource(worker);
   }
 
   /**
@@ -438,16 +716,78 @@ export class CloudVolumes {
     return held.texture;
   }
 
+  /**
+   * Whether a body's world's shape noises are made and on the GPU, asking for them where they are
+   * not: the worker makes them, or the builder within `budgetMs` of `nowMs`'s clock a call.
+   */
+  noisesReady(id: BodyIdHex, nowMs: () => number): boolean {
+    const seed = cloudSeedOf(id);
+    if (this.#noiseTextures?.seed === seed) {
+      return true;
+    }
+    const made = this.#noises.noisesOf(seed, nowMs);
+    if (made === null) {
+      return false;
+    }
+    this.#upload(seed, made);
+    return true;
+  }
+
+  /** Makes a body's world's shape noises at once, for a still's first sample. */
+  prepareNoises(id: BodyIdHex): void {
+    const seed = cloudSeedOf(id);
+    if (this.#noiseTextures?.seed !== seed) {
+      this.#upload(seed, this.#noises.noisesNow(seed));
+    }
+  }
+
+  #upload(seed: number, made: { base: Uint8Array; detail: Uint8Array; curl: Uint8Array }): void {
+    this.#releaseNoises();
+    const cube = (what: string, side: number, texels: Uint8Array): TextureHandle => {
+      const size = { width: side, height: side, depthOrArrayLayers: side };
+      const texture = this.#engine.createTexture({
+        name: `${this.#name} cloud ${what} noise`,
+        size,
+        dimension: "3d",
+        format: "r8unorm",
+        mips: 1,
+        usage: TEXTURE_USAGE.TEXTURE_BINDING | TEXTURE_USAGE.COPY_DST,
+        category: "clouds",
+      });
+      this.#engine.writeTexture(texture, { x: 0, y: 0, z: 0 }, size, texels);
+      return texture;
+    };
+    const curlSize = { width: CURL_NOISE_SIZE, height: CURL_NOISE_SIZE };
+    const curl = this.#engine.createTexture({
+      name: `${this.#name} cloud curl noise`,
+      size: curlSize,
+      dimension: "2d",
+      format: "r8unorm",
+      mips: 1,
+      usage: TEXTURE_USAGE.TEXTURE_BINDING | TEXTURE_USAGE.COPY_DST,
+      category: "clouds",
+    });
+    this.#engine.writeTexture(curl, { x: 0, y: 0 }, curlSize, made.curl);
+    this.#noiseTextures = {
+      seed,
+      base: cube("base", BASE_NOISE_SIZE, made.base),
+      detail: cube("detail", DETAIL_NOISE_SIZE, made.detail),
+      curl,
+    };
+  }
+
   /** Drops the history, so that the next frame resolves from its march alone (a cut). */
   cut(): void {
     this.#last = null;
   }
 
   /**
-   * Draws a body's volume: its march and its resolve into the volume's own targets, then its
-   * composite into `target`, within `scissor` where given, over what the body's composite drew.
+   * Draws a body's volume: its map, its march and its resolve into the volume's own targets, then
+   * its composite into `target`, within `scissor` where given, over what the body's composite drew.
+   * The world's noises must be ready ({@link CloudVolumes.noisesReady}).
    *
    * @param size - The frame's own size, the scene depth's.
+   * @throws Error where the world's noises are not on the GPU.
    */
   draw(
     volume: CloudVolumeDraw,
@@ -457,6 +797,12 @@ export class CloudVolumes {
     pass: PassMatrices,
     scissor: TexelRect | null,
   ): void {
+    const noises = this.#noiseTextures;
+    if (noises?.seed !== cloudSeedOf(volume.id)) {
+      throw new Error(
+        `the cloud volume of ${volume.id} was drawn before its world's noises were made`,
+      );
+    }
     const targets = this.#targetsOf(size);
     const quarter = targets.size;
     const { view, gpu, condensate } = volume;
@@ -467,6 +813,49 @@ export class CloudVolumes {
     const layer = cloudLayerUniforms(marchView);
     const jitter = volumeJitter(this.#frames);
     this.#frames += 1;
+    const depthM = Math.max(condensate.topAltitudeM - condensate.baseAltitudeM, 1);
+    const kind = cloudShapeKindOf(condensate);
+    const shapeFrame = cloudShapeFrame(
+      depthM,
+      gpu.texels === undefined ? { x: 0, y: 0, z: 0 } : windAtM(gpu.texels, view.camera.positionM),
+      volume.timeS,
+      volume.rate,
+    );
+    const shape = this.#shapeBuffer();
+    this.#engine.writeBuffer(shape, 0, packCloudShape(shapeFrame, kind, this.#shapeRows));
+    const mapFrame = this.#anchor.frameFor(view.camera.positionM, view.shell.equatorialRadiusM);
+    const mapTarget = this.#mapTarget();
+    const mapUniforms = cloudMapUniforms(mapFrame);
+    mapTarget.render({
+      label: CLOUD_MAP_PASS,
+      viewRotation: pass.viewRotation,
+      projection: pass.projection,
+      draws: [
+        {
+          mesh: materials.triangle,
+          material: materials.map,
+          offsetFromCameraM: new Float32Array(3),
+          uniforms: {
+            ...mapUniforms,
+            shape: new Float32Array([
+              view.shell.equatorialRadiusM / view.shell.polarRadiusM,
+              view.octaves,
+              kind.cumuliform ? 1 : 0,
+              0,
+            ]),
+          },
+          textures: {
+            [CLOUD_TEXTURES.coverage]: gpu.coverage,
+            [CLOUD_TEXTURES.noise]: gpu.noise,
+          },
+          storageBuffers: { [CLOUD_TEXTURES.layer]: gpu.layer },
+        },
+      ],
+      postProcesses: [],
+    });
+    const flat = volumeFlatteningAt(
+      heightAboveDeckM(view.camera.positionM, view.figure, condensate),
+    );
     targets.march.render({
       label: CLOUD_VOLUME_PASS,
       viewRotation: pass.viewRotation,
@@ -478,23 +867,35 @@ export class CloudVolumes {
           offsetFromCameraM: new Float32Array(3),
           uniforms: {
             ...layer,
-            levers: new Float32Array([view.octaves, VOLUME_STEPS, jitter, 0]),
+            levers: new Float32Array([
+              volume.levers.viewSteps,
+              volume.levers.lightSteps,
+              jitter,
+              volume.levers.detail ? 1 : 0,
+            ]),
             deck: new Float32Array([
               condensate.baseAltitudeM,
               condensate.topAltitudeM,
               size.widthPx,
               size.heightPx,
             ]),
+            ...mapUniforms,
+            march: new Float32Array([flat, 0, 0, 0]),
           },
           textures: {
             sceneDepth: volume.sceneDepth,
-            [CLOUD_TEXTURES.coverage]: gpu.coverage,
-            [CLOUD_TEXTURES.noise]: gpu.noise,
+            [CLOUD_VOLUME_TEXTURES.map]: mapTarget.colour,
             ...surfaceLightingDrawTextures(volume.lighting),
             [CLOUD_VOLUME_TEXTURES.correction]: volume.correction,
             [CLOUD_VOLUME_TEXTURES.blueNoise]: volume.blueNoise,
+            [CLOUD_VOLUME_TEXTURES.baseNoise]: noises.base,
+            [CLOUD_VOLUME_TEXTURES.detailNoise]: noises.detail,
+            [CLOUD_VOLUME_TEXTURES.curlNoise]: noises.curl,
           },
-          storageBuffers: { [CLOUD_TEXTURES.layer]: gpu.layer },
+          storageBuffers: {
+            [CLOUD_TEXTURES.layer]: gpu.layer,
+            [CLOUD_VOLUME_TEXTURES.shape]: shape,
+          },
         },
       ],
       postProcesses: [],
@@ -584,11 +985,56 @@ export class CloudVolumes {
     }
   }
 
-  /** Lets go of everything. */
+  /** Lets go of everything, the worker with it. */
   dispose(): void {
     this.keepOnly([]);
     this.#releaseTargets();
+    this.#releaseNoises();
+    this.#map?.dispose();
+    this.#map = null;
+    if (this.#shape !== null) {
+      this.#engine.releaseBuffer(this.#shape);
+      this.#shape = null;
+    }
+    this.#noises.dispose();
+    this.#anchor.reset();
     this.#last = null;
+  }
+
+  #releaseNoises(): void {
+    const held = this.#noiseTextures;
+    if (held !== null) {
+      this.#engine.releaseTexture(held.base);
+      this.#engine.releaseTexture(held.detail);
+      this.#engine.releaseTexture(held.curl);
+      this.#noiseTextures = null;
+    }
+  }
+
+  #mapTarget(): RenderTarget {
+    if (this.#map === null) {
+      this.#map = this.#engine.createRenderTarget({
+        name: `${this.#name}:cloud map`,
+        size: { widthPx: CLOUD_MAP_SIDE, heightPx: CLOUD_MAP_SIDE * CLOUD_MAP_LEVELS },
+        format: HDR_COLOUR_FORMAT,
+        mips: 1,
+        depth: false,
+        category: "clouds",
+      });
+    }
+    return this.#map;
+  }
+
+  #shapeBuffer(): BufferHandle {
+    if (this.#shape === null) {
+      this.#shape = this.#engine.createBuffer({
+        name: `${this.#name} cloud shape`,
+        bytes: 16 * CLOUD_SHAPE_ROWS,
+        usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST,
+        category: "clouds",
+      });
+    }
+    return this.#shape;
   }
 
   #targetsOf(size: ViewSize): VolumeTargets {

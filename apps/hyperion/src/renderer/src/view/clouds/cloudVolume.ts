@@ -429,8 +429,8 @@ export interface DeckRay {
   /** Its footprint's growth with distance, m per m; the footprint is at least 1 m. */
   readonly footprintPerM: number;
   /**
-   * The covered share of the view's footprint the ray is drawn in (`cloud_volume_march_between`'s
-   * `share`): each column's mean τ over it, the covered part alone, 1 if absent.
+   * The covered share of the view's footprint the ray is drawn in (the layer's independent-pixel
+   * form): each column's mean τ over it, the covered part alone, 1 if absent.
    */
   readonly share?: number;
 }
@@ -444,9 +444,12 @@ export interface DeckMarch {
 }
 
 /**
- * A view ray's march through a body's deck (the module's remarks), the reference of
- * `cloud_volume_march`: each sample's column read on the layer's shell above it over the ray's
- * footprint there, its multiple scattering corrected by `correction`.
+ * A view ray's march through a body's deck spread uniformly through its depth (the module's
+ * remarks): each sample's column read on the layer's shell above it over the ray's footprint
+ * there, its multiple scattering corrected by `correction`. The form the volume flattens to at its
+ * hand-over to the layer (`cloudMarch.ts`' `marchCloudRay` at φ = 1), and the reference its
+ * octaves and correction were fitted on; its WGSL twin, `cloud_volume_march`, gave way to
+ * `cloud_march` (2026-11-19).
  */
 export function marchDeckRay(
   clouds: CloudLightInput,

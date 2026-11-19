@@ -347,6 +347,11 @@ export interface CloudBodyGpu {
   readonly coverage: TextureHandle;
   /** The noise tile. */
   readonly noise: TextureHandle;
+  /**
+   * Its coverage texture's texels as made, whose wind the volume's noises drift with (plan R11,
+   * R11.T7.c; `cloudVolumePass.ts`' `windAtM`); absent, still air.
+   */
+  readonly texels?: CoverageTexels;
 }
 
 /** A body's state held across frames. */
@@ -496,7 +501,7 @@ export class CloudLayers {
     const shell = cloudShellOf(frame.figure, cloudLayerHeightM(frame.condensate));
     packCloudLayer(params, shell, frame.condensate, frame.figure.equatorialRadiusM, held.rows);
     this.#engine.writeBuffer(held.layer, 0, held.rows);
-    return { layer: held.layer, coverage: held.coverage, noise };
+    return { layer: held.layer, coverage: held.coverage, noise, texels: made.texels };
   }
 
   /** Lets go of every body's state but those in `kept`. */
