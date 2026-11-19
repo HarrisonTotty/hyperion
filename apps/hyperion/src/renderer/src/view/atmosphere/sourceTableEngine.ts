@@ -454,7 +454,13 @@ export class SourceTableEngine implements RenderEngine {
             if (this.#kernels.get(kernel)?.[kind] !== held) {
               return;
             }
-            held.made = await this.#inner.createComputeAsync(held.pair);
+            const made = await this.#inner.createComputeAsync(held.pair);
+            // A release of its kernel meanwhile let the twin go with it: it goes at once.
+            if (this.#kernels.get(kernel)?.[kind] === held) {
+              held.made = made;
+            } else {
+              this.#inner.releaseCompute(made);
+            }
           } catch (error: unknown) {
             if (!(error instanceof EngineUnavailable)) {
               console.error(
@@ -534,8 +540,8 @@ export class SourceTableEngine implements RenderEngine {
     const twins = this.#materials.get(material);
     if (twins !== undefined) {
       this.#materials.delete(material);
-      for (const held of [twins.tableOnly, twins.airless]) {
-        if (held !== undefined && held.twin !== null) {
+      for (const held of Object.values(twins)) {
+        if (held.twin !== null) {
           this.#inner.releaseMaterial(held.twin);
         }
       }
@@ -547,8 +553,8 @@ export class SourceTableEngine implements RenderEngine {
     const twins = this.#kernels.get(kernel);
     if (twins !== undefined) {
       this.#kernels.delete(kernel);
-      for (const held of [twins.tableOnly, twins.airless]) {
-        if (held !== undefined && held.made !== null) {
+      for (const held of Object.values(twins)) {
+        if (held.made !== null) {
           this.#inner.releaseCompute(held.made);
         }
       }

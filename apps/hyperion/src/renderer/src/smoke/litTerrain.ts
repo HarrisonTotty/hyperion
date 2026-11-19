@@ -35,6 +35,7 @@ import {
   surfaceLightingDrawTextures,
   type SurfaceLightingTables,
 } from "../view/atmosphere/surfaceLighting";
+import { SourceTableEngine } from "../view/atmosphere/sourceTableEngine";
 import type { Quaternion } from "../view/camera/pose";
 import { viewRotation4 } from "../view/camera/projection";
 import { quaternionFromRows } from "../view/camera/quaternion";
@@ -271,6 +272,35 @@ interface LitFrames {
   readonly emission: LitFrame;
   /** The `Melt` slots' frame on a night side (R08.T18.a). */
   readonly melt: LitFrame;
+  /**
+   * The lit material's and its emissive form's frames drawn again by their airless twins, against
+   * their first draws as written (plan R07, perf-bodies-pass); where the frames were asked to.
+   */
+  readonly twins?: { readonly lit: LitFrame; readonly emissive: LitFrame };
+}
+
+/**
+ * Whether `again`, drawn by `swaps` twins, is `first`'s every bit: `what`'s frame drawn by its
+ * airless twin against its draw as written.
+ */
+function twinFrameOf(
+  what: string,
+  first: Float32Array,
+  again: Float32Array,
+  swaps: number,
+): LitFrame {
+  const a = new Uint32Array(first.buffer, first.byteOffset, first.length);
+  const b = new Uint32Array(again.buffer, again.byteOffset, again.length);
+  let differing = 0;
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i] !== b[i]) {
+      differing += 1;
+    }
+  }
+  return {
+    pass: differing === 0 && swaps > 0 && a.length === b.length,
+    detail: `${what}: ${String(differing)} of ${String(a.length)} channels differ; ${String(swaps)} draws by a twin`,
+  };
 }
 
 /**
@@ -281,6 +311,7 @@ async function drawLit(
   engine: RenderEngine,
   setting: "high" | "low",
   field: WorkerFixture,
+  twins?: SourceTableEngine,
 ): Promise<LitFrames> {
   const settings = { ...TERRAIN_SETTINGS[setting], cacheBytes: CACHE_BYTES };
   const resources = new TerrainResources(engine, settings, MOON_LIKE, "lit");
@@ -289,7 +320,7 @@ async function drawLit(
   // (R10.T9.b).
   const shadow = createShadowPlaceholder(engine);
   try {
-    return await drawInto(engine, setting, field, resources, air, shadow);
+    return await drawInto(engine, setting, field, resources, air, shadow, twins);
   } finally {
     resources.dispose();
     engine.releaseTexture(air.body);
@@ -305,6 +336,7 @@ async function drawInto(
   resources: TerrainResources,
   air: SurfaceLightingTables,
   shadow: TextureHandle,
+  twins?: SourceTableEngine,
 ): Promise<LitFrames> {
   const settings = TERRAIN_SETTINGS[setting];
   const { layout } = resources;
@@ -479,6 +511,14 @@ async function drawInto(
   };
   try {
     const first = await renderInto(engine, target, draw);
+    // The first draw is the module's as written; once its airless twin is prepared, the twin's.
+    let litTwin: LitFrame | null = null;
+    if (twins !== undefined) {
+      await twins.twinsSettled();
+      const before = twins.swaps;
+      const again = await renderInto(engine, target, draw);
+      litTwin = twinFrameOf("the lit material", first, again, twins.swaps - before);
+    }
     const blended = litFrameOf(layout.vertexPath, draw, first);
     // The morph's end's frames run in order, each read back before the next is written.
     writeBlock(MORPH_DONE_M, true);
@@ -507,6 +547,13 @@ async function drawInto(
       [resources.mesh],
     );
     const emitted = await renderInto(engine, target, { ...draw, material: emissive });
+    let emissiveTwin: LitFrame | null = null;
+    if (twins !== undefined) {
+      await twins.twinsSettled();
+      const before = twins.swaps;
+      const again = await renderInto(engine, target, { ...draw, material: emissive });
+      emissiveTwin = twinFrameOf("its emissive form", emitted, again, twins.swaps - before);
+    }
     const albedos = blockAlbedos(bakes, lighting.elsewhere.a);
     // The locked lava world's night side over the block: its ground at its 21 K night, its first
     // slot's `Melt` at the melt's least temperature.
@@ -536,6 +583,9 @@ async function drawInto(
         albedos,
         exposureScale: lighting.exposureScale,
       }),
+      ...(litTwin === null || emissiveTwin === null
+        ? {}
+        : { twins: { lit: litTwin, emissive: emissiveTwin } }),
     };
   } finally {
     target.dispose();
@@ -884,6 +934,34 @@ export async function checkLitTerrain(engine: RenderEngine, checks: Checks): Pro
       `R08.T18.a the lit terrain's Melt slots glow on a night side at the melt's temperature (${setting})`,
       melt.pass,
       melt.detail,
+    );
+  }
+}
+
+/**
+ * Plan R07's airless twins on the lit terrain (perf-bodies-pass; `SourceTableEngine`): the field's
+ * block drawn through the page's engine by the lit material, then by its emissive form, each first
+ * as written and again by its airless twin once that is prepared, at both settings' vertex paths;
+ * every bit the same, and the twins taken.
+ */
+export async function checkLitTerrainAirlessTwins(
+  engine: RenderEngine,
+  checks: Checks,
+): Promise<void> {
+  const name = "plan R07: the lit terrain drawn by its airless twins draws its modules' bytes";
+  if (!(engine instanceof SourceTableEngine)) {
+    checks.check(name, false, "the page's engine is not a SourceTableEngine");
+    return;
+  }
+  const field = moonLikeFixture("first");
+  for (const setting of ["high", "low"] as const) {
+    // The frames run in order: each bakes, draws and reads back before the next allocates.
+    // oxlint-disable-next-line no-await-in-loop
+    const { twins } = await drawLit(engine, setting, field, engine);
+    checks.check(
+      `${name} (${setting})`,
+      twins !== undefined && twins.lit.pass && twins.emissive.pass,
+      twins === undefined ? "no twin's frame" : `${twins.lit.detail}; ${twins.emissive.detail}`,
     );
   }
 }

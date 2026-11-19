@@ -203,7 +203,7 @@ import {
   checkOceanShore,
 } from "./ocean";
 import { checkClassCurveSeam, checkLitBody } from "./litBody";
-import { checkLitTerrain } from "./litTerrain";
+import { checkLitTerrain, checkLitTerrainAirlessTwins } from "./litTerrain";
 import { checkClusterCull } from "./clusterCull";
 import { checkClusterGrid } from "./clusterGrid";
 import { checkOcclusionCull } from "./occlusionCull";
@@ -694,6 +694,9 @@ async function run(
   );
   await group(35, "plan R07: airless bodies drawn by their airless twins", () =>
     checkAirlessTwins(engine, checks),
+  );
+  await group(35, "plan R07: the lit terrain drawn by its airless twins", () =>
+    checkLitTerrainAirlessTwins(engine, checks),
   );
   // R08.T8.e's table's march twins, in part 16 after R08.T9.b's.
   await group(16, "T9.b catalogue: the march's table-only twins", () =>

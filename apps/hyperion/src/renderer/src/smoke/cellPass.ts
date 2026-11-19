@@ -888,6 +888,8 @@ export async function checkAirlessTwins(engine: RenderEngine, checks: Checks): P
   const writtenRenderer = new LitBodyRenderer(written.engine, WIREFRAME_MATERIALS.starSprite);
   const twinnedRenderer = new LitBodyRenderer(twinned.engine, WIREFRAME_MATERIALS.starSprite);
   let weights: ClassMapDiscSurface | null = null;
+  // The kernels made, each with the engine that made it, released at the end.
+  const made: Array<{ readonly by: RenderEngine; readonly kernel: ComputeHandle }> = [];
   try {
     const twoClass = packClassMap(4, 2, ({ i, j }) =>
       (i + j) % 2 !== 0 ? null : i % 2 === 0 ? [1, 0] : [0.25, 0.75],
@@ -909,6 +911,12 @@ export async function checkAirlessTwins(engine: RenderEngine, checks: Checks): P
       engine.createComputeAsync(BODY_DISC_CELLS_KERNEL),
       engine.createComputeAsync(BODY_DISC_CELLS_PACKED_KERNEL),
     ]);
+    made.push(
+      { by: engine.inner, kernel: writtenKernel },
+      { by: engine.inner, kernel: writtenPacked },
+      { by: engine, kernel: twinnedKernel },
+      { by: engine, kernel: twinnedPacked },
+    );
     const small = { widthPx: 48, heightPx: 48 };
     const cases: ReadonlyArray<CellCase> = [
       {
@@ -1014,6 +1022,9 @@ export async function checkAirlessTwins(engine: RenderEngine, checks: Checks): P
   } finally {
     writtenRenderer.dispose();
     twinnedRenderer.dispose();
+    for (const { by, kernel } of made) {
+      by.releaseCompute(kernel);
+    }
     if (weights !== null) {
       engine.releaseTexture(weights.weights);
     }

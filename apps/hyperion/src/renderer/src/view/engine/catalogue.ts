@@ -648,7 +648,7 @@ const AIRLESS_SOURCES: ReadonlyArray<CatalogueEntry> = [
 /**
  * Plan R07's airless twins (perf-bodies-pass; `sourceTableEngine.ts`): each of
  * {@link AIRLESS_SOURCES}' lit materials and `disc cells` kernels with `surfaceLighting.wgsl`'s
- * `AIRLESS_ONLY` set. The smoke page compiles them in part 35, alone, beside their check.
+ * `AIRLESS_ONLY` set. The smoke page compiles them in part 35, alone, beside their checks.
  */
 export const AIRLESS_ENTRIES: ReadonlyArray<CatalogueEntry> = AIRLESS_SOURCES.flatMap(
   (entry): ReadonlyArray<CatalogueEntry> => {

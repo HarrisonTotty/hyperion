@@ -3,7 +3,13 @@ import { describe, expect, it, vi } from "vitest";
 import { countingRenderEngine } from "../../test/countingRenderEngine";
 import { BODY_DISC_CELLS_KERNEL, BODY_DISC_MATERIALS } from "../bodies/draw";
 import { TEXTURE_USAGE } from "../engine/gpuFlags";
-import type { DrawItem, MaterialHandle, MeshHandle, TextureHandle } from "../engine/types";
+import type {
+  ComputeBindings,
+  DrawItem,
+  MaterialHandle,
+  MeshHandle,
+  TextureHandle,
+} from "../engine/types";
 import { COMPOSITE_MATERIAL } from "./hillaire";
 import { SourceTableEngine } from "./sourceTableEngine";
 import {
@@ -229,6 +235,16 @@ function bodyDrawOf(material: MaterialHandle, mesh: MeshHandle, body: TextureHan
   };
 }
 
+/** A dispatch's bindings with `body` as its body's table and `table` as its sources' table. */
+function sampled(body: TextureHandle, table: TextureHandle): ComputeBindings {
+  return {
+    uniforms: {},
+    buffers: {},
+    sampled: { atmosphere_body: body, atmosphere_source_table: table },
+    storage: {},
+  };
+}
+
 describe("the lit passes' airless twins (plan R07, perf-bodies-pass)", () => {
   it("makes a twin of a material or kernel that binds a body's tables, and of nothing else", () => {
     const twin = airlessMaterial(BODY_DISC_MATERIALS.interior);
@@ -315,6 +331,38 @@ describe("the lit passes' airless twins (plan R07, perf-bodies-pass)", () => {
       "BODY DISC CELLS (airless)",
       "BODY DISC CELLS",
     ]);
+  });
+
+  it("releases a kernel's twins with it, one made after its release at once", async () => {
+    const { inner, engine } = await setUp();
+    const released: string[] = [];
+    const release = inner.releaseCompute.bind(inner);
+    inner.releaseCompute = (kernel) => {
+      released.push(kernel.name);
+      release(kernel);
+    };
+    const airless = createAirlessTables(engine, "bodies:no atmosphere");
+    const oneBand = tableOf(engine, ONE_BAND_SOURCE_TABLE_NAME);
+    const kernel = engine.createCompute(BODY_DISC_CELLS_KERNEL);
+    engine.dispatch(kernel, sampled(airless.body, airless.body), [1, 1, 1]);
+    engine.dispatch(kernel, sampled(oneBand, oneBand), [1, 1, 1]);
+    await engine.twinsSettled();
+    engine.releaseCompute(kernel);
+    const withIt = [...released];
+    // A twin still being made as its kernel goes, in its task (perf-long-tasks-4), is released
+    // once it is made: here its kernel goes as its making begins.
+    const late = engine.createCompute(BODY_DISC_CELLS_KERNEL);
+    const make = inner.createComputeAsync.bind(inner);
+    inner.createComputeAsync = (pair) => {
+      engine.releaseCompute(late);
+      return make(pair);
+    };
+    engine.dispatch(late, sampled(airless.body, airless.body), [1, 1, 1]);
+    await engine.twinsSettled();
+    expect({ withIt, late: released.slice(withIt.length) }).toEqual({
+      withIt: ["BODY DISC CELLS (table only)", "BODY DISC CELLS (airless)", "BODY DISC CELLS"],
+      late: ["BODY DISC CELLS", "BODY DISC CELLS (airless)"],
+    });
   });
 
   it("releases both twins with their material", async () => {
