@@ -23,6 +23,7 @@ import type {
 } from "../../../../preload/api";
 import type { GpuTimer } from "../engine/status";
 import type { AllocationEvent } from "../engine/memory";
+import { passOwnNs } from "../engine/passSpans";
 import type { PassTimes } from "../engine/types";
 import type { GeometrySettings } from "../quality/qualitySetting";
 import type { SpikeGeometrySample } from "./spikeRun";
@@ -165,7 +166,11 @@ export class SpikeMetrics {
   readonly #lastEngineFrame: number[] = [];
   /** Each frame's resolves whose pass times have arrived. */
   readonly #reportedResolves: number[] = [];
-  readonly #passes = new Map<string, Array<number | null>>();
+  /** Each pass's span and own time each frame, ms (`SpikePassSeries`), by its label. */
+  readonly #passes = new Map<
+    string,
+    { readonly gpuMs: Array<number | null>; readonly ownMs: Array<number | null> }
+  >();
   readonly #segments = new Map<string, SegmentTally>();
   /** Each segment's geometry counts (plan R14), and the geometry the last frame's pass drew with. */
   readonly #geometry = new Map<string, GeometryTally>();
@@ -211,7 +216,8 @@ export class SpikeMetrics {
     this.#ourCodeMs.push(sample.callbackMs);
     this.#callbackStartsMs.push(sample.callbackStartMs);
     for (const series of this.#passes.values()) {
-      series.push(null);
+      series.gpuMs.push(null);
+      series.ownMs.push(null);
     }
     if (sample.passesSubmitted !== null) {
       this.#untimedPasses += Math.max(0, sample.passesSubmitted - TIMED_PASSES_A_FRAME);
@@ -241,15 +247,21 @@ export class SpikeMetrics {
       return;
     }
     this.#reportedResolves[index] = (this.#reportedResolves[index] ?? 0) + 1;
-    for (const { label, ns } of times.passes) {
+    const own = passOwnNs(times.passes);
+    times.passes.forEach(({ label, ns }, i) => {
       let series = this.#passes.get(label);
       if (series === undefined) {
-        series = Array.from({ length: this.#scriptTimesS.length }, () => null);
+        const frames = this.#scriptTimesS.length;
+        series = {
+          gpuMs: Array.from({ length: frames }, () => null),
+          ownMs: Array.from({ length: frames }, () => null),
+        };
         this.#passes.set(label, series);
       }
       // A label a frame times twice (the two instruments' `view:wireframe`) is summed.
-      series[index] = (series[index] ?? 0) + ns / 1e6;
-    }
+      series.gpuMs[index] = (series.gpuMs[index] ?? 0) + ns / 1e6;
+      series.ownMs[index] = (series.ownMs[index] ?? 0) + (own[i] ?? 0) / 1e6;
+    });
   }
 
   /** The frame owning an engine frame number: the first whose last is at or after it. */
@@ -468,10 +480,11 @@ export class SpikeMetrics {
         callbackStartsMs: this.#callbackStartsMs.slice(from, to),
         missingResolves: this.#missingResolves(from, to),
         inFlightResolves: this.#inFlightResolves(extra.inFlightResolves, from, to),
-        passes: [...this.#passes].map(([label, gpuMs]) => ({
+        passes: [...this.#passes].map(([label, { gpuMs, ownMs }]) => ({
           label,
           row: this.#options.rowOf(label),
           gpuMs: gpuMs.slice(from, to),
+          ownMs: ownMs.slice(from, to),
         })),
       },
       streaming,

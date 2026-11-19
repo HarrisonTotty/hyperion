@@ -44,6 +44,9 @@ export function sampleRepetition(index: number, metrics: RepetitionMetrics): Per
         p50Ms: 9.0,
         p95Ms: 11.2,
         p99Ms: 12.5,
+        ownP50Ms: 8.8,
+        ownP95Ms: 10.9,
+        ownP99Ms: 12.1,
       },
     ],
     memory: {

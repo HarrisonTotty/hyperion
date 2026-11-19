@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { GpuTimer } from "../engine/status";
 import type { PassTimes } from "../engine/types";
-import { serialPasses, timedPass } from "../../test/passTimes";
+import { overlappedPasses, serialPasses, timedPass } from "../../test/passTimes";
 import { passRolesOf } from "./passRows";
 import { type PerfFrameSample, RepetitionMetrics, TIMESTAMP_QUANTUM_NS } from "./repetitionMetrics";
 
@@ -72,6 +72,9 @@ describe("a repetition's metrics", () => {
       p50Ms: 4,
       p95Ms: 6,
       p99Ms: 6,
+      ownP50Ms: 4,
+      ownP95Ms: 6,
+      ownP99Ms: 6,
     });
     expect(result.rows).toContainEqual({
       row: "terrain",
@@ -91,7 +94,34 @@ describe("a repetition's metrics", () => {
     m.passTimes(times(11, [["bodies", 1e6]]));
     m.passTimes(times(12, [["bodies", 50e6]]));
     expect(m.result(EXTRAS).passes).toEqual([
-      { key: "primary:bodies", row: "terrain", frames: 1, p50Ms: 1, p95Ms: 1, p99Ms: 1 },
+      {
+        key: "primary:bodies",
+        row: "terrain",
+        frames: 1,
+        p50Ms: 1,
+        p95Ms: 1,
+        p99Ms: 1,
+        ownP50Ms: 1,
+        ownP95Ms: 1,
+        ownP99Ms: 1,
+      },
+    ]);
+  });
+
+  it("totals a frame by its passes' own times where Metal's spans overlap, each pass's span beside its own (lane fix-floor-calm)", () => {
+    const m = metrics();
+    m.frame(frame(1, 0));
+    // 4 ms of bodies, the 12 ms march, and the composite's span holding the march and 0.5 ms more:
+    // 28.5 ms of spans, 16.5 ms of GPU work.
+    m.passTimes({ frame: 1, timer: "full", passes: overlappedPasses(4e6, 12e6, 0.5e6) });
+    const result = m.result(EXTRAS);
+    const composite = result.passes.find(({ key }) => key === "primary:atmosphere composite");
+    const rows = Object.fromEntries(result.rows.map(({ row, p50Ms }) => [row, p50Ms]));
+    expect([composite?.p50Ms, composite?.ownP50Ms, rows, result.timedPassesPerFrameMs]).toEqual([
+      12.5,
+      0.5,
+      { terrain: 4, "atmosphere-frame": 12.5 },
+      16.5,
     ]);
   });
 

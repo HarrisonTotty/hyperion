@@ -39,6 +39,9 @@ function isOpenMap(path: string): boolean {
   return OPEN_MAPS.some((m) => (typeof m === "string" ? m === path : m.test(path)));
 }
 
+/** The fields added within version 1 (`absentAs`), which a record written before them lacks. */
+const ADDED_IN_VERSION = /^runs\[\d+\]\.passes\[\d+\]\.own(P50|P95|P99)Ms$/;
+
 /** Every field's path in the record, with the container and key that hold it. */
 function fields(
   value: Json,
@@ -85,7 +88,9 @@ describe("the run record", () => {
   });
 
   it("names each missing field", () => {
-    const paths = fields(plain(), "", []).filter((f) => !Array.isArray(f.holder));
+    const paths = fields(plain(), "", []).filter(
+      (f) => !Array.isArray(f.holder) && !ADDED_IN_VERSION.test(f.path),
+    );
     expect(paths.length).toBeGreaterThan(150);
     for (const { path } of paths) {
       const value = plain();
@@ -116,6 +121,19 @@ describe("the run record", () => {
       const error = errorOf(() => validatePerfRecord(value));
       expect({ path, field: error.field }).toEqual({ path, field: path });
     }
+  });
+
+  it("reads a pass's own times as not measured in a record written before they were kept", () => {
+    const value = plain();
+    const added = fields(value, "", []).filter((f) => ADDED_IN_VERSION.test(f.path));
+    for (const { holder, key } of added) {
+      if (!Array.isArray(holder) && typeof key === "string") delete holder[key];
+    }
+    const passes = validatePerfRecord(value).runs.flatMap((run) => run.passes);
+    expect([
+      added.length,
+      passes.map(({ ownP50Ms, ownP95Ms, ownP99Ms }) => [ownP50Ms, ownP95Ms, ownP99Ms]),
+    ]).toEqual([3 * passes.length, passes.map(() => [null, null, null])]);
   });
 
   it("refuses an unknown version", () => {

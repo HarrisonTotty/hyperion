@@ -236,8 +236,8 @@ describe("the spike's recorder", () => {
     }
     const report = recorder.report({ widthPx: 1280, heightPx: 720 });
     expect(report.frames.passes).toEqual([
-      { label: "terrain", row: "terrain", gpuMs: [1, 1] },
-      { label: "view:wireframe", row: "other", gpuMs: [2, null] },
+      { label: "terrain", row: "terrain", gpuMs: [1, 1], ownMs: [1, 1] },
+      { label: "view:wireframe", row: "other", gpuMs: [2, null], ownMs: [2, null] },
     ]);
     // The second frame's resolves 4 and 6 never reported.
     expect(report.frames.missingResolves).toEqual([0, 2]);
@@ -280,7 +280,9 @@ describe("the spike's recorder", () => {
       });
     }
     const { frames } = recorder.report({ widthPx: 1280, heightPx: 720 });
-    expect(frames.passes).toEqual([{ label: "terrain", row: "terrain", gpuMs: [1, null, 3] }]);
+    expect(frames.passes).toEqual([
+      { label: "terrain", row: "terrain", gpuMs: [1, null, 3], ownMs: [1, null, 3] },
+    ]);
     // The dropped resolve is its frame's one missing resolve.
     expect(frames.missingResolves).toEqual([0, 1, 0]);
   });

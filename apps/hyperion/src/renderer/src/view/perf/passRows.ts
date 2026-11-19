@@ -22,6 +22,7 @@ import {
 } from "@hyperion/perf";
 
 import type { RenderStyle } from "../camera/state";
+import { passOwnNs } from "../engine/passSpans";
 import type { PassTimes } from "../engine/types";
 
 /**
@@ -122,8 +123,14 @@ export function passRolesOf(
 export interface AttributedPass {
   readonly key: PassKey;
   readonly row: BudgetRow;
-  /** Its GPU time, ns. */
+  /** Its GPU time, ns: its span, from its first timestamp to its last. */
   readonly ns: number;
+  /**
+   * Its own time, ns (`passOwnNs`; lane fix-floor-calm): its span less what the resolve's passes
+   * ending before it covered, so that the resolve's own times add to the union of its spans; its
+   * span on a serial timer.
+   */
+  readonly ownNs: number;
 }
 
 /**
@@ -144,6 +151,7 @@ export function attributePasses(
     : photorealistic
       ? "primary"
       : roles.first;
+  const own = passOwnNs(times.passes);
   return times.passes.map(({ label, ns }, i) => {
     let role = resolveRole;
     if (wireframe && photorealistic) {
@@ -155,6 +163,6 @@ export function attributePasses(
             ? "primary"
             : roles.first;
     }
-    return { key: `${role}:${label}`, row: passRowOf(role, label), ns };
+    return { key: `${role}:${label}`, row: passRowOf(role, label), ns, ownNs: own[i] ?? 0 };
   });
 }

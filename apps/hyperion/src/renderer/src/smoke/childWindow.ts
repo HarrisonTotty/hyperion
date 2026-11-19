@@ -21,7 +21,7 @@ import { requestAdapterOutcome } from "../view/engine/platform";
 import type { GraphicsStatusStore } from "../view/engine/status";
 import type { PassTimes, RenderEngine, RenderView, ViewSize } from "../view/engine/types";
 import { type Checks, drawOf, flatSpec, frameOf, fullScreenMesh, triangleMesh } from "./harness";
-import { percentile } from "./soak";
+import { ownBeside, percentile, recordPassTimes } from "./soak";
 
 /** How long the opener draws on after the child closes, ms. */
 export const CLOSE_TAIL_MS = 2_000;
@@ -206,9 +206,12 @@ export function resizedFrom(sizes: ReadonlyArray<string>, before: number): boole
   return last !== undefined && sizes.slice(before).some((size) => size !== last);
 }
 
-/** The median and 95th percentile of a pass's times, µs, and its count. */
-function passFigures(values: ReadonlyArray<number>): string {
-  return `${(percentile(values, 0.5) / 1000).toFixed(1)} µs (p95 ${(percentile(values, 0.95) / 1000).toFixed(1)}, n ${String(values.length)})`;
+/**
+ * The median and 95th percentile of a pass's spans, µs, its count, and its own time's median where
+ * it differs ({@link ownBeside}).
+ */
+function passFigures(values: ReadonlyArray<number>, ownNs: ReadonlyArray<number>): string {
+  return `${(percentile(values, 0.5) / 1000).toFixed(1)} µs (p95 ${(percentile(values, 0.95) / 1000).toFixed(1)}, n ${String(values.length)}${ownBeside(values, ownNs)})`;
 }
 
 /** A view's canvas size in device pixels, for a window's inner size. */
@@ -262,10 +265,9 @@ export async function runChildWindow(
   }
   const engine: RenderEngine = await loadRenderEngine(outcome, status);
   const times = new Map<string, number[]>();
+  const ownTimes = new Map<string, number[]>();
   const stopTimes = engine.onPassTimes((frame: PassTimes) => {
-    for (const pass of frame.passes) {
-      times.set(pass.label, [...(times.get(pass.label) ?? []), pass.ns]);
-    }
+    recordPassTimes(frame, times, ownTimes);
   });
   let losses = 0;
   const stopFaults = engine.onFault((fault) => {
@@ -415,7 +417,7 @@ export async function runChildWindow(
   checks.check(
     "T21 frame times beside the main view's",
     openerIntervals.length > 0 && cockpitTimes.length > 0 && childTimes.length > 0,
-    `opener frame p50 ${percentile(openerIntervals, 0.5).toFixed(2)} ms, p95 ${percentile(openerIntervals, 0.95).toFixed(2)} ms; GPU: cockpit ${passFigures(cockpitTimes)}, child instrument ${passFigures(childTimes)}, their post-processes ${passFigures(times.get("cockpit tone") ?? [])} and ${passFigures(times.get("child instrument tone") ?? [])}; timer ${snapshot.timer}`,
+    `opener frame p50 ${percentile(openerIntervals, 0.5).toFixed(2)} ms, p95 ${percentile(openerIntervals, 0.95).toFixed(2)} ms; GPU: cockpit ${passFigures(cockpitTimes, ownTimes.get("cockpit") ?? [])}, child instrument ${passFigures(childTimes, ownTimes.get("child instrument") ?? [])}, their post-processes ${passFigures(times.get("cockpit tone") ?? [], ownTimes.get("cockpit tone") ?? [])} and ${passFigures(times.get("child instrument tone") ?? [], ownTimes.get("child instrument tone") ?? [])}; timer ${snapshot.timer}`,
   );
   checks.check(
     "T21 the child followed its resize",

@@ -2,10 +2,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ATMOSPHERE_VIEW_PASS } from "../view/atmosphere/hillaire";
 import type { PassTimes } from "../view/engine/types";
-import { serialPasses } from "../test/passTimes";
+import { overlappedPasses, serialPasses } from "../test/passTimes";
 import {
   type FrameRecord,
   keptOf,
+  labelledNs,
   perFrameSums,
   ResolveLedger,
   runTimed,
@@ -14,6 +15,7 @@ import {
   type TimedFrame,
   timedFrameOf,
   type TimerEngine,
+  sumNs,
   viewPassesOf,
 } from "./frameTimingLedger";
 
@@ -39,11 +41,11 @@ class StubTimer implements TimerEngine {
 
   /** Reports resolve `frame`'s passes, each a label and its ns. */
   report(frame: number, passes: ReadonlyArray<readonly [string, number]>): void {
-    const times: PassTimes = {
-      frame,
-      timer: "full",
-      passes: serialPasses(passes),
-    };
+    this.reportTimes({ frame, timer: "full", passes: serialPasses(passes) });
+  }
+
+  /** Reports a resolve's times as they are. */
+  reportTimes(times: PassTimes): void {
     for (const listener of this.#listeners) {
       listener(times);
     }
@@ -52,7 +54,11 @@ class StubTimer implements TimerEngine {
 
 /** A frame of `passes`, as `timedFrameOf` makes one. */
 function frameOf(passes: ReadonlyArray<readonly [string, number]>): TimedFrame {
-  return { passes: passes.map(([label, ns]) => ({ label, ns })), cpuMs: 0, timers: ["full"] };
+  return {
+    passes: passes.map(([label, ns]) => ({ label, ns, ownNs: ns })),
+    cpuMs: 0,
+    timers: ["full"],
+  };
 }
 
 /** A small form, so that a run is a few frames: one warm-up and two timed a sweep. */
@@ -87,9 +93,9 @@ describe("the ledger of the timer's resolves", () => {
     ]);
     expect(timedFrameOf(record)).toEqual({
       passes: [
-        { label: "sky", ns: 20 },
-        { label: "bodies", ns: 21 },
-        { label: "discs", ns: 30 },
+        { label: "sky", ns: 20, ownNs: 20 },
+        { label: "bodies", ns: 21, ownNs: 21 },
+        { label: "discs", ns: 30, ownNs: 30 },
       ],
       cpuMs: 1.5,
       timers: ["full", "full"],
@@ -106,7 +112,7 @@ describe("the ledger of the timer's resolves", () => {
     timer.report(fence ?? 0, [["fence", 5]]);
     timer.report(99, [["elsewhere", 6]]);
     timer.report(own ?? 0, [["sky", 7]]);
-    expect(timedFrameOf(record)?.passes).toEqual([{ label: "sky", ns: 7 }]);
+    expect(timedFrameOf(record)?.passes).toEqual([{ label: "sky", ns: 7, ownNs: 7 }]);
   });
 
   it("drops and counts a frame with a resolve held back", () => {
@@ -148,6 +154,35 @@ describe("the ledger of the timer's resolves", () => {
     const timedOut = ledger.settled(held, 2_000);
     await vi.advanceTimersByTimeAsync(2_000);
     await expect(timedOut).resolves.toBe(false);
+  });
+});
+
+describe("a frame's sums (lane fix-floor-calm)", () => {
+  it("adds its passes' own times where Metal's spans overlap, so that the labelled and the rest part the union", () => {
+    const timer = new StubTimer();
+    const ledger = new ResolveLedger(timer);
+    const before = ledger.count;
+    const [resolve] = timer.submit(1);
+    const record = ledger.frame(before, 0);
+    // The composite's span holds the 12 ms march it waits on, and 0.5 ms of its own after it.
+    timer.reportTimes({
+      frame: resolve ?? 0,
+      timer: "full",
+      passes: overlappedPasses(4e6, 12e6, 0.5e6),
+    });
+    const frame = timedFrameOf(record);
+    if (frame === null) {
+      throw new Error("the frame's one resolve arrived");
+    }
+    const composite = frame.passes.find(({ label }) => label === "atmosphere composite");
+    const air = new Set(["atmosphere view", "atmosphere composite"]);
+    expect([
+      composite?.ns,
+      composite?.ownNs,
+      sumNs(frame),
+      labelledNs(frame, air),
+      sumNs(frame) - labelledNs(frame, air),
+    ]).toEqual([12.5e6, 0.5e6, 16.5e6, 12.5e6, 4e6]);
   });
 });
 

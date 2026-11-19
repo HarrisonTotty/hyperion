@@ -274,7 +274,8 @@ export interface PerfRepetitionResult {
   readonly rows: ReadonlyArray<RowFigures>;
   /**
    * The mean over frames of each frame's timed passes' sum, ms, for the `compositing` row (the GPU
-   * process's busy time less it, Design note 6); `null` where no pass was timed.
+   * process's busy time less it, Design note 6): of their own times, each resolve's union of its
+   * spans (lane fix-floor-calm); `null` where no pass was timed.
    */
   readonly timedPassesPerFrameMs: number | null;
   readonly timer: PerfTimer;
@@ -726,8 +727,17 @@ export interface SpikePassSeries {
   /** The pass's `FrameSubmission.label`. */
   readonly label: string;
   readonly row: SpikePassRow;
-  /** Its GPU time each frame, ms; `null` in a frame it did not run or was not timed. */
+  /**
+   * Its GPU time each frame, ms: its span, from its first timestamp to its last; `null` in a frame it
+   * did not run or was not timed.
+   */
   readonly gpuMs: ReadonlyArray<number | null>;
+  /**
+   * Its own time each frame, ms, `null` where {@link gpuMs} is (lane fix-floor-calm): its span less
+   * what its resolve's passes ending before it covered (`passOwnNs`), so that a frame's own times
+   * add to the union of its resolves' spans, which Metal overlaps; its span on a serial timer.
+   */
+  readonly ownMs: ReadonlyArray<number | null>;
 }
 
 /** The renderer's per-frame series of a run. */

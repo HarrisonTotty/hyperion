@@ -1,4 +1,16 @@
-import type { DescentSpikeReport } from "../../preload/api";
+import type { DescentSpikeReport, SpikePassSeries } from "../../preload/api";
+
+/**
+ * A pass's series as a serial timer gives it: its own time each frame its span, `gpuMs` (lane
+ * fix-floor-calm).
+ */
+export function serialSeries(
+  label: string,
+  row: SpikePassSeries["row"],
+  gpuMs: ReadonlyArray<number | null>,
+): SpikePassSeries {
+  return { label, row, gpuMs, ownMs: gpuMs };
+}
 
 /** A small valid report: three frames, one pass, one segment, one trace window. */
 export function smallReport(): DescentSpikeReport {
@@ -18,7 +30,7 @@ export function smallReport(): DescentSpikeReport {
       callbackStartsMs: [1000.1, 1016.1, 1033.1],
       missingResolves: [0, 0, 0],
       inFlightResolves: [0, 0, 0],
-      passes: [{ label: "terrain", row: "terrain", gpuMs: [1, null, 1.2] }],
+      passes: [serialSeries("terrain", "terrain", [1, null, 1.2])],
     },
     streaming: [
       {

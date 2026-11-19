@@ -14,6 +14,7 @@ import type { BudgetRow, MemoryItem, PassKey, ViewRole } from "./rows.ts";
 import { isPerfSceneId } from "./scenes.ts";
 import type { PerfSceneId } from "./scenes.ts";
 import {
+  absentAs,
   array,
   bool,
   count,
@@ -298,7 +299,11 @@ export interface SegmentFigures {
   readonly frames: FrameFigures;
 }
 
-/** A row's GPU time: each frame's sum of the row's passes (Design note 4). */
+/**
+ * A row's GPU time: each frame's sum of the row's passes' own times (Design note 4), so that the
+ * rows part the union of the frame's spans among them (lane fix-floor-calm); on a serial timer each
+ * own time is its pass's span, and the sum the spans' as before.
+ */
 export interface RowFigures {
   readonly row: BudgetRow;
   readonly frames: number;
@@ -308,15 +313,24 @@ export interface RowFigures {
   readonly p99Ms: number | null;
 }
 
-/** One timed pass's GPU time (Design note 4). */
+/** One timed pass's GPU time (Design note 4): its span's percentiles, and its own time's. */
 export interface PassFigures {
   readonly key: PassKey;
   /** Its row as `PASS_ROWS` had it when the record was made. */
   readonly row: BudgetRow;
   readonly frames: number;
+  /** Its span's, ms: from its first timestamp to its last, which on Metal may hold another's. */
   readonly p50Ms: number | null;
   readonly p95Ms: number | null;
   readonly p99Ms: number | null;
+  /**
+   * Its own time's, ms (lane fix-floor-calm; R01's `passOwnNs`): its span less what the passes
+   * ending before it covered, so that a frame's own times add to the union of its spans; its span's
+   * on a serial timer. `null` in a record written before own times were kept.
+   */
+  readonly ownP50Ms: number | null;
+  readonly ownP95Ms: number | null;
+  readonly ownP99Ms: number | null;
 }
 
 /** The GPU memory's headline and its bounds (Design note 6). */
@@ -555,6 +569,9 @@ const repetition = object<PerfRepetition>({
       p50Ms: nNonNegative,
       p95Ms: nNonNegative,
       p99Ms: nNonNegative,
+      ownP50Ms: absentAs(nNonNegative, null),
+      ownP95Ms: absentAs(nNonNegative, null),
+      ownP99Ms: absentAs(nNonNegative, null),
     }),
   ),
   memory: object<MemoryFigures>({

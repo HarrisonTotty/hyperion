@@ -12,9 +12,15 @@
  * draw up to the count after it. A resolve the timer dropped is never reported, so a frame waits
  * for its resolves only so long, and one with any missing is left out of its combination's figures
  * and counted.
+ *
+ * Each pass keeps its own time beside its span (lane fix-floor-calm; `passOwnNs`), and a frame's
+ * sums are of own times, which add to each resolve's union of its spans: Metal overlaps them, and a
+ * sum of spans counted the composite's wait on the march twice. On a serial timer, SwiftShader's
+ * and the RTX 3080's, each own time is its span and every sum is as before.
  */
 
 import { ATMOSPHERE_VIEW_PASS } from "../view/atmosphere/hillaire";
+import { passOwnNs } from "../view/engine/passSpans";
 import type { GpuTimer } from "../view/engine/status";
 import type { PassTimes, RenderEngine } from "../view/engine/types";
 
@@ -164,10 +170,13 @@ export class ResolveLedger {
   }
 }
 
-/** One pass of a resolve: its label and its time, ns. */
+/** One pass of a resolve: its label and its time, ns, its span's and its own. */
 export interface PassTime {
   readonly label: string;
+  /** Its span, ns: from its first timestamp to its last. */
   readonly ns: number;
+  /** Its span less what its resolve's passes ending before it covered, ns (`passOwnNs`). */
+  readonly ownNs: number;
 }
 
 /** A timed frame that arrived whole: its passes in submission order and its main-thread time. */
@@ -191,24 +200,32 @@ export function timedFrameOf(record: FrameRecord): TimedFrame | null {
       return null;
     }
     timers.push(times.timer);
-    passes.push(...times.passes.map(({ label, ns }) => ({ label, ns })));
+    const own = passOwnNs(times.passes);
+    passes.push(...times.passes.map(({ label, ns }, i) => ({ label, ns, ownNs: own[i] ?? 0 })));
   }
   return { passes, cpuMs: record.cpuMs, timers };
 }
 
-/** A frame's GPU pass sum, ns. */
+/** A frame's GPU time, ns: its passes' own times summed, each resolve's union of its spans. */
 export function sumNs(frame: TimedFrame): number {
-  return frame.passes.reduce((sum, pass) => sum + pass.ns, 0);
+  return frame.passes.reduce((sum, pass) => sum + pass.ownNs, 0);
 }
 
-/** A frame's passes under `labels`, summed, ns. */
+/**
+ * A frame's passes under `labels`, their own times summed, ns: so that the labelled passes and the
+ * rest part the frame's {@link sumNs}.
+ */
 export function labelledNs(frame: TimedFrame, labels: ReadonlySet<string>): number {
-  return frame.passes.reduce((sum, pass) => sum + (labels.has(pass.label) ? pass.ns : 0), 0);
+  return frame.passes.reduce((sum, pass) => sum + (labels.has(pass.label) ? pass.ownNs : 0), 0);
 }
 
-/** Whether every pass time of every frame is finite and not negative. */
+/** Whether every pass time of every frame, span and own, is finite and not negative. */
 export function framesFinite(frames: ReadonlyArray<TimedFrame>): boolean {
-  return frames.every((frame) => frame.passes.every((p) => Number.isFinite(p.ns) && p.ns >= 0));
+  return frames.every((frame) =>
+    frame.passes.every(
+      (p) => Number.isFinite(p.ns) && p.ns >= 0 && Number.isFinite(p.ownNs) && p.ownNs >= 0,
+    ),
+  );
 }
 
 /** A frame's atmosphere view passes by their place, ns. */

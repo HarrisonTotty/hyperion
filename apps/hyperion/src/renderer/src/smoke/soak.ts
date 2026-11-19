@@ -10,6 +10,7 @@
  */
 
 import { loadRenderEngine } from "../view/engine/loadEngine";
+import { passOwnNs } from "../view/engine/passSpans";
 import { requestAdapterOutcome } from "../view/engine/platform";
 import type { GraphicsStatusStore } from "../view/engine/status";
 import type { PassTimes, RenderEngine, RenderView } from "../view/engine/types";
@@ -24,6 +25,39 @@ export function percentile(values: ReadonlyArray<number>, p: number): number {
   return (
     sorted[Math.min(sorted.length - 1, Math.max(0, Math.ceil(p * sorted.length) - 1))] ?? Number.NaN
   );
+}
+
+/**
+ * Records a resolve's passes by label, ns: each span in `spans` and each own time, its span less
+ * what the resolve's passes ending before it covered (`passOwnNs`; lane fix-floor-calm), in `own`.
+ */
+export function recordPassTimes(
+  times: PassTimes,
+  spans: Map<string, number[]>,
+  own: Map<string, number[]>,
+): void {
+  const ownNs = passOwnNs(times.passes);
+  times.passes.forEach((pass, i) => {
+    for (const [byLabel, ns] of [
+      [spans, pass.ns],
+      [own, ownNs[i] ?? 0],
+    ] as const) {
+      const list = byLabel.get(pass.label) ?? [];
+      list.push(ns);
+      byLabel.set(pass.label, list);
+    }
+  });
+}
+
+/**
+ * A pass's own time's median beside its span's figures, µs, where any differs, as Metal's
+ * overlapping spans make them (lane fix-floor-calm); nothing on a serial timer, whose own times are
+ * its spans, so that SwiftShader's checks read as before.
+ */
+export function ownBeside(spansNs: ReadonlyArray<number>, ownNs: ReadonlyArray<number>): string {
+  return spansNs.length === ownNs.length && spansNs.every((ns, i) => ns === ownNs[i])
+    ? ""
+    : `, own ${(percentile(ownNs, 0.5) / 1000).toFixed(1)}`;
 }
 
 /** One view of the scene, with the canvas it draws into. */
@@ -88,14 +122,13 @@ export async function runSoak(
   }
   const engine: RenderEngine = await loadRenderEngine(outcome, status);
   const times = new Map<string, number[]>();
+  const ownTimes = new Map<string, number[]>();
   const labelsSeen = new Set<string>();
   const stopTimes = engine.onPassTimes((frame: PassTimes) => {
     for (const pass of frame.passes) {
       labelsSeen.add(pass.label);
-      const list = times.get(pass.label) ?? [];
-      list.push(pass.ns);
-      times.set(pass.label, list);
     }
+    recordPassTimes(frame, times, ownTimes);
   });
   let losses = 0;
   const stopFaults = engine.onFault((fault) => {
@@ -233,7 +266,7 @@ export async function runSoak(
     [...times]
       .map(
         ([label, values]) =>
-          `${label} ${(median(values) / 1000).toFixed(1)} (p95 ${(percentile(values, 0.95) / 1000).toFixed(1)}, n ${values.length})`,
+          `${label} ${(median(values) / 1000).toFixed(1)} (p95 ${(percentile(values, 0.95) / 1000).toFixed(1)}, n ${values.length}${ownBeside(values, ownTimes.get(label) ?? [])})`,
       )
       .join("; "),
   );

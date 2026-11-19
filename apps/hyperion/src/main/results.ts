@@ -32,6 +32,11 @@
  * - The rest of the frame (decision-r05-high-atmosphere.md): terrain and atmosphere are judged as
  *   one row, each frame's passes of both summed, against their estimates' sum. Each pass row's own
  *   percentiles are recorded against its estimate in `gpu.rows`, a finding that enters no verdict.
+ * - Own times (lane fix-floor-calm): every per-frame sum adds its passes' own times
+ *   (`SpikePassSeries.ownMs`), which add to each resolve's union of its spans, since Metal's
+ *   overlap and a sum of spans counted the composite's wait on the march twice; on a serial timer
+ *   each is its span, as before. Each pass's figures give its own time's percentiles beside its
+ *   span's (`ownP50Ms` and the rest); the version stays 9, and a file without them reads as before.
  * - The measured sizes (plan R10, R10.T14.b; decision-r10-t14b-measure §6(g)): a `--sizes on`
  *   run's file carries an optional `sizes` block (`sizesResults.ts`), and its summary a "Sizes"
  *   section; the version stays 6, and a file without the block reads as before.
@@ -877,7 +882,7 @@ export interface PassRowFigures {
   readonly overEstimate: boolean | null;
 }
 
-/** A pass's GPU time over the run. */
+/** A pass's GPU time over the run: its span's percentiles, and its own time's beside them. */
 export interface PassFigures {
   readonly label: string;
   readonly row: SpikePassRow;
@@ -885,6 +890,10 @@ export interface PassFigures {
   readonly p50Ms: number;
   readonly p95Ms: number;
   readonly p99Ms: number;
+  /** Its own time's (`SpikePassSeries.ownMs`) over the same frames, ms. */
+  readonly ownP50Ms: number;
+  readonly ownP95Ms: number;
+  readonly ownP99Ms: number;
 }
 
 /** The results file of one run. */
@@ -1526,7 +1535,11 @@ export function buildResults(input: ResultsInput): DescentResults {
         frames.passes.flatMap((pass) => {
           const arrived = pick(pass.gpuMs, warm).filter((ms): ms is number => ms !== null);
           const stats = frameStats(arrived, null);
-          return stats === null
+          const own = frameStats(
+            pick(pass.ownMs, warm).filter((ms): ms is number => ms !== null),
+            null,
+          );
+          return stats === null || own === null
             ? []
             : [
                 {
@@ -1536,12 +1549,15 @@ export function buildResults(input: ResultsInput): DescentResults {
                   p50Ms: stats.p50Ms,
                   p95Ms: stats.p95Ms,
                   p99Ms: stats.p99Ms,
+                  ownP50Ms: own.p50Ms,
+                  ownP95Ms: own.p95Ms,
+                  ownP99Ms: own.p99Ms,
                 },
               ];
         }),
       );
-  // Each complete frame's sum of its timed passes in `rowFilter` (every pass for `null`), in the
-  // frames with one, and the most passes any of those sums added.
+  // Each complete frame's sum of its timed passes' own times in `rowFilter` (every pass for `null`),
+  // in the frames with one, and the most passes any of those sums added.
   const sums = (
     rowFilter: ReadonlySet<SpikePassRow> | null,
   ): { values: number[]; maxPasses: number } => {
@@ -1554,7 +1570,7 @@ export function buildResults(input: ResultsInput): DescentResults {
       let sum = 0;
       let k = 0;
       for (const pass of frames.passes) {
-        const ms = pass.gpuMs[i];
+        const ms = pass.ownMs[i];
         if ((rowFilter === null || rowFilter.has(pass.row)) && ms !== undefined && ms !== null) {
           sum += ms;
           k += 1;

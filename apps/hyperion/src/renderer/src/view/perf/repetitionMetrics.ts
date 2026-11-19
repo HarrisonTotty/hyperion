@@ -8,9 +8,13 @@
  * its own last (`FrameSample.engineFrame`, on R05's `ResolveCounter`), and each resolve's
  * `PassTimes` are matched to their frame when they arrive: resolves numbered before the
  * repetition's first frame are the warm-up's or an earlier repetition's and are left out, as are
- * those after its last frame. A pass's percentiles are over the frames that timed it; a row's and
- * the timed passes' sum over the frames whose every resolve reported (a dropped resolve is a gap),
- * each such frame's sum of the row's passes, 0 where none ran. Percentiles are by nearest rank.
+ * those after its last frame. A pass's percentiles, its span's and its own time's, are over the
+ * frames that timed it; a row's and the timed passes' sum over the frames whose every resolve
+ * reported (a dropped resolve is a gap), each such frame's sum of the row's passes' own times, 0
+ * where none ran. Own times (`passOwnNs`) add to each resolve's union of its spans, so the timed
+ * passes' sum is the floor's `gpuTimeMs` and the rows part it (lane fix-floor-calm): on Metal a sum
+ * of spans counted the composite's wait on the march twice; on a serial timer each own time is its
+ * span, as before. Percentiles are by nearest rank.
  * The timer is the worst any resolve reported, and `quantized` where it reported `full` but every
  * pass time is a whole multiple of 65,536 ns, Dawn's quantum (Design note 4; R12.T4.a's record).
  */
@@ -110,10 +114,11 @@ interface SegmentTallies {
   readonly streamingS: ReadonlyMap<string, number>;
 }
 
-/** A pass's GPU time in each frame that timed it, ms, by frame index. */
+/** A pass's GPU time in each frame that timed it, ms, by frame index: its span's and its own. */
 interface PassSeries {
   readonly row: BudgetRow;
   readonly msByFrame: Map<number, number>;
+  readonly ownMsByFrame: Map<number, number>;
 }
 
 /** Gathers one repetition's figures, frame by frame, into its {@link PerfRepetitionResult}. */
@@ -197,16 +202,17 @@ export class RepetitionMetrics {
       this.#timer = times.timer;
     }
     this.#reported[index] = (this.#reported[index] ?? 0) + 1;
-    for (const { key, row, ns } of attributed) {
+    for (const { key, row, ns, ownNs } of attributed) {
       this.#multiples &&= ns % TIMESTAMP_QUANTUM_NS === 0;
       this.#nonZero ||= ns !== 0;
       let series = this.#passes.get(key);
       if (series === undefined) {
-        series = { row, msByFrame: new Map() };
+        series = { row, msByFrame: new Map(), ownMsByFrame: new Map() };
         this.#passes.set(key, series);
       }
       // A key a frame times twice (the two instruments' `view:wireframe`) is summed, as R05's is.
       series.msByFrame.set(index, (series.msByFrame.get(index) ?? 0) + ns / 1e6);
+      series.ownMsByFrame.set(index, (series.ownMsByFrame.get(index) ?? 0) + ownNs / 1e6);
     }
   }
 
@@ -229,15 +235,26 @@ export class RepetitionMetrics {
     const complete = this.#completeFrames();
     const passes: PassFigures[] = [];
     const rowsSeen = new Set<BudgetRow>();
-    for (const [key, { row, msByFrame }] of this.#passes) {
+    for (const [key, { row, msByFrame, ownMsByFrame }] of this.#passes) {
       rowsSeen.add(row);
       const { p50Ms, p95Ms, p99Ms } = figuresOf([...msByFrame.values()]);
-      passes.push({ key, row, frames: msByFrame.size, p50Ms, p95Ms, p99Ms });
+      const own = figuresOf([...ownMsByFrame.values()]);
+      passes.push({
+        key,
+        row,
+        frames: msByFrame.size,
+        p50Ms,
+        p95Ms,
+        p99Ms,
+        ownP50Ms: own.p50Ms,
+        ownP95Ms: own.p95Ms,
+        ownP99Ms: own.p99Ms,
+      });
     }
     const rows: RowFigures[] = [...rowsSeen].map((row) => {
       const series = [...this.#passes.values()].filter((s) => s.row === row);
       const sums = complete.map((i) =>
-        series.reduce((sum, { msByFrame }) => sum + (msByFrame.get(i) ?? 0), 0),
+        series.reduce((sum, { ownMsByFrame }) => sum + (ownMsByFrame.get(i) ?? 0), 0),
       );
       const { meanMs, p50Ms, p95Ms, p99Ms } = figuresOf(sums);
       return { row, frames: complete.length, meanMs, p50Ms, p95Ms, p99Ms };
@@ -245,7 +262,7 @@ export class RepetitionMetrics {
     const allSeries = [...this.#passes.values()];
     const timed = figuresOf(
       complete.map((i) =>
-        allSeries.reduce((sum, { msByFrame }) => sum + (msByFrame.get(i) ?? 0), 0),
+        allSeries.reduce((sum, { ownMsByFrame }) => sum + (ownMsByFrame.get(i) ?? 0), 0),
       ),
     );
     return {

@@ -15,6 +15,7 @@ import {
 } from "./fixtures/traces";
 import { parseClientArgs } from "./cli";
 import { type SizesFixtureOptions, sizesReportOf } from "./fixtures/sizesReport";
+import { serialSeries } from "./fixtures/spikeReport";
 import { SIZES_BLOCK_BUDGET_BYTES } from "./sizesResults";
 import type { GpuClockSample } from "./gpuClocks";
 import type { Measured } from "./measured";
@@ -142,13 +143,21 @@ function reportOf(overrides: Partial<DescentSpikeReport> = {}): DescentSpikeRepo
       missingResolves: scriptTimesS.map(() => 0),
       inFlightResolves: scriptTimesS.map(() => 0),
       passes: [
-        { label: "terrain", row: "terrain", gpuMs: scriptTimesS.map(() => 6) },
-        { label: "atmosphere.sky", row: "atmosphere", gpuMs: scriptTimesS.map(() => 1.5) },
-        {
-          label: "tone",
-          row: "other",
-          gpuMs: scriptTimesS.map((_, i) => (i % 2 === 0 ? 0.5 : null)),
-        },
+        serialSeries(
+          "terrain",
+          "terrain",
+          scriptTimesS.map(() => 6),
+        ),
+        serialSeries(
+          "atmosphere.sky",
+          "atmosphere",
+          scriptTimesS.map(() => 1.5),
+        ),
+        serialSeries(
+          "tone",
+          "other",
+          scriptTimesS.map((_, i) => (i % 2 === 0 ? 0.5 : null)),
+        ),
       ],
     },
     streaming: [
@@ -246,9 +255,11 @@ function twoWindowReport(): DescentSpikeReport {
       ourCodeMs: base.frames.ourCodeMs.map((ms, i) => (inExclusion[i] === true ? 40 : ms)),
       passes: base.frames.passes.map((pass) =>
         pass.row === "terrain"
-          ? Object.assign({}, pass, {
-              gpuMs: pass.gpuMs.map((ms, i) => (inExclusion[i] === true ? 50 : ms)),
-            })
+          ? serialSeries(
+              pass.label,
+              pass.row,
+              pass.gpuMs.map((ms, i) => (inExclusion[i] === true ? 50 : ms)),
+            )
           : pass,
       ),
     },
@@ -429,6 +440,40 @@ describe("a results file", () => {
     expect(files.written.get(paths.markdown)).toContain("# Descent spike: devbox, low, 2026-10-02");
   });
 
+  it("sums each frame's passes by their own times where Metal's spans overlap, each pass's span beside its own (lane fix-floor-calm)", () => {
+    const base = reportOf();
+    const frames = base.frames.scriptTimesS.map(() => 1);
+    // The composite's span holds the 6 ms terrain it waits on, and 0.5 ms of its own after it.
+    const report = reportOf({
+      frames: {
+        ...base.frames,
+        passes: [
+          serialSeries(
+            "terrain",
+            "terrain",
+            frames.map(() => 6),
+          ),
+          {
+            label: "atmosphere composite",
+            row: "atmosphere",
+            gpuMs: frames.map(() => 6.5),
+            ownMs: frames.map(() => 0.5),
+          },
+        ],
+      },
+    });
+    const results = buildResults({ run: runOf(), report, trace: traceOf(), memory: MEMORY });
+    const composite = results.gpu.passes.value?.find(
+      ({ label }) => label === "atmosphere composite",
+    );
+    expect([
+      composite?.p50Ms,
+      composite?.ownP50Ms,
+      results.gpu.sumP95Ms,
+      results.gpu.rows.atmosphere.p50Ms,
+    ]).toEqual([6.5, 0.5, measured(6.5), measured(0.5)]);
+  });
+
   it("does not overwrite a run of the same day, machine and setting", async () => {
     const files = memoryFiles();
     const results = buildResults({
@@ -581,7 +626,13 @@ describe("a results file", () => {
       timer: "quantized",
       frames: {
         ...frames,
-        passes: [{ label: "terrain", row: "terrain", gpuMs: frames.scriptTimesS.map(() => 18.03) }],
+        passes: [
+          serialSeries(
+            "terrain",
+            "terrain",
+            frames.scriptTimesS.map(() => 18.03),
+          ),
+        ],
       },
     });
     const results = buildResults({
@@ -823,7 +874,11 @@ function restOfFrameReport(
           pass.row === "terrain" ? terrainMs : pass.row === "atmosphere" ? atmosphereMs : null;
         return timeAt === null
           ? pass
-          : Object.assign({}, pass, { gpuMs: pass.gpuMs.map((_, i) => timeAt(i)) });
+          : serialSeries(
+              pass.label,
+              pass.row,
+              pass.gpuMs.map((_, i) => timeAt(i)),
+            );
       }),
     },
   };
@@ -1845,7 +1900,11 @@ function incompleteReport(
         dropped.has(i) ? 5 : partial.has(i) ? 1 : 0,
       ),
       passes: base.frames.passes.map((pass) =>
-        Object.assign({}, pass, { gpuMs: pass.gpuMs.map((ms, i) => timeAt(pass.row, ms, i)) }),
+        serialSeries(
+          pass.label,
+          pass.row,
+          pass.gpuMs.map((ms, i) => timeAt(pass.row, ms, i)),
+        ),
       ),
     },
   };

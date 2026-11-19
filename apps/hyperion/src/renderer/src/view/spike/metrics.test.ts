@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { PassTimes } from "../engine/types";
 import { SETTINGS } from "../quality/qualitySetting";
-import { serialPasses } from "../../test/passTimes";
+import { overlappedPasses, serialPasses } from "../../test/passTimes";
 import {
   type FrameSample,
   SpikeMetrics,
@@ -93,8 +93,8 @@ describe("the spike's metrics", () => {
     const { frames, timer } = metrics.report(EXTRA);
     expect(timer).toBe("full");
     expect(frames.passes).toEqual([
-      { label: "terrain", row: "terrain", gpuMs: [3.5, 4] },
-      { label: "atmosphere.sky", row: "atmosphere", gpuMs: [0.5, null] },
+      { label: "terrain", row: "terrain", gpuMs: [3.5, 4], ownMs: [3.5, 4] },
+      { label: "atmosphere.sky", row: "atmosphere", gpuMs: [0.5, null], ownMs: [0.5, null] },
     ]);
   });
 
@@ -109,8 +109,25 @@ describe("the spike's metrics", () => {
     metrics.passTimes(times(5, [["view:wireframe", 500_000]]));
     metrics.passTimes(times(7, [["terrain", 2_000_000]]));
     expect(metrics.report(EXTRA).frames.passes).toEqual([
-      { label: "terrain", row: "terrain", gpuMs: [1, 2] },
-      { label: "view:wireframe", row: "other", gpuMs: [0.75, null] },
+      { label: "terrain", row: "terrain", gpuMs: [1, 2], ownMs: [1, 2] },
+      { label: "view:wireframe", row: "other", gpuMs: [0.75, null], ownMs: [0.75, null] },
+    ]);
+  });
+
+  it("gives each pass its own time beside its span where Metal's spans overlap (lane fix-floor-calm)", () => {
+    const metrics = new SpikeMetrics(OPTIONS);
+    metrics.frame(sample(1, 0));
+    // The composite's span holds the 12 ms march it waits on, and 0.5 ms of its own after it.
+    metrics.passTimes({ frame: 1, timer: "full", passes: overlappedPasses(4e6, 12e6, 0.5e6) });
+    const series = metrics.report(EXTRA).frames.passes.map(({ label, gpuMs, ownMs }) => ({
+      label,
+      gpuMs,
+      ownMs,
+    }));
+    expect(series).toEqual([
+      { label: "bodies", gpuMs: [4], ownMs: [4] },
+      { label: "atmosphere view", gpuMs: [12], ownMs: [12] },
+      { label: "atmosphere composite", gpuMs: [12.5], ownMs: [0.5] },
     ]);
   });
 
@@ -120,7 +137,7 @@ describe("the spike's metrics", () => {
     metrics.passTimes(times(1, [["tone", 250_000]]));
     metrics.frame(sample(2, 0.1));
     expect(metrics.report(EXTRA).frames.passes).toEqual([
-      { label: "tone", row: "other", gpuMs: [0.25, null] },
+      { label: "tone", row: "other", gpuMs: [0.25, null], ownMs: [0.25, null] },
     ]);
   });
 
@@ -136,7 +153,9 @@ describe("the spike's metrics", () => {
     const { frames } = metrics.report(EXTRA);
     // The second frame lost one of its five (partial), the third all five (dropped).
     expect(frames.missingResolves).toEqual([0, 1, 5]);
-    expect(frames.passes).toEqual([{ label: "terrain", row: "terrain", gpuMs: [5, 4, null] }]);
+    expect(frames.passes).toEqual([
+      { label: "terrain", row: "terrain", gpuMs: [5, 4, null], ownMs: [5, 4, null] },
+    ]);
   });
 
   it("counts each frame's missing resolves still being read at the report", () => {

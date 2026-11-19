@@ -21,7 +21,7 @@ import {
   traceWindowFileName,
 } from "./spikeSession";
 import { sizesReportOf } from "./fixtures/sizesReport";
-import { smallReport } from "./fixtures/spikeReport";
+import { serialSeries, smallReport } from "./fixtures/spikeReport";
 import { callbackStartsOf, PROFILED, UNPROFILED, windowTrace } from "./fixtures/traces";
 import { LOST_DATA_REASON, type TraceSettings } from "./traceWindows";
 
@@ -304,7 +304,13 @@ function smokeReport(): DescentSpikeReport {
       callbackStartsMs: callbackStartsOf(scriptStartMs, scriptTimesS),
       missingResolves: scriptTimesS.map(() => 0),
       inFlightResolves: scriptTimesS.map(() => 0),
-      passes: [{ label: "terrain", row: "terrain", gpuMs: scriptTimesS.map(() => 1) }],
+      passes: [
+        serialSeries(
+          "terrain",
+          "terrain",
+          scriptTimesS.map(() => 1),
+        ),
+      ],
     },
   };
 }

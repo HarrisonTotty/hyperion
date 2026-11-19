@@ -161,9 +161,23 @@ export function array<T>(schema: Schema<T>): Schema<ReadonlyArray<T>> {
 /** The validators of every field of `T`, by name. */
 export type Fields<T> = { readonly [K in keyof T]-?: Schema<T[K]> };
 
+/** What a field {@link absentAs} marks reads as where a record lacks it, by its validator. */
+const ABSENT_AS = new WeakMap<object, { readonly value: unknown }>();
+
 /**
- * An object with exactly the fields named: each missing field and each field not named is an
- * error.
+ * A field added to its record's version after records were written without it (lane
+ * fix-floor-calm): read by `schema` where present, and as `fallback` where absent, so that the
+ * older records still read without a version bump. Every other field of {@link object} is required.
+ */
+export function absentAs<T>(schema: Schema<T>, fallback: T): Schema<T> {
+  const read: Schema<T> = (value, path) => schema(value, path);
+  ABSENT_AS.set(read, { value: fallback });
+  return read;
+}
+
+/**
+ * An object with exactly the fields named: each missing field, but one {@link absentAs} marks, and
+ * each field not named is an error.
  */
 export function object<T>(fields: Fields<T>): Schema<T> {
   const names = Object.keys(fields);
@@ -174,10 +188,15 @@ export function object<T>(fields: Fields<T>): Schema<T> {
     const out: Record<string, unknown> = {};
     for (const name of names) {
       const fieldPath = child(path, name);
-      if (!Object.hasOwn(value, name)) throw new PerfRecordError(fieldPath, "missing");
       const schema: unknown = Reflect.get(fields, name);
       if (typeof schema !== "function") {
         throw new Error(`the validator of ${fieldPath} is not a function`);
+      }
+      if (!Object.hasOwn(value, name)) {
+        const absent = ABSENT_AS.get(schema);
+        if (absent === undefined) throw new PerfRecordError(fieldPath, "missing");
+        out[name] = absent.value;
+        continue;
       }
       out[name] = Reflect.apply(schema, undefined, [value[name], fieldPath]);
     }

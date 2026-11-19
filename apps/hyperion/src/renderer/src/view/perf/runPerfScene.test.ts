@@ -444,6 +444,9 @@ describe("a perf run in the renderer", () => {
         p50Ms: 2,
         p95Ms: 2,
         p99Ms: 2,
+        ownP50Ms: 2,
+        ownP95Ms: 2,
+        ownP99Ms: 2,
       });
       expect(result.rows.find(({ row }) => row === "cockpit-instruments")?.p99Ms).toBe(0.5);
       expect(result.timedPassesPerFrameMs).toBe(2.5);

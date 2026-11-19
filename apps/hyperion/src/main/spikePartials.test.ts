@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { DescentSpikeReport, SpikeReportPart } from "../preload/api";
+import { serialSeries } from "./fixtures/spikeReport";
 import {
   measured,
   type PartialResultsFiles,
@@ -66,11 +67,13 @@ function report(fromS: number, toS: number, labels = ["terrain"]): DescentSpikeR
       callbackStartsMs: scriptTimesS.map((s) => 1000 + s * 1000),
       missingResolves: scriptTimesS.map(() => 0),
       inFlightResolves: scriptTimesS.map(() => 0),
-      passes: labels.map((label) => ({
-        label,
-        row: label === "terrain" ? ("terrain" as const) : ("other" as const),
-        gpuMs: scriptTimesS.map(() => 2),
-      })),
+      passes: labels.map((label) =>
+        serialSeries(
+          label,
+          label === "terrain" ? "terrain" : "other",
+          scriptTimesS.map(() => 2),
+        ),
+      ),
     },
     streaming: [],
     uploadBytes: 0,
@@ -112,8 +115,8 @@ describe("a spike report's parts (R14's Mac measurements)", () => {
     expect([merged.frames.scriptTimesS, merged.frames.passes]).toEqual([
       [0, 0.1, 0.2, 0.30000000000000004],
       [
-        { label: "terrain", row: "terrain", gpuMs: [2, 2, null, null] },
-        { label: "atmosphere view", row: "other", gpuMs: [null, null, 2, 2] },
+        serialSeries("terrain", "terrain", [2, 2, null, null]),
+        serialSeries("atmosphere view", "other", [null, null, 2, 2]),
       ],
     ]);
   });

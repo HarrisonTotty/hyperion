@@ -128,6 +128,9 @@ export const readRepetitionResult: perfSchema.Schema<PerfRepetitionResult> = obj
       p50Ms: nNonNegative,
       p95Ms: nNonNegative,
       p99Ms: nNonNegative,
+      ownP50Ms: nNonNegative,
+      ownP95Ms: nNonNegative,
+      ownP99Ms: nNonNegative,
     }),
   ),
   rows: array(

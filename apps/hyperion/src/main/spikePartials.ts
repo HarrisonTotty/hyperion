@@ -71,6 +71,10 @@ export function mergeReportPart(
         ...series.gpuMs,
         ...(added.get(series.label)?.gpuMs ?? nulls(next.scriptTimesS.length)),
       ],
+      ownMs: [
+        ...series.ownMs,
+        ...(added.get(series.label)?.ownMs ?? nulls(next.scriptTimesS.length)),
+      ],
     })),
     ...next.passes
       .filter((series) => !was.passes.some(({ label }) => label === series.label))
@@ -78,6 +82,7 @@ export function mergeReportPart(
         label: series.label,
         row: series.row,
         gpuMs: [...nulls(before), ...series.gpuMs],
+        ownMs: [...nulls(before), ...series.ownMs],
       })),
   ];
   return {

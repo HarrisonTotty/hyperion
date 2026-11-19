@@ -75,17 +75,22 @@ function pass(value: unknown, frames: number): SpikePassSeries | null {
   if (!isRecord(value)) {
     return null;
   }
-  const { label, row, gpuMs } = value;
+  const { label, row, gpuMs, ownMs } = value;
+  const series = (ms: unknown): ms is unknown[] =>
+    Array.isArray(ms) &&
+    ms.length === frames &&
+    ms.every((each: unknown) => each === null || isFinite(each));
   if (
     typeof label !== "string" ||
     (row !== "terrain" && row !== "atmosphere" && row !== "other") ||
-    !Array.isArray(gpuMs) ||
-    gpuMs.length !== frames ||
-    !gpuMs.every((ms) => ms === null || isFinite(ms))
+    !series(gpuMs) ||
+    !series(ownMs)
   ) {
     return null;
   }
-  return { label, row, gpuMs: gpuMs.map((ms: unknown) => (isFinite(ms) ? ms : null)) };
+  const read = (ms: unknown[]): Array<number | null> =>
+    ms.map((each: unknown) => (isFinite(each) ? each : null));
+  return { label, row, gpuMs: read(gpuMs), ownMs: read(ownMs) };
 }
 
 const STREAMING_FIGURES = [

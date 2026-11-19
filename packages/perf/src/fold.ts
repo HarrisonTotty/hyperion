@@ -190,6 +190,10 @@ function passes(gpu: Obj, viewList: ReadonlyArray<PerfViewRecord>): ReadonlyArra
         p50Ms: numberOrNull(pass["p50Ms"]),
         p95Ms: numberOrNull(pass["p95Ms"]),
         p99Ms: numberOrNull(pass["p99Ms"]),
+        // A results file kept own times from lane fix-floor-calm; an older one has none.
+        ownP50Ms: numberOrNull(pass["ownP50Ms"]),
+        ownP95Ms: numberOrNull(pass["ownP95Ms"]),
+        ownP99Ms: numberOrNull(pass["ownP99Ms"]),
       };
     });
 }
