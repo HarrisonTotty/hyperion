@@ -10273,3 +10273,14 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
   10%, two in four heavier lifting it (lean: the square under-reads a fixed cost). Each air change calls `ResolutionController.restart`; its
   rise keeps a lone frame over `raiseBelow` in its run. `CALM_SHARE` is gone; without a timer the
   air is as before.
+- **The bodies pass at low on the UHD 620 (2026-11-19, perf-bodies-pass; the owner's frame rate).**
+  - The term (pod, SwiftShader, TERRAIN TEST's descent held at poses): per-pixel shading, the
+    figure's `disc_pixel` (97% of the figure) and the lit terrain's fragment (about two thirds of
+    the terrain near the ground); every lit module carried `surfaceLighting.wgsl`'s lookups through
+    the air, skipped at run time for an airless body, their code alone 62% of TEST MOON's figure.
+  - The cut, bit for bit: `SourceTableEngine` draws an airless body by its modules' airless twins
+    (`AIRLESS_ONLY`, `airlessMaterial`, `airlessKernel`, `isAirlessTable`; `AIRLESS_ENTRIES`, 36,
+    and their bytes' check in test-render's part 31). Whole descent, three pairs: bodies p50
+    1,505–2,628 → 571–579 ms (descent arc 1,285–1,326 → 542–556), p95 9.4–9.9 → 6.0–6.6 s; discs
+    and disc cells −59%. Spike results version 10 add `gpu.deviceLosses`.
+  - Pending: the owner's UHD 620 and Mac re-runs (the lane's outbox has the commands).
