@@ -1588,7 +1588,7 @@ impl TablesBuilt {
     /// How many steps, from the first, have their tables built; every step once the builder has
     /// gone, whose jobs then build what they lack themselves.
     #[must_use]
-    fn steps(&self) -> usize {
+    pub(crate) fn steps(&self) -> usize {
         if self.gone {
             usize::MAX
         } else {
@@ -1597,7 +1597,7 @@ impl TablesBuilt {
     }
 
     /// Waits until the count rises or the builder goes; never, once it has gone.
-    async fn changed(&mut self) {
+    pub(crate) async fn changed(&mut self) {
         if self.gone {
             std::future::pending::<()>().await;
         }

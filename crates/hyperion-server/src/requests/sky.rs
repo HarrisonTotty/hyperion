@@ -103,7 +103,7 @@ use hyperion_sim::units::consts::{
     METRES_PER_LIGHT_YEAR, RADIANS_PER_DEGREE, SECONDS_PER_JULIAN_YEAR,
 };
 use hyperion_sim::units::{CandelasPerSquareMetre, Degrees, LightYears, Magnitudes};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 
 use super::global_list::tube_refused;
 use super::universe::openable_universe;
@@ -117,8 +117,8 @@ use crate::compute::sky::{
     BulkJobs, CENSUS_JOB_SLICE, CensusInputs, CensusStep, SkyBand, SkyMembers,
 };
 use crate::compute::{
-    self, CancelToken, ComputeError, CpuPool, GalaxyKey, HeldGlobalList, JobError, ListedTubes,
-    Listing, Priority, SkyCaps,
+    self, CancelToken, Claim, ComputeError, CpuPool, GalaxyKey, HeldGlobalList, JobError,
+    ListedTubes, Listing, Priority, SkyCaps,
 };
 use crate::convert::{ConvertRequestError, mass_layer, query_time, root_cube_position, wire_time};
 use crate::{AppState, HeldSkies, SkyQos};
@@ -305,11 +305,9 @@ async fn computed(
     replies: &Replies,
     started: Instant,
 ) -> Result<Answer, RequestError> {
-    // The galaxy's warm-up starts the tables of the streams nearest the observer first, which
-    // the census's first steps read.
-    state
-        .global_lists
-        .prefer_near(key, asked.observer.position());
+    // The galaxy's warm-up starts the tables the census's first steps may read first, and until
+    // the first reply starts no other (perf-first-sky).
+    let (first_made, first) = FirstReply::claimed(state, key, asked.observer.position());
     let galaxy = state.galaxies.get(key).await?;
     if let (Some(system), Some(named)) = (asked.exclude, &request.exclude_system) {
         check_exclude(state, (key, &galaxy), system, named, token.clone()).await?;
@@ -394,13 +392,20 @@ async fn computed(
         token,
     )
     .map_err(RequestError::from);
-    let tubes = step_tables(state, (&building, key), (list.as_ref(), built), started);
+    let tubes = step_tables(
+        state,
+        (&building, key),
+        (list.as_ref(), built),
+        first,
+        started,
+    );
     let reply = Reply {
         state,
         request,
         inputs: &inputs,
         plan: &plan,
         hosts: &hosts,
+        first_made,
         token,
         started,
     };
@@ -447,10 +452,50 @@ async fn sky_list(
     }))
 }
 
+/// What holds a galaxy's warm-ups and a sky's later steps back until its first reply
+/// (perf-first-sky).
+///
+/// It is the sky's claim from its start, under which the warm-ups start only the tables its first
+/// steps may read, and the word that the first reply is made, until which [`step_tables`] holds
+/// them from starting any and builds no later step's tables.
+struct FirstReply<'a> {
+    /// Raised once the first reply is made; its sender dropped, the replies have ended.
+    made: watch::Receiver<bool>,
+    /// The sky's claim on the warm-ups from its start ([`GlobalListService::prefer_near`]).
+    ///
+    /// [`GlobalListService::prefer_near`]: crate::compute::GlobalListService::prefer_near
+    near_only: Claim<'a>,
+}
+
+impl<'a> FirstReply<'a> {
+    /// A sky's, seen from `at` in the galaxy `key` names, with its claim on `state`'s warm-ups
+    /// taken, and the sender its replies raise once the first is made.
+    ///
+    /// The claim is [`GlobalListService::prefer_near`]'s: dropped, it releases the warm-ups.
+    ///
+    /// [`GlobalListService::prefer_near`]: crate::compute::GlobalListService::prefer_near
+    #[must_use = "the claim holds the warm-ups back only while it is held"]
+    fn claimed(
+        state: &'a AppState,
+        key: GalaxyKey,
+        at: &hyperion_sim::coords::GalacticPosition,
+    ) -> (watch::Sender<bool>, Self) {
+        let (sender, made) = watch::channel(false);
+        let near_only = state.global_lists.prefer_near(key, at);
+        (sender, Self { made, near_only })
+    }
+}
+
 /// Builds the tables of `list`'s streams step by step on the pool, a few at once, each once, and
 /// says each step's built through `built` (R06.T16.a's cost): beside the census, so that no
 /// census job builds one, the field's cells go on meanwhile, and a step's members' jobs start
 /// once its tables are built. Nothing where the census reads no list.
+///
+/// The first step's are built at once, and every later step's once `first` says the first reply
+/// is made (perf-first-sky). Until then the galaxy's warm-ups start no table, so that no warm-up
+/// table and no later step's table runs on the pool from the sky's plan to its first reply: near
+/// the Sun the later steps' tables took 8 to 9 of the 70 CPU-s the pool spent there before
+/// (release, eight workers, pod, 16 vCPU, 2026-11-19).
 ///
 /// # Errors
 ///
@@ -459,12 +504,20 @@ async fn step_tables(
     state: &AppState,
     (galaxy, key): (&Arc<Galaxy>, GalaxyKey),
     (list, built): (Option<&SkyList>, Option<compute::sky::StepTablesBuilt>),
+    mut first: FirstReply<'_>,
     started: Instant,
 ) -> Result<(), RequestError> {
     let (Some(list), Some(built)) = (list, built) else {
         return Ok(());
     };
+    let mut claims = Some((state.global_lists.ask(), first.near_only));
     for (k, numbers) in list.by_step.iter().enumerate() {
+        if k == 1 {
+            if !first_reply_made(&mut first.made).await {
+                return Ok(());
+            }
+            drop(claims.take());
+        }
         let specs: Vec<&StreamSpec> = numbers
             .iter()
             .map(|&number| {
@@ -487,7 +540,17 @@ async fn step_tables(
             "sky step's tube tables built"
         );
     }
+    // A sky of one step holds the warm-ups back until its one reply too.
+    if claims.is_some() {
+        first_reply_made(&mut first.made).await;
+    }
     Ok(())
+}
+
+/// Waits until `made` says a sky's first reply is made, and says whether it was: `false` if its
+/// sender went first, the replies having ended, the request failed or given up.
+async fn first_reply_made(made: &mut watch::Receiver<bool>) -> bool {
+    made.wait_for(|&made| made).await.is_ok()
 }
 
 /// The streams whose tube tables the members of each of `steps`, of `plan`, read through
@@ -536,6 +599,8 @@ struct Reply<'a> {
     inputs: &'a CensusInputs,
     plan: &'a Arc<CensusPlan>,
     hosts: &'a [HostDiscDto],
+    /// Raised once the first reply is made, which [`step_tables`] waits for.
+    first_made: watch::Sender<bool>,
     token: &'a CancelToken,
     /// When the request began, for the log's times.
     started: Instant,
@@ -566,6 +631,10 @@ impl Reply<'_> {
         while let Some(step) = censused.recv().await {
             let last = step.last;
             let answer = self.of(step, &marches, made).await?;
+            if made == 0 {
+                // The warm-ups and the later steps' tables wait for it (`step_tables`).
+                self.first_made.send_replace(true);
+            }
             if last {
                 return Ok(answer);
             }
@@ -2265,6 +2334,77 @@ mod tests {
             host_discs(&galaxy, &SystemStars::generate(&galaxy, &host), t),
             []
         );
+        harness.stop().await;
+    }
+
+    /// perf-first-sky: a sky's handler builds its first step's tube tables at once, and a later
+    /// step's only once its first reply is made, and holds the warm-ups back until then. Here a
+    /// stream of the server tests' galaxy for each of two steps: once the first step's table is
+    /// built and said so, the second's is not begun, and both claims on the warm-ups are held,
+    /// until the first reply is made; then the second is built, and neither is held. A sky of one
+    /// step, asked first, holds them until its one reply too.
+    #[tokio::test]
+    async fn a_skys_later_steps_tables_wait_for_its_first_reply() {
+        let harness = Harness::start(Handlers).await;
+        let state = harness.state();
+        let key = GalaxyKey::new(SEED, hyperion_sim::GENERATOR_VERSION);
+        let galaxy = timeout(WAIT, state.galaxies.get(key))
+            .await
+            .expect("timed out building the galaxy")
+            .unwrap();
+        let held = timeout(WAIT, state.global_lists.get(key, Priority::Bulk))
+            .await
+            .expect("timed out building the list")
+            .unwrap();
+        let streams = held.list().debris().streams();
+        let (first, later) = (streams[0].number(), streams[1].number());
+        let list = |by_step| SkyList {
+            tubes: ListedTubes::new(
+                (Arc::clone(&galaxy), key),
+                Arc::clone(&held),
+                Arc::clone(&state.tube_tables),
+            ),
+            held: Arc::clone(&held),
+            by_step,
+        };
+        let sun = hyperion_sim::coords::GalacticPosition::from_light_years(SUN_LY.map(f64::from))
+            .unwrap();
+        // One step first, so that the later stream's table is first built by the two steps.
+        for steps in [vec![vec![first]], vec![vec![first], vec![later]]] {
+            let two = steps.len() == 2;
+            let list = list(steps);
+            let (built, mut tables) = compute::sky::TablesBuilt::none();
+            let (made, first_reply) = FirstReply::claimed(state, key, &sun);
+            let building = step_tables(
+                state,
+                (&galaxy, key),
+                (Some(&list), Some(built)),
+                first_reply,
+                Instant::now(),
+            );
+            let (built, ()) = tokio::join!(timeout(WAIT, building), async {
+                while tables.steps() < 1 {
+                    timeout(WAIT, tables.changed())
+                        .await
+                        .expect("timed out building the first step's table");
+                }
+                assert!(state.global_lists.is_ready(key, first), "the first step's");
+                assert_eq!(
+                    (
+                        state.global_lists.is_ready(key, later),
+                        state.global_lists.tables_building(),
+                        state.global_lists.claims()
+                    ),
+                    (false, 0, (1, 1)),
+                    "the later step's waits for the first reply, not begun, and the warm-ups too"
+                );
+                made.send_replace(true);
+            });
+            built.expect("timed out building the tables").unwrap();
+            assert_eq!(state.global_lists.is_ready(key, later), two, "then built");
+            assert_eq!(state.global_lists.claims(), (0, 0), "then released");
+            assert_eq!(tables.steps(), if two { 2 } else { 1 });
+        }
         harness.stop().await;
     }
 

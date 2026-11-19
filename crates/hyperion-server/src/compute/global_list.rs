@@ -67,6 +67,18 @@
 //! of: its first step named 67 to 72 then, and 22 to 35 nearest first, and its first reply came
 //! after 37.3 to 39.4 s, and 23.7 to 27.5 s (release, eight workers, pod, 16 vCPU, 2026-11-06).
 //!
+//! **The first reply first** (perf-first-sky). A sky holds its galaxy's warm-ups back until its
+//! first reply, whose jobs fill the pool from the sky's start: while it waits, a warm-up starts
+//! only the tables of the streams whose tubes may pass within [`first_steps_reach`] of the
+//! observer, by their kept envelopes where the list's models keep one, after a restart those read
+//! back from disk, and by their shells otherwise; and from the sky's plan to its first reply,
+//! none ([`GlobalListService::ask`]). Nor do the sky's later steps' tables start before that
+//! reply (`requests::sky`'s `step_tables`). A relaunched server's warm-up built 20 tables before
+//! a sky near the Sun reached its plan, one of the 12 its first step named, and the sky's first
+//! reply came 11.8 to 12.2 s after the open; it now builds those 12 first, and the reply comes
+//! after 9.9 s (`first_answers_after_a_launch_and_a_relaunch`, release, eight workers, pod, 16
+//! vCPU, 2026-11-19).
+//!
 //! [`served_range_query`]: super::served_range_query
 //! [`DebrisPlan::orphan`]: hyperion_sim::galaxy::global_list::DebrisPlan::orphan
 
@@ -92,6 +104,8 @@ use hyperion_sim::galaxy::global_list::{
 use hyperion_sim::galaxy::{Galaxy, Population};
 use hyperion_sim::id::{SystemId, SystemIdKind};
 use hyperion_sim::math;
+use hyperion_sim::sky::census::SHELL_EDGES_LY;
+use hyperion_sim::units::LightYears;
 use tokio::sync::watch;
 use tokio::task::JoinSet;
 
@@ -739,35 +753,80 @@ struct Lists {
     /// The class of each table's build in flight, which a waiter of a higher class raises.
     tube_classes: BuildClasses<TubeKey>,
     warm_ups: SingleFlight<GalaxyKey, WarmedTubes, ComputeError>,
-    /// How many requests are building tables they asked for ([`GlobalListService::tubes`]),
-    /// which every warm-up yields to (module documentation, "Asked first").
+    /// How many requests are building tables they asked for, or reading what they feed
+    /// ([`GlobalListService::tubes`], [`GlobalListService::ask`]), which every warm-up yields to
+    /// (module documentation, "Asked first").
     asking: watch::Sender<usize>,
-    /// The galaxy of the latest sky asked, and its observer's distance from the galaxy's centre,
-    /// ly: its warm-up starts the tables of the streams whose shells come nearest it first
+    /// How many skies are waiting for their first reply ([`GlobalListService::prefer_near`]):
+    /// meanwhile every warm-up starts only the tables the latest sky's first steps may read.
+    first_skies: watch::Sender<usize>,
+    /// The latest sky asked: its warm-up starts first the tables its first steps may read, then
+    /// those of the streams whose shells come nearest its observer
     /// ([`GlobalListService::prefer_near`]).
-    nearest: Mutex<Option<(GalaxyKey, f64)>>,
+    nearest: Mutex<Option<Nearest>>,
 }
 
-/// A request's claim on the tables' workers while it builds the tables it asked for
-/// ([`GlobalListService::tubes`]): the warm-ups start no table until every claim has gone.
-/// Dropped however the request ends, its building given up included.
-struct Asking<'a> {
-    asking: &'a watch::Sender<usize>,
+/// The latest sky asked, as the warm-ups read it ([`GlobalListService::prefer_near`]).
+#[derive(Debug, Clone, Copy)]
+struct Nearest {
+    /// Its galaxy.
+    key: GalaxyKey,
+    /// Its observer.
+    at: GalacticPosition,
+    /// Its observer's distance from the galaxy's centre, ly.
+    radius_ly: f64,
 }
 
-impl<'a> Asking<'a> {
-    /// A claim on `asking`'s count.
-    #[must_use]
-    fn new(asking: &'a watch::Sender<usize>) -> Self {
-        asking.send_modify(|count| *count += 1);
-        Self { asking }
+/// Which tables a warm-up may start ([`Lists::next_to_warm`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Warming {
+    /// Any of its galaxy's.
+    Any,
+    /// Only those the latest sky's first steps may read, while a sky waits for its first reply
+    /// ([`GlobalListService::prefer_near`]).
+    FirstStepsOnly,
+}
+
+/// How near a sky's observer a stream's tube must pass for the warm-up to count its table as one
+/// the sky's first steps may read ([`GlobalListService::prefer_near`]).
+///
+/// It is the third of the census's fixed shell edges ([`SHELL_EDGES_LY`]), 500 ly. The first step
+/// holds each layer's first shell,
+/// to the first edge, 125 ly, or to a nearer cap, and its members read the tubes within the
+/// shells padded by the layers' stars' offsets and their drift over the step's light time
+/// (`streams_seen_in_with`'s reach): near the Sun a camera's first step to V 9 named streams whose
+/// shells lie up to 410 ly from its observer's radius (perf-first-sky). It orders the warm-up
+/// alone: a table it leaves out is built for the sky's step that reads it, to the same bits.
+#[must_use]
+fn first_steps_reach() -> LightYears {
+    LightYears::new(f64::from(SHELL_EDGES_LY[2]))
+}
+
+/// A claim that holds the warm-ups back while it is held, one of a count they watch.
+///
+/// It is a request's on the tables' workers while it builds the tables it asked for, or while its
+/// jobs read what they feed ([`GlobalListService::tubes`], [`GlobalListService::ask`]), under
+/// which the warm-ups start no table; or a sky's until its first reply
+/// ([`GlobalListService::prefer_near`]), under which they start only the tables its first steps
+/// may read (module documentation, "Asked first" and "The first reply first"). It is dropped
+/// however its holder ends, given up included.
+#[must_use = "a claim holds the warm-ups back only while it is held"]
+pub(crate) struct Claim<'a> {
+    count: &'a watch::Sender<usize>,
+}
+
+impl<'a> Claim<'a> {
+    /// A claim on `count`.
+    fn new(count: &'a watch::Sender<usize>) -> Self {
+        count.send_modify(|count| *count += 1);
+        Self { count }
     }
 }
 
-impl Drop for Asking<'_> {
+impl Drop for Claim<'_> {
     fn drop(&mut self) {
         // Above nought: this claim's own count is in it.
-        self.asking
+        self.count
             .send_modify(|count| *count = count.saturating_sub(1));
     }
 }
@@ -827,6 +886,7 @@ impl GlobalListService {
                 tube_classes: BuildClasses::new(),
                 warm_ups: SingleFlight::new(),
                 asking: watch::Sender::new(0),
+                first_skies: watch::Sender::new(0),
                 nearest: Mutex::new(None),
             }),
             warming: Mutex::new(JoinSet::new()),
@@ -895,7 +955,7 @@ impl GlobalListService {
         priority: Priority,
     ) -> Result<(), (StreamNumber, BuildTubeOnPoolError)> {
         // The warm-ups start no table until these are built, or their building is given up.
-        let _asking = Asking::new(&self.lists.asking);
+        let _asking = Claim::new(&self.lists.asking);
         let fewest = specs
             .iter()
             .map(|spec| SprayParams::of_stream(galaxy, spec).tracers())
@@ -919,6 +979,25 @@ impl GlobalListService {
             };
             built.map_err(|error| (number, error))?;
         }
+    }
+
+    /// The tables being built, for a test of who builds them when.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn tables_building(&self) -> usize {
+        self.lists.tube_flights.len()
+    }
+
+    /// The claims held on the warm-ups: those under which they start no table, and the skies'
+    /// waiting for their first replies ([`ask`](Self::ask), [`prefer_near`](Self::prefer_near)),
+    /// for a test of who holds them when.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn claims(&self) -> (usize, usize) {
+        (
+            *self.lists.asking.borrow(),
+            *self.lists.first_skies.borrow(),
+        )
     }
 
     /// Whether the cache holds the table of stream `number` of the galaxy `key` names, uncounted:
@@ -1021,19 +1100,40 @@ impl GlobalListService {
         });
     }
 
-    /// Has the warm-up of the galaxy `key` names start, of the tables it has still to start, first
-    /// those of the streams whose shells come nearest `at`, in number order among equals, until
-    /// another galaxy's sky is asked: what a sky asks where it starts, so that the tables its first
-    /// steps name are among the first its galaxy's warm-up builds (module documentation, "Asked
-    /// first"). It is scheduling alone: no table, and no answer, changes.
-    pub(crate) fn prefer_near(&self, key: GalaxyKey, at: &GalacticPosition) {
+    /// Has the galaxy `key` names warm first the tables a sky seen from `at` may read in its first
+    /// steps, and every warm-up only those while the claim it returns is held.
+    ///
+    /// Of the tables it has still to start, the galaxy's warm-up starts those first, then the
+    /// rest, each in the order of their streams' shells' nearness to `at`, in number order among
+    /// equals, until another galaxy's sky is asked. A sky asks it where it starts and holds the
+    /// claim until its first reply, so that the tables its first steps name are among the first
+    /// its galaxy's warm-up builds, and no other table's jobs stand in the queue before that
+    /// reply's (module documentation, "Asked first" and "The first reply first"). It is scheduling
+    /// alone: no table, and no answer, changes.
+    ///
+    /// A stream's tube is taken as one the first steps may read where it may pass within
+    /// [`first_steps_reach`] of `at`: by its envelope, where the list's models keep one, kept
+    /// by this server or read back from its files after a restart, and otherwise by its shell.
+    pub(crate) fn prefer_near(&self, key: GalaxyKey, at: &GalacticPosition) -> Claim<'_> {
         let [x, y, z] = at.to_light_years_f64();
-        let radius = math::hypot(math::hypot(x, y), z);
+        let radius_ly = math::hypot(math::hypot(x, y), z);
         *self
             .lists
             .nearest
             .lock()
-            .unwrap_or_else(PoisonError::into_inner) = Some((key, radius));
+            .unwrap_or_else(PoisonError::into_inner) = Some(Nearest {
+            key,
+            at: *at,
+            radius_ly,
+        });
+        Claim::new(&self.lists.first_skies)
+    }
+
+    /// A claim under which the warm-ups start no table, as a request's build of the tables it
+    /// asked for holds one ([`tubes`](Self::tubes)): what a sky holds from its plan until its
+    /// first reply, every job of which that reply reads (module documentation, "Asked first").
+    pub(crate) fn ask(&self) -> Claim<'_> {
+        Claim::new(&self.lists.asking)
     }
 
     /// Stops waiting on the warm-ups [`prefetch`](Self::prefetch) started: each is given up, and
@@ -1219,15 +1319,23 @@ impl Lists {
         let mut remaining: Vec<&StreamSpec> = streams.iter().collect();
         let mut full = false;
         let mut building = FuturesUnordered::new();
-        let mut asked = self.asking.subscribe();
+        let (mut asked, mut skies) = (self.asking.subscribe(), self.first_skies.subscribe());
         loop {
             // One table alone until a table's charge is known, which the budget's test needs.
             let at_once = if next_charge == 0 { 1 } else { room };
-            // While a request builds tables it asked for, none is started here (module
+            // While a request builds tables it asked for, none is started here, and while a sky
+            // waits for its first reply, none but those its first steps may read (module
             // documentation, "Asked first").
             let yielding = *asked.borrow_and_update() > 0;
+            let warming = if *skies.borrow_and_update() > 0 {
+                Warming::FirstStepsOnly
+            } else {
+                Warming::Any
+            };
+            let mut held_back = false;
             while !full && !yielding && building.len() < at_once {
-                let Some(spec) = self.next_to_warm(key, list.list(), &mut remaining) else {
+                let Some(spec) = self.next_to_warm(key, &list, &mut remaining, warming) else {
+                    held_back = warming == Warming::FirstStepsOnly && !remaining.is_empty();
                     break;
                 };
                 let number = spec.number();
@@ -1244,13 +1352,16 @@ impl Lists {
                     (number, built)
                 });
             }
-            let done = if yielding {
+            let done = if yielding || held_back {
                 tokio::select! {
                     done = building.next(), if !building.is_empty() => done,
                     // Once no request asks, the tables still to build are started.
-                    _ = asked.wait_for(|&count| count == 0), if !full && !remaining.is_empty() => {
+                    _ = asked.wait_for(|&count| count == 0), if yielding && !full
+                        && !remaining.is_empty() => {
                         continue;
                     }
+                    // Once no sky waits, or another is asked, the rest are looked at again.
+                    _ = skies.changed(), if held_back => continue,
                     else => None,
                 }
             } else {
@@ -1286,24 +1397,36 @@ impl Lists {
     }
 
     /// The next of a warm-up's `remaining` streams of `list`, of the galaxy `key` names, taken out
-    /// of them: the first, unless the latest sky asked was of this galaxy, when the first of those
-    /// whose shells come nearest its observer ([`GlobalListService::prefer_near`]).
+    /// of them, as `warming` allows.
+    ///
+    /// It is the first, unless the latest sky asked was of this galaxy, when it is the first of
+    /// those its first steps may read, or failing those of the rest, each taken in the order of
+    /// their shells' nearness to its observer ([`GlobalListService::prefer_near`]). While a sky
+    /// waits for its first reply ([`Warming::FirstStepsOnly`]), it is none if no stream the latest
+    /// sky's first steps may read is left.
     fn next_to_warm<'a>(
         &self,
         key: GalaxyKey,
-        list: &GlobalList,
+        list: &HeldGlobalList,
         remaining: &mut Vec<&'a StreamSpec>,
+        warming: Warming,
     ) -> Option<&'a StreamSpec> {
+        let near_only = warming == Warming::FirstStepsOnly;
         let near = *self.nearest.lock().unwrap_or_else(PoisonError::into_inner);
         let at = match near {
-            Some((asked, radius)) if asked == key => remaining
-                .iter()
-                .enumerate()
-                .min_by(|(_, a), (_, b)| {
-                    shell_gap(list, a, radius).total_cmp(&shell_gap(list, b, radius))
-                })
-                .map(|(at, _)| at),
-            Some(_) | None => (!remaining.is_empty()).then_some(0),
+            Some(near) if near.key == key => {
+                let rank = |spec: &StreamSpec| {
+                    let gap_ly = shell_gap(list.list(), spec, near.radius_ly);
+                    (!may_read_first(list, spec, &near, gap_ly), gap_ly)
+                };
+                let (at, (later, _)) = remaining.iter().map(|spec| rank(spec)).enumerate().min_by(
+                    |(_, (a_later, a_gap)), (_, (b_later, b_gap))| {
+                        a_later.cmp(b_later).then(a_gap.total_cmp(b_gap))
+                    },
+                )?;
+                (!(near_only && later)).then_some(at)
+            }
+            Some(_) | None => (!near_only && !remaining.is_empty()).then_some(0),
         }?;
         Some(remaining.remove(at))
     }
@@ -1320,6 +1443,22 @@ fn shell_gap(list: &GlobalList, spec: &StreamSpec, radius: f64) -> f64 {
             (shell.inner().value() - radius)
                 .max(radius - shell.outer().value())
                 .max(0.0)
+        })
+}
+
+/// Whether a sky seen from `near`'s observer may read `spec`'s stream of `list` in its first
+/// steps, its shell lying `gap_ly` ly from the observer's distance from the centre
+/// ([`shell_gap`]).
+///
+/// Where the list's models keep the stream's envelope, it is whether its tube may pass within
+/// [`first_steps_reach`] of the observer, and otherwise whether its shell does.
+#[must_use]
+fn may_read_first(list: &HeldGlobalList, spec: &StreamSpec, near: &Nearest, gap_ly: f64) -> bool {
+    let reach = first_steps_reach();
+    list.models()
+        .envelope(spec.number())
+        .map_or(gap_ly <= reach.value(), |envelope| {
+            envelope.may_touch(&near.at, reach)
         })
 }
 
@@ -1394,7 +1533,6 @@ mod tests {
     };
     use hyperion_sim::galaxy::query::{RangeQuery, range_query};
     use hyperion_sim::id::{DwarfCoreMemberId, Layer, MemberSlot};
-    use hyperion_sim::units::LightYears;
 
     use super::*;
     use crate::compute::{BulkGate, ENVELOPE_FILES_DIR, EnvelopeFiles, SharedSystemCache};
@@ -1704,7 +1842,7 @@ mod tests {
         let (service, pool) = service_on(4, &three);
         let (galaxy, list) = listed(&service).await;
         let streams = list.list().debris().streams();
-        let claim = Asking::new(&service.lists.asking);
+        let claim = service.ask();
         let (warmed, ()) = tokio::join!(within(service.lists.warm(key())), async {
             within(service.tubes((&galaxy, key()), &[&streams[2]], Priority::Bulk))
                 .await
@@ -1758,13 +1896,13 @@ mod tests {
         );
         // Another galaxy's sky, then this one's.
         let other = GalaxyKey::new(key().seed() + 1, key().generator_version());
-        service.prefer_near(other, &sun);
+        drop(service.prefer_near(other, &sun));
         let mut remaining: Vec<&StreamSpec> = streams.iter().collect();
         let first = service
             .lists
-            .next_to_warm(key(), list.list(), &mut remaining);
+            .next_to_warm(key(), &list, &mut remaining, Warming::Any);
         assert_eq!(first.map(StreamSpec::number), Some(streams[0].number()));
-        service.prefer_near(key(), &sun);
+        drop(service.prefer_near(key(), &sun));
         let warmed = within(service.lists.warm(key()))
             .await
             .expect("the warm-up's jobs run");
@@ -1772,6 +1910,109 @@ mod tests {
         for number in nearest {
             assert!(service.is_ready(key(), number), "{number:?} built");
         }
+        pool.shutdown().await.unwrap();
+    }
+
+    /// perf-first-sky: once a sky is asked, a warm-up takes first the streams the sky's first
+    /// steps may read, by their kept envelopes where the list's models keep one and by their
+    /// shells otherwise, then the rest, each by their shells' nearness; and while the sky's claim
+    /// is held, none of the rest. Here near the Sun: of the streams whose shells come nearest it,
+    /// the first whose tube passes farther from it than the first steps' reach, its envelope kept,
+    /// is taken after every stream the first steps may read, and not at all under the claim.
+    #[tokio::test]
+    async fn a_warm_up_takes_first_the_streams_a_skys_first_steps_may_read() {
+        let tubes = Arc::new(TubeTableCache::new(64 << 20));
+        let (service, pool) = service_on(4, &tubes);
+        let (galaxy, list) = listed(&service).await;
+        let streams = list.list().debris().streams();
+        let sun = GalacticPosition::from_light_years([0.0, 26_000.0, 68.0]).expect("in the cube");
+        let radius = math::hypot(26_000.0, 68.0);
+        let gap = |spec: &StreamSpec| shell_gap(list.list(), spec, radius);
+        let mut by_gap: Vec<&StreamSpec> = streams.iter().collect();
+        // A stable sort: number order among equals.
+        by_gap.sort_by(|a, b| gap(a).total_cmp(&gap(b)));
+        let mut missed = None;
+        for &spec in by_gap.iter().take(16) {
+            let table = within(service.tube((&galaxy, key()), spec, Priority::Bulk))
+                .await
+                .expect("the tube builds");
+            if !TubeEnvelope::of(&table).may_touch(&sun, first_steps_reach()) {
+                list.models().keep_envelope(&table);
+                missed = Some(spec.number());
+                break;
+            }
+        }
+        let missed = missed.expect("a near-shelled stream's tube passes far from the Sun");
+        let spec_of = |number| list.list().stream(number).expect("the list's own stream");
+        assert!(gap(spec_of(missed)) <= first_steps_reach().value());
+        let near =
+            |spec: &StreamSpec| spec.number() != missed && gap(spec) <= first_steps_reach().value();
+        let readable = streams.iter().filter(|spec| near(spec)).count();
+        let claim = service.prefer_near(key(), &sun);
+        let order = |warming: Warming| {
+            let mut remaining: Vec<&StreamSpec> = streams.iter().collect();
+            let taken: Vec<StreamNumber> = std::iter::from_fn(|| {
+                service
+                    .lists
+                    .next_to_warm(key(), &list, &mut remaining, warming)
+            })
+            .map(StreamSpec::number)
+            .collect();
+            (taken, remaining.len())
+        };
+        let (taken, left) = order(Warming::FirstStepsOnly);
+        assert_eq!((taken.len(), left), (readable, streams.len() - readable));
+        assert!(!taken.contains(&missed), "not under the claim");
+        drop(claim);
+        let (taken, left) = order(Warming::Any);
+        assert_eq!(left, 0);
+        let at = taken.iter().position(|&number| number == missed);
+        assert_eq!(
+            at,
+            Some(readable),
+            "after every stream the first steps may read"
+        );
+        assert!(
+            taken[..readable]
+                .iter()
+                .all(|&number| near(spec_of(number))),
+            "those first"
+        );
+        pool.shutdown().await.unwrap();
+    }
+
+    /// perf-first-sky: while a sky waits for its first reply, a warm-up starts no table its first
+    /// steps cannot read, and once the sky's claim goes it starts them. Here near the centre,
+    /// 5,000 ly out, where no stream's shell comes within the first steps' reach, with room for one
+    /// table: the warm-up has started none when the claim goes, and then builds one.
+    #[tokio::test]
+    async fn a_warm_up_starts_no_table_a_waiting_skys_first_steps_cannot_read() {
+        let charge = a_table_s_charge().await;
+        let one = Arc::new(TubeTableCache::new(charge + charge / 2));
+        let (service, pool) = service_on(4, &one);
+        let (_, list) = listed(&service).await;
+        let streams = list.list().debris().streams();
+        let inner = GalacticPosition::from_light_years([0.0, 5_000.0, 0.0]).expect("in the cube");
+        assert!(
+            streams
+                .iter()
+                .all(|spec| shell_gap(list.list(), spec, 5_000.0) > first_steps_reach().value()),
+            "no shell within reach"
+        );
+        let claim = service.prefer_near(key(), &inner);
+        let (warmed, ()) = tokio::join!(biased; within(service.lists.warm(key())), async {
+            // Polled first, the warm-up has found its list and galaxy held and waits on the claim
+            // alone, watching the count of waiting skies, with no table in flight.
+            assert_eq!(service.lists.first_skies.receiver_count(), 1, "it watches the count");
+            assert!(service.lists.tube_flights.is_empty(), "no table in flight");
+            assert!(
+                streams.iter().all(|spec| !service.is_ready(key(), spec.number())),
+                "none built"
+            );
+            drop(claim);
+        });
+        let warmed = warmed.expect("the warm-up's jobs run");
+        assert_eq!(warmed.built(), 1);
         pool.shutdown().await.unwrap();
     }
 
