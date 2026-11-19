@@ -101,6 +101,15 @@ export const MAC_PROFILE_LEVERS: ReadonlyArray<MacProfileLever> = [
     countSides: false,
   },
   {
+    name: "cloud-volume",
+    decides:
+      "R11.T7.c, the cloud volume's cost: its full levers (A, 64 samples, 6 towards the sun, the detail noise) against the floor's stepped ones (B, 40, 4, no detail); its sides differ only where the view stands within 300 km of a cloudy body's deck",
+    a: ["--cloud-volume", "full"],
+    b: ["--cloud-volume", "stepped"],
+    ratios: [1],
+    countSides: false,
+  },
+  {
     name: "lit-per-fragment",
     decides: "R08.T9.b, the lit fragment's sources: from the table (A) against per fragment (B)",
     a: [],
@@ -360,14 +369,16 @@ export interface MacProfileMatrixOptions {
  * crosses its lit disc, such as the served giant 41ffecb1ffc00013.0400 (a lean, 2026-11-13: its
  * rings were drawn on 2026-11-04, not checked since); rocks (R11.T4), whose sides draw apart
  * only near the ground of a generated world, where finest patches are drawn (a lean, 2026-11-18);
- * and mesh-casters (R14.T6.c), whose rocks cast only there too (a lean, 2026-11-25). `--levers`
- * names each, on such a body's batch.
+ * mesh-casters (R14.T6.c), whose rocks cast only there too (a lean, 2026-11-25); and cloud-volume
+ * (R11.T7.c), on a cloudy body with the view within 300 km of its deck, such as the decked world's
+ * from low in its air. `--levers` names each, on such a body's batch.
  */
 export const MAC_PROFILE_BODY_LEVERS: ReadonlyArray<string> = [
   "decked-air-surface",
   "ring-shadow-on-body",
   "rocks",
   "mesh-casters",
+  "cloud-volume",
 ];
 
 /**

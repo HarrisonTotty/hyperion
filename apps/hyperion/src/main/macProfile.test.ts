@@ -181,12 +181,13 @@ describe("the Mac batch's matrix", () => {
     ]);
   });
 
-  it("leaves the decked air's ground, the ring's shadow, the rocks and their casters out of the defaults, whose body has no deck or ring and whose pose stands off its ground, and runs each when named (R08, R11.T9.a, R11.T4, R14.T6.c)", () => {
+  it("leaves the decked air's ground, the ring's shadow, the rocks, their casters and the cloud volume out of the defaults, whose body has no deck or ring, whose pose stands off its ground and whose view draws no volume, and runs each when named (R08, R11.T9.a, R11.T4, R14.T6.c, R11.T7.c)", () => {
     expect(MAC_PROFILE_BODY_LEVERS).toEqual([
       "decked-air-surface",
       "ring-shadow-on-body",
       "rocks",
       "mesh-casters",
+      "cloud-volume",
     ]);
     expect(MAC_PROFILE_DEFAULTS.levers).toEqual(
       MAC_PROFILE_LEVERS.map((lever) => lever.name).filter(

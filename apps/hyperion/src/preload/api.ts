@@ -1704,6 +1704,12 @@ export interface AtmosphereLeversOverride {
   readonly marchSourceTransmittance?: "table" | "per-step";
   readonly surfaceLobes?: "transmitted" | "extinguished";
   readonly deckedAirSurface?: "departure" | "uniform";
+  /**
+   * The cloud volume's levers by the frame-rate floor's step they stand for (plan R11, R11.T7.c;
+   * `cloudVolumePass.ts`' `VOLUME_LEVERS`): `full`, `stepped` (fewer samples, no detail noise) or
+   * `lowest`, in place of the floor's own step, the owner's Mac pair of the volume's cost.
+   */
+  readonly cloudVolume?: "full" | "stepped" | "lowest";
 }
 
 /**

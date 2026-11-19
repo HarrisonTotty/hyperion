@@ -969,12 +969,30 @@ describe("the several-views check's options", () => {
     ]);
   });
 
+  it("takes --cloud-volume, the frame profile's cloud volume's levers over the floor's step (R11.T7.c)", () => {
+    const profile = [
+      "--views-check",
+      "--inspection",
+      "--universe",
+      UNIVERSE,
+      "--body",
+      BODY,
+      "--timing",
+    ];
+    expect([
+      parse([...profile, "--cloud-volume", "stepped"]).viewsCheck?.atmosphereLevers,
+      parse([...profile, "--cloud-volume", "full", "--limb-rays", "packed"]).viewsCheck
+        ?.atmosphereLevers,
+    ]).toEqual([{ cloudVolume: "stepped" }, { limbRays: "packed", cloudVolume: "full" }]);
+  });
+
   it.each([
     ["--march-cover", "tiles"],
     ["--limb-rays", "packed"],
     ["--march-sources", "table"],
     ["--surface-lobes", "extinguished"],
     ["--decked-air-surface", "uniform"],
+    ["--cloud-volume", "lowest"],
   ] as const)(
     "refuses %s without the frame profile, or naming no value (R08.T8.d)",
     (flag, value) => {

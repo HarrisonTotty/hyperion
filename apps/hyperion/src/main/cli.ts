@@ -672,6 +672,12 @@ export function buildCommand(version: string): Command {
     )
     .addOption(
       new Option(
+        "--cloud-volume <STEP>",
+        "the frame profile's cloud volume's levers over the frame-rate floor's step (R11.T7.c): full, stepped or lowest",
+      ).choices(["full", "stepped", "lowest"]),
+    )
+    .addOption(
+      new Option(
         "--decked-air-surface <GROUND>",
         "the frame profile's decked air's ground over its setting's (R08): departing from the bake's, or the bake's uniform ground",
       ).choices(["departure", "uniform"]),
@@ -906,6 +912,7 @@ export function parseClientArgs(args: readonly string[], version: string): Clien
     ["marchSources", "--march-sources"],
     ["surfaceLobes", "--surface-lobes"],
     ["deckedAirSurface", "--decked-air-surface"],
+    ["cloudVolume", "--cloud-volume"],
   ] as const) {
     if (options[option] !== undefined && options["timing"] !== true) {
       command.error(`error: ${flag} is an option of --timing, which was not given`);
@@ -1223,9 +1230,10 @@ function marchProbeOf(
 }
 
 /**
- * The atmosphere's levers `--march-cover`, `--limb-rays`, `--march-sources`, `--surface-lobes` and
- * `--decked-air-surface` name where any is given, else nothing (plan R08, R08.T8.d, R08.T8.e's
- * table and fix-r08-decked-air-route); commander has checked their choices.
+ * The atmosphere's levers `--march-cover`, `--limb-rays`, `--march-sources`, `--surface-lobes`,
+ * `--decked-air-surface` and `--cloud-volume` name where any is given, else nothing (plan R08,
+ * R08.T8.d, R08.T8.e's table and fix-r08-decked-air-route; plan R11, R11.T7.c); commander has
+ * checked their choices.
  */
 function atmosphereLeversOf(
   options: Readonly<Record<string, unknown>>,
@@ -1235,12 +1243,16 @@ function atmosphereLeversOf(
   const sources = options["marchSources"];
   const lobes = options["surfaceLobes"];
   const ground = options["deckedAirSurface"];
+  const volume = options["cloudVolume"];
   const levers: AtmosphereLeversOverride = {
     ...(cover === "area" || cover === "tiles" ? { marchCover: cover } : {}),
     ...(rays === "per-texel" || rays === "packed" ? { limbRays: rays } : {}),
     ...(sources === "table" || sources === "per-step" ? { marchSourceTransmittance: sources } : {}),
     ...(lobes === "transmitted" || lobes === "extinguished" ? { surfaceLobes: lobes } : {}),
     ...(ground === "departure" || ground === "uniform" ? { deckedAirSurface: ground } : {}),
+    ...(volume === "full" || volume === "stepped" || volume === "lowest"
+      ? { cloudVolume: volume }
+      : {}),
   };
   return Object.keys(levers).length === 0 ? {} : { atmosphereLevers: levers };
 }

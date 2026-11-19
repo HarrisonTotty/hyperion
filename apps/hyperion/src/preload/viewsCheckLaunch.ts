@@ -105,6 +105,7 @@ export function readAtmosphereLevers(value: unknown): AtmosphereLeversOverride |
     marchSourceTransmittance: sources,
     surfaceLobes: lobes,
     deckedAirSurface: ground,
+    cloudVolume: volume,
     ...rest
   } = value;
   if (
@@ -113,12 +114,14 @@ export function readAtmosphereLevers(value: unknown): AtmosphereLeversOverride |
       limbRays === undefined &&
       sources === undefined &&
       lobes === undefined &&
-      ground === undefined) ||
+      ground === undefined &&
+      volume === undefined) ||
     !(marchCover === undefined || marchCover === "area" || marchCover === "tiles") ||
     !(limbRays === undefined || limbRays === "per-texel" || limbRays === "packed") ||
     !(sources === undefined || sources === "table" || sources === "per-step") ||
     !(lobes === undefined || lobes === "transmitted" || lobes === "extinguished") ||
-    !(ground === undefined || ground === "departure" || ground === "uniform")
+    !(ground === undefined || ground === "departure" || ground === "uniform") ||
+    !(volume === undefined || volume === "full" || volume === "stepped" || volume === "lowest")
   ) {
     return null;
   }
@@ -128,6 +131,7 @@ export function readAtmosphereLevers(value: unknown): AtmosphereLeversOverride |
     ...(sources === undefined ? {} : { marchSourceTransmittance: sources }),
     ...(lobes === undefined ? {} : { surfaceLobes: lobes }),
     ...(ground === undefined ? {} : { deckedAirSurface: ground }),
+    ...(volume === undefined ? {} : { cloudVolume: volume }),
   };
 }
 

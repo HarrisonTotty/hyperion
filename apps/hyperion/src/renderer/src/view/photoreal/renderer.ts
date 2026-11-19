@@ -2602,10 +2602,11 @@ export class PhotorealRenderer {
               timeS: (frame.time ?? CLOCK_ZERO).seconds + (frame.time ?? CLOCK_ZERO).nanos * 1e-9,
               rate: frame.timeRate ?? 0,
               // The frame-rate floor's step degrades the volume and never sheds it (plan R11,
-              // R11.T7.c; the owner's requirement, 2026-11-19).
+              // R11.T7.c; the owner's requirement, 2026-11-19); a profile's lever names its step.
               levers:
                 VOLUME_LEVERS[
-                  volumeStepOf(frame.setting, frame.atmosphereSetting, frame.floorLowest)
+                  frame.atmosphereLevers?.cloudVolume ??
+                    volumeStepOf(frame.setting, frame.atmosphereSetting, frame.floorLowest)
                 ],
             },
             { ...resources.cloudVolume, triangle: resources.triangle },
