@@ -72,12 +72,14 @@
 //! only the tables of the streams whose tubes may pass within [`first_steps_reach`] of the
 //! observer, by their kept envelopes where the list's models keep one, after a restart those read
 //! back from disk, and by their shells otherwise; and from the sky's plan to its first reply,
-//! none ([`GlobalListService::ask`]). Nor do the sky's later steps' tables start before that
-//! reply (`requests::sky`'s `step_tables`). A relaunched server's warm-up built 20 tables before
-//! a sky near the Sun reached its plan, one of the 12 its first step named, and the sky's first
-//! reply came 11.8 to 12.2 s after the open; it now builds those 12 first, and the reply comes
-//! after 9.9 s (`first_answers_after_a_launch_and_a_relaunch`, release, eight workers, pod, 16
-//! vCPU, 2026-11-19).
+//! none ([`GlobalListService::ask`]). Neither the sky's later steps' tables nor their census jobs
+//! start before that reply either (`requests::sky`'s `step_tables`,
+//! [`census_in_steps`](super::sky::census_in_steps)). A relaunched server's warm-up built 20
+//! tables before a sky near the Sun reached its plan, one of the 12 its first step named, and the
+//! sky's first reply came 11.8 to 12.2 s after the open; it now builds those 12 first, and the
+//! reply comes after 9.7 to 9.9 s; a cold sky's after 22.5 to 22.6 s, against 23.4 to 24.0 s
+//! (`first_answers_after_a_launch_and_a_relaunch`, release, eight workers, pod, 16 vCPU,
+//! 2026-11-19).
 //!
 //! [`served_range_query`]: super::served_range_query
 //! [`DebrisPlan::orphan`]: hyperion_sim::galaxy::global_list::DebrisPlan::orphan

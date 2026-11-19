@@ -10176,3 +10176,12 @@ CensusCost)`.
     is the one body of both; `unknown_system_named(field, …)` replaces `unknown_exclude`, and
     `check_exclude` takes `(field, value)`.
   - Served with `--serve-sky=false` too (lean, 2026-11-06): it reads no table or census.
+- **R06, a sky's first reply first (lane `perf-first-sky`, 2026-11-19, at 33; no output moved).**
+  - _Server._ `GlobalListService::prefer_near(key, at)` returns a `Claim` (was `Asking`) the sky
+    holds until its first reply: meanwhile every warm-up starts only the tables of streams whose
+    kept envelope, or else shell, passes within 500 ly of the observer, and from the sky's plan
+    none (`GlobalListService::ask`, held by `step_tables`). Later steps' tube tables and census
+    jobs wait for the first reply (`requests::sky::FirstReply`, `compute::sky::FirstReplyMade`,
+    `census_in_steps`' third step input).
+  - _Left._ A cold first sky near the Sun stays CPU-bound at about 180 CPU-s on eight workers
+    (findings); the nuclear disc's first step costs about 1.6 × 10⁴ CPU-s.

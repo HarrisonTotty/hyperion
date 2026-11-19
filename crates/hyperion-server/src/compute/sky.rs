@@ -1435,6 +1435,12 @@ struct Slice {
 /// [`TablesBuilt::all`]. Should the tables' builder go before it says so, its error ends the
 /// request, and meanwhile the jobs build what they lack themselves, to the same bits.
 ///
+/// Every later step's work waits until `first` says the sky's first reply is made
+/// (perf-first-sky), so that no later step's job runs before that reply, nor holds a worker while
+/// its merge, band and payload wait for one: in the nuclear disc a cell's job outlasts its slice by
+/// tens of seconds, and the next step's held the first reply 223 s past its census on eight
+/// workers. A test's census whose steps are read without replies is given one made already.
+///
 /// It returns once the last step is sent, or once `sink` has gone, the replies having been given
 /// up.
 ///
@@ -1450,7 +1456,7 @@ pub(crate) async fn census_in_steps(
     pool: &CpuPool,
     inputs: &CensusInputs,
     plan: &Arc<CensusPlan>,
-    (steps, mut tables): (&[Vec<Shell>], TablesBuilt),
+    (steps, mut tables, mut first): (&[Vec<Shell>], TablesBuilt, FirstReplyMade),
     slice: Duration,
     sink: mpsc::Sender<CensusStep>,
     token: &CancelToken,
@@ -1462,27 +1468,9 @@ pub(crate) async fn census_in_steps(
         .get()
         .saturating_mul(CENSUS_JOBS_PER_WORKER)
         .min(BULK_QUEUE_CAPACITY.get());
-    // The work not yet in a job, by step and then in the order queued.
-    let mut queued: BTreeMap<(usize, u64), Work> = BTreeMap::new();
-    let mut order = 0_u64;
-    // Per step, its work queued and its jobs outstanding: done at nought.
-    let mut open = vec![0_usize; steps.len()];
     let parts = NonZeroU32::try_from(pool.workers()).unwrap_or(NonZeroU32::MAX);
-    for (step, shells) in steps.iter().enumerate() {
-        for &shell in shells {
-            let members = MemberPart::all(parts)
-                .filter(|_| inputs.members.is_some())
-                .map(|part| Work::Members(Arc::clone(plan), shell, part));
-            let slabs = plan
-                .shell_slabs(shell)
-                .map(|slab| Work::Cells(CellWork::of(&slab)));
-            for work in members.chain(slabs) {
-                queued.insert((step, order), work);
-                order += 1;
-                open[step] += 1;
-            }
-        }
-    }
+    let members = inputs.members.is_some().then_some(parts);
+    let (mut queued, mut open, mut order) = steps_work(plan, steps, members);
     let mut outstanding = FuturesUnordered::new();
     let mut found: Vec<StepPart> = steps.iter().map(|_| StepPart::default()).collect();
     let mut worked = vec![[Duration::ZERO; Layer::ALL.len()]; steps.len()];
@@ -1516,10 +1504,16 @@ pub(crate) async fn census_in_steps(
             let (key, work) = entry.remove_entry();
             queued.insert(key, work);
         }
+        // Until the first reply only the first step's work is taken; the queue is in step order.
+        let released = if first.is_made() { steps.len() } else { 1 };
         while outstanding.len() < window {
-            let Some(((step, order), work)) = queued.pop_first() else {
+            let Some(entry) = queued.first_entry() else {
                 break;
             };
+            if entry.key().0 >= released {
+                break;
+            }
+            let ((step, order), work) = entry.remove_entry();
             if step >= built && matches!(work, Work::Members(..)) {
                 waiting.insert((step, order), work);
                 continue;
@@ -1529,12 +1523,16 @@ pub(crate) async fn census_in_steps(
             let receiver = pool.submit(Priority::Bulk, token.clone(), job).await?;
             outstanding.push(async move { (step, receiver.await) });
         }
-        let finished = if waiting.is_empty() {
+        let held = queued
+            .first_key_value()
+            .is_some_and(|(&(step, _), _)| step >= released);
+        let finished = if waiting.is_empty() && !held {
             outstanding.next().await
         } else {
             tokio::select! {
                 finished = outstanding.next(), if !outstanding.is_empty() => finished,
-                () = tables.changed() => continue,
+                () = tables.changed(), if !waiting.is_empty() => continue,
+                () = first.changed(), if held => continue,
             }
         };
         let (step, finished) = finished.expect("a step not yet censused has its work in jobs");
@@ -1556,6 +1554,39 @@ pub(crate) async fn census_in_steps(
         }
         found[step].absorb(stars, tallies.as_ref(), &cost);
     }
+}
+
+/// The work of `plan`'s `steps`, before any of it is a job ([`census_in_steps`]): by step and then
+/// in the order queued, each shell's members' parts first, `members` of them where the census
+/// takes the members, then its slabs; with each step's count of work, and the order the next
+/// work queued takes.
+#[must_use]
+fn steps_work(
+    plan: &Arc<CensusPlan>,
+    steps: &[Vec<Shell>],
+    members: Option<NonZeroU32>,
+) -> (BTreeMap<(usize, u64), Work>, Vec<usize>, u64) {
+    let mut queued = BTreeMap::new();
+    let mut order = 0_u64;
+    // Per step, its work queued and its jobs outstanding: done at nought.
+    let mut open = vec![0_usize; steps.len()];
+    for (step, shells) in steps.iter().enumerate() {
+        for &shell in shells {
+            let members = members
+                .into_iter()
+                .flat_map(MemberPart::all)
+                .map(|part| Work::Members(Arc::clone(plan), shell, part));
+            let slabs = plan
+                .shell_slabs(shell)
+                .map(|slab| Work::Cells(CellWork::of(&slab)));
+            for work in members.chain(slabs) {
+                queued.insert((step, order), work);
+                order += 1;
+                open[step] += 1;
+            }
+        }
+    }
+    (queued, open, order)
 }
 
 /// How many of a sky's steps, from the first, have the tube tables built that their members' jobs
@@ -1623,6 +1654,46 @@ impl StepTablesBuilt {
             }
             rises
         });
+    }
+}
+
+/// Whether a sky's first reply is made, which [`census_in_steps`] holds every later step's work
+/// back for (perf-first-sky); once the replies' side has gone, it reads as made.
+#[derive(Debug)]
+pub(crate) struct FirstReplyMade {
+    made: watch::Receiver<bool>,
+    /// Whether the replies' side has gone, the census then going on unheld.
+    gone: bool,
+}
+
+impl FirstReplyMade {
+    /// The first reply as `made` says it, the replies raising it once it is made.
+    #[must_use]
+    pub(crate) fn of(made: watch::Receiver<bool>) -> Self {
+        Self { made, gone: false }
+    }
+
+    /// Made already: a census whose replies hold back none of its steps, a test's.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn made() -> Self {
+        Self::of(watch::channel(true).1)
+    }
+
+    /// Whether the first reply is made, or the replies' side has gone.
+    #[must_use]
+    fn is_made(&self) -> bool {
+        self.gone || *self.made.borrow()
+    }
+
+    /// Waits until the first reply is made or the replies' side goes; never, once either has.
+    async fn changed(&mut self) {
+        if self.is_made() {
+            std::future::pending::<()>().await;
+        }
+        if self.made.wait_for(|&made| made).await.is_err() {
+            self.gone = true;
+        }
     }
 }
 
@@ -2211,7 +2282,7 @@ pub(crate) mod tests {
                 pool,
                 inputs,
                 plan,
-                (steps, TablesBuilt::all()),
+                (steps, TablesBuilt::all(), FirstReplyMade::made()),
                 slice,
                 sink,
                 &token,
@@ -2690,6 +2761,93 @@ pub(crate) mod tests {
         pool.shutdown().await.unwrap();
     }
 
+    /// perf-first-sky: a later step's census jobs wait for the first reply. Near the Sun to 30 ly,
+    /// in three steps of two layers each and a job a cell: once the first step is sent, no job is
+    /// running or queued, and none starts until the first reply is said made; then the census
+    /// ends, each step the census's whose replies held back none, star for star and tally for
+    /// tally.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_later_steps_census_waits_for_the_first_reply() {
+        let galaxy = Arc::new(Galaxy::new(Seed::new(0x4d2)));
+        let caps = SkyCaps::forced(LightYears::new(30.0)).unwrap();
+        let tables = Arc::new(featured_tables(&galaxy, GENERATOR_VERSION));
+        let query = caps.on(SkyQuery::builder(sun(), Magnitudes::new(9.0))
+            .build()
+            .unwrap());
+        let pool = pool(3);
+        let token = CancelToken::new();
+        let (query, plan) = timeout(
+            WAIT,
+            plan(
+                &pool,
+                &galaxy,
+                &tables,
+                Arc::new(query),
+                &SHELL_EDGES_LY,
+                &token,
+            ),
+        )
+        .await
+        .expect("timed out planning")
+        .unwrap();
+        let plan = Arc::new(plan);
+        let inputs = CensusInputs {
+            galaxy: Arc::clone(&galaxy),
+            key: GalaxyKey::new(0x4d2, GENERATOR_VERSION),
+            tables: Arc::clone(&tables),
+            cells: Arc::new(SharedSkyCellCache::new(0)),
+            members: None,
+            query: Arc::clone(&query),
+        };
+        let shells: Vec<Shell> = plan.shells().collect();
+        let steps: Vec<Vec<Shell>> = shells.chunks(2).map(<[Shell]>::to_vec).collect();
+        assert_eq!(steps.len(), 3);
+        let unheld = steps_censused(&pool, &inputs, &plan, &steps, Duration::ZERO).await;
+
+        let (made, first) = watch::channel(false);
+        let (sink, mut sent) = mpsc::channel(steps.len());
+        let census = census_in_steps(
+            &pool,
+            &inputs,
+            &plan,
+            (&steps, TablesBuilt::all(), FirstReplyMade::of(first)),
+            Duration::ZERO,
+            sink,
+            &token,
+        );
+        let (censused, held) = tokio::join!(timeout(WAIT, census), async {
+            let first = timeout(WAIT, sent.recv())
+                .await
+                .expect("timed out censusing the first step")
+                .expect("the first step");
+            let counters = pool.counters();
+            assert_eq!(
+                (counters.running(), counters.queued_bulk()),
+                (0, 0),
+                "no later step's job before the first reply"
+            );
+            assert!(matches!(sent.try_recv(), Err(TryRecvError::Empty)));
+            made.send_replace(true);
+            let mut held = vec![first];
+            while let Some(step) = sent.recv().await {
+                held.push(step);
+            }
+            held
+        });
+        censused.expect("timed out censusing").unwrap();
+        assert_eq!(held.len(), steps.len());
+        for (k, (step, (_, census))) in held.into_iter().zip(&unheld).enumerate() {
+            let merged = timeout(
+                WAIT,
+                merge_step(&pool, &plan, step, inputs.query.n_max(), &token),
+            )
+            .await
+            .expect("timed out merging")
+            .unwrap();
+            assert_eq!(bits(&merged), bits(census), "step {k}");
+        }
+    }
+
     /// A step's members' jobs wait for its tube tables (R06.T16.a's cost): with the tables said
     /// built one step at a time, each step is sent only once its tables are, and no later step
     /// before them, and each is the census whose tables were all held from the start, star for
@@ -2763,7 +2921,7 @@ pub(crate) mod tests {
             &pool,
             &inputs,
             &plan,
-            (&steps, gate),
+            (&steps, gate, FirstReplyMade::made()),
             CENSUS_JOB_SLICE,
             sink,
             &token,
@@ -2814,7 +2972,7 @@ pub(crate) mod tests {
                 &pool,
                 &inputs,
                 &plan,
-                (&steps, gate),
+                (&steps, gate, FirstReplyMade::made()),
                 CENSUS_JOB_SLICE,
                 sink,
                 &token,

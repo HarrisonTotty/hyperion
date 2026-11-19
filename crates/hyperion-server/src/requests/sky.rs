@@ -386,7 +386,7 @@ async fn computed(
         pool,
         &inputs,
         &plan,
-        (&steps, tubes_built),
+        (&steps, tubes_built, first.census_gate()),
         CENSUS_JOB_SLICE,
         sink,
         token,
@@ -457,7 +457,8 @@ async fn sky_list(
 ///
 /// It is the sky's claim from its start, under which the warm-ups start only the tables its first
 /// steps may read, and the word that the first reply is made, until which [`step_tables`] holds
-/// them from starting any and builds no later step's tables.
+/// them from starting any and builds no later step's tables, and the census starts no later
+/// step's job ([`census_in_steps`](compute::sky::census_in_steps)).
 struct FirstReply<'a> {
     /// Raised once the first reply is made; its sender dropped, the replies have ended.
     made: watch::Receiver<bool>,
@@ -483,6 +484,13 @@ impl<'a> FirstReply<'a> {
         let (sender, made) = watch::channel(false);
         let near_only = state.global_lists.prefer_near(key, at);
         (sender, Self { made, near_only })
+    }
+
+    /// What the census reads of the first reply, to hold every later step's work until it is made
+    /// ([`census_in_steps`](compute::sky::census_in_steps)).
+    #[must_use]
+    fn census_gate(&self) -> compute::sky::FirstReplyMade {
+        compute::sky::FirstReplyMade::of(self.made.clone())
     }
 }
 
