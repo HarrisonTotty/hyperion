@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { cross, dot, norm, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
+import { aViewRing } from "../../test/ringFixtures";
 import { aBody, aViewScene, FIXTURE_PLANET, FIXTURE_SYSTEM } from "../../test/viewFixtures";
 import { rotate } from "../camera/quaternion";
 import { bodyKindSymbol, type ViewRing, type ViewScene } from "../scene/model";
@@ -20,7 +21,7 @@ const NORMAL = vec3(0, Math.sin(Math.PI / 6), Math.cos(Math.PI / 6));
 
 /** A ring of the fixture's planet, its giant here. */
 function aRing(innerRadiusM: number, outerRadiusM: number, body = FIXTURE_PLANET): ViewRing {
-  return { body, innerRadiusM, outerRadiusM, normal: NORMAL };
+  return aViewRing(body, innerRadiusM, outerRadiusM, NORMAL);
 }
 
 /** A system of a star, at the barycentre unless given, and the giant 5 au out along galactic x. */

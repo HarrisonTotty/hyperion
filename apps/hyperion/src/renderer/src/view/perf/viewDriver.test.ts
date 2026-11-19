@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import type { ViewPerfFrame } from "../../displays/view/viewPerf";
 import { startServerRun, type ViewRun } from "../../displays/view/viewRun";
 import { vec3 } from "../../geometry/vec3";
+import { aViewRing } from "../../test/ringFixtures";
 import { aBody, aViewScene } from "../../test/viewFixtures";
 import { bodyKindSymbol, type ViewScene } from "../scene/model";
 import { PerfEngine } from "./descentDriver";
@@ -57,9 +58,7 @@ function servedScene(system: string = PERF_PINS.system, ringed = true): ViewScen
       }),
       aBody({ id: PERF_PINS.giant, radiusM: 7.5e7, centreM: vec3(4 * AU_M, AU_M, 0) }),
     ],
-    rings: ringed
-      ? [{ body: PERF_PINS.giant, innerRadiusM: 8.2e7, outerRadiusM: 1.3e8, normal: vec3(0, 0, 1) }]
-      : [],
+    rings: ringed ? [aViewRing(PERF_PINS.giant, 8.2e7, 1.3e8, vec3(0, 0, 1))] : [],
   });
 }
 
