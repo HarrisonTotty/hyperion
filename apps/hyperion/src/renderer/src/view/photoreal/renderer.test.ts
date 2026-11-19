@@ -2214,6 +2214,10 @@ describe("the device's kernels over a session's bodies (R01.T15)", () => {
         bodies: [planet],
         atmospheres: [airOf(planet, tables)],
       });
+      // The packed limb's kernels a frame asks are begun in the task after it (lane
+      // perf-long-tasks-4), as a session's next frame would follow it.
+      // oxlint-disable-next-line no-await-in-loop
+      await untilNextTask();
       tables.dispose();
       held.push(count());
     }

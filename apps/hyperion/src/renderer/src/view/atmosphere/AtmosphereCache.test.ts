@@ -3915,3 +3915,165 @@ describe("a decked air's cloud-free ground (fix-r08-decked-air-opacity; research
     );
   });
 });
+
+/** A preparation the stepped harness holds, settled by the test (lane perf-long-tasks-4). */
+interface HeldPreparation {
+  readonly built: BuiltAtmosphere;
+  readonly thickSlots: number;
+  readonly ready: () => void;
+  readonly refuse: (error: unknown) => void;
+}
+
+/**
+ * A cache over the fakes whose tables are prepared ({@link AtmosphereCacheOptions.prepare}): each
+ * preparation held until the test settles it, and its frame's step making a fake's tables.
+ */
+function steppedHarness(): Harness & { readonly preparations: HeldPreparation[] } {
+  const seam = new BodyDetailSeam();
+  const builder = new ScriptedBuilder();
+  const made: FakeTables[] = [];
+  const thickSlots: number[] = [];
+  const factory: { throws: Error | null } = { throws: null };
+  const preparations: HeldPreparation[] = [];
+  const make = (built: BuiltAtmosphere, slots: number): FakeTables => {
+    if (factory.throws !== null) {
+      throw factory.throws;
+    }
+    thickSlots.push(slots);
+    const tables = new FakeTables(built, 1_000);
+    made.push(tables);
+    return tables;
+  };
+  const cache = new AtmosphereCache<FakeTables>({
+    requests: seam.client,
+    builder,
+    routes: routesNone,
+    corrects: routesNone,
+    tables: make,
+    prepare: (built, slots) =>
+      new Promise<() => FakeTables>((resolve, reject) => {
+        preparations.push({
+          built,
+          thickSlots: slots,
+          ready: () => {
+            resolve(() => make(built, slots));
+          },
+          refuse: reject,
+        });
+      }),
+    between: () => Promise.resolve(),
+  });
+  return { seam, builder, made, thickSlots, cache, view: cache.openView(), factory, preparations };
+}
+
+/** Asks for, answers and lands `body`'s build as R05's Earth. */
+async function landEarth(h: Harness, body: BodyIdHex, bodies = [lit(body)]): Promise<void> {
+  note(h, bodies);
+  await answer(h, body);
+  await land(h, body, { kind: "built", assembled: earthAssembly() });
+}
+
+describe("a landed build's tables prepared in tasks (lane perf-long-tasks-4)", () => {
+  it("makes them in the first frame after their preparation, drawing nothing of the build before, pending", async () => {
+    const h = steppedHarness();
+    await landEarth(h, A);
+    const landing = note(h, [lit(A)]);
+    await microtasks();
+    const meanwhile = note(h, [lit(A)]);
+    expect([h.made.length, h.preparations.length, h.cache.entryOf(A), landing.pending]).toEqual([
+      0,
+      1,
+      null,
+      true,
+    ]);
+    expect(meanwhile.pending).toBe(true);
+    h.preparations[0]?.ready();
+    await microtasks();
+    note(h, [lit(A)]);
+    expect([h.made.length, h.cache.entryOf(A)?.tables]).toEqual([1, h.made[0]]);
+  });
+
+  it("prepares them under the thick slots the factory would be given, for the medium it would make", async () => {
+    const h = steppedHarness();
+    await landEarth(h, A);
+    note(h, [lit(A)]);
+    await microtasks();
+    expect(h.preparations.map((p) => [p.built.medium, p.thickSlots])).toEqual([
+      [R05_EARTH_REFERENCE, 0],
+    ]);
+  });
+
+  it("draws the entry drawn before while a rebuild's tables are prepared, and lets it go once they are made", async () => {
+    const h = steppedHarness();
+    await landEarth(h, A);
+    note(h, [lit(A)]);
+    await microtasks();
+    h.preparations[0]?.ready();
+    await microtasks();
+    note(h, [lit(A)]);
+    const first = h.made[0];
+    // Another light set: rebuilt from the reply held, its tables prepared again.
+    const relit = [lit(A, "disc", [SUN_LIGHT, { ...SUN_LIGHT, star: `${FIXTURE_SYSTEM}.0101` }])];
+    note(h, relit);
+    await land(h, A, { kind: "built", assembled: earthAssembly() });
+    note(h, relit);
+    await microtasks();
+    note(h, relit);
+    expect([h.cache.entryOf(A)?.tables, first?.disposed, h.preparations.length]).toEqual([
+      first,
+      false,
+      2,
+    ]);
+    h.preparations[1]?.ready();
+    await microtasks();
+    note(h, relit);
+    expect([h.cache.entryOf(A)?.tables, first?.disposed]).toEqual([h.made[1], true]);
+  });
+
+  it("makes no tables of a preparation whose build was let go before it ended", async () => {
+    const h = steppedHarness();
+    await landEarth(h, A);
+    note(h, [lit(A)]);
+    await microtasks();
+    h.cache.dispose();
+    h.preparations[0]?.ready();
+    await microtasks();
+    expect(h.made).toEqual([]);
+  });
+
+  it("holds a refused preparation as the body's failed problem, with one console.error", async () => {
+    const h = steppedHarness();
+    const errors = vi.spyOn(console, "error").mockImplementation(ignore);
+    await landEarth(h, A);
+    note(h, [lit(A)]);
+    await microtasks();
+    h.preparations[0]?.refuse(new RangeError("a medium of too many terms"));
+    await microtasks();
+    const report = note(h, [lit(A)]);
+    expect([report.problems.get(A), errors.mock.calls.length, h.made]).toEqual([
+      { kind: "failed" },
+      1,
+      [],
+    ]);
+  });
+
+  it("prepares them again after a lost device, with no problem", async () => {
+    const h = steppedHarness();
+    await landEarth(h, A);
+    note(h, [lit(A)]);
+    await microtasks();
+    h.preparations[0]?.refuse(new EngineUnavailable("lost"));
+    await microtasks();
+    const lost = note(h, [lit(A)]);
+    note(h, [lit(A)]);
+    await microtasks();
+    h.preparations[1]?.ready();
+    await microtasks();
+    note(h, [lit(A)]);
+    expect([lost.problems.size, h.preparations.length, h.cache.entryOf(A)?.tables]).toEqual([
+      0,
+      2,
+      h.made[0],
+    ]);
+  });
+});

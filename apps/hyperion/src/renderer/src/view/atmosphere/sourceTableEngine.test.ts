@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { countingRenderEngine } from "../../test/countingRenderEngine";
 import { BODY_DISC_CELLS_KERNEL, BODY_DISC_MATERIALS } from "../bodies/draw";
@@ -176,5 +176,40 @@ describe("the lit passes' table-only twins (R08.T9.b's lever)", () => {
     const made = inner.live.materials;
     engine.releaseMaterial(material);
     expect([before, made, inner.live.materials]).toEqual([before, before + 1, before - 1]);
+  });
+
+  it("makes a twin in a task after the frame that first draws or dispatches it, never in that frame (perf-long-tasks-4)", async () => {
+    const { inner, engine, material, mesh, render } = await setUp();
+    const oneBand = tableOf(engine, ONE_BAND_SOURCE_TABLE_NAME);
+    const kernel = engine.createCompute(BODY_DISC_CELLS_KERNEL);
+    const kernelsMade = vi.spyOn(inner, "createComputeAsync");
+    const before = inner.live.materials;
+    render(drawOf(material, mesh, oneBand));
+    engine.dispatch(
+      kernel,
+      { uniforms: {}, buffers: {}, sampled: { atmosphere_source_table: oneBand }, storage: {} },
+      [1, 1, 1],
+    );
+    expect([inner.live.materials, kernelsMade.mock.calls.length]).toEqual([before, 0]);
+    await engine.twinsSettled();
+    expect([inner.live.materials, kernelsMade.mock.calls.length]).toEqual([before + 1, 1]);
+  });
+
+  it("makes no twin of a material or kernel let go before its task (perf-long-tasks-4)", async () => {
+    const { inner, engine, material, mesh, render } = await setUp();
+    const oneBand = tableOf(engine, ONE_BAND_SOURCE_TABLE_NAME);
+    const kernel = engine.createCompute(BODY_DISC_CELLS_KERNEL);
+    const kernelsMade = vi.spyOn(inner, "createComputeAsync");
+    const before = inner.live.materials;
+    render(drawOf(material, mesh, oneBand));
+    engine.dispatch(
+      kernel,
+      { uniforms: {}, buffers: {}, sampled: { atmosphere_source_table: oneBand }, storage: {} },
+      [1, 1, 1],
+    );
+    engine.releaseMaterial(material);
+    engine.releaseCompute(kernel);
+    await engine.twinsSettled();
+    expect([inner.live.materials, kernelsMade.mock.calls.length]).toEqual([before - 1, 0]);
   });
 });

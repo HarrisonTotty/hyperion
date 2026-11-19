@@ -177,6 +177,7 @@ import type {
 } from "@hyperion/protocol";
 import { isBulkAssemblyFailure } from "@hyperion/protocol";
 
+import { untilNextTask } from "../../lib/nextTask";
 import { isRefusal } from "../../lib/refusal";
 import { toBodyDetail, toBodyDetailRequest } from "../../lib/system/bodiesWire";
 import type { BodyDetail } from "../../lib/system/model";
@@ -228,6 +229,7 @@ import {
   type AtmosphereBody,
   AtmosphereTables,
   kernelMedium,
+  prepareAtmosphereTables,
 } from "./tables";
 import type { MsSourceTable, ThickBakeBody } from "./thick/bake";
 import { spectralColumnOf } from "./thick/columnLayout";
@@ -355,8 +357,58 @@ export type AtmosphereTablesFactory<T extends CachedTables> = (
 export function atmosphereTablesOn(
   engine: RenderEngine,
 ): AtmosphereTablesFactory<AtmosphereTables> {
-  return (built, thickSlots) => {
-    const tables = new AtmosphereTables(
+  return (built, thickSlots) =>
+    withThermalSource(
+      new AtmosphereTables(
+        engine,
+        built.medium,
+        built.bottomRadiusM,
+        built.curves,
+        built.body,
+        "read",
+        thickSlots,
+      ),
+      built,
+    );
+}
+
+/** Tables given their medium's thermal source where it has one, or disposed where that throws. */
+function withThermalSource(tables: AtmosphereTables, built: BuiltAtmosphere): AtmosphereTables {
+  if (built.temperature !== undefined) {
+    try {
+      tables.setThermalSource(built.temperature);
+    } catch (error: unknown) {
+      tables.dispose();
+      throw error;
+    }
+  }
+  return tables;
+}
+
+/**
+ * Prepares a body's tables in tasks ahead of the frame that makes them (lane perf-long-tasks-4),
+ * `thickSlots` as the factory's ({@link AtmosphereTablesFactory}): it resolves with that frame's
+ * step, which makes the tables the factory makes of the same build, to the bit.
+ *
+ * @throws As the factory, as a rejection, or from the step: `EngineUnavailable` while the engine
+ *   has no device, which the cache passes in silence and prepares again at a later frame, and
+ *   anything else, the body's `failed` problem.
+ */
+export type AtmosphereTablesPreparer<T extends CachedTables> = (
+  built: BuiltAtmosphere,
+  thickSlots: number,
+) => Promise<() => T>;
+
+/**
+ * The app's preparer: {@link prepareAtmosphereTables}'s packing and kernels in tasks, then
+ * `AtmosphereTables.prepared` and the thermal source in the frame, as {@link atmosphereTablesOn}
+ * makes them at once.
+ */
+export function atmosphereTablesPreparedOn(
+  engine: RenderEngine,
+): AtmosphereTablesPreparer<AtmosphereTables> {
+  return async (built, thickSlots) => {
+    const prepared = await prepareAtmosphereTables(
       engine,
       built.medium,
       built.bottomRadiusM,
@@ -365,15 +417,7 @@ export function atmosphereTablesOn(
       "read",
       thickSlots,
     );
-    if (built.temperature !== undefined) {
-      try {
-        tables.setThermalSource(built.temperature);
-      } catch (error: unknown) {
-        tables.dispose();
-        throw error;
-      }
-    }
-    return tables;
+    return () => withThermalSource(AtmosphereTables.prepared(engine, prepared), built);
   };
 }
 
@@ -582,6 +626,16 @@ export interface AtmosphereCacheOptions<T extends CachedTables> {
   /** The optics pool (`opticsPool.ts`'s `OpticsWorkerPool`), which the cache owns and terminates. */
   readonly builder: AtmosphereBuilder;
   readonly tables: AtmosphereTablesFactory<T>;
+  /**
+   * Where given, each landed build's tables are prepared by it in tasks after the frame it landed
+   * in, their thick slots first in a task of their own, and made in the first frame after
+   * (lane perf-long-tasks-4): the frames between draw what they drew. Absent, they are made by
+   * {@link AtmosphereCacheOptions.tables} in the frame the build lands in, as before. Tables made
+   * again after an eviction are the factory's, at once.
+   */
+  readonly prepare?: AtmosphereTablesPreparer<T>;
+  /** What the thick slots' task waits for, `untilNextTask` if absent; a test's otherwise. */
+  readonly between?: () => Promise<void>;
   /** How the busy re-asks wait; `setTimeout` if absent. */
   readonly schedule?: AtmosphereSchedule;
   /**
@@ -854,7 +908,27 @@ interface HeldBody<T> {
   /** The drawn entry's disc table (R08.T16.b); `null` where none is asked, or nothing is drawn. */
   disc: DiscState<T> | null;
   problem: AtmosphereProblem | null;
+  /** Its landed build's tables being prepared (`AtmosphereCacheOptions.prepare`), or `null`. */
+  making: TablesMaking<T> | null;
 }
+
+/**
+ * A landed entry's tables being prepared in tasks (lane perf-long-tasks-4), and how the
+ * preparation ended: the frame's step that makes them, with the thick slots they were prepared
+ * for, or why none came; `null` while it runs.
+ */
+interface TablesMaking<T> {
+  readonly entry: ToDraw;
+  outcome:
+    | { readonly kind: "ready"; readonly make: () => T; readonly thickSlots: number }
+    | { readonly kind: "unavailable" }
+    | { readonly kind: "failed"; readonly error: unknown }
+    | null;
+}
+
+/** A body's tables as a frame finds them: made, with their thick slots, or why not yet or not. */
+type TablesFound<T> =
+  { readonly tables: T; readonly thickSlots: number } | "pending" | "unavailable" | "failed";
 
 const IDLE: Fetch = { kind: "idle" };
 const WAITING: Fetch = { kind: "waiting" };
@@ -1486,6 +1560,8 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
   readonly #requests: AtmosphereRequests;
   readonly #builder: AtmosphereBuilder;
   readonly #tables: AtmosphereTablesFactory<T>;
+  readonly #prepare: AtmosphereTablesPreparer<T> | undefined;
+  readonly #between: () => Promise<void>;
   readonly #schedule: AtmosphereSchedule;
   readonly #routes: (
     regime: AtmosphereRegime,
@@ -1511,6 +1587,8 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
     this.#requests = opts.requests;
     this.#builder = opts.builder;
     this.#tables = opts.tables;
+    this.#prepare = opts.prepare;
+    this.#between = opts.between ?? untilNextTask;
     this.#schedule = opts.schedule ?? scheduleTimeout;
     const giantRoute = opts.giantRoute ?? GIANT_ROUTE;
     this.#giantRoute = giantRoute;
@@ -1797,6 +1875,7 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
       correction: null,
       disc: null,
       problem: null,
+      making: null,
     };
     this.#bodies.set(body.id, held);
     return held;
@@ -2180,13 +2259,12 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
       let tables: T | null = null;
       let thickSlots = 0;
       if (entry.built !== null) {
-        thickSlots = this.#thickSlotsOf(held, entry, entry.built);
-        const made = this.#make(held, this.#tablesBuilt(entry, entry.built), thickSlots);
-        if (made === "unavailable" || made === "failed") {
-          // Kept landed to be made again at a later frame, or dropped with the body's problem.
+        const found = this.#tablesFor(held, entry, entry.built);
+        if (found === "pending" || found === "unavailable" || found === "failed") {
+          // Kept landed to be made at a later frame, or dropped with the body's problem.
           return;
         }
-        tables = made;
+        ({ tables, thickSlots } = found);
       }
       if (drawn !== null && drawn.tables !== null) {
         drawn.tables.dispose();
@@ -2836,6 +2914,81 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
   }
 
   /**
+   * A landed entry's tables and their thick slots: made at once by the factory, or, with a
+   * preparer (lane perf-long-tasks-4), `pending` while they are prepared in tasks and made in the
+   * first frame after; or `unavailable` while the device is lost, or `failed` (its problem set).
+   */
+  #tablesFor(held: HeldBody<T>, entry: ToDraw, built: BuiltAtmosphere): TablesFound<T> {
+    const prepare = this.#prepare;
+    if (prepare === undefined) {
+      const thickSlots = this.#thickSlotsOf(held, entry, built);
+      const made = this.#make(held, this.#tablesBuilt(entry, built), thickSlots);
+      return made === "unavailable" || made === "failed" ? made : { tables: made, thickSlots };
+    }
+    const making = held.making;
+    if (making === null || making.entry !== entry) {
+      this.#startMaking(held, entry, built, prepare);
+      return "pending";
+    }
+    const { outcome } = making;
+    if (outcome === null) {
+      return "pending";
+    }
+    held.making = null;
+    if (outcome.kind === "unavailable") {
+      // Prepared again from the next frame, after the restore.
+      return "unavailable";
+    }
+    if (outcome.kind === "failed") {
+      this.#fail(held, outcome.error);
+      return "failed";
+    }
+    try {
+      return { tables: outcome.make(), thickSlots: outcome.thickSlots };
+    } catch (error: unknown) {
+      if (error instanceof EngineUnavailable) {
+        return "unavailable";
+      }
+      this.#fail(held, error);
+      return "failed";
+    }
+  }
+
+  /**
+   * Prepares a landed entry's tables (lane perf-long-tasks-4): its thick slots in a task after
+   * the frame, some 30 ms of the routing's on a pod, then the preparer's tasks; read by the first
+   * frame after it ends that still draws the entry, and by none once the body's build is
+   * cancelled or replaced, the body let go or the cache disposed.
+   */
+  #startMaking(
+    held: HeldBody<T>,
+    entry: ToDraw,
+    built: BuiltAtmosphere,
+    prepare: AtmosphereTablesPreparer<T>,
+  ): void {
+    const making: TablesMaking<T> = { entry, outcome: null };
+    held.making = making;
+    const read = (): boolean =>
+      !this.#disposed && held.making === making && this.#bodies.get(held.id) === held;
+    void (async () => {
+      await this.#between();
+      if (!read()) {
+        return;
+      }
+      const thickSlots = this.#thickSlotsOf(held, entry, built);
+      const make = await prepare(this.#tablesBuilt(entry, built), thickSlots);
+      if (read()) {
+        making.outcome = { kind: "ready", make, thickSlots };
+      }
+    })().catch((error: unknown) => {
+      if (read()) {
+        making.outcome =
+          error instanceof EngineUnavailable ? { kind: "unavailable" } : { kind: "failed", error };
+      }
+    });
+  }
+
+  /**
    * A body's tables, or `unavailable` while the device is lost, or `failed` (its problem set).
    *
    * @param thickSlots - As the factory's ({@link AtmosphereTablesFactory}).
@@ -2958,6 +3111,8 @@ export class AtmosphereCache<T extends CachedTables = AtmosphereTables> {
       held.build.handle.cancel();
     }
     held.build = null;
+    // Its preparation, if any, goes unread.
+    held.making = null;
   }
 
   /** Disposes a body's tables, cancels its bakes and draws nothing of it. */

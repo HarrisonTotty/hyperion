@@ -233,23 +233,27 @@ describe("the far limb's node rays, packed (plan R08, R08.T8.d)", () => {
     expect(marchesOf(engine).map((d) => d.kernel)).toEqual(["atmosphere ray march"]);
   });
 
-  it("marches per texel at its first frame while its packed kernels are made in the background, and packs from the next", async () => {
+  it("marches per texel at its first frame while its packed kernels are made in the background, begun in the task after it, and packs from the next", async () => {
     vi.useFakeTimers();
     const { engine, view } = await viewOf(packed("area"));
     view.drawFrame(DISTANT, [NOON], SCENE);
     const first = marchesOf(engine).map((d) => d.kernel);
-    const asked = engine.kernelPairs
-      .filter((pair) => pair.name.includes("limb"))
-      .map((p) => p.name);
+    const limbPairs = (): string[] =>
+      engine.kernelPairs.filter((pair) => pair.name.includes("limb")).map((p) => p.name);
+    // None made in the frame (lane perf-long-tasks-4).
+    const inFrame = limbPairs();
     await vi.advanceTimersByTimeAsync(0);
+    const asked = limbPairs();
     engine.dispatched.length = 0;
     view.drawFrame(DISTANT, [NOON], SCENE);
     expect({
       first,
+      inFrame,
       asked: asked.toSorted(),
       next: marchesOf(engine).map((d) => d.kernel),
     }).toEqual({
       first: ["atmosphere ray march for one band, edge-free"],
+      inFrame: [],
       asked: [
         LIMB_DISPATCH_KERNEL.name,
         RAY_MARCH_LIMB_SPECIAL_KERNEL.name,

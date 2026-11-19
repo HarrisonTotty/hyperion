@@ -16,13 +16,14 @@
  * prepared. There every lookup is the table's in both, the same arithmetic in the same order, so
  * that the twin draws the module's bytes; until it is prepared the module draws, as before.
  *
- * - **Materials.** A material's twin is made at its first draw into a target with a one-band table
- *   bound, and its pipeline prepared there for that target's format and the draw's mesh, off the
- *   frame (`prepareMaterial`); it stands in for draws into such a target with such a mesh once that
+ * - **Materials.** A material's twin is asked at its first draw into a target with a one-band table
+ *   bound, and made and its pipeline prepared for that target's format and the draw's mesh in a
+ *   task after that frame's (`prepareMaterial`; lane perf-long-tasks-4: its shaders' making held
+ *   the first frame with air); it stands in for draws into such a target with such a mesh once that
  *   preparation has settled, so that a twin never compiles on a frame. A view's draws, which no lit
  *   body takes (they draw into the scene target), take none.
- * - **Kernels.** A kernel's twin is made at its first dispatch with a one-band table bound,
- *   asynchronously, and stands in from the first such dispatch after it is made: the table's own
+ * - **Kernels.** A kernel's twin is asked at its first dispatch with a one-band table bound, made
+ *   asynchronously in a task after that frame's, and stands in from the first such dispatch after it is made: the table's own
  *   build, which never binds one there, takes none. The ray march's thin forms declare the same
  *   table and constant (`marchSourceTable.wgsl`; `AtmosphereSettings.marchSourceTransmittance`'s
  *   `table`), and take their twins the same way; their every step's source is the table's in both.
@@ -31,6 +32,7 @@
  *   their materials and kernels again, and their twins come again with their draws.
  */
 
+import { untilNextTask } from "../../lib/nextTask";
 import type { KernelPair } from "../engine/kernels";
 import type { AllocationEvent, BufferSpec, MemoryCategory, TextureSpec } from "../engine/memory";
 import { EngineUnavailable } from "../engine/resilientEngine";
@@ -215,11 +217,11 @@ export class SourceTableEngine implements RenderEngine {
    * preparation there begun where due.
    */
   #materialTwinOf = (draw: DrawItem, target: TargetPreparation): MaterialHandle | null => {
-    const held = this.#materials.get(draw.material);
+    const { material } = draw;
+    const held = this.#materials.get(material);
     if (held === undefined || !this.#holdsEveryLookup(draw.textures[SOURCE_TABLE_DRAW_TEXTURE])) {
       return null;
     }
-    const twin = (held.twin ??= this.#inner.createMaterial(held.spec));
     let byTarget = held.prepared.get(draw.mesh);
     if (byTarget === undefined) {
       byTarget = new Map();
@@ -231,23 +233,33 @@ export class SourceTableEngine implements RenderEngine {
       preparing.set(target.key, false);
       this.#track(
         (async () => {
+          // Made and prepared in a task after the drawing frame's (lane perf-long-tasks-4): its
+          // shaders' making held the first frame with air on a pod. A material let go meanwhile
+          // takes none.
+          await untilNextTask();
+          if (this.#materials.get(material) !== held) {
+            return;
+          }
+          let name = held.spec.name;
           try {
+            const twin = (held.twin ??= this.#inner.createMaterial(held.spec));
+            name = twin.name;
             await this.#inner.prepareMaterial(twin, [target.target], [draw.mesh]);
             preparing.set(target.key, true);
           } catch (error: unknown) {
             // A loss meanwhile is no failure: the restore makes the material and its twin again.
             if (!(error instanceof EngineUnavailable)) {
-              console.error(`the table-only twin ${twin.name} could not be prepared:`, error);
+              console.error(`the table-only twin ${name} could not be prepared:`, error);
             }
           }
         })(),
       );
     }
-    if (state !== true) {
+    if (state !== true || held.twin === null) {
       return null;
     }
     this.#swaps += 1;
-    return twin;
+    return held.twin;
   };
 
   /** Notes `spec`'s twin, to make at its material `material`'s first draw that takes it. */
@@ -364,6 +376,12 @@ export class SourceTableEngine implements RenderEngine {
       this.#track(
         (async () => {
           try {
+            // Made in a task after the dispatching frame's (lane perf-long-tasks-4), as a
+            // material's twin is; a kernel let go meanwhile takes none.
+            await untilNextTask();
+            if (this.#kernels.get(kernel) !== held) {
+              return;
+            }
             held.made = await this.#inner.createComputeAsync(held.pair);
           } catch (error: unknown) {
             if (!(error instanceof EngineUnavailable)) {

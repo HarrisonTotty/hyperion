@@ -137,6 +137,7 @@ import slotDepthsWgsl from "./shaders/slotDepths.wgsl?raw";
 import sourceTransmittanceWgsl from "./shaders/sourceTransmittance.wgsl?raw";
 import thickReadWgsl from "./shaders/thickRead.wgsl?raw";
 import transmittanceWgsl from "./shaders/transmittance.wgsl?raw";
+import { untilNextTask } from "../../lib/nextTask";
 import { log } from "../../lib/pinnedMath";
 import {
   ONE_BAND_SOURCE_TABLE_NAME,
@@ -2198,7 +2199,11 @@ function sameSizes(a: ColumnTableSizes, b: ColumnTableSizes): boolean {
 }
 
 /** A device's resources, the slices' column tables made at `sizes`, the first build's. */
-function createResources(engine: RenderEngine, sizes: ColumnTableSizes): TableResources {
+function createResources(
+  engine: RenderEngine,
+  sizes: ColumnTableSizes,
+  kernels: Pick<PreparedKernels, "transmittance" | "multiScattering"> | null = null,
+): TableResources {
   const one = { widthTexels: 1, layers: 1 };
   return {
     slices: { ...createTransmittance(engine, "", 1, sizes), layers: 1, sizes },
@@ -2243,8 +2248,224 @@ function createResources(engine: RenderEngine, sizes: ColumnTableSizes): TableRe
       heightTexels: 1,
     }),
     slotDepths: null,
-    transmittanceKernel: engine.createCompute(TRANSMITTANCE_KERNEL),
-    multiScatteringKernel: engine.createCompute(MULTI_SCATTERING_KERNEL),
+    transmittanceKernel: kernels?.transmittance ?? engine.createCompute(TRANSMITTANCE_KERNEL),
+    multiScatteringKernel:
+      kernels?.multiScattering ?? engine.createCompute(MULTI_SCATTERING_KERNEL),
+  };
+}
+
+/**
+ * A medium's tables as the CPU packs them for a build, before any of the device's work (lane
+ * perf-long-tasks-4): what {@link AtmosphereTables.setMedium} forms from its arguments, and
+ * {@link prepareAtmosphereTables} forms a step at a time, in tasks before the frame that makes the
+ * tables, through the same steps ({@link packingSteps}), so that the two build the same tables.
+ */
+export interface PackedMediumTables {
+  readonly medium: AtmosphereMedium;
+  readonly bottomRadiusM: number;
+  readonly curves: AbsorberCurveSlots;
+  readonly body: AtmosphereBody | null;
+  readonly columnTables: ColumnTables;
+  readonly thickSlots: number;
+  /** {@link packMedium}'s, of the medium with its terms' forward deltas taken out. */
+  readonly terms: Float32Array;
+  readonly densityTables: LayeredTable;
+  readonly phaseTables: LayeredTable;
+  readonly lobeTables: LayeredPlanes;
+  readonly absorberCurves: PackedTable;
+  readonly layerEdges: Float32Array;
+  /** Design note 11's widening over the 2 MB row ({@link rowBodyOf}). */
+  readonly sliced: RowBody;
+  readonly plan: TablesPlan;
+  readonly layersPerBand: number;
+  readonly oblateBody: Float32Array;
+  readonly refusal: SlotDepthsRefusal | null;
+  readonly row: PerPlanetRow;
+}
+
+/**
+ * Packs a medium's tables a step at a time, yielding between the steps (lane perf-long-tasks-4):
+ * the CPU part of {@link AtmosphereTables.setMedium}, in its order.
+ *
+ * @throws As {@link packMedium}, {@link packAbsorberCurves} and {@link tablesPlanOf}, at the step
+ *   that throws.
+ */
+function* packingSteps(
+  medium: AtmosphereMedium,
+  bottomRadiusM: number,
+  curves: AbsorberCurveSlots,
+  body: AtmosphereBody | null,
+  columnTables: ColumnTables,
+  thickSlots: number,
+): Generator<void, PackedMediumTables, void> {
+  // The kernels read the medium with its terms' forward deltas taken out, as their twin reads
+  // `kernelMedium(medium)` (R08.T7).
+  const direct = { ...medium, terms: medium.terms.map(withoutForwardDelta) };
+  const terms = packMedium(direct);
+  yield;
+  const densityTables = packDensityTables(direct);
+  yield;
+  const phaseTables = packPhaseTables(direct);
+  yield;
+  const lobeTables = packLobeTables(direct);
+  yield;
+  const absorberCurves = packAbsorberCurves(medium, curves);
+  const layerEdges = packLayerEdges(medium);
+  yield;
+  // Design note 11's widening over the 2 MB row (R08.T11.e): the slicing the plan is built in.
+  const sliced = rowBodyOf(medium, curves, body, bottomRadiusM, thickSlots);
+  const plan = tablesPlanOf(sliced.body, bottomRadiusM);
+  const layersPerBand = multiScatteringLayersOf(medium, curves);
+  yield;
+  const oblateBody = packOblateBody(
+    sliced.body?.figure ?? { equatorialRadiusM: bottomRadiusM, polarRadiusM: bottomRadiusM },
+    sliced.body?.gravity ?? null,
+    plan,
+    bottomRadiusM,
+    medium,
+    layersPerBand,
+  );
+  yield;
+  // Whether the body takes the slot layers (R08.T8.e, `decision-r08-t8-leans.md` §13): decided
+  // here, from what the build knows, so that its ray march takes its read when its pipeline is
+  // made; the key already holds all of it, so the choice sets off no rebuild of its own.
+  const refusal = slotDepthsRefusal(medium, curves, plan, thickSlots);
+  const row = perPlanetRowOf(medium, curves, plan, columnTables, thickSlots);
+  return {
+    medium,
+    bottomRadiusM,
+    curves,
+    body,
+    columnTables,
+    thickSlots,
+    terms,
+    densityTables,
+    phaseTables,
+    lobeTables,
+    absorberCurves,
+    layerEdges,
+    sliced,
+    plan,
+    layersPerBand,
+    oblateBody,
+    refusal,
+    row,
+  };
+}
+
+/**
+ * A medium's tables packed at once ({@link packingSteps}).
+ *
+ * @throws As {@link packingSteps}.
+ */
+function packMediumTables(
+  medium: AtmosphereMedium,
+  bottomRadiusM: number,
+  curves: AbsorberCurveSlots,
+  body: AtmosphereBody | null,
+  columnTables: ColumnTables,
+  thickSlots: number,
+): PackedMediumTables {
+  const steps = packingSteps(medium, bottomRadiusM, curves, body, columnTables, thickSlots);
+  for (;;) {
+    const next = steps.next();
+    if (next.done === true) {
+      return next.value;
+    }
+  }
+}
+
+/**
+ * The kernels a body's first build and its tables' first reads make (the transmittance, the
+ * multiple scattering, the slot layers where it takes them, the sky's irradiance and the sources'
+ * transmittance), made ahead by {@link prepareAtmosphereTables} (lane perf-long-tasks-4).
+ */
+interface PreparedKernels {
+  readonly transmittance: ComputeHandle;
+  readonly multiScattering: ComputeHandle;
+  readonly slotDepths: ComputeHandle | null;
+  readonly irradiance: ComputeHandle;
+  readonly sourceTable: ComputeHandle;
+}
+
+/**
+ * A body's tables prepared for the frame that makes them (lane perf-long-tasks-4): the medium's
+ * tables packed and the kernels made, which {@link AtmosphereTables.prepared} builds from.
+ */
+export interface PreparedAtmosphereTables {
+  readonly packed: PackedMediumTables;
+  readonly kernels: PreparedKernels;
+}
+
+/**
+ * Prepares a body's tables in tasks before the frame that makes them (lane perf-long-tasks-4): on
+ * a pod the making held the first frame with air 64 to 70 ms. Each packing step
+ * ({@link packingSteps}) and each kernel's `createComputeAsync` begins after `between`, and the
+ * kernels' compiles are awaited, so that the frame's {@link AtmosphereTables.prepared} makes the
+ * tables' resources, uploads and dispatches alone, and their first reads compile nothing.
+ *
+ * @param between - What each step waits for: a task of its own, `untilNextTask`, by default.
+ * @throws As {@link packingSteps}, and `EngineUnavailable` while the engine has no device, as a
+ *   rejection.
+ */
+export async function prepareAtmosphereTables(
+  engine: RenderEngine,
+  medium: AtmosphereMedium,
+  bottomRadiusM: number,
+  curves: AbsorberCurveSlots = NO_ABSORBER_CURVES,
+  body: AtmosphereBody | null = null,
+  columnTables: ColumnTables = "read",
+  thickSlots = 0,
+  between: () => Promise<void> = untilNextTask,
+): Promise<PreparedAtmosphereTables> {
+  const steps = packingSteps(medium, bottomRadiusM, curves, body, columnTables, thickSlots);
+  let packed: PackedMediumTables | null = null;
+  while (packed === null) {
+    // One step a task, in order.
+    // oxlint-disable-next-line no-await-in-loop
+    await between();
+    const next = steps.next();
+    if (next.done === true) {
+      packed = next.value;
+    }
+  }
+  // Each kernel begun in a task of its own, in order, and their compiles awaited together.
+  const pairs = [
+    TRANSMITTANCE_KERNEL,
+    MULTI_SCATTERING_KERNEL,
+    IRRADIANCE_KERNEL,
+    SOURCE_TRANSMITTANCE_KERNEL,
+    ...(packed.refusal === null ? [SLOT_DEPTHS_KERNEL] : []),
+  ];
+  const making: Array<Promise<ComputeHandle>> = [];
+  for (const pair of pairs) {
+    // oxlint-disable-next-line no-await-in-loop
+    await between();
+    const kernel = engine.createComputeAsync(pair);
+    // Its failure is the `Promise.all` below's, which the caller takes: none goes unhandled
+    // while a later kernel's task is awaited.
+    kernel.catch(() => undefined);
+    making.push(kernel);
+  }
+  const [transmittance, multiScattering, irradiance, sourceTable, slotDepths] =
+    await Promise.all(making);
+  if (
+    transmittance === undefined ||
+    multiScattering === undefined ||
+    irradiance === undefined ||
+    sourceTable === undefined
+  ) {
+    throw new Error("the tables' kernels were not all made");
+  }
+  return {
+    packed,
+    kernels: {
+      transmittance,
+      multiScattering,
+      slotDepths: slotDepths ?? null,
+      irradiance,
+      sourceTable,
+    },
   };
 }
 
@@ -2395,6 +2616,9 @@ export class AtmosphereTables {
    *   which the 2 MB row counts when it decides the slicing (R08.T14.d.4, T14.d's precondition 4;
    *   `AtmosphereCache.ts`'s factory's); 0, the default, where it takes none, as a caller that
    *   gives its tables a thick table of its own choosing (the smoke's) has its row count none.
+   * @param prepared - These arguments' tables prepared ahead ({@link AtmosphereTables.prepared}),
+   *   whose packed tables and kernels the build takes; `null`, the default, packs and makes them
+   *   here.
    * @throws Error or RangeError as {@link packMedium}, {@link packAbsorberCurves} and
    *   {@link tablesPlanOf}, and `EngineUnavailable` while the engine has no device (a loss), having
    *   released the buffer and textures it made before.
@@ -2407,6 +2631,7 @@ export class AtmosphereTables {
     body: AtmosphereBody | null = null,
     columnTables: ColumnTables = "read",
     thickSlots = 0,
+    prepared: PreparedAtmosphereTables | null = null,
   ) {
     this.#engine = engine;
     this.#medium = medium;
@@ -2417,9 +2642,23 @@ export class AtmosphereTables {
     this.#columnTables = columnTables;
     this.#thickSlots = thickSlots;
     this.#plan = tablesPlanOf(body, bottomRadiusM);
-    this.#resources = createResources(engine, columnTableSizes(medium, columnTables));
+    this.#resources = createResources(
+      engine,
+      columnTableSizes(medium, columnTables),
+      prepared?.kernels ?? null,
+    );
+    if (prepared !== null) {
+      this.#irradianceKernel = prepared.kernels.irradiance;
+      this.#sourceTableKernel = prepared.kernels.sourceTable;
+      this.#slotDepthsKernel = prepared.kernels.slotDepths;
+    }
     try {
-      this.setMedium(medium, bottomRadiusM, curves, body);
+      if (prepared === null) {
+        this.setMedium(medium, bottomRadiusM, curves, body);
+      } else {
+        // A first build forms no key (`#keyed`), as `setMedium`'s does not.
+        this.#build(prepared.packed, null);
+      }
     } catch (error: unknown) {
       releaseResources(engine, this.#resources);
       throw error;
@@ -2473,6 +2712,29 @@ export class AtmosphereTables {
         this.#below = { packed: below, texture: this.#uploadBelow(below) };
       }
     });
+  }
+
+  /**
+   * The tables made from a body's tables prepared ahead ({@link prepareAtmosphereTables}; lane
+   * perf-long-tasks-4), in the frame that makes them: the same tables
+   * `new AtmosphereTables(engine, …)` makes of the same arguments, by the same uploads and
+   * dispatches in the same order, the packing and the kernels' compiles done before it.
+   *
+   * @throws `EngineUnavailable` while the engine has no device (a loss), having released what it
+   *   made.
+   */
+  static prepared(engine: RenderEngine, prepared: PreparedAtmosphereTables): AtmosphereTables {
+    const { packed } = prepared;
+    return new AtmosphereTables(
+      engine,
+      packed.medium,
+      packed.bottomRadiusM,
+      packed.curves,
+      packed.body,
+      packed.columnTables,
+      packed.thickSlots,
+      prepared,
+    );
   }
 
   /**
@@ -3272,32 +3534,22 @@ export class AtmosphereTables {
         return false;
       }
     }
-    // The kernels read the medium with its terms' forward deltas taken out, as their twin reads
-    // `kernelMedium(medium)` (R08.T7).
-    const direct = { ...medium, terms: medium.terms.map(withoutForwardDelta) };
-    const terms = packMedium(direct);
-    const densityTables = packDensityTables(direct);
-    const phaseTables = packPhaseTables(direct);
-    const lobeTables = packLobeTables(direct);
-    const absorberCurves = packAbsorberCurves(medium, curves);
-    const layerEdges = packLayerEdges(medium);
-    // Design note 11's widening over the 2 MB row (R08.T11.e): the slicing the plan is built in.
-    const sliced = rowBodyOf(medium, curves, body, bottomRadiusM, this.#thickSlots);
-    const plan = tablesPlanOf(sliced.body, bottomRadiusM);
-    const layersPerBand = multiScatteringLayersOf(medium, curves);
-    const oblateBody = packOblateBody(
-      sliced.body?.figure ?? { equatorialRadiusM: bottomRadiusM, polarRadiusM: bottomRadiusM },
-      sliced.body?.gravity ?? null,
-      plan,
-      bottomRadiusM,
-      medium,
-      layersPerBand,
+    this.#build(
+      packMediumTables(medium, bottomRadiusM, curves, body, this.#columnTables, this.#thickSlots),
+      key,
     );
-    // Whether the body takes the slot layers (R08.T8.e, `decision-r08-t8-leans.md` §13): decided
-    // here, from what the build knows, so that its ray march takes its read when its pipeline is
-    // made; the key above already holds all of it, so the choice sets off no rebuild of its own.
-    const refusal = slotDepthsRefusal(medium, curves, plan, this.#thickSlots);
-    const row = perPlanetRowOf(medium, curves, plan, this.#columnTables, this.#thickSlots);
+    return true;
+  }
+
+  /**
+   * Builds the tables from a medium's packed tables ({@link PackedMediumTables}): the device's
+   * part of {@link AtmosphereTables.setMedium}, its uploads and dispatches, `key` the build's key
+   * where it was formed.
+   */
+  #build(packed: PackedMediumTables, key: string | null): void {
+    const { medium, bottomRadiusM, curves, body, terms, densityTables, phaseTables } = packed;
+    const { lobeTables, absorberCurves, layerEdges, sliced, plan, layersPerBand } = packed;
+    const { oblateBody, refusal, row } = packed;
     this.#medium = medium;
     this.#bottomRadiusM = bottomRadiusM;
     this.#curves = curves;
@@ -3405,7 +3657,6 @@ export class AtmosphereTables {
     );
     this.#keyed = { of: [medium, bottomRadiusM, curves, body], text: key };
     this.#builds += 1;
-    return true;
   }
 
   /**

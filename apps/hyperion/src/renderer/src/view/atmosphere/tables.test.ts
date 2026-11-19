@@ -113,6 +113,7 @@ import {
   PER_PLANET_ROW_BYTES,
   perPlanetRowOf,
   PHASE_TABLE_ENTRIES,
+  prepareAtmosphereTables,
   RESAMPLED_COLUMN_TOLERANCE,
   resampledDensity,
   resampledPhase,
@@ -2862,5 +2863,165 @@ describe("the 2 MB row with the thick table a body's route gives it (R08.T14.d.4
       ["none", 4, 0],
       ["kappaAndBands", 3, 3 * 388_864],
     ]);
+  });
+});
+
+/** Typed arrays as their bytes, so that two records compare to the bit. */
+function asBytes(_key: string, value: unknown): unknown {
+  return ArrayBuffer.isView(value)
+    ? Array.from(new Uint8Array(value.buffer, value.byteOffset, value.byteLength))
+    : value;
+}
+
+/** What an engine was asked, in order: every texture made, write, upload, staged scope and dispatch. */
+function recordOf(engine: Awaited<ReturnType<typeof countingRenderEngine>>): unknown {
+  return JSON.parse(
+    JSON.stringify(
+      {
+        textures: engine.textureSpecs,
+        writes: engine.writes,
+        uploads: engine.textureWritten,
+        staged: engine.staged,
+        dispatched: engine.dispatched,
+      },
+      asBytes,
+    ),
+  );
+}
+
+// Lane perf-long-tasks-4: a body's tables prepared in tasks, then made in a frame, are the tables
+// made at once, by the same calls in the same order.
+describe("AtmosphereTables prepared ahead (lane perf-long-tasks-4)", () => {
+  const four = fourAbsorberMedium();
+  const saturn = {
+    medium: SATURN_OBLATE_CASE.medium,
+    body: { figure: SATURN_OBLATE_GRAVITY.spheroid, gravity: SATURN_OBLATE_GRAVITY },
+    radiusM: tableRadiusM(SATURN_OBLATE_GRAVITY.spheroid),
+  };
+  const cases = [
+    {
+      name: "R05's Earth",
+      medium: R05_EARTH_REFERENCE,
+      radiusM: R,
+      curves: NO_ABSORBER_CURVES,
+      body: null,
+      thickSlots: 0,
+    },
+    {
+      name: "three terms",
+      medium: TABULATED,
+      radiusM: R,
+      curves: NO_ABSORBER_CURVES,
+      body: null,
+      thickSlots: 0,
+    },
+    {
+      name: "four absorbers, slot layers",
+      medium: four.medium,
+      radiusM: R,
+      curves: four.curves,
+      body: null,
+      thickSlots: 0,
+    },
+    {
+      name: "saturn-oblate under two slots",
+      medium: saturn.medium,
+      radiusM: saturn.radiusM,
+      curves: NO_ABSORBER_CURVES,
+      body: saturn.body,
+      thickSlots: 2,
+    },
+  ] as const;
+
+  it.each(cases)(
+    "makes the calls of the tables made at once, their first reads too: $name",
+    async (each) => {
+      const atOnce = await countingRenderEngine();
+      const made = new AtmosphereTables(
+        atOnce,
+        each.medium,
+        each.radiusM,
+        each.curves,
+        each.body,
+        "read",
+        each.thickSlots,
+      );
+      made.irradiance();
+      made.sourceTransmittance();
+      const inSteps = await countingRenderEngine();
+      const prepared = await prepareAtmosphereTables(
+        inSteps,
+        each.medium,
+        each.radiusM,
+        each.curves,
+        each.body,
+        "read",
+        each.thickSlots,
+        () => Promise.resolve(),
+      );
+      const kernelsBefore = inSteps.kernelPairs.length;
+      const tables = AtmosphereTables.prepared(inSteps, prepared);
+      tables.irradiance();
+      tables.sourceTransmittance();
+      expect(recordOf(inSteps)).toEqual(recordOf(atOnce));
+      // Its kernels were made ahead: the frame's step and the first reads make none.
+      expect(inSteps.kernelPairs.length).toBe(kernelsBefore);
+      expect([tables.builds, tables.slotDepthsRefusal, tables.widening]).toEqual([
+        made.builds,
+        made.slotDepthsRefusal,
+        made.widening,
+      ]);
+    },
+  );
+
+  it("packs a step and begins each kernel after a task of its own, and asks the device nothing else", async () => {
+    const engine = await countingRenderEngine();
+    let tasks = 0;
+    const prepared = await prepareAtmosphereTables(
+      engine,
+      four.medium,
+      R,
+      four.curves,
+      null,
+      "read",
+      0,
+      () => {
+        tasks += 1;
+        return Promise.resolve();
+      },
+    );
+    // Eight packing steps, then five kernels: the slot layers' among them.
+    expect([tasks, engine.kernelPairs.map((pair) => pair.name)]).toEqual([
+      8 + 5,
+      [
+        TRANSMITTANCE_KERNEL.name,
+        "atmosphere multiple scattering",
+        "atmosphere irradiance",
+        SOURCE_TRANSMITTANCE_KERNEL.name,
+        SLOT_DEPTHS_KERNEL.name,
+      ],
+    ]);
+    expect([engine.textureSpecs, engine.writes, engine.dispatched]).toEqual([[], [], []]);
+    expect(prepared.kernels.slotDepths).not.toBeNull();
+  });
+
+  it("makes no slot layers' kernel for a body that takes none", async () => {
+    const engine = await countingRenderEngine();
+    const prepared = await prepareAtmosphereTables(engine, R05_EARTH_REFERENCE, R);
+    expect([prepared.kernels.slotDepths, prepared.packed.refusal]).toEqual([
+      null,
+      { kind: "noAbsorber" },
+    ]);
+  });
+
+  it("refuses, as a rejection, a medium the tables made at once refuse", async () => {
+    const engine = await countingRenderEngine();
+    const tooMany = { ...TABULATED, terms: Array.from({ length: 64 }, () => GAS) };
+    expect(() => new AtmosphereTables(engine, tooMany, R)).toThrow(/at most/);
+    await expect(
+      prepareAtmosphereTables(engine, tooMany, R, NO_ABSORBER_CURVES, null, "read", 0, () =>
+        Promise.resolve(),
+      ),
+    ).rejects.toThrow(/at most/);
   });
 });

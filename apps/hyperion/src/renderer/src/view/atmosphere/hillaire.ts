@@ -154,6 +154,7 @@ import {
 } from "./thick/read";
 import { belowDeckOpticalDepthInto, belowDeckReadScratch, belowDeckSplitM } from "./thick/deckRead";
 import { tableOnlyKernel } from "./surfaceLighting";
+import { untilNextTask } from "../../lib/nextTask";
 import { atan2, log, sin, tan } from "../../lib/pinnedMath";
 
 /** A 3D table's size, texels. */
@@ -2727,8 +2728,9 @@ async function limbKernelsOf(
 /**
  * The far limb's packed kernels on `engine` over those `made`, each other read and form made at its
  * first ask: at once where not `later` (an atmosphere's own kernels), else in the background, by
- * `createComputeAsync`, so that no frame waits on a compile (the device's shared kernels, a view's;
- * on SwiftShader a synchronous compile beside the march's was ended as hung, R08.T11.d).
+ * `createComputeAsync` begun in a task after the asking frame's (lane perf-long-tasks-4), so that no
+ * frame waits on a compile or makes the kernels' modules (the device's shared kernels, a view's; on
+ * SwiftShader a synchronous compile beside the march's was ended as hung, R08.T11.d).
  */
 function limbKernelsOver(
   engine: RenderEngine,
@@ -2774,6 +2776,9 @@ function limbKernelsOver(
       if (!asked.has(key)) {
         asked.add(key);
         const making = async (): Promise<void> => {
+          // Begun in a task after the asking frame's (lane perf-long-tasks-4): the kernels' keys
+          // and modules, some 60 ms of the first frame with air on a pod.
+          await untilNextTask();
           const [footprint, nodes, both] = await Promise.all([
             engine.createComputeAsync(pairs.footprint),
             engine.createComputeAsync(pairs.nodes),

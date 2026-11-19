@@ -15,6 +15,7 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import {
   type AtmosphereRequests,
   atmosphereTablesOn,
+  atmosphereTablesPreparedOn,
   AtmosphereCache,
 } from "../../view/atmosphere/AtmosphereCache";
 import { BodyDetailShare } from "../../view/atmosphere/bodyDetailShare";
@@ -99,6 +100,9 @@ export function useAtmosphereCache(input: AtmosphereCacheInput): AtmosphereCache
         createWorker,
       }),
       tables: atmosphereTablesOn(engine),
+      // A landed build's tables prepared in tasks, made in the first frame after (lane
+      // perf-long-tasks-4): their making held the first frame with air 64 to 70 ms on a pod.
+      prepare: atmosphereTablesPreparedOn(engine),
       giantRoute,
     });
     holder.set(made);
