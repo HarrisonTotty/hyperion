@@ -16,7 +16,10 @@
 //!     climate's permanent cap names, with no ice of its own, is never minor (P14.T53.h): its
 //!     reservoir is the cap, which lies at its cold trap, not across the surface, so it is held as
 //!     a dominant one is, d = 1, with no sea of its own at the mean, c = 0, at the cap's
-//!     saturation pressure (Leighton and Murray 1966).
+//!     saturation pressure (Leighton and Murray 1966). From generator version 35 a minor
+//!     condensable held over terrain of its own, warmer than its air's ice, takes that terrain's
+//!     temperature and saturation in place of the mean and h (P14.T55.e.a,
+//!     [`ColumnInventory::with_terrain_temperature`]: a tenuous air's methane).
 //!   - A **dominant** one takes its saturation pressure at the coldest zone, h = 1, where its
 //!     reservoir cold-traps: its pressure is set globally there, the collapse of Wordsworth (2015,
 //!     ApJ 806, 180, as P14.T48.d cites it), as Mars's carbon dioxide and Pluto's and Triton's
@@ -302,14 +305,21 @@ impl ClimateSpan {
     /// [`ColumnInventory::with_ice_temperature`]).
     #[must_use]
     fn toward(&self, cold: Kelvin, pull: f64) -> Kelvin {
-        let mean = self.mean.value();
-        if pull <= 0.0 {
-            self.mean
-        } else if pull >= 1.0 {
-            cold
-        } else {
-            Kelvin::new(mean - pull * (mean - cold.value()))
-        }
+        toward(self.mean, cold, pull)
+    }
+}
+
+/// The temperature `from` pulled toward `cold` by `pull`, in [0, 1]: `from` − p (`from` − `cold`),
+/// `from` itself at no pull and `cold` at a full one ([`ClimateSpan::toward`]'s, from the mean).
+#[must_use]
+fn toward(from: Kelvin, cold: Kelvin, pull: f64) -> Kelvin {
+    let start = from.value();
+    if pull <= 0.0 {
+        from
+    } else if pull >= 1.0 {
+        cold
+    } else {
+        Kelvin::new(start - pull * (start - cold.value()))
     }
 }
 
@@ -663,6 +673,14 @@ struct Species {
     /// [`ColumnInventory::with_ice_temperature`]): the temperature that stands for the climate's
     /// coldest zone in its caps and where it lies. `None` for every other species.
     ice: Option<Kelvin>,
+    /// The temperature of the terrain of its own over which it is held, where that lies warmer
+    /// than its air's ice (P14.T55.e.a, [`ColumnInventory::with_terrain_temperature`]): the
+    /// temperature that stands for the mean on its minor branch, where it is saturated. `None` for
+    /// every other species.
+    terrain: Option<Kelvin>,
+    /// Whether its ice holds it as a dominant condensable is held, whatever its share of the air
+    /// (P14.T55.e.a, [`ColumnInventory::with_held_ice`]): `false` for every other species.
+    held_by_ice: bool,
 }
 
 /// Why a [`ColumnInventory`] was refused.
@@ -721,6 +739,8 @@ impl ColumnInventory {
                 diagram: row.phase_diagram(),
                 humidity: surface_humidity(substance),
                 ice: None,
+                terrain: None,
+                held_by_ice: false,
             });
         }
         species.sort_by_key(|s| s.substance);
@@ -785,6 +805,85 @@ impl ColumnInventory {
         self
     }
 
+    /// This inventory with the species `substance` held by its own ice at `ice` as a dominant
+    /// condensable is held, whatever its share of the air (P14.T55.e.a): its cold trap its ice's
+    /// temperature ([`with_ice_temperature`](Self::with_ice_temperature)), its dominance 1 and no
+    /// sea of its own.
+    ///
+    /// An ice that lies across a body and holds its vapour at one temperature sets that vapour's
+    /// pressure there, whatever else the air holds, as a permanent cap does
+    /// (`ClimateSpan::with_cap`, P14.T53.h). Judged on its minor branch's share at the mean, a
+    /// tenuous air's nitrogen under its methane, held over terrain warmer than both
+    /// ([`with_terrain_temperature`](Self::with_terrain_temperature)), would be pulled off its ice
+    /// toward the colder mean and collapse. A species the inventory does not name, and a
+    /// temperature that is negative or not finite, leave it as it was.
+    #[must_use]
+    pub fn with_held_ice(self, substance: SubstanceId, ice: Kelvin) -> Self {
+        let t = ice.value();
+        let mut inventory = self.with_ice_temperature(substance, ice);
+        if t.is_finite()
+            && t >= 0.0
+            && let Some(species) = inventory
+                .species
+                .iter_mut()
+                .find(|s| s.substance == substance)
+        {
+            species.held_by_ice = true;
+        }
+        inventory
+    }
+
+    /// This inventory with the species `substance` held over terrain of its own at `terrain`, saturated
+    /// there (P14.T55.e.a; science-p14-t24f §1).
+    ///
+    /// A minor condensable whose reservoir is ice that the air's own ice does not buffer, as
+    /// Pluto's and Triton's methane-rich terrain is not buffered by their nitrogen ice, is held at
+    /// that terrain's saturation pressure in place of its surface humidity at the mean, and its
+    /// condensate lies there. Its cold trap is unchanged, so the pull toward it moves it from the
+    /// terrain as its dominance rises. A species the inventory does not name, and a temperature that
+    /// is negative or not finite, leave it as it was; a −0 is written +0.
+    ///
+    /// # Examples
+    ///
+    /// A Pluto's methane beside its nitrogen ice at 37 K, held over terrain at 43.5 K, is held at
+    /// that terrain's saturation pressure, some 0.6% of the air, where the minor branch at its 32.5 K
+    /// mean holds a few parts in ten million:
+    ///
+    /// ```
+    /// use hyperion_sim::planetary::chem::partition::{
+    ///     ClimateSpan, ColumnInventory, Ground, partition,
+    /// };
+    /// use hyperion_sim::planetary::derive::atmosphere::Gas;
+    /// use hyperion_sim::units::{Kelvin, MetresPerSecondSquared, Pascals};
+    ///
+    /// let (n2, ch4) = (Gas::Nitrogen.substance(), Gas::Methane.substance());
+    /// let climate = ClimateSpan::new(Kelvin::new(30.0), Kelvin::new(32.5), Kelvin::new(40.0))?;
+    /// let ground = Ground::without_basins(MetresPerSecondSquared::new(0.62));
+    /// let inventory = ColumnInventory::new([(n2, Pascals::new(1e5)), (ch4, Pascals::new(1e5))])?
+    ///     .with_ice_temperature(n2, Kelvin::new(37.0));
+    /// let share_of = |inventory: &ColumnInventory| {
+    ///     let air = partition(&climate, &ground, inventory);
+    ///     let methane = air.of(ch4).ok_or("named")?.partial_pressure();
+    ///     Ok::<f64, &str>(methane.value() / air.surface_pressure().value())
+    /// };
+    /// let terrain = inventory.clone().with_terrain_temperature(ch4, Kelvin::new(43.5));
+    /// assert!((0.003..0.0168).contains(&share_of(&terrain)?));
+    /// assert!(share_of(&inventory)? < 1e-6);
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    #[must_use]
+    pub fn with_terrain_temperature(mut self, substance: SubstanceId, terrain: Kelvin) -> Self {
+        let t = terrain.value();
+        if t.is_finite()
+            && t >= 0.0
+            && let Some(species) = self.species.iter_mut().find(|s| s.substance == substance)
+        {
+            species.terrain = Some(Kelvin::new(t + 0.0));
+            species.humidity = 1.0;
+        }
+        self
+    }
+
     /// The species and their column weights, in registry order.
     pub fn species(&self) -> impl ExactSizeIterator<Item = (SubstanceId, Pascals)> + '_ {
         self.species.iter().map(|s| (s.substance, s.weight))
@@ -844,11 +943,42 @@ impl Species {
                 .is_some_and(|(substance, _)| substance == self.substance)
     }
 
+    /// The partial pressure its solid's extent is read at, its partial pressure in the air being
+    /// `partial` ([`Partitioned::cover_pressure`]): `partial`, but over terrain of its own the
+    /// smaller of it and its surface humidity times its condensation cap at the climate `climate`'s
+    /// mean (P14.T55.e.a). The methane-rich terrain whose vapour fills the air lies apart, its
+    /// share P14.T55.e's, so the frost's extent across the climate is read as the minor branch has
+    /// it (the lane's lean, 2026-11-19): read at the terrain's vapour instead, a Pluto's methane frost
+    /// would cover its whole surface, raising its Bond albedo from 0.84 to 0.93, and its air would
+    /// collapse.
+    #[must_use]
+    fn cover_pressure(&self, climate: &ClimateSpan, partial: Pascals) -> Pascals {
+        let Some(diagram) = self.diagram.filter(|_| self.terrain.is_some()) else {
+            return partial;
+        };
+        let minor = Pascals::new(
+            surface_humidity(self.substance) * diagram.condensation_cap(climate.mean).value(),
+        );
+        if minor < partial { minor } else { partial }
+    }
+
+    /// The temperature at which this species is held on its minor branch: its own terrain's where
+    /// it lies over one (P14.T55.e.a), else the climate `climate`'s mean.
+    #[must_use]
+    fn minor_temperature(&self, climate: &ClimateSpan) -> Kelvin {
+        self.terrain.unwrap_or(climate.mean)
+    }
+
     /// The temperature that controls this species pulled toward its cold trap by `pull` over the
-    /// climate `climate` (`ClimateSpan::toward`), its cold trap its own ([`Self::cold_trap`]).
+    /// climate `climate` (`ClimateSpan::toward`), its cold trap its own ([`Self::cold_trap`]), from
+    /// its own terrain where it lies over one (P14.T55.e.a).
     #[must_use]
     fn controlling(&self, climate: &ClimateSpan, pull: f64) -> Kelvin {
-        climate.toward(self.cold_trap(climate), pull)
+        let cold = self.cold_trap(climate);
+        match self.terrain {
+            None => climate.toward(cold, pull),
+            Some(terrain) => toward(terrain, cold, pull),
+        }
     }
 }
 
@@ -1030,7 +1160,10 @@ impl AirborneWeights {
         for species in &inventory.species {
             let held = species.condensable().map(|diagram| Caps {
                 minor_cap: Pascals::new(
-                    species.humidity * diagram.condensation_cap(climate.mean).value(),
+                    species.humidity
+                        * diagram
+                            .condensation_cap(species.minor_temperature(climate))
+                            .value(),
                 ),
                 cold_cap: diagram.condensation_cap(species.cold_trap(climate)),
                 dominance: 0.0,
@@ -1144,7 +1277,9 @@ impl AirborneWeights {
     /// air far under the vapour pressure a sea of it at the mean would need. Read on its share, the
     /// minor branch's reservoir across the surface, a CO₂ under a collapsed N₂ air was held only
     /// partway toward its cap and stood 10¹–10⁴ times over its saturation there; with c judged on
-    /// the minor branch's counterfactual air, two stood 1.3 and 1.6 times over.
+    /// the minor branch's counterfactual air, two stood 1.3 and 1.6 times over. From generator
+    /// version 35 a condensable its own ice holds ([`ColumnInventory::with_held_ice`],
+    /// P14.T55.e.a) is held so too, at its ice.
     fn sweep(
         &mut self,
         climate: &ClimateSpan,
@@ -1171,7 +1306,7 @@ impl AirborneWeights {
                 }
             };
             let minor = at_cap(held.minor_cap);
-            let capped = species.held_by_cap(climate);
+            let capped = species.held_by_cap(climate) || species.held_by_ice;
             let d = if capped {
                 1.0
             } else {
@@ -1559,6 +1694,11 @@ pub struct Partitioned {
     dominance: f64,
     own_ocean_weight: f64,
     lies_at: Kelvin,
+    /// The partial pressure its solid's extent is read at ([`Partition::publish`]): its own, but
+    /// for a species held over terrain of its own (P14.T55.e.a), whose vapour that terrain's
+    /// saturation sets, the smaller of it and its minor branch's at the mean, h `p_sat`(`T_mean`),
+    /// the vapour the surface across the climate holds.
+    cover_pressure: Pascals,
 }
 
 impl Partitioned {
@@ -2071,14 +2211,16 @@ pub fn partition(climate: &ClimateSpan, ground: &Ground, inventory: &ColumnInven
             0.0
         };
         let (d, c) = state.map_or((0.0, 0.0), |state| (state.dominance, state.own_ocean));
+        let partial_pressure = Pascals::new(x * pressure);
         let partitioned = Partitioned {
             substance: s.substance,
             inventory: s.weight,
             airborne,
-            partial_pressure: Pascals::new(x * pressure),
+            partial_pressure,
             dominance: d,
             own_ocean_weight: c,
             lies_at: s.controlling(climate, d * (1.0 - c)),
+            cover_pressure: s.cover_pressure(climate, partial_pressure),
         };
         if let Some(diagram) = s.diagram
             && let Some(condensate) = condensate_of(
@@ -2789,7 +2931,7 @@ impl Partition {
                 } else {
                     let held = self
                         .of(c.substance)
-                        .map_or((0.0, Pascals::ZERO), |s| (s.dominance, s.partial_pressure));
+                        .map_or((0.0, Pascals::ZERO), |s| (s.dominance, s.cover_pressure));
                     parts_of(c, diagram, (held, edges), cover, self.surface_pressure)
                 };
             if let Some(solid) = solid {

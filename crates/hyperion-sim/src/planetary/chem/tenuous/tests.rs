@@ -144,3 +144,183 @@ fn the_floor_holds_pluto_s_and_triton_s_airs_and_not_io_s() {
     assert!(!held(1.0, 0.0));
     assert!(!held(f64::NAN, 1.0));
 }
+
+/// The temperature at which `gas`'s saturation pressure on the registry's curve is `pascals`, K.
+fn frost_point(gas: Gas, pascals: f64) -> f64 {
+    gas.substance()
+        .substance()
+        .phase_diagram()
+        .and_then(|d| d.saturation_temperature(Pascals::new(pascals)))
+        .expect("the gas's curve holds the pressure")
+        .value()
+}
+
+/// P14.T55.e.a's figure ([`METHANE_TERRAIN_WARMING_K`]) against its source, on the registry's
+/// curves: Pluto's measured surface CH₄ ÷ N₂ of 0.006–0.0084 over 11 µbar (Gladstone et al. 2016)
+/// is pure methane ice 6.15–6.95 K warmer than β-N₂ at its 10–12 µbar, and the figure lies within
+/// that span; Triton's 9.8 nbar of CH₄ (Lellouch et al. 2010) over its 38 ± 1 K ice is stated, not
+/// asserted, the smaller warming the rule does not hold (recorded). A temperature that is not one
+/// is given back.
+#[test]
+fn the_methane_terrain_lies_as_much_warmer_than_pluto_s_ice_as_its_measured_methane() {
+    let (warmest_ice, coldest_ice) = (
+        frost_point(Gas::Nitrogen, 1.2),
+        frost_point(Gas::Nitrogen, 1.0),
+    );
+    let (least, most) = (
+        frost_point(Gas::Methane, 0.006 * 1.1),
+        frost_point(Gas::Methane, 0.0084 * 1.1),
+    );
+    let span = (least - warmest_ice, most - coldest_ice);
+    let triton = frost_point(Gas::Methane, 9.8e-4);
+    eprintln!(
+        "Pluto: N2 ice {coldest_ice:.3}–{warmest_ice:.3} K, its methane's terrain {least:.3}–\
+         {most:.3} K, warmer by {:.3}–{:.3} K; Triton's 9.8 nbar of CH4 at {triton:.3} K, {:.3} \
+         K over its 38 K ice; the rule's {METHANE_TERRAIN_WARMING_K} K",
+        span.0,
+        span.1,
+        triton - 38.0,
+    );
+    assert!(
+        (span.0..=span.1).contains(&METHANE_TERRAIN_WARMING_K),
+        "{span:?}"
+    );
+    let terrain = methane_terrain_temperature(Kelvin::new(37.0));
+    assert_same_bits(terrain.value(), 37.0 + METHANE_TERRAIN_WARMING_K);
+    assert!(
+        methane_terrain_temperature(Kelvin::new(f64::NAN))
+            .value()
+            .is_nan()
+    );
+    for t in [-1.0, f64::INFINITY] {
+        assert_same_bits(methane_terrain_temperature(Kelvin::new(t)).value(), t);
+    }
+}
+
+/// P14.T55.e.a's and P14.T55.n's hold ([`TenuousAirRules`]): the 35 bump deletes it, and until then
+/// the version holds a tenuous air as 33 has it and only the tests' switch publishes 35's rules.
+#[test]
+fn the_tenuous_air_is_held_only_until_the_35_bump() {
+    use TenuousAirRules::{Held, Published};
+    assert!(
+        crate::GENERATOR_VERSION < TENUOUS_AIR_VERSION,
+        "the 34 → 35 bump publishes a tenuous air's methane terrain and haze (P14.T55.e.a, \
+         P14.T55.n): delete `TenuousAirRules`' `Held` arm with its reads, `with_tenuous_air`, this \
+         test and its line in `testing::held`, unwrap the tests' switches, and bless what moves at \
+         35"
+    );
+    assert_eq!(TenuousAirRules::in_force(), Held);
+    assert_eq!(
+        with_tenuous_air(Published, TenuousAirRules::in_force),
+        Published
+    );
+    assert_eq!(
+        with_tenuous_air(Published, || with_tenuous_air(
+            Held,
+            TenuousAirRules::in_force
+        )),
+        Held
+    );
+    assert_eq!(TenuousAirRules::in_force(), Held);
+}
+
+/// P14.T55.e.a's census over P14.T53.c's sets (the 400 whole systems, the golden systems and
+/// LOOK72's triaged systems; a measurement, run by name), each system generated afresh under the
+/// version's rules and under each arm of the 35 hold ([`TenuousAirRules`]):
+///
+/// - asserted, the held arm is the version's, every body's state, pressure, temperature and gases
+///   to the bit (33 bit for bit);
+/// - stated, the bodies by state under each arm, every body whose state the published arm moves,
+///   and the tenuous airs' methane under it, its least, median and largest x(CH₄);
+/// - asserted, under the published arm no tenuous air holds a value that is not finite, its
+///   methane stays minor (x(CH₄) under 0.1, `DOMINANCE_ONSET`), and no body leaves `Tenuous` for
+///   `Airless`.
+#[test]
+#[ignore = "a measurement for P14.T55.e.a's record, run by name"]
+fn under_every_35_hold_the_tenuous_airs_are_stated() {
+    use std::collections::BTreeMap;
+
+    use crate::planetary::chem::partition::DOMINANCE_ONSET;
+    use crate::planetary::derive::atmosphere::SurfaceState;
+    use crate::planetary::system::tests::{ThinAirBody, thin_air_census, thin_air_sets};
+    let sets = thin_air_sets();
+    let version = thin_air_census(&sets);
+    let held = with_tenuous_air(TenuousAirRules::Held, || thin_air_census(&sets));
+    let published = with_tenuous_air(TenuousAirRules::Published, || thin_air_census(&sets));
+    assert_eq!(version.len(), held.len());
+    assert_eq!(version.len(), published.len());
+    for (ours, theirs) in version.iter().zip(&held) {
+        assert_eq!(ours.label, theirs.label);
+        assert_eq!(ours.state, theirs.state, "{}", ours.label);
+        for (a, b) in [
+            (ours.p, theirs.p),
+            (ours.t_s, theirs.t_s),
+            (ours.air_p, theirs.air_p),
+        ] {
+            assert_same_bits(a, b);
+        }
+        assert_eq!(ours.gases.len(), theirs.gases.len(), "{}", ours.label);
+        for (&(a, x), &(b, y)) in ours.gases.iter().zip(&theirs.gases) {
+            assert_eq!(a, b, "{}", ours.label);
+            assert_same_bits(x, y);
+        }
+    }
+    let by_state = |bodies: &[ThinAirBody]| {
+        let mut states: BTreeMap<String, u32> = BTreeMap::new();
+        for body in bodies {
+            *states.entry(format!("{:?}", body.state)).or_default() += 1;
+        }
+        states
+    };
+    eprintln!(
+        "{} bodies with a surface; by state, held {:?}, published {:?}",
+        version.len(),
+        by_state(&held),
+        by_state(&published)
+    );
+    eprintln!("MOVED BY THE PUBLISHED ARM:");
+    let mut left_for_airless = Vec::new();
+    for (was, now) in held.iter().zip(&published) {
+        assert_eq!(was.label, now.label);
+        if was.state != now.state {
+            eprintln!("  {}: {} -> {}", was.label, was.line(), now.line());
+            if was.state == SurfaceState::Tenuous && now.state == SurfaceState::Airless {
+                left_for_airless.push(was.label.clone());
+            }
+        }
+    }
+    let mut methane: Vec<f64> = Vec::new();
+    for body in published
+        .iter()
+        .filter(|b| b.state == SurfaceState::Tenuous)
+    {
+        let at = || format!("{}: {}", body.label, body.line());
+        for value in [body.p, body.column, body.t_s, body.g] {
+            assert!(value.is_finite(), "{}", at());
+        }
+        assert!(body.mu.is_some_and(f64::is_finite), "{}", at());
+        for &(_, x) in &body.gases {
+            assert!(x.is_finite() && x >= 0.0, "{}", at());
+        }
+        let x = body.share(Gas::Methane);
+        assert!(x < DOMINANCE_ONSET, "{}", at());
+        if x > 0.0 {
+            methane.push(x);
+        }
+    }
+    methane.sort_by(f64::total_cmp);
+    let at = |k: usize| methane.get(k).copied().unwrap_or(f64::NAN);
+    eprintln!(
+        "the published tenuous airs' methane: {} with CH4, x(CH4) least {:.4e}, median {:.4e}, \
+         largest {:.4e}",
+        methane.len(),
+        at(0),
+        at(methane.len() / 2),
+        at(methane.len().saturating_sub(1))
+    );
+    assert_eq!(
+        left_for_airless,
+        Vec::<String>::new(),
+        "tenuous airs left airless"
+    );
+}

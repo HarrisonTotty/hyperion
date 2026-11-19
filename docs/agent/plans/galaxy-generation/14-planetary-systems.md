@@ -8870,6 +8870,10 @@ Each is labelled "not yet modelled" where a console could show it:
 - **P14.T55.e** seasonal volatile transport and frost by month, with Triton's and Pluto's methane,
   which lies over methane-rich terrain a few kelvin warmer than their N₂ ice, ten to eighty times
   a humidity rule's (science-p14-t24f §1, finding 4);
+  - **P14.T55.e.a The methane alone** (split off; lean, 2026-11-19): a tenuous air's methane
+    saturated over terrain warmer than its nitrogen ice; seasons and frost by month stay T55.e's.
+    _Built_ 2026-11-19, held at 35 (`TENUOUS_AIR_VERSION`, with P14.T55.n): Risks, "Deviations in
+    P14.T55.e.a, as built".
 - **P14.T55.f** clathrate reservoirs and their outgassing;
 - **P14.T55.g** isotopes, D/H first;
 - **P14.T55.h** three-dimensional day–night chemistry and nightside clouds;
@@ -34570,3 +34574,17 @@ ACTIVE HOST · HOST LEAVING MAIN SEQUENCE · EXTRAPOLATED ZONE · FROZEN SURFACE
   0.0512 and 0.0555 (B, V, R), the draw's p +0.03, +0.01 and −0.13 stops over it, so
   `TWIN_EXCESS_AS_IT_STANDS` goes and each band is held within a third of a stop of the table, as
   of the march. `DARK_SUB_NEPTUNE_MARCH` re-measured unchanged.
+- **Deviations in P14.T55.e.a, as built (2026-11-19).** Held at 35 with P14.T55.n:
+  `chem::tenuous::{TENUOUS_AIR_VERSION, TenuousAirRules, with_tenuous_air}`, its line in
+  `testing::held`, tripwire `the_tenuous_air_is_held_only_until_the_35_bump`; 33 bit for bit.
+  - _Split (lean, 2026-11-19):_ T55.e.a is the methane alone; T55.e keeps seasons and frost by month.
+  - _New items:_ `chem::tenuous::{METHANE_TERRAIN_WARMING_K, methane_terrain_temperature}` (6.5 K,
+    Pluto's measured excess on the registry's curves); `ColumnInventory::with_terrain_temperature`
+    and `ColumnInventory::with_held_ice`.
+  - _Rule:_ where its ice holds nitrogen, the methane is saturated over terrain 6.5 K warmer than
+    that ice; every ice-held gas (N₂, Ar) is held as a dominant one is (d = 1, as P14.T53.h's cap),
+    since judged on its share at the mean the nitrogen was pulled off its ice under the methane.
+  - _Lean (2026-11-19):_ the methane solid's extent is read at its minor branch's vapour
+    (`Partitioned::cover_pressure`); read at the terrain's, Pluto's frost covered its whole surface
+    (Bond 0.84 → 0.93) and its air collapsed to `Airless`.
+  - _At the bump:_ delete the `Held` arm; `HeldIce::on` keeps only the published branch.

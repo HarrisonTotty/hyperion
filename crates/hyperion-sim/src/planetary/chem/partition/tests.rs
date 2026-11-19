@@ -318,6 +318,85 @@ fn triton_and_pluto_hold_nitrogen_ice_with_methane() {
     }
 }
 
+/// P14.T55.e.a's two inventory rules on a Pluto by hand (nitrogen ice at 37 K under a 30–40 K
+/// climate about a 32.5 K mean, methane ice beside it, gravity 0.62 m s⁻²):
+///
+/// - held by its own ice ([`ColumnInventory::with_held_ice`]), the nitrogen is held at its ice's
+///   saturation, d = 1, though its methane, held over terrain at 43.5 K
+///   ([`ColumnInventory::with_terrain_temperature`]), outweighs its minor branch at the mean;
+/// - the methane is that terrain's saturation, lies there, and its solid's extent is read at its
+///   minor branch's vapour, h `p_sat`(`T_mean`) ([`Partitioned::cover_pressure`]), so that its
+///   published entry is the one it has with no terrain beside the same nitrogen, to its ice's
+///   density at the warmer terrain, its sheet's extent within 1%;
+/// - a terrain or an ice that is not a temperature, or a species the inventory does not name,
+///   leaves it as it was.
+#[test]
+fn a_methane_over_its_terrain_beside_an_ice_held_nitrogen() {
+    let (n2, ch4) = (id("N2"), id("CH4"));
+    let climate = span(30.0, 32.5, 40.0);
+    let ground = gravity(0.62);
+    let base = inventory(&[("N2", 1e5), ("CH4", 1e5)]);
+    let terrain = Kelvin::new(43.5);
+    let plain = base.clone().with_ice_temperature(n2, Kelvin::new(37.0));
+    let held = base
+        .clone()
+        .with_held_ice(n2, Kelvin::new(37.0))
+        .with_terrain_temperature(ch4, terrain);
+    let world = partition(&climate, &ground, &held);
+    let nitrogen = of(&world, "N2");
+    assert_same_bits(nitrogen.dominance(), 1.0);
+    assert!(relative(nitrogen.partial_pressure().value(), sat("N2", 37.0)) < 1e-9);
+    let methane = of(&world, "CH4");
+    assert_same_bits(methane.dominance(), 0.0);
+    assert_same_bits(methane.lies_at().value(), terrain.value());
+    assert!(relative(methane.partial_pressure().value(), sat("CH4", 43.5)) < 1e-9);
+    let minor = surface_humidity(ch4) * sat("CH4", 32.5);
+    assert!(relative(methane.cover_pressure.value(), minor) < 1e-12);
+    // Its terrain alone, beside a nitrogen held only by its ice's temperature: the nitrogen is
+    // judged on its minor branch's share, and is pulled off its ice by the methane.
+    let pulled = partition(
+        &climate,
+        &ground,
+        &plain.clone().with_terrain_temperature(ch4, terrain),
+    );
+    assert!(of(&pulled, "N2").dominance() < 1.0, "{pulled:?}");
+    // The published methane entry is the one it has with no terrain.
+    let profile = linear_cold_area(30.0, 40.0);
+    let entry = |p: &Partition| {
+        let cover = Cover {
+            cold_area: &profile,
+            state: SurfaceState::Tenuous,
+            water: water_cover(p, &profile, 0.0),
+        };
+        p.publish(&cover)
+            .entry(ch4, CondensatePhase::Solid)
+            .map(|e| (e.area_fraction(), e.is_seasonal()))
+    };
+    let without = partition(
+        &climate,
+        &ground,
+        &base.clone().with_held_ice(n2, Kelvin::new(37.0)),
+    );
+    let (ours, theirs) = (entry(&world), entry(&without));
+    assert_eq!(ours.map(|e| e.1), theirs.map(|e| e.1));
+    if let (Some(ours), Some(theirs)) = (ours, theirs) {
+        assert!(
+            relative(ours.0, theirs.0) < 0.01,
+            "{ours:?} against {theirs:?}"
+        );
+    }
+    // What is not a temperature, or not named, leaves the inventory as it was.
+    for t in [f64::NAN, -1.0, f64::INFINITY] {
+        assert_eq!(
+            base.clone().with_terrain_temperature(ch4, Kelvin::new(t)),
+            base
+        );
+        assert_eq!(base.clone().with_held_ice(n2, Kelvin::new(t)), base);
+    }
+    let dry = inventory(&[("N2", 1e5)]);
+    assert_eq!(dry.clone().with_terrain_temperature(ch4, terrain), dry);
+}
+
 /// A cold world of 0.2 bar of nitrogen at 120 K, its contrasts by hand (115 to 124 K), with the
 /// carbon of a body formed beyond the snow line as methane, some 60 times its nitrogen by moles
 /// (science-p14-t24f §2).

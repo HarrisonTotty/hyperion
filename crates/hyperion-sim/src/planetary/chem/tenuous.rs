@@ -32,6 +32,11 @@
 //!   alone, and a narrower rule for supersaturated thin airs left its one case on its own
 //!   threshold.
 //!
+//! - **The methane's terrain** ([`methane_terrain_temperature`], from generator version 35 under
+//!   `TenuousAirRules`; P14.T55.e.a). Where its ice holds the nitrogen, the methane beside it is
+//!   held saturated over methane-rich terrain [`METHANE_TERRAIN_WARMING_K`] warmer than that ice,
+//!   in place of the minor branch's humidity at the mean (science-p14-t24f §1, finding 4).
+//!
 //! Exospheres are P14.T55.c's, and seasonal transport and frost by month P14.T55.e's.
 
 use crate::math;
@@ -45,6 +50,7 @@ use crate::units::{
     Kelvin, Kilograms, KilogramsPerSquareMetre, Metres, MetresPerSecondSquared, Pascals,
     WattsPerSquareMetre, Years,
 };
+use crate::{GENERATOR_VERSION, GeneratorVersion};
 
 #[cfg(test)]
 mod tests;
@@ -132,6 +138,58 @@ pub fn ice_temperature(gas: Gas, equilibrium: Kelvin, heat_flow: WattsPerSquareM
         (light + heat) / (ice_emissivity(gas) * STEFAN_BOLTZMANN),
         0.25,
     ))
+}
+
+/// How much warmer than the nitrogen ice that holds a tenuous air the methane-rich terrain lies
+/// whose saturated vapour is the air's methane, K: 6.5 (P14.T55.e.a; science-p14-t24f §1, finding
+/// 4).
+///
+/// Methane ice is not buffered by the nitrogen's latent heat, so the terrain rich in it lies a few
+/// kelvin warmer than the nitrogen ice, whose temperature is one over the body; its vapour is
+/// that ice's saturation, ten to eighty times what the minor branch's humidity at the mean holds.
+/// The figure is Pluto's on the registry's curves: its measured surface CH₄ ÷ N₂ of 0.006–0.0084
+/// (0.008 adopted) over its 11 ± 1 µbar (Gladstone et al. 2016, Science 351, aad8866, read) is
+/// 6.6–9.2 mPa of CH₄, saturated at 43.1–43.6 K, over β-N₂ at 36.65–36.95 K: 6.15–6.95 K warmer,
+/// 6.5 near the centre. Triton's measured 9.8 ± 3.7 nbar of CH₄ (Lellouch et al. 2010, A&A 512,
+/// L8, §2, 2009, as the partition's tests read it) is pure methane ice at 40.3 K on the same curve,
+/// some 2–3 K over its 38 ± 1 K nitrogen ice (Tryka et al. 1994, Icarus 112, 513): Triton's
+/// terrain, warmer by less, holds less methane than this rule gives it (recorded). The terrain's
+/// share and its albedo, which set the two apart, and its seasons are P14.T55.e's.
+pub const METHANE_TERRAIN_WARMING_K: f64 = 6.5;
+
+/// The temperature of the methane-rich terrain over which a tenuous air's methane is held, where
+/// its nitrogen ice lies at `nitrogen_ice`: [`METHANE_TERRAIN_WARMING_K`] warmer (P14.T55.e.a).
+///
+/// A temperature that is not finite, or is negative, is given back as it is, which the partition
+/// then reads as no terrain ([`ColumnInventory::with_terrain_temperature`]).
+///
+/// [`ColumnInventory::with_terrain_temperature`]: crate::planetary::chem::partition::ColumnInventory::with_terrain_temperature
+///
+/// # Examples
+///
+/// Pluto's nitrogen ice at 36.8 K, at its measured 11 µbar, holds its methane over terrain at
+/// 43.3 K, whose saturated vapour is about 0.8% of the air, as New Horizons measured:
+///
+/// ```
+/// use hyperion_sim::planetary::chem::tenuous::methane_terrain_temperature;
+/// use hyperion_sim::planetary::derive::atmosphere::Gas;
+/// use hyperion_sim::substance::saturation_pressure;
+/// use hyperion_sim::units::Kelvin;
+///
+/// let terrain = methane_terrain_temperature(Kelvin::new(36.8));
+/// let methane = saturation_pressure(Gas::Methane.substance(), terrain).ok_or("CH4's curve")?;
+/// let share = methane.value() / 1.1;
+/// assert!((0.006..0.0084).contains(&share), "{share}");
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+#[must_use]
+pub fn methane_terrain_temperature(nitrogen_ice: Kelvin) -> Kelvin {
+    let t = nitrogen_ice.value();
+    if t.is_finite() && t >= 0.0 {
+        Kelvin::new(t + METHANE_TERRAIN_WARMING_K)
+    } else {
+        nitrogen_ice
+    }
 }
 
 /// The upper atmosphere's temperature over its ice's in an ice-held condensable's vapour air, at
@@ -346,4 +404,64 @@ pub const TENUOUS_FLOOR_COLUMN: KilogramsPerSquareMetre = KilogramsPerSquareMetr
 pub fn holds_tenuous_air(pressure: Pascals, gravity: MetresPerSecondSquared) -> bool {
     let (p, g) = (pressure.value(), gravity.value());
     p.is_finite() && p > 0.0 && g.is_finite() && g > 0.0 && p / g >= TENUOUS_FLOOR_COLUMN.value()
+}
+
+/// The generator version from which a tenuous air's methane lies over its own terrain (P14.T55.e.a)
+/// and its haze is modelled (P14.T55.n): 35 (main, 2026-11-19: the three holds then opened at 35).
+pub const TENUOUS_AIR_VERSION: GeneratorVersion = GeneratorVersion::new(35);
+
+/// Whether P14.T55.e.a's methane terrain and P14.T55.n's haze are in force: from
+/// [`TENUOUS_AIR_VERSION`], a hold (its bump folds it).
+///
+/// Below it a `Tenuous` air's methane is the minor branch's at the mean, and its record's aerosols
+/// are not modelled (decision-p14-t53c-tenuous-aerosols), so no output moves at 33 or 34. The
+/// tests reach version 35's rules through `with_tenuous_air`. The 35 bump deletes the `Held` arm,
+/// `with_tenuous_air`, this enum's reads and the tripwire
+/// (`the_tenuous_air_is_held_only_until_the_35_bump`), with its line in `testing::held`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum TenuousAirRules {
+    /// Version 33's and 34's: the methane at the mean on the minor branch, the aerosols not
+    /// modelled.
+    Held,
+    /// Version 35's: the methane over its terrain ([`methane_terrain_temperature`]).
+    Published,
+}
+
+impl TenuousAirRules {
+    /// The rules this generator version gives: published from [`TENUOUS_AIR_VERSION`], held below
+    /// it; in the tests, the rules a test's switch sets on its thread (`with_tenuous_air`).
+    #[must_use]
+    pub(crate) fn in_force() -> Self {
+        #[cfg(test)]
+        if let Some(rules) = TENUOUS_AIR_RULES.with(core::cell::Cell::get) {
+            return rules;
+        }
+        if GENERATOR_VERSION >= TENUOUS_AIR_VERSION {
+            Self::Published
+        } else {
+            Self::Held
+        }
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The tenuous air's rules a test sets on its thread, `None` for the version's.
+    static TENUOUS_AIR_RULES: core::cell::Cell<Option<TenuousAirRules>> =
+        const { core::cell::Cell::new(None) };
+}
+
+/// `run`'s result with the tenuous air's rules `rules` on this thread, for the tests to reach
+/// version 35's ahead of its bump; the version's are set back after, a panic in `run` included.
+#[cfg(test)]
+pub(crate) fn with_tenuous_air<R>(rules: TenuousAirRules, run: impl FnOnce() -> R) -> R {
+    /// Sets the thread's rules back as it drops.
+    struct Restore(Option<TenuousAirRules>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            TENUOUS_AIR_RULES.with(|cell| cell.set(self.0));
+        }
+    }
+    let _restore = Restore(TENUOUS_AIR_RULES.with(|cell| cell.replace(Some(rules))));
+    run()
 }
