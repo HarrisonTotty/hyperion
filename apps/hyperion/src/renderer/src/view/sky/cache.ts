@@ -19,7 +19,10 @@
  * sky, where a re-bake at high held the page's thread 260 to 540 ms on a pod. Until it is baked the
  * view keeps the cube it holds, which its frames draw with the sky they drew before
  * (`ViewFrameDrawer`); from the peak pass's end the two cubes are held together.
- * {@link SkyCubeCache.acquire} bakes at once, as the cache always did.
+ * {@link SkyCubeCache.acquire} bakes at once, as the cache always did. Every bake the cache starts
+ * reads the solid angles it holds from bake to bake (`HeldSolidAngles`; lane perf-long-tasks-4),
+ * so that a re-bake's frame step uploads its points alone, the first bake's solid angles a frame
+ * before them.
  */
 
 import type { SkyStars } from "@hyperion/protocol";
@@ -28,6 +31,7 @@ import { nextTask } from "../../lib/nextTask";
 import type { RenderEngine } from "../engine/types";
 import {
   type BakedCube,
+  HeldSolidAngles,
   releaseBakedCube,
   type SkyBakeJob,
   type SkyBakeSource,
@@ -126,9 +130,12 @@ export class SkyCubeCache {
   readonly #waiting = new Map<string, Bake>();
   /** Whether a task of steps is queued. */
   #queued = false;
+  /** The solid angles every bake of the device reads, held from bake to bake (perf-long-tasks-4). */
+  readonly #solidAngles: HeldSolidAngles;
 
   constructor(engine: RenderEngine, options: SkyCubeCacheOptions = {}) {
     this.#engine = engine;
+    this.#solidAngles = new HeldSolidAngles(engine);
     this.#schedule = options.schedule ?? nextTask;
     this.#now = options.now ?? (() => performance.now());
     // A lost device took every cube with it, and every bake's handles: the views bake again on
@@ -147,6 +154,8 @@ export class SkyCubeCache {
       }
       this.#bakes.length = 0;
       this.#waiting.clear();
+      // After the bakes, which gave them back as they were cancelled.
+      this.#solidAngles.forget();
     });
   }
 
@@ -356,7 +365,7 @@ export class SkyCubeCache {
       this.#dropSpare();
       let job: SkyBakeJob;
       try {
-        job = startSkyBake(this.#engine, request.bakeSource());
+        job = startSkyBake(this.#engine, request.bakeSource(), this.#solidAngles);
       } catch (error: unknown) {
         return { kind: "failed", error };
       }
@@ -385,7 +394,7 @@ export class SkyCubeCache {
     if (under === undefined) {
       // The spare goes before a bake, so that the device never holds more than the bake would.
       this.#dropSpare();
-      const baked = startSkyBake(this.#engine, request.bakeSource()).step(
+      const baked = startSkyBake(this.#engine, request.bakeSource(), this.#solidAngles).step(
         Number.POSITIVE_INFINITY,
         this.#now,
         true,

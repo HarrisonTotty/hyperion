@@ -40,7 +40,9 @@
  * - `shadows`: the terrain's shadow cascades, one set of four 2,048² `depth32float` layers for the
  *   engine, 64 MiB (R10.T9.b; R12's name, plan 12's `MemoryItem`).
  * - `sky-cube`: R06's baked star cube and the buffer of its scale (R06.T13.g).
- * - `sky-scratch`: the sky bake's transients, released when it ends (R06.T13.g).
+ * - `sky-scratch`: the sky bake's transients, released when it ends (R06.T13.g), and the solid
+ *   angles the device's cube cache holds from bake to bake, 18.9 MB at high (lane
+ *   perf-long-tasks-4; `sky/bake.ts`'s `HeldSolidAngles`).
  */
 export type MemoryCategory =
   | "render-targets"

@@ -36,7 +36,9 @@
  *
  * The cube counts under `MemoryCategory` `sky-cube`; every transient, the scratch face's levels (or
  * a tile's and the face's upper levels), the solid angles, the points and the staging, under
- * `sky-scratch`, released when the bake ends (T13.h's `releaseBuffer` and `releaseTexture`).
+ * `sky-scratch`, released when the bake ends (T13.h's `releaseBuffer` and `releaseTexture`). A
+ * view's bakes read the solid angles the device's cube cache holds from bake to bake instead,
+ * under `sky-scratch` too ({@link HeldSolidAngles}; lane perf-long-tasks-4).
  */
 
 import { BUFFER_USAGE, TEXTURE_USAGE } from "../engine/gpuFlags";
@@ -343,7 +345,9 @@ function* layOutPoints(
  * where the bake at once made them (lane perf-long-tasks-3): in parts, in tasks between the frames,
  * each waited on room in the page's command buffer to the GPU process, which a slow one
  * (SwiftShader's, drawing a frame of some 10 s at high on a pod) frees only as it reads, and one
- * part's write held the page 15 to 43 s there; in a frame they took 13 to 23 ms.
+ * part's write held the page 15 to 43 s there; in a frame they took 13 to 23 ms. Over held solid
+ * angles ({@link HeldSolidAngles}) a bake writes its points alone there, and the held buffer's
+ * first upload has a frame's step of its own before it (lane perf-long-tasks-4).
  */
 export type BakeStepPlace = "task" | "frame";
 
@@ -466,6 +470,107 @@ export function hasTexelSolidAngles(sizePx: number): boolean {
   return SOLID_ANGLES_F32.has(sizePx);
 }
 
+/** One face size's held solid angles: the buffer, and how many bakes read it. */
+interface HeldAngles {
+  readonly buffer: BufferHandle;
+  users: number;
+}
+
+/**
+ * The solid angles' buffers a device's bakes share, by face size (lane perf-long-tasks-4): a
+ * re-bake at high wrote its 18.9 MB of them anew in its frame's step, beside its 9.6 MB of points,
+ * and that step held its frame 34 to 180 ms on a pod. The device's cube cache holds one
+ * (`cache.ts`), and each bake it starts reads the buffer of its face size, made and written by the
+ * first; the table is the one each bake wrote, so every cube is the one it was, to the bit.
+ *
+ * @remarks
+ * A bake takes its size's buffer in a frame's step and gives it back as it ends, however it ends.
+ * The last face size taken keeps its buffer once its bakes end, under `sky-scratch`, until a bake
+ * of another size takes one and no bake reads it; so a view's re-bakes write none, and a change of
+ * setting holds the two only while a bake of the old size runs. A lost device took them all: the
+ * cache {@link HeldSolidAngles.forget | forgets} them, and the next bake writes its size's anew.
+ */
+export class HeldSolidAngles {
+  readonly #engine: RenderEngine;
+  readonly #bySize = new Map<number, HeldAngles>();
+  /** The face size taken last, whose buffer is kept once no bake reads it. */
+  #latest: number | null = null;
+
+  constructor(engine: RenderEngine) {
+    this.#engine = engine;
+  }
+
+  /** Whether a face size's buffer is held, so that a bake of it writes none. */
+  holds(sizePx: number): boolean {
+    return this.#bySize.has(sizePx);
+  }
+
+  /**
+   * A face size's buffer, made and written where it is not held, for one bake to read until it
+   * gives it back ({@link HeldSolidAngles.give}); a buffer of another size that no bake reads is
+   * released.
+   *
+   * @throws Whatever making or writing the buffer throws, having released what it made.
+   */
+  take(sizePx: number): BufferHandle {
+    let held = this.#bySize.get(sizePx);
+    if (held === undefined) {
+      const angles = texelSolidAnglesF32(sizePx);
+      const buffer = this.#engine.createBuffer({
+        name: `sky bake ${String(sizePx)}² solid angles`,
+        bytes: angles.byteLength,
+        usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST,
+        category: "sky-scratch",
+      });
+      try {
+        this.#engine.writeBuffer(buffer, 0, angles);
+      } catch (error: unknown) {
+        this.#engine.releaseBuffer(buffer);
+        throw error;
+      }
+      held = { buffer, users: 0 };
+      this.#bySize.set(sizePx, held);
+    }
+    held.users += 1;
+    this.#latest = sizePx;
+    this.#releaseUnread();
+    return held.buffer;
+  }
+
+  /** Gives a taken buffer back; nothing for one a restore has forgotten. */
+  give(buffer: BufferHandle): void {
+    for (const held of this.#bySize.values()) {
+      if (held.buffer === buffer) {
+        held.users -= 1;
+        this.#releaseUnread();
+        return;
+      }
+    }
+  }
+
+  /** Forgets every buffer, which the lost device took with it (`RenderEngine.onRestored`). */
+  forget(): void {
+    this.#bySize.clear();
+    this.#latest = null;
+  }
+
+  /** Releases every buffer no bake reads, for an owner done with them (the harness's check). */
+  release(): void {
+    this.#latest = null;
+    this.#releaseUnread();
+  }
+
+  /** Releases each buffer of a size but the latest that no bake reads. */
+  #releaseUnread(): void {
+    for (const [sizePx, held] of this.#bySize) {
+      if (sizePx !== this.#latest && held.users <= 0) {
+        this.#bySize.delete(sizePx);
+        this.#engine.releaseBuffer(held.buffer);
+      }
+    }
+  }
+}
+
 /** Workgroups of 8 × 8 over a square of `size`. */
 function groups(size: number): readonly [number, number, number] {
   return [Math.ceil(size / 8), Math.ceil(size / 8), 1];
@@ -485,9 +590,9 @@ function placed(size: Uint32Array, origin: readonly [number, number, number, num
  * A bake under way, made a step at a time ({@link startSkyBake}).
  *
  * @remarks
- * A step is the stars' layout of {@link BAKE_STARS_A_STEP}; then a frame's, the kernels', the
- * uploads' and the scratch's making, the solid angles formed there where the worker has not
- * answered; then a tile's splat and peak, a tile's splat and levels, or a face's last levels. The
+ * A step is the stars' layout of {@link BAKE_STARS_A_STEP}; then, over held solid angles that hold
+ * none of its size, a frame's, their upload; then a frame's, the kernels', the uploads' and the
+ * scratch's making, the solid angles formed there where the worker has not answered; then a tile's splat and peak, a tile's splat and levels, or a face's last levels. The
  * CPU bake, the fallback, lays its stars out and packs its levels in tasks, then makes and writes
  * its cube in a frame's step.
  */
@@ -512,12 +617,20 @@ export interface SkyBakeJob {
 /**
  * Starts a bake that runs as its steps are asked for (Design note 21; lane perf-long-tasks-3).
  *
+ * @param solidAngles - The device's held solid angles, which a GPU bake reads in place of a buffer
+ *   of its own (lane perf-long-tasks-4); where they hold none of its size, the bake writes them in
+ *   a frame's step of their own, before its other uploads. Absent, the bake makes and releases its
+ *   own, as before.
  * @throws Error for a face size with no mip chain to one texel.
  */
-export function startSkyBake(engine: RenderEngine, source: SkyBakeSource): SkyBakeJob {
+export function startSkyBake(
+  engine: RenderEngine,
+  source: SkyBakeSource,
+  solidAngles?: HeldSolidAngles,
+): SkyBakeJob {
   mipSizes(source.faceSizePx);
   const steps = engine.capabilities.float32Blendable
-    ? bakeOnGpu(engine, source)
+    ? bakeOnGpu(engine, source, solidAngles)
     : bakeOnCpu(engine, source);
   let over = false;
   // Where the next step runs, as the last step said.
@@ -599,6 +712,7 @@ interface LevelOf {
 function* bakeOnGpu(
   engine: RenderEngine,
   source: SkyBakeSource,
+  solidAngles: HeldSolidAngles | undefined,
 ): Generator<BakeStepPlace, BakedCube | null, void> {
   const size = source.faceSizePx;
   const sizes = mipSizes(size);
@@ -615,8 +729,15 @@ function* bakeOnGpu(
   let result: BakedCube | null = null;
   const kept: Array<BufferHandle | TextureHandle> = [];
   let headed: Float32Array | null = takePoints(count);
+  // The device's held solid angles this bake reads, taken until its end (perf-long-tasks-4).
+  let taken: BufferHandle | null = null;
   try {
     yield* layOutPoints(source, headed);
+    if (solidAngles !== undefined && !solidAngles.holds(size)) {
+      // The held solid angles' first upload, in a frame's step of its own (`BakeStepPlace`).
+      yield "frame";
+      taken = solidAngles.take(size);
+    }
     // The uploads and the scratch, in a frame (`BakeStepPlace`).
     yield "frame";
     const kernels: BakeKernels = {
@@ -638,16 +759,8 @@ function* bakeOnGpu(
     // Written into the queue's own copy: the page's array is free for the next bake.
     givePoints(headed);
     headed = null;
-    const solidAngles = texelSolidAnglesF32(size);
-    const omega = made(
-      engine.createBuffer({
-        name: `${source.name} solid angles`,
-        bytes: solidAngles.byteLength,
-        usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST,
-        category: "sky-scratch",
-      }),
-    );
-    engine.writeBuffer(omega, 0, solidAngles);
+    taken ??= solidAngles?.take(size) ?? null;
+    const omega = taken ?? ownSolidAngles(engine, size, source.name, made);
     const usage =
       TEXTURE_USAGE.RENDER_ATTACHMENT | TEXTURE_USAGE.STORAGE_BINDING | TEXTURE_USAGE.COPY_SRC;
     // The face's levels from the upper level down, each flux and solid angle summed from its
@@ -865,6 +978,9 @@ function* bakeOnGpu(
     if (headed !== null) {
       givePoints(headed);
     }
+    if (taken !== null) {
+      solidAngles?.give(taken);
+    }
     splat?.dispose();
     for (const handle of transients) {
       release(engine, handle);
@@ -875,6 +991,26 @@ function* bakeOnGpu(
       }
     }
   }
+}
+
+/** A bake's own solid angles' buffer, made and written, among its transients (`made`). */
+function ownSolidAngles(
+  engine: RenderEngine,
+  sizePx: number,
+  name: string,
+  made: (handle: BufferHandle) => BufferHandle,
+): BufferHandle {
+  const angles = texelSolidAnglesF32(sizePx);
+  const omega = made(
+    engine.createBuffer({
+      name: `${name} solid angles`,
+      bytes: angles.byteLength,
+      usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST,
+      category: "sky-scratch",
+    }),
+  );
+  engine.writeBuffer(omega, 0, angles);
+  return omega;
 }
 
 /** Releases a buffer or a texture by its kind. */

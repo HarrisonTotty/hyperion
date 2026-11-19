@@ -74,6 +74,11 @@ async function gpuCubes(): Promise<{
   engine: RenderEngine;
   made: string[];
   released: string[];
+  /** Each buffer written, by name, in order. */
+  written: string[];
+  /** Each buffer released, by name, in order. */
+  releasedBuffers: string[];
+  restore: () => void;
 }> {
   const adapter = new FakeAdapter({ info: INTEL_UHD_620_INFO, features: ["float32-blendable"] });
   await adapter.requestDevice({ requiredFeatures: ["float32-blendable"] });
@@ -83,8 +88,15 @@ async function gpuCubes(): Promise<{
   }
   const made: string[] = [];
   const released: string[] = [];
+  const written: string[] = [];
+  const releasedBuffers: string[] = [];
+  const restored: Array<() => void> = [];
   let next = 0;
   const engine = Object.assign(new FakeRenderEngine(device), {
+    onRestored: (listener: () => void): (() => void) => {
+      restored.push(listener);
+      return () => undefined;
+    },
     createCompute: (pair: { readonly name: string }): ComputeHandle => ({
       kind: "compute",
       name: pair.name,
@@ -106,17 +118,32 @@ async function gpuCubes(): Promise<{
       name: spec.name,
       bytes: spec.bytes,
     }),
-    writeBuffer: (): void => undefined,
+    writeBuffer: (buffer: BufferHandle): void => {
+      written.push(buffer.name);
+    },
     dispatch: (): void => undefined,
     writePackedCubeLevelFromBuffer: (): void => undefined,
-    releaseBuffer: (): void => undefined,
+    releaseBuffer: (buffer: BufferHandle): void => {
+      releasedBuffers.push(buffer.name);
+    },
     releaseTexture: (texture: TextureHandle): void => {
       if (texture.name.startsWith("cube ")) {
         released.push(texture.name);
       }
     },
   });
-  return { engine, made, released };
+  return {
+    engine,
+    made,
+    released,
+    written,
+    releasedBuffers,
+    restore: () => {
+      for (const listener of restored) {
+        listener();
+      }
+    },
+  };
 }
 
 /** A decoded sky of two stars, both baked; each call is another sky, as another arrival's is. */
@@ -138,7 +165,7 @@ function aSky() {
 const STARS = aSky();
 
 /** A view's request for a sky's two stars. */
-function requestOf(stars = STARS): CubeRequest {
+function requestOf(stars = STARS, faceSizePx = 4): CubeRequest {
   return {
     stars,
     baked: Uint32Array.from([0, 1]),
@@ -146,7 +173,7 @@ function requestOf(stars = STARS): CubeRequest {
       bakeSourceOf({
         directions: stars.directions,
         illuminanceLx: new Float32Array(6).fill(1e-9),
-        faceSizePx: 4,
+        faceSizePx,
         name: "sky cube",
       }),
   };
@@ -312,14 +339,20 @@ function bakeThrough(
 }
 
 describe("SkyCubeCache's bakes in the tasks after a frame (lane perf-long-tasks-3)", () => {
-  it("bakes a view's first cube in tasks of its own and its uploads in a frame after the one that asks", async () => {
-    const { engine, made } = await gpuCubes();
+  it("bakes a view's first cube in tasks of its own, its solid angles in a frame after the one that asks and its other uploads in the next", async () => {
+    const { engine, made, written } = await gpuCubes();
     const { cache, tasks, runTasks } = steppedCache(engine);
     expect(cache.want("cockpit", requestOf())).toEqual({ kind: "baking" });
     expect([made, tasks.length]).toEqual([[], 1]);
     // The stars' layout, a task a step, and then nothing until a frame asks for the uploads.
     expect(runTasks()).toBe(2);
+    expect(written).toEqual([]);
     expect(cache.want("cockpit", requestOf())).toEqual({ kind: "baking" });
+    // The held solid angles alone in that frame (perf-long-tasks-4), and nothing until the next.
+    runTasks();
+    expect(written).toEqual(["sky bake 4² solid angles"]);
+    expect(cache.want("cockpit", requestOf())).toEqual({ kind: "baking" });
+    expect(written).toEqual(["sky bake 4² solid angles", "sky cube points", "sky cube peak"]);
     // Then its splats and levels in tasks: six faces' peaks, six faces' tiles and levels.
     expect(runTasks()).toBeGreaterThanOrEqual(6 * 2);
     const state = cache.want("cockpit", requestOf());
@@ -362,7 +395,9 @@ describe("SkyCubeCache's bakes in the tasks after a frame (lane perf-long-tasks-
     cache.want("cockpit", requestOf());
     cache.want("instrument", requestOf());
     runTasks();
+    // The held solid angles' frame, then the other uploads' (perf-long-tasks-4).
     cache.want("instrument", requestOf());
+    cache.want("cockpit", requestOf());
     runTasks();
     const a = cache.want("cockpit", requestOf());
     const b = cache.want("instrument", requestOf());
@@ -489,5 +524,68 @@ describe("SkyCubeCache's bakes in the tasks after a frame (lane perf-long-tasks-
     expect(cube).not.toBeNull();
     expect(cache.want("cockpit", requestOf())).toEqual({ kind: "baked", cube });
     expect(made).toEqual(["cube 1"]);
+  });
+});
+
+/** The writes, or releases, of the held solid angles among `names`. */
+function anglesWritten(names: ReadonlyArray<string>): string[] {
+  return names.filter((name) => name.endsWith("solid angles"));
+}
+
+describe("SkyCubeCache's solid angles, held from bake to bake (lane perf-long-tasks-4)", () => {
+  it("re-bakes over the solid angles its first bake wrote, its frame step writing its points alone", async () => {
+    const { engine, written, releasedBuffers } = await gpuCubes();
+    const { cache, runTasks } = steppedCache(engine);
+    bakeThrough(cache, "cockpit", requestOf(), runTasks);
+    const next = requestOf(aSky());
+    expect(cache.want("cockpit", next)).toEqual({ kind: "baking" });
+    runTasks();
+    const before = written.length;
+    // One frame's step, the points' upload, and then the splats and levels in tasks.
+    expect(cache.want("cockpit", next)).toEqual({ kind: "baking" });
+    expect(written.slice(before)).toEqual(["sky cube points", "sky cube peak"]);
+    runTasks();
+    expect(cache.want("cockpit", next).kind).toBe("baked");
+    expect(anglesWritten(written)).toEqual(["sky bake 4² solid angles"]);
+    expect(releasedBuffers).not.toContain("sky bake 4² solid angles");
+  });
+
+  it("releases a face size's solid angles once a bake of another size has taken its own", async () => {
+    const { engine, written, releasedBuffers } = await gpuCubes();
+    const { cache, runTasks } = steppedCache(engine);
+    bakeThrough(cache, "cockpit", requestOf(), runTasks);
+    bakeThrough(cache, "cockpit", requestOf(aSky(), 8), runTasks);
+    expect(anglesWritten(written)).toEqual([
+      "sky bake 4² solid angles",
+      "sky bake 8² solid angles",
+    ]);
+    expect(anglesWritten(releasedBuffers)).toEqual(["sky bake 4² solid angles"]);
+  });
+
+  it("keeps a face size's solid angles that a bake under way reads while another size's are taken", async () => {
+    const { engine, releasedBuffers } = await gpuCubes();
+    const { cache, runTasks } = steppedCache(engine);
+    // The cockpit's bake past its uploads, reading the 4² solid angles.
+    cache.want("cockpit", requestOf());
+    runTasks();
+    cache.want("cockpit", requestOf());
+    cache.want("cockpit", requestOf());
+    // The instrument's bake takes the 8² ones while the cockpit's still reads the 4².
+    bakeThrough(cache, "instrument", requestOf(aSky(), 8), runTasks);
+    expect(cache.want("cockpit", requestOf()).kind).toBe("baked");
+    expect(anglesWritten(releasedBuffers)).toEqual(["sky bake 4² solid angles"]);
+  });
+
+  it("writes them anew after a device loss's restore, the old buffer having died with the device", async () => {
+    const { engine, written, releasedBuffers, restore } = await gpuCubes();
+    const { cache, runTasks } = steppedCache(engine);
+    bakeThrough(cache, "cockpit", requestOf(), runTasks);
+    restore();
+    bakeThrough(cache, "cockpit", requestOf(), runTasks);
+    expect(anglesWritten(written)).toEqual([
+      "sky bake 4² solid angles",
+      "sky bake 4² solid angles",
+    ]);
+    expect(anglesWritten(releasedBuffers)).toEqual([]);
   });
 });

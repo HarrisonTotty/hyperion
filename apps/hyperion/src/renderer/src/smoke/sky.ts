@@ -24,6 +24,7 @@ import {
   bakeSkyCube,
   bakeSkyCubeOnCpu,
   bakeSourceOf,
+  HeldSolidAngles,
   paddedRowTexels,
   releaseBakedCube,
   startSkyBake,
@@ -630,4 +631,52 @@ export async function checkSkyBake(engine: RenderEngine, checks: Checks): Promis
     !steppedDifferences.includes("FAILED"),
     `${stepsTaken} steps; ${steppedDifferences.filter((text) => text !== "FAILED").join("; ")}`,
   );
+
+  // Two bakes over the device's held solid angles (lane perf-long-tasks-4), the second reading the
+  // buffer the first wrote, each against the bake at once, bit for bit at every level and its peak.
+  const angles = new HeldSolidAngles(engine);
+  const heldDifferences: string[] = [];
+  for (const each of [
+    { ...bakeStars(20_000, 96), name: "sky cube: smoke held 96", tilePx: 32 },
+    { ...bakeStars(14_000, 96), name: "sky cube: smoke held 96 again", tilePx: 32 },
+  ]) {
+    const over = startSkyBake(engine, bakeSourceOf(each), angles).step(
+      Number.POSITIVE_INFINITY,
+      () => 0,
+      true,
+    );
+    if (over === null) {
+      heldDifferences.push(`${each.name} not baked`, "FAILED");
+      continue;
+    }
+    const atOnce = bakeSkyCube(engine, { ...each, name: `${each.name} at once` });
+    const sizes = mipSizes(each.faceSizePx);
+    // oxlint-disable-next-line no-await-in-loop
+    const reads = await Promise.all([
+      engine.readBuffer(over.peak, "tolerance"),
+      engine.readBuffer(atOnce.peak, "tolerance"),
+      ...sizes.flatMap((_, levelIndex) => [
+        engine.readTexture(over.cube, levelIndex),
+        engine.readTexture(atOnce.cube, levelIndex),
+      ]),
+    ]);
+    let differing = 0;
+    for (let pair = 0; pair < reads.length; pair += 2) {
+      const a = new Uint32Array(reads[pair] ?? new ArrayBuffer(0));
+      const b = new Uint32Array(reads[pair + 1] ?? new ArrayBuffer(0));
+      differing += a.length === b.length ? a.filter((bits, i) => bits !== b[i]).length : a.length;
+    }
+    heldDifferences.push(`${each.name}: ${differing} words differ`);
+    if (differing > 0 || reads.length !== 2 + 2 * sizes.length) {
+      heldDifferences.push("FAILED");
+    }
+    releaseBakedCube(engine, over);
+    releaseBakedCube(engine, atOnce);
+  }
+  checks.check(
+    "R06.T13.g two bakes over the held solid angles equal the bake at once bit for bit (perf-long-tasks-4)",
+    !heldDifferences.includes("FAILED") && angles.holds(96),
+    heldDifferences.filter((text) => text !== "FAILED").join("; "),
+  );
+  angles.release();
 }

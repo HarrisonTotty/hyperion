@@ -17,6 +17,7 @@ import {
   bakeSkyCube,
   bakeSourceOf,
   bakeTiling,
+  HeldSolidAngles,
   type SolidAnglesWorker,
   startSkyBake,
   warmTexelSolidAngles,
@@ -405,5 +406,108 @@ describe("startSkyBake: the bake in steps (lane perf-long-tasks-3)", () => {
       held.cancel();
     }
     expect(pointsOf(fourth.seen)).not.toBe(pointsOf(first.seen));
+  });
+});
+
+/** Runs a job's steps to its end, each step in a frame; how many it took. */
+function stepThrough(job: ReturnType<typeof startSkyBake>): number {
+  const now = expiring();
+  let steps = 1;
+  while (job.step(0, now, true) === null) {
+    steps += 1;
+  }
+  return steps;
+}
+
+/** A call but the solid angles' own: their buffer is the held one's, made and released elsewhere. */
+function notTheAngles(call: string): boolean {
+  return !call.endsWith("solid angles");
+}
+
+describe("startSkyBake over held solid angles (lane perf-long-tasks-4)", () => {
+  it("makes the calls of a bake at once but the solid angles' own, and reads the same table", async () => {
+    const atOnce = await gpuEngine();
+    bakeSkyCube(atOnce.engine, TILED);
+    const held = await gpuEngine();
+    const angles = new HeldSolidAngles(held.engine);
+    const steps = stepThrough(startSkyBake(held.engine, bakeSourceOf(TILED), angles));
+    expect(held.seen.calls.filter(notTheAngles)).toEqual(atOnce.seen.calls.filter(notTheAngles));
+    expect(anglesOf(held.seen)).toEqual(anglesOf(atOnce.seen));
+    expect(held.seen.made.filter((made) => !notTheAngles(made.name))).toEqual([
+      { name: "sky bake 48² solid angles", category: "sky-scratch" },
+    ]);
+    // The at-once count's steps, and one more: the held solid angles' frame of their own.
+    expect(steps).toBe(1 + 1 + 1 + 6 * 9 + 6 * 9 + 6 + 1 + 1);
+  });
+
+  it("writes them in a frame's step before its other uploads, which the next frame makes", async () => {
+    const { engine, seen } = await gpuEngine();
+    const job = startSkyBake(engine, bakeSourceOf(TILED), new HeldSolidAngles(engine));
+    const now = expiring();
+    try {
+      expect(job.step(Number.POSITIVE_INFINITY, now, false)).toBeNull();
+      expect([job.awaitsFrame, seen.writes]).toEqual([true, []]);
+      expect(job.step(0, now, true)).toBeNull();
+      expect([job.awaitsFrame, seen.writes.map((write) => write.name)]).toEqual([
+        true,
+        ["sky bake 48² solid angles"],
+      ]);
+      expect(job.step(0, now, true)).toBeNull();
+      expect(seen.writes.map((write) => write.name).slice(1, 2)).toEqual(["sky cube: test points"]);
+    } finally {
+      job.cancel();
+    }
+  });
+
+  it("writes them once for two bakes, a frame's step fewer the second, and keeps them past both", async () => {
+    const { engine, seen } = await gpuEngine();
+    const angles = new HeldSolidAngles(engine);
+    const first = stepThrough(startSkyBake(engine, bakeSourceOf(TILED), angles));
+    const second = stepThrough(
+      startSkyBake(engine, bakeSourceOf({ ...TILED, name: "sky cube: next" }), angles),
+    );
+    expect(second).toBe(first - 1);
+    expect(seen.writes.filter((write) => !notTheAngles(write.name))).toHaveLength(1);
+    expect(seen.released.filter((name) => !notTheAngles(name))).toEqual([]);
+    expect(angles.holds(TILED.faceSizePx)).toBe(true);
+  });
+
+  it("gives them back as a bake is cancelled, so that a bake of another size releases them", async () => {
+    const { engine, seen } = await gpuEngine();
+    const angles = new HeldSolidAngles(engine);
+    const job = startSkyBake(engine, bakeSourceOf(TILED), angles);
+    const now = expiring();
+    for (let step = 0; step < 6; step += 1) {
+      job.step(0, now, true);
+    }
+    job.cancel();
+    expect(seen.released.filter((name) => !notTheAngles(name))).toEqual([]);
+    stepThrough(startSkyBake(engine, bakeSourceOf(INPUT), angles));
+    expect(seen.released.filter((name) => !notTheAngles(name))).toEqual([
+      "sky bake 48² solid angles",
+    ]);
+    expect([angles.holds(TILED.faceSizePx), angles.holds(INPUT.faceSizePx)]).toEqual([false, true]);
+  });
+
+  it("releases them once no bake reads them, at its owner's release", async () => {
+    const { engine, seen } = await gpuEngine();
+    const angles = new HeldSolidAngles(engine);
+    stepThrough(startSkyBake(engine, bakeSourceOf(INPUT), angles));
+    angles.release();
+    expect(seen.released.filter((name) => !notTheAngles(name))).toEqual([
+      "sky bake 8² solid angles",
+    ]);
+    expect(angles.holds(INPUT.faceSizePx)).toBe(false);
+  });
+
+  it("forgets them at a restore, so that the next bake writes its own anew and releases none", async () => {
+    const { engine, seen } = await gpuEngine();
+    const angles = new HeldSolidAngles(engine);
+    stepThrough(startSkyBake(engine, bakeSourceOf(INPUT), angles));
+    angles.forget();
+    expect(angles.holds(INPUT.faceSizePx)).toBe(false);
+    stepThrough(startSkyBake(engine, bakeSourceOf(INPUT), angles));
+    expect(seen.writes.filter((write) => !notTheAngles(write.name))).toHaveLength(2);
+    expect(seen.released.filter((name) => !notTheAngles(name))).toEqual([]);
   });
 });
