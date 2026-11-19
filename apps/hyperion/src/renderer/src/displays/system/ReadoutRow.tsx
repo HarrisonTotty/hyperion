@@ -2,7 +2,13 @@ import type { ReactNode } from "react";
 
 /** What a reading shows: a value with its unit, a value in words, or the em dash with why. */
 export type Shown =
-  | { readonly kind: "value"; readonly value: string; readonly unit?: ReactNode }
+  | {
+      readonly kind: "value";
+      readonly value: string;
+      readonly unit?: ReactNode;
+      /** The condition the value is taken at, after a middle dot, as the guide's `AT` reads. */
+      readonly beside?: ReactNode;
+    }
   | { readonly kind: "missing"; readonly why?: string };
 
 /** The guide's Missing state: the em dash in `--text-muted`, never a blank or a zero. */
@@ -46,6 +52,7 @@ export function ReadoutRow({ label, shown: reading, wide = false }: ReadoutRowPr
                 <span className="body-readout__unit">{reading.unit}</span>
               </>
             )}
+            {reading.beside === undefined ? null : <> · {reading.beside}</>}
           </>
         )}
       </dd>

@@ -33,6 +33,9 @@
 //! - [`tenuous`]: thin and transient air (P14.T53.c): an ice-held volatile's retention at its
 //!   ice's own temperature and the `Tenuous` state's floor, on the record from generator version
 //!   24.
+//! - [`silicate_vapour`]: a surface melt's own vapour (P14.T55.b), its species and pressure by the
+//!   melt's temperature and composition and whether its body holds it, on the record from
+//!   generator version 35 behind its hold.
 //! - Here, the host's C/O and Mg/Si ([`HostAbundances`]), drawn per system on
 //!   `system.abundances` ([`AbundanceDraws`]), since a star's planets share its photospheric
 //!   ratios, until plan 06 carries them on the star. Plan 06 may adopt the stream without moving
@@ -89,6 +92,7 @@ pub mod partition;
 pub mod photochem;
 pub mod quench;
 pub mod redox;
+pub mod silicate_vapour;
 pub mod tenuous;
 
 use crate::Seed;

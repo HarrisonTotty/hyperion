@@ -91,6 +91,7 @@ import type { SurfaceStateDto } from "./generated/SurfaceStateDto";
 import type { TaxonomicClassDto } from "./generated/TaxonomicClassDto";
 import type { TectonicRegimeDto } from "./generated/TectonicRegimeDto";
 import type { ThermalRegimeDto } from "./generated/ThermalRegimeDto";
+import type { VapourEscapeDto } from "./generated/VapourEscapeDto";
 import type { VerticalStructureDto } from "./generated/VerticalStructureDto";
 import type { WetEpochDto } from "./generated/WetEpochDto";
 import type { Census } from "./generated/Census";
@@ -462,6 +463,7 @@ export type {
   TaxonomicClassDto,
   TectonicRegimeDto,
   ThermalRegimeDto,
+  VapourEscapeDto,
   VerticalStructureDto,
   WetEpochDto,
   CataclysmicKindDto,

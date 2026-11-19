@@ -22,6 +22,7 @@ import {
   type DetailAnswer,
 } from "../../test/atmosphereRecords";
 import {
+  E101_VAPOUR,
   earthContact,
   earthDetail,
   earthDetailOfAnOlderServer,
@@ -201,6 +202,39 @@ describe("a body's labels by the section its air comes from", () => {
     }));
     const result = assembled(melt);
     expect([result.medium, result.labels]).toEqual([undefined, ["silicateVapourNotYetModelled"]]);
+  });
+
+  // P14.T55.b: a vapour sent as a value drops its note, and R08, which holds no optics of Na or
+  // SiO, draws none of it.
+  it("gives an airless lava world sent its vapour the exosphere's note alone", () => {
+    const pool = assembled(
+      withSurface(lavaWorldDetail(), (surface) => ({ ...surface, silicate_vapour: E101_VAPOUR })),
+    );
+    expect([pool.medium, pool.labels]).toEqual([undefined, ["exosphereNotYetModelled"]]);
+  });
+
+  it("draws no air and says nothing for a melt with no volatile air sent its vapour", () => {
+    const melt = withSurface(earthDetail(), (surface) => ({
+      ...surface,
+      state: "magma_ocean",
+      surface_pressure_pa: 0,
+      gases: [],
+      mean_molar_mass_g_per_mol: null,
+      heat_capacity_over_r: null,
+      silicate_vapour: E101_VAPOUR,
+    }));
+    const result = assembled(melt);
+    expect([result.medium, result.labels]).toEqual([undefined, []]);
+  });
+
+  it("draws an air over melt sent its vapour as it draws the same air without it", () => {
+    const over = withMeltArea(earthDetail(), 0.1);
+    const withVapour = assembled(
+      withSurface(over, (surface) => ({ ...surface, silicate_vapour: E101_VAPOUR })),
+    );
+    expect(withVapour.medium).toBeDefined();
+    expect(withVapour.medium).toEqual(assembled(over).medium);
+    expect(withVapour.labels).toEqual(["aerosolsNotYetModelled", "atmosphereApproximate"]);
   });
 
   it("gives an absent inventory no aerosol term", () => {

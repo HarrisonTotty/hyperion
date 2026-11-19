@@ -45,6 +45,7 @@ use crate::orbit::KeplerElements;
 use crate::planetary::belts::{Belt, BeltComponent, BeltComposition, BeltGap, BeltSite};
 use crate::planetary::chem::envelope_abundances::EnvelopeAbundances;
 use crate::planetary::chem::partition::Condensates;
+use crate::planetary::chem::silicate_vapour::SilicateVapour;
 use crate::planetary::derive::atmosphere::{SurfaceMaterial, SurfaceState, desert_label};
 use crate::planetary::derive::figure::BodyFigure;
 use crate::planetary::derive::photometry::BodyPhotometry;
@@ -625,7 +626,8 @@ impl BulkProperties {
 ///
 /// It also carries the body's taxonomic class (P14.T51.e, [`TaxonomicClass`]), a label of its
 /// surface's spectrum read from its built crust, condensates, modifiers and figures, on the record
-/// from generator version 24 ([`taxonomic_class`](Self::taxonomic_class)).
+/// from generator version 24 ([`taxonomic_class`](Self::taxonomic_class)), and its melt's own
+/// vapour (P14.T55.b), from generator version 35 ([`silicate_vapour`](Self::silicate_vapour)).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Surface {
     state: SurfaceState,
@@ -643,6 +645,7 @@ pub struct Surface {
     modifiers: Modelled<SurfaceModifiers>,
     biosphere: Modelled<Biosphere>,
     taxonomic_class: Modelled<Option<TaxonomicClass>>,
+    silicate_vapour: Modelled<Option<SilicateVapour>>,
     basis: Option<SurfaceBasis>,
 }
 
@@ -717,6 +720,7 @@ impl Surface {
             modifiers: Modelled::NotModelled,
             biosphere: Modelled::NotModelled,
             taxonomic_class: Modelled::NotModelled,
+            silicate_vapour: Modelled::NotModelled,
             basis: None,
         })
     }
@@ -788,6 +792,17 @@ impl Surface {
     pub(crate) fn with_taxonomic_class(self, class: Modelled<Option<TaxonomicClass>>) -> Self {
         Self {
             taxonomic_class: class,
+            ..self
+        }
+    }
+
+    /// The surface with its melt's own vapour `vapour` (P14.T55.b): `Ok(None)` for a surface
+    /// holding no melt, and not modelled below generator version 35
+    /// ([`SILICATE_VAPOUR_VERSION`](crate::planetary::chem::silicate_vapour::SILICATE_VAPOUR_VERSION)).
+    #[must_use]
+    pub(crate) fn with_silicate_vapour(self, vapour: Modelled<Option<SilicateVapour>>) -> Self {
+        Self {
+            silicate_vapour: vapour,
             ..self
         }
     }
@@ -959,6 +974,25 @@ impl Surface {
     #[must_use]
     pub const fn taxonomic_class(&self) -> Modelled<Option<TaxonomicClass>> {
         self.taxonomic_class
+    }
+
+    /// The vapour the surface's melt holds over it, its silicate vapour (P14.T55.b,
+    /// [`SilicateVapour`]): the rock-forming species over the melt at its warmest temperature,
+    /// with whether the body holds them or they stream off it. It is not part of the volatile air
+    /// the conditions hold.
+    ///
+    /// - Not modelled below generator version 35
+    ///   ([`SILICATE_VAPOUR_VERSION`](crate::planetary::chem::silicate_vapour::SILICATE_VAPOUR_VERSION)),
+    ///   never to be read as none.
+    /// - `Ok(None)`, computed as none, on a surface holding no melt: neither in the `MagmaOcean`
+    ///   state nor with a crust whose melt area is above 0.
+    /// - `Ok(Some(vapour))` over melt.
+    #[must_use]
+    pub const fn silicate_vapour(&self) -> Modelled<Option<&SilicateVapour>> {
+        match &self.silicate_vapour {
+            Modelled::Ok(vapour) => Modelled::Ok(vapour.as_ref()),
+            Modelled::NotModelled => Modelled::NotModelled,
+        }
     }
 }
 

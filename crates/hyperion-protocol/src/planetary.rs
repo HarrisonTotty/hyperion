@@ -33,7 +33,7 @@ pub use record::{
     ResourceAbundancesDto, SilicateVapourDto, SizeDistributionDto, SpinResonanceDto,
     SubstanceAreaDto, SubstancePhaseDto, SubsurfaceOceanDto, SurfaceCondensateDto,
     SurfaceMaterialDto, SurfaceModifiersDto, SurfaceStateDto, TaxonomicClassDto, TectonicRegimeDto,
-    ThermalRegimeDto, VerticalStructureDto, WetEpochDto,
+    ThermalRegimeDto, VapourEscapeDto, VerticalStructureDto, WetEpochDto,
 };
 pub use requests::{
     BodyDetailRequest, BodyEventDto, BodyEventsDto, BodyEventsRequest, CometEventDto,

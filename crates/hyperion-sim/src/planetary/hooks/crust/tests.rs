@@ -102,6 +102,7 @@ fn planet(surface: &SurfaceConditions) -> CrustCompositionInputs<'_> {
         state: SurfaceState::Airless,
         formation_temperature: Kelvin::new(250.0),
         surface,
+        heat_flow: WattsPerSquareMetre::new(0.0),
     }
 }
 
@@ -688,6 +689,150 @@ fn io_has_a_komatiite_secondary_lid_and_no_melt_area() {
     assert!(crust.melt_area_fraction() < 1e-12);
 }
 
+/// Io as [`io_has_a_komatiite_secondary_lid_and_no_melt_area`] reads it, at its measured heat flow
+/// `heat_flow`, W m⁻² (about 2.5: Veeder et al. 2015's 56.2 TW at 54% of Io's total, 105 TW, over
+/// its 4.17 × 10¹³ m²).
+fn io(surface: &SurfaceConditions, heat_flow: f64) -> CrustCompositionInputs<'_> {
+    CrustCompositionInputs {
+        origin: CrustOrigin::RegularMoon,
+        formation: Megayears::new(2.0),
+        molten_until: None,
+        radius: Metres::new(1.821_6e6),
+        mass: earths(8.932e22),
+        fractions: MassFractions::solid(0.2, 0.8, 0.0),
+        delta_iw: Dex::new(0.95),
+        surface_age: Years::new(1e4),
+        tidal: TidalVolcanism::Volcanic,
+        formation_temperature: table_equilibrium_temperature("Ganymede"),
+        heat_flow: WattsPerSquareMetre::new(heat_flow),
+        ..planet(surface)
+    }
+}
+
+/// P14.T55.b's active lava, held at 35: Io's `komatiite` lid at 2.5 W m⁻² takes `f_v` F ÷ (σ
+/// `T_e`⁴) = 0.54 × 2.5 ÷ (σ 1,613.15⁴), 3.5 × 10⁻⁶ of its surface, its whole melt area, as its
+/// starlight melts none; below 35 it takes none. decision-pre-23-review item 10's 2 × 10⁻⁵ to
+/// 2 × 10⁻⁴ is Io's volcanic power over σT⁴ at 600–1,070 K, its cooling crust's: at the eruption
+/// temperature the rule's area is an upper bound on the lava that hot, under Keszthelyi et al.
+/// 2007's "less than 1%" of Io's ~1% of active lavas near it (§2), and the miss is recorded.
+#[test]
+fn under_the_35_hold_io_s_volcanic_lid_takes_its_active_lava() {
+    use crate::planetary::chem::silicate_vapour::{SilicateVapourRules, with_silicate_vapour};
+    let surface = table_conditions("Ganymede");
+    let inputs = io(&surface, 2.5);
+    let held = CrustComposition::derive(&inputs).unwrap();
+    assert_eq!(held.active_lava(), None);
+    assert!(held.melt_area_fraction() < 1e-12);
+    let crust = with_silicate_vapour(SilicateVapourRules::Modelled, || {
+        CrustComposition::derive(&inputs)
+    })
+    .unwrap();
+    let lava = crust.active_lava().expect("a volcanic lid erupts");
+    assert_same_bits(lava.eruption_temperature().value(), 1_613.15);
+    let share = VOLCANIC_POWER_SHARE * 2.5 / (STEFAN_BOLTZMANN * math::powi(1_613.15, 4));
+    assert_same_bits(lava.share(), share);
+    assert!((3.4e-6..3.6e-6).contains(&share), "{share}");
+    assert_same_bits(crust.starlit_melt_fraction(), held.melt_area_fraction());
+    assert_same_bits(crust.melt_area_fraction(), share);
+    eprintln!("Io's active lava at 2.5 W m⁻²: {share:.3e} of its surface at 1,613.15 K");
+    // Nothing else of the crust moves.
+    assert_eq!(keys(&crust), keys(&held));
+    assert_eq!(crust.lid(), held.lid());
+    // A quiet lid at the same heat flow, and a volcanic one with none, take none.
+    for quiet in [
+        CrustCompositionInputs {
+            tidal: TidalVolcanism::Quiet,
+            ..inputs
+        },
+        io(&surface, 0.0),
+    ] {
+        let crust = with_silicate_vapour(SilicateVapourRules::Modelled, || {
+            CrustComposition::derive(&quiet)
+        })
+        .unwrap();
+        assert_eq!(crust.active_lava(), None);
+    }
+}
+
+/// A volcanic lid's active lava joins its starlit pool as an area apart from it, f = `f_s` +
+/// (1 − `f_s`) `f_a`: a locked lava world at 0.05 AU, tidally volcanic at 400 W m⁻², an extreme
+/// heat flow, so that the lava's share shows beside its pool, its lid erupting at its own
+/// lava's temperature.
+#[test]
+fn a_volcanic_lid_s_lava_joins_its_starlit_pool() {
+    use crate::planetary::chem::silicate_vapour::{SilicateVapourRules, with_silicate_vapour};
+    let surface = locked_mercury_at(0.05);
+    let lava = CrustCompositionInputs {
+        surface_age: Years::new(1e8),
+        delta_iw: Dex::new(0.0),
+        tidal: TidalVolcanism::Volcanic,
+        heat_flow: WattsPerSquareMetre::new(400.0),
+        ..mercury(&surface)
+    };
+    let crust = with_silicate_vapour(SilicateVapourRules::Modelled, || {
+        CrustComposition::derive(&lava)
+    })
+    .unwrap();
+    let starlit = crust.starlit_melt_fraction();
+    let active = crust.active_lava().expect("a volcanic lid erupts");
+    let row = CrustLithology::of_key(key(Some(crust.lid_lithology()))).unwrap();
+    assert_same_bits(
+        active.eruption_temperature().value(),
+        row.eruption_temperature().value(),
+    );
+    assert!(
+        starlit > 0.2 && active.share() > 1e-4,
+        "{starlit}, {}",
+        active.share()
+    );
+    assert_same_bits(
+        crust.melt_area_fraction(),
+        starlit + (1.0 - starlit) * active.share(),
+    );
+    let held = CrustComposition::derive(&lava).unwrap();
+    assert_same_bits(held.melt_area_fraction(), starlit);
+}
+
+/// The eruption temperatures: an ultramafic lava's Io's 1,613.15 K, a basaltic's 1,473.15 K, a lid
+/// whose solidus lies above its lava's, `feldspathic`'s 1,533.15 K, its solidus, and an ice's its
+/// own transition; only a lid of a silicate melt erupts.
+#[test]
+fn each_lid_erupts_at_its_lava_s_temperature_or_its_solidus() {
+    let t = |lithology: CrustLithology| lithology.eruption_temperature().value();
+    assert_same_bits(t(CrustLithology::Komatiite), 1_613.15);
+    assert_same_bits(t(CrustLithology::Ultramafic), 1_613.15);
+    assert_same_bits(t(CrustLithology::Basalt), 1_473.15);
+    assert_same_bits(t(CrustLithology::IronRichBasalt), 1_473.15);
+    assert_same_bits(t(CrustLithology::Feldspathic), 1_533.15);
+    assert_same_bits(
+        t(CrustLithology::Water),
+        CrustLithology::Water.transition().value(),
+    );
+    let erupting: Vec<_> = CrustLithology::ALL
+        .into_iter()
+        .filter(|lithology| lithology.holds_a_silicate_melt())
+        .map(CrustLithology::key)
+        .collect();
+    assert_eq!(
+        erupting,
+        [
+            "feldspathic",
+            "basalt",
+            "basalt_fe",
+            "komatiite",
+            "basalt_reduced",
+            "granite",
+            "ultramafic"
+        ]
+    );
+    for lithology in CrustLithology::ALL {
+        assert!(
+            t(lithology) >= lithology.transition().value(),
+            "{lithology:?}"
+        );
+    }
+}
+
 /// A Ceres-like body (470 km, a quarter water, formed at 3 Myr): its ice melted, its rock did not,
 /// and its frozen ocean is a primary `phyllosilicate` crust with no secondary, at its own surface
 /// (the table's Ceres) and its present equilibrium temperature.
@@ -937,6 +1082,26 @@ fn locked_mercury_at(au: f64) -> SurfaceConditions {
             ..spin_of("Mercury")
         },
     )
+}
+
+/// A locked world's peak temperature is its eyeball's substellar point, (`E_n` + (3/2)(`E_d` −
+/// `E_n`))^¼ to the bit, above its climate range's warmest; a rotating world's is that warmest.
+#[test]
+fn a_locked_world_s_peak_is_its_eyeball_s_substellar_point() {
+    let locked = locked_mercury_at(0.05);
+    let (day, night) = locked.day_and_night();
+    let (e_d, e_n) = (math::powi(day.value(), 4), math::powi(night.value(), 4));
+    let substellar = (e_n + EYEBALL_SLOPE * (e_d - e_n)).sqrt().sqrt();
+    assert_same_bits(locked.peak_temperature().value(), substellar);
+    assert!(
+        substellar > locked.climate_range().1.value(),
+        "{substellar}"
+    );
+    let rotating = table_conditions("Mercury");
+    assert_same_bits(
+        rotating.peak_temperature().value(),
+        rotating.climate_range().1.value(),
+    );
 }
 
 /// A locked lava world's melt area is its eyeball's dayside pool: in [0, 0.5], rising with its
@@ -1389,6 +1554,34 @@ fn each_input_out_of_range_is_refused_by_its_variant() {
     }
 }
 
+/// A heat flow that is not finite or is negative is refused, after every other input, as
+/// `CrustComposition::derive`'s `# Errors` orders it (P14.T55.b's active lava reads it).
+#[test]
+fn a_heat_flow_out_of_range_is_refused() {
+    let surface = table_conditions("Earth");
+    let base = earth(&surface);
+    let refused = |heat_flow: f64| {
+        CrustComposition::derive(&CrustCompositionInputs {
+            heat_flow: WattsPerSquareMetre::new(heat_flow),
+            ..base
+        })
+        .unwrap_err()
+    };
+    assert_eq!(
+        refused(f64::NAN),
+        DeriveCrustError::NotFinite(CrustInput::HeatFlow)
+    );
+    assert_eq!(
+        refused(f64::INFINITY),
+        DeriveCrustError::NotFinite(CrustInput::HeatFlow)
+    );
+    assert_eq!(
+        refused(-0.1),
+        DeriveCrustError::HeatFlowNegative(WattsPerSquareMetre::new(-0.1))
+    );
+    assert!(CrustComposition::derive(&base).is_ok());
+}
+
 /// Every error's message is lowercase with no trailing punctuation
 /// (`.claude/rules/rust-dev.md`, Errors and panics).
 #[test]
@@ -1414,6 +1607,7 @@ fn every_error_message_is_lowercase_with_no_trailing_punctuation() {
         .to_string(),
         DeriveCrustError::VolcanismNegative(-1.0).to_string(),
         DeriveCrustError::ContinentalFractionOutsideUnit(2.0).to_string(),
+        DeriveCrustError::HeatFlowNegative(WattsPerSquareMetre::new(-1.0)).to_string(),
         BuildFormationWindowError::NotFiniteOrNegative(Megayears::new(-1.0)).to_string(),
         BuildFormationWindowError::Reversed {
             earliest: Megayears::new(2.0),
@@ -2068,6 +2262,9 @@ mod unstaged {
             redox,
             mantle_delta_iw: inputs.delta_iw,
             melt_area_fraction: melt_area(inputs, lid_lithology),
+            // As it was built: starlight's alone, with no active lava (the held rules').
+            starlit_melt_fraction: melt_area(inputs, lid_lithology),
+            active_lava: None,
             thermal_history,
             peak_central_temperature: peak,
         })

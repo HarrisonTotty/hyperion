@@ -51,6 +51,17 @@ mod held;
 #[cfg(test)]
 pub(crate) use held::{HeldRules, in_shares};
 
+/// `run`'s result under every planetary hold of generator version 35 on this thread (train 35):
+/// P14.T55.b's silicate vapour and active lava ([`with_silicate_vapour`]). 35's bump deletes it
+/// with the holds; a hold of 35 added later adds its switch here.
+///
+/// [`with_silicate_vapour`]: super::chem::silicate_vapour::with_silicate_vapour
+#[cfg(test)]
+pub(crate) fn with_every_35_hold<R>(run: impl FnOnce() -> R) -> R {
+    use super::chem::silicate_vapour::{SilicateVapourRules, with_silicate_vapour};
+    with_silicate_vapour(SilicateVapourRules::Modelled, run)
+}
+
 /// An air's partial pressures stated by hand, each gas's `pressure(gas)` in [`Gas::ALL`]'s order,
 /// unvalidated, as the crate's own tests state one: for other crates' tests of what a derivation
 /// reads of an air, as the server's conversion of P14.T51.j's oxidised surface does (a caller's

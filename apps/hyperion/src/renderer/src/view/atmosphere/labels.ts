@@ -50,9 +50,11 @@
  *   carries none (`signoff-2.md` item 6).
  * - `silicateVapourNotYetModelled`: a generated body's surface holds melt (its state
  *   `magma_ocean`, or a crust whose `melt_area_fraction` is above 0) and its `silicate_vapour`
- *   member is absent (P14.T35.f; every server until P14.T55.b): the melt's own vapour, chiefly Na,
- *   O₂, O and SiO over a melt with no volatiles (Schaefer and Fegley 2009), is not drawn, nor its
- *   sodium's resonance light. Any air the surface section computes is drawn as computed beside it.
+ *   member is absent (P14.T35.f; every server whose generator predates version 35, P14.T55.b's):
+ *   the melt's own vapour, chiefly Na, O₂, O and SiO over a melt with no volatiles (Schaefer and
+ *   Fegley 2009), is not drawn, nor its sodium's resonance light. A vapour sent as a value drops
+ *   the note: the readout reads it, and it is not drawn, since R08 holds no optics of Na or SiO.
+ *   Any air the surface section computes is drawn as computed beside it.
  *   It stands on its own line, beside `exosphereNotYetModelled` where an airless body holds a pool
  *   of melt (decision-backlog-2 §2.5; `signoff-12.md` item 27).
  * - `atmospherePending`: the body's surface or envelope section has been asked of the server

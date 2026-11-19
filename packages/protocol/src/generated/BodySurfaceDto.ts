@@ -243,15 +243,17 @@ taxonomic_class?: TaxonomicClassDto | null,
  */
 biosphere?: BiosphereDto | null, 
 /**
- * The melt's own vapour, its silicate vapour (P14.T55.b); absent until that task, from
- * every server.
+ * The melt's own vapour, its silicate vapour (P14.T55.b): absent from a server whose generator
+ * does not model it, every one before generator version 35; from it `null` on a surface
+ * holding no melt, and the vapour over melt (decision-backlog-2 §2.3).
  *
  * It is not part of the volatile air that `surface_pressure_pa` and `gases` hold: the
  * melt's temperature sets it where melt lies, not a volatile inventory's weight over the
  * globe. It applies where a surface holds melt, a fact on the wire: the state `magma_ocean`
  * (P14.T53.b's `steam_envelope` is never a surface's: such a body has its envelope section)
- * and, from P14.T54.a, a `crust.melt_area_fraction` above 0. Elsewhere its absence says
- * nothing. From P14.T55.b it is `null` on a surface holding no melt, and the vapour over
- * melt (decision-backlog-2 §2.3).
+ * and, from P14.T54.a, a `crust.melt_area_fraction` above 0. Where it is absent, its absence
+ * says nothing elsewhere. Every surface holding melt is sent a value, which a console since
+ * P14.T43.e reads as not none where it reads the surface as holding melt, so that the
+ * volatiles' zero beside it is never read as clear of gas there.
  */
 silicate_vapour?: SilicateVapourDto | null, };

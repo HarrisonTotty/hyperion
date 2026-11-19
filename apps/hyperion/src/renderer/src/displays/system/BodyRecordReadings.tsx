@@ -37,6 +37,7 @@ import {
   ringMaterialLabel,
   sectionStateLabel,
   surfaceStateLabel,
+  vapourEscapeLabel,
 } from "../../lib/system/bodyWords";
 import type {
   BodyEnvelope,
@@ -410,34 +411,68 @@ function holdsMelt(surface: BodySurface): boolean {
   );
 }
 
-/** What a melt's own vapour, as the wire sends it, lets its surface's rows read. */
-interface VapourReading {
-  /** Whether an empty volatile air reads Missing, the em dash, rather than `NONE`. */
-  readonly emptyAirMissing: boolean;
-  /** Whether the `SILICATE VAPOUR NOT YET MODELLED` row stands. */
-  readonly notModelledRow: boolean;
-}
-
 /**
- * How a melt's own vapour reads: not modelled, Missing air and its row; computed as none, `NONE`
- * and no row (decision-backlog-2 §2.4); a value, Missing air and no row.
+ * What a melt's own vapour, as the wire sends it, lets its surface's rows read: not modelled, its
+ * `NOT YET MODELLED` row, beside which an empty volatile air reads Missing; computed as none, no
+ * row and `NONE` (decision-backlog-2 §2.4); a value (P14.T55.b), its rows ({@link vapourRows}),
+ * beside which an empty volatile air reads `NONE`, since the air the generator computes holds no
+ * gas and the melt's own vapour, which it leaves out, reads in its own rows (the guide's
+ * `SURFACE PRESSURE`: the em dash only "while the vapour is not modelled or this console cannot
+ * read it").
  */
+type VapourReading =
+  | { readonly kind: "not_modelled" }
+  | { readonly kind: "none" }
+  | { readonly kind: "value"; readonly vapour: SilicateVapour };
+
+/** A melt's own vapour's reading ({@link VapourReading}), its three kinds in one switch. */
 function vapourReading(vapour: Modelled<SilicateVapour>): VapourReading {
   let reading: VapourReading;
   switch (vapour.kind) {
     case "not_modelled":
-      reading = { emptyAirMissing: true, notModelledRow: true };
+      reading = { kind: "not_modelled" };
       break;
     case "none":
-      reading = { emptyAirMissing: false, notModelledRow: false };
+      reading = { kind: "none" };
       break;
     case "value":
-      // `NOT YET MODELLED` would be false, and this client has no figures to read: P14.T55.b, which
-      // gives the vapour its members, adds its row (plan 14, P14.T43.e's record).
-      reading = { emptyAirMissing: true, notModelledRow: false };
+      reading = { kind: "value", vapour: vapour.value };
       break;
   }
   return reading;
+}
+
+/**
+ * A melt's own vapour's rows (P14.T55.b): `SILICATE VAPOUR`, its pressure over the melt read as
+ * `SURFACE PRESSURE` reads one, then after a middle dot the melt temperature it is taken at, the
+ * melt's warmest, in whole kelvin, as the guide's `AT` gives a reading's condition
+ * (`1.28 Pa · AT 1684 K`); and `VAPOUR ESCAPE`, whether its body holds it or it streams off
+ * (`BOUND`, `OUTFLOW`).
+ *
+ * @remarks
+ * Its other members are on the wire and not yet read here: its species by mole fraction, chiefly
+ * Na, O2, O and SiO, their mean molar mass and its Jeans parameter. A reading of the species waits
+ * on the guide: `VAPOUR MOLE FRACTION`, the quantity's name as the guide asks, is wider than the
+ * label track.
+ */
+function vapourRows(vapour: SilicateVapour): ReactNode {
+  const pressure = formatPressure(vapour.vapourPressurePa);
+  const taken = (
+    <>
+      AT <span className="body-readout__value">{formatTemperatureK(vapour.meltTemperatureK)}</span>{" "}
+      <span className="body-readout__unit">K</span>
+    </>
+  );
+  return (
+    <>
+      <ReadoutRow
+        label="SILICATE VAPOUR"
+        shown={{ kind: "value", value: pressure.value, unit: pressure.unit, beside: taken }}
+        wide
+      />
+      <ReadoutRow label="VAPOUR ESCAPE" shown={value(vapourEscapeLabel(vapour.escape))} wide />
+    </>
+  );
 }
 
 /**
@@ -608,8 +643,9 @@ function subsurfaceOceanShown(surface: BodySurface): Shown {
  * view's `EXOSPHERE: NOT YET MODELLED` does (rendering plan R08, R08.T10.a).
  *
  * A surface holding melt, the state `magma_ocean` (P14.T35.f) or a crust's melt area above 0
- * (P14.T54.a), has a vapour of its own, the melt's silicate vapour, which no rule computes before
- * P14.T55.b. While the wire leaves it out, its row reads `SILICATE VAPOUR NOT YET MODELLED`, and an
+ * (P14.T54.a), has a vapour of its own, the melt's silicate vapour, which no generator computes
+ * before version 35 (P14.T55.b). While the wire leaves it out, its row reads
+ * `SILICATE VAPOUR NOT YET MODELLED`, and an
  * empty volatile air reads its pressure and gases Missing, the em dash, never `NONE`, since the
  * pressure over a melt is at least the melt's own vapour pressure (the guide's Data states;
  * decision-backlog-2 §2.4, decision-triton-and-e101 §2.3). A volatile air it holds, a young magma
@@ -619,8 +655,10 @@ function subsurfaceOceanShown(surface: BodySurface): Shown {
  * Design note 12). `SILICATE VAPOUR` is signed off (signoff-12, item 27), as one name with the
  * view's `SILICATE VAPOUR: NOT YET MODELLED` note, which R08.T10.a adds.
  *
- * A vapour the wire sends as a value, which no server does before P14.T55.b, reads its empty
- * volatile air as Missing too, and has no row: its figures are T55.b's to read.
+ * A vapour the wire sends as a value, from generator version 35 (P14.T55.b), reads in its own rows
+ * in that place ({@link vapourRows}), its pressure at its melt's temperature and whether it is
+ * bound or an outflow, and an empty volatile air beside it reads `NONE`, the air the generator
+ * computes holding no gas.
  *
  * After the air's rows come the ground's, in this order (P14.T43.g, decision-ux-23-surface-rows):
  * the crust's rows ({@link crustRows}), `CRUST`, `MANTLE REDOX`, the mantle's class and not the
@@ -654,9 +692,9 @@ function subsurfaceOceanShown(surface: BodySurface): Shown {
  */
 function surfaceRows(surface: BodySurface): ReactNode {
   const vapour = holdsMelt(surface) ? vapourReading(surface.silicateVapour) : null;
-  // Ruled on the empty gases, not on the pressure (decision-backlog-2 §2.4): only a vapour computed
-  // as none lets the volatile air's zero read as `NONE` over a melt.
-  const airMissing = vapour !== null && vapour.emptyAirMissing && surface.gases.length === 0;
+  // Ruled on the empty gases, not on the pressure (decision-backlog-2 §2.4): only a vapour not
+  // modelled keeps the volatile air's zero from reading `NONE` over a melt.
+  const airMissing = vapour?.kind === "not_modelled" && surface.gases.length === 0;
   // A server that models no condensates, as every one before P14.T54.a, sends its water alone in
   // the cover's lists, so they are not the whole cover and never read as it.
   const coverModelled = surface.condensates.kind !== "not_modelled";
@@ -684,9 +722,10 @@ function surfaceRows(surface: BodySurface): ReactNode {
       {surface.state === "airless" ? (
         <ReadoutRow label="EXOSPHERE" shown={notModelled} wide />
       ) : null}
-      {vapour?.notModelledRow === true ? (
+      {vapour?.kind === "not_modelled" ? (
         <ReadoutRow label="SILICATE VAPOUR" shown={notModelled} wide />
       ) : null}
+      {vapour?.kind === "value" ? vapourRows(vapour.vapour) : null}
       {crustRows(surface.crust)}
       <ReadoutRow
         label="LIQUID COVER"

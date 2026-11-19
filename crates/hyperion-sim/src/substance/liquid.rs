@@ -1183,6 +1183,19 @@ impl LiquidColumns {
         }
     }
 
+    /// A melt row's major oxides, weight per cent, as its source analyses them (each oxide once;
+    /// the row's sources name the analysis), which a melt's silicate vapour reads its composition
+    /// from (P14.T55.b). `None` for a liquid that is not a lithology's melt.
+    #[must_use]
+    pub(crate) const fn melt_oxides(&self) -> Option<&'static [(Oxide, f64)]> {
+        match &self.constitution {
+            LiquidConstitution::Melt(melt) => Some(melt.oxides),
+            LiquidConstitution::Pure { .. }
+            | LiquidConstitution::Solution(_)
+            | LiquidConstitution::AwaitingSolute(_) => None,
+        }
+    }
+
     /// The index and absorption, from the row's R08 file.
     #[must_use]
     pub const fn optics(&self) -> Option<&LiquidOptics> {

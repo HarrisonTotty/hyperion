@@ -24,11 +24,12 @@ use hyperion_protocol::{
     OrbitHostDto, PhaseTemplateDto, PlanetClassDto, PopulationDto, ProfileNodeDto,
     ProtoplanetaryDiscDto, RadiationClassDto, RadioisotopesDto, RedoxClassDto, RequestError,
     ResourceAbundancesDto, RingDto, RingGapDto, RingKindDto, RingMaterialDto, SceneBodyDto,
-    SceneSystemDto, SectionDto, SeenPositionDto, SizeDistributionDto, SpinResonanceDto,
-    SubstanceAreaDto, SubstancePhaseDto, SubsurfaceOceanDto, SurfaceCondensateDto,
-    SurfaceMaterialDto, SurfaceModifiersDto, SurfaceStateDto, SystemBodiesDto, SystemBodiesRequest,
-    SystemPlaneDto, SystemSummaryDto, SystemSummaryRequest, TaxonomicClassDto, TectonicRegimeDto,
-    ThermalRegimeDto, VerticalStructureDto, WetEpochDto, ZoneDto,
+    SceneSystemDto, SectionDto, SeenPositionDto, SilicateVapourDto, SizeDistributionDto,
+    SpinResonanceDto, SubstanceAreaDto, SubstancePhaseDto, SubsurfaceOceanDto,
+    SurfaceCondensateDto, SurfaceMaterialDto, SurfaceModifiersDto, SurfaceStateDto,
+    SystemBodiesDto, SystemBodiesRequest, SystemPlaneDto, SystemSummaryDto, SystemSummaryRequest,
+    TaxonomicClassDto, TectonicRegimeDto, ThermalRegimeDto, VapourEscapeDto, VerticalStructureDto,
+    WetEpochDto, ZoneDto,
 };
 use hyperion_sim::Seed;
 use hyperion_sim::galaxy::placement::Existence;
@@ -38,6 +39,7 @@ use hyperion_sim::planetary::belts::{BeltComposition, BeltSite};
 use hyperion_sim::planetary::chem::condense::{NotFormed, ResolveOpticalDepthError, SizeModeError};
 use hyperion_sim::planetary::chem::partition::{CondensatePhase, Condensates};
 use hyperion_sim::planetary::chem::redox::RedoxClass;
+use hyperion_sim::planetary::chem::silicate_vapour::{SilicateVapour, VapourEscape};
 use hyperion_sim::planetary::derive::atmosphere::{SurfaceMaterial, SurfaceState};
 use hyperion_sim::planetary::derive::figure::{BodyFigure, Datum, FigureLaw};
 use hyperion_sim::planetary::derive::photometry::{Bands, BodyPhotometry, PhaseTemplate};
@@ -1155,8 +1157,9 @@ fn later<T, U>(member: RecordModelled<&T>, value: impl FnOnce(&T) -> Option<U>) 
 /// structure ([`vertical_structure_member`]) and the aerosol inventory ([`aerosol_inventory`],
 /// never `null`: the empty inventory for a surface with no air), with the modifiers and the
 /// taxonomic class ([`taxonomic_class_member`]), each on the record from generator version 24 and
-/// absent where the record does not model it. The melt's own vapour, `silicate_vapour`, has no
-/// member in the record and is sent absent from every surface until P14.T55.b.
+/// absent where the record does not model it. The melt's own vapour, `silicate_vapour`
+/// (P14.T55.b), is the record's: absent below generator version 35, `null` on a surface holding
+/// no melt and the vapour over melt ([`silicate_vapour`]).
 #[must_use]
 fn surface(surface: &Surface) -> BodySurfaceDto {
     let conditions = surface.conditions();
@@ -1214,9 +1217,28 @@ fn surface(surface: &Surface) -> BodySurfaceDto {
         }),
         taxonomic_class: taxonomic_class_member(surface.taxonomic_class()),
         biosphere: later(surface.biosphere(), |fluxes| Some(biosphere(fluxes))),
-        // P14.T55.b's: the record holds no such member, so every server sends it absent until
-        // then (P14.T35.f).
-        silicate_vapour: Modelled::NotModelled,
+        silicate_vapour: match surface.silicate_vapour() {
+            RecordModelled::Ok(Some(vapour)) => Modelled::Value(silicate_vapour(vapour)),
+            RecordModelled::Ok(None) => Modelled::Null,
+            RecordModelled::NotModelled => Modelled::NotModelled,
+        },
+    }
+}
+
+/// A melt's own vapour as the wire carries it (P14.T55.b): its figures in their units and each
+/// species by its registry key, in the record's order, largest first.
+#[must_use]
+fn silicate_vapour(vapour: &SilicateVapour) -> SilicateVapourDto {
+    SilicateVapourDto {
+        melt_temperature_k: vapour.melt_temperature().value(),
+        vapour_pressure_pa: vapour.pressure().value(),
+        species: gas_shares(vapour.species()),
+        mean_molar_mass_g_per_mol: vapour.mean_molar_mass_g_per_mol(),
+        jeans_parameter: vapour.jeans_parameter(),
+        escape: match vapour.escape() {
+            VapourEscape::Bound => VapourEscapeDto::Bound,
+            VapourEscape::Outflow => VapourEscapeDto::Outflow,
+        },
     }
 }
 
@@ -1951,7 +1973,12 @@ mod tests {
 
     /// Every golden system's records at the epoch at the `full` level, each beside its wire form
     /// as `body_detail` sends it, its hooks with the body's server-only hooks.
-    static GOLDEN_RECORDS: LazyLock<Vec<(BodyRecord, BodyRecordDto)>> = LazyLock::new(|| {
+    static GOLDEN_RECORDS: LazyLock<Vec<(BodyRecord, BodyRecordDto)>> =
+        LazyLock::new(golden_records);
+
+    /// The golden systems' records at the epoch, each with its wire form, under the rules in force
+    /// on this thread: [`GOLDEN_RECORDS`]'s, the version's.
+    fn golden_records() -> Vec<(BodyRecord, BodyRecordDto)> {
         let galaxy = &*GOLDEN_GALAXY;
         GOLDEN_SYSTEMS
             .iter()
@@ -1975,7 +2002,7 @@ mod tests {
                     .collect::<Vec<_>>()
             })
             .collect()
-    });
+    }
 
     /// The golden records of present planets with a bulk section, with their class.
     fn present_planets()
@@ -3486,8 +3513,68 @@ mod tests {
         assert!(airless > 0, "no airless body was checked");
     }
 
-    /// P14.T35.f (decision-backlog-2 §2): every surface sends the melt's own vapour absent, with
-    /// no key, the golden systems' magma oceans among them, each of rock. The close binary's dwarf
+    /// P14.T55.b (decision-backlog-2 §2.3), under its hold at 35: every surface sends its melt's
+    /// own vapour with its key, `null` on a surface holding no melt and a value over melt (the
+    /// state `magma_ocean` or a crust's melt area above 0), its figures the record's to the bit.
+    /// So every surface holding melt sends a value: a console since P14.T43.e reads it as not none
+    /// wherever it reads the surface as holding melt, and one before it ignores the key as before,
+    /// so that the first send leaves no console reading the volatiles' zero as `NONE` where it did
+    /// not already (decision-backlog-2 §2.3).
+    #[test]
+    fn under_the_35_hold_a_surface_sends_its_melt_s_vapour_or_null() {
+        use hyperion_sim::planetary::chem::silicate_vapour::{
+            SilicateVapourRules, with_silicate_vapour,
+        };
+        let records = with_silicate_vapour(SilicateVapourRules::Modelled, golden_records);
+        let (mut values, mut nulls, mut outflows) = (0, 0, 0);
+        for (sim, wire) in &records {
+            let (Section::Ok(sim), SectionDto::Ok(dto)) = (sim.surface(), &wire.surface) else {
+                continue;
+            };
+            let id = wire.id.as_str();
+            let sent = serde_json::to_value(dto).expect("a surface section serializes");
+            let holds_melt = dto.state == SurfaceStateDto::MagmaOcean
+                || matches!(&dto.crust, Modelled::Value(crust) if crust.melt_area_fraction > 0.0);
+            match (&dto.silicate_vapour, sim.silicate_vapour()) {
+                (Modelled::Value(vapour), RecordModelled::Ok(Some(record))) => {
+                    assert!(holds_melt, "{id}: a vapour over no melt");
+                    assert_eq!(vapour, &silicate_vapour(record), "{id}");
+                    assert_eq!(
+                        vapour.vapour_pressure_pa.to_bits(),
+                        record.pressure().value().to_bits(),
+                        "{id}"
+                    );
+                    assert_eq!(
+                        vapour.species[0].species,
+                        key(record.species()[0].0),
+                        "{id}"
+                    );
+                    let escape = &sent["silicate_vapour"]["escape"];
+                    if vapour.escape == VapourEscapeDto::Outflow {
+                        assert_eq!(escape, "outflow", "{id}");
+                        outflows += 1;
+                    } else {
+                        assert_eq!(escape, "bound", "{id}");
+                    }
+                    values += 1;
+                }
+                (Modelled::Null, RecordModelled::Ok(None)) => {
+                    assert!(!holds_melt, "{id}: a melt with no vapour");
+                    assert!(sent["silicate_vapour"].is_null(), "{id}: {sent}");
+                    nulls += 1;
+                }
+                (vapour, record) => panic!("{id}: {vapour:?} against the record's {record:?}"),
+            }
+        }
+        eprintln!("{values} vapours ({outflows} outflows) and {nulls} surfaces with none");
+        assert!(
+            values > 0 && nulls > 0,
+            "{values} vapours, {nulls} with none"
+        );
+    }
+
+    /// P14.T35.f (decision-backlog-2 §2): below generator version 35 every surface sends the melt's
+    /// own vapour absent, with no key, the golden systems' magma oceans among them, each of rock. The close binary's dwarf
     /// planets `e101` to `e103`, magma oceans at some 1,684 K below generator version 28, whose
     /// volatiles' zero this test pinned, have evaporated from 28 (P14.T55.b.a): each is sent
     /// destroyed by its evaporation, with no surface.

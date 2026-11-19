@@ -1496,11 +1496,36 @@ impl SurfaceConditions {
         self.climate_range
     }
 
+    /// The surface's warmest temperature at a point, K: the [`climate_range`](Self::climate_range)'s
+    /// warmest, or, on a world locked 1:1, its substellar point's where that is warmer,
+    /// (`E_n` + (3/2)(`E_d` − `E_n`))^¼ on its day's and night's E = σT⁴, the eyeball's peak
+    /// ([`EYEBALL_SLOPE`]; [`cold_area`](Self::cold_area)'s profile). A starlit melt's vapour is
+    /// read there, where its pressure is highest (P14.T55.b).
+    #[must_use]
+    pub(crate) fn peak_temperature(&self) -> Kelvin {
+        let warmest = self.climate_range.1;
+        if !self.locked {
+            return warmest;
+        }
+        let (day, night) = (self.day_and_night.0.value(), self.day_and_night.1.value());
+        let (e_d, e_n) = (math::powi(day, 4), math::powi(night, 4));
+        if e_d <= e_n {
+            return warmest;
+        }
+        let substellar = (e_n + EYEBALL_SLOPE * (e_d - e_n)).sqrt().sqrt();
+        if substellar > warmest.value() {
+            Kelvin::new(substellar)
+        } else {
+            warmest
+        }
+    }
+
     /// The surface pressure of the modelled air, the volatiles': the sum of the gases' weights,
     /// zero for an airless body and for a surface holding melt whose volatiles are gone, and a
     /// tenuous air's own below 100 Pa (P14.T53.c).
     ///
-    /// It does not include the melt's own vapour, which no rule computes until P14.T55.b.
+    /// It does not include the melt's own vapour, its record surface's silicate vapour (P14.T55.b,
+    /// from generator version 35).
     #[must_use]
     pub const fn surface_pressure(&self) -> Pascals {
         self.surface_pressure

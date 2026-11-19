@@ -127,6 +127,9 @@ use crate::planetary::chem::equilibrium::{BuildNetworkError, Network};
 use crate::planetary::chem::escape::{EnvelopeHelium, host_helium_per_hydrogen};
 use crate::planetary::chem::inventory::{ElementInventory, Reservoir};
 use crate::planetary::chem::partition::{CondensatePhase, Condensates, CrustWater, Partition};
+use crate::planetary::chem::silicate_vapour::{
+    MeltComposition, SilicateVapour, SilicateVapourInputs, SilicateVapourRules,
+};
 use crate::planetary::chem::{AbundanceDraws, HostAbundances};
 use crate::planetary::context::{
     HostKind, OWN_DEATH_SHARE, SystemContext, XuvHistory, at_own_death,
@@ -6590,10 +6593,59 @@ fn with_held_members(
             weathered: case.sky.weathered,
         },
     );
+    let vapour = record_silicate_vapour(&surface, case.bulk);
     surface
         .with_vertical_structure(structure)
         .with_aerosols(aerosols)
         .with_modifiers(modifiers)
+        .with_silicate_vapour(vapour)
+}
+
+/// The melt's own vapour over the published surface `surface` of a body of bulk section `bulk`
+/// (P14.T55.b, [`SilicateVapour`]): not modelled below generator version 35
+/// ([`SilicateVapourRules`]); `Ok(None)` on a surface holding no melt, neither in the `MagmaOcean`
+/// state nor with a crust whose melt area is above 0; otherwise the vapour at the melt's warmest
+/// temperature, the surface's peak where its starlight melts it (the `MagmaOcean` state, or a
+/// starlit share above 0) and its active lava's eruption temperature where that is warmer, of the
+/// bulk silicate's composition in the `MagmaOcean` state or with no crust and of its lid's
+/// otherwise ([`MeltComposition::of_row`]), on the bulk section's gravity and radius.
+#[must_use]
+fn record_silicate_vapour(
+    surface: &Surface,
+    bulk: &BulkProperties,
+) -> Modelled<Option<SilicateVapour>> {
+    if SilicateVapourRules::in_force() == SilicateVapourRules::Held {
+        return Modelled::NotModelled;
+    }
+    let molten = surface.state() == SurfaceState::MagmaOcean;
+    let crust = match surface.crust() {
+        Modelled::Ok(crust) => Some(crust),
+        Modelled::NotModelled => None,
+    };
+    let starlit = (molten || crust.is_some_and(|crust| crust.starlit_melt_fraction() > 0.0))
+        .then(|| surface.conditions().peak_temperature());
+    let lava = crust
+        .and_then(CrustComposition::active_lava)
+        .map(|lava| lava.eruption_temperature());
+    let melt_temperature = match (starlit, lava) {
+        (Some(peak), Some(lava)) if lava.value() > peak.value() => lava,
+        (Some(t), _) | (None, Some(t)) => t,
+        (None, None) => return Modelled::Ok(None),
+    };
+    let composition = match crust {
+        Some(crust) if !molten => MeltComposition::of_row(crust.lid_lithology()),
+        Some(_) | None => MeltComposition::BulkSilicate,
+    };
+    let vapour = SilicateVapour::derive(&SilicateVapourInputs {
+        melt_temperature,
+        composition,
+        gravity: bulk.surface_gravity(),
+        radius: Metres::from(bulk.radius()),
+    });
+    // A record's surface temperatures, gravity and radius are finite and positive: a refusal is a
+    // bug, which the tests' debug builds catch, and the vapour is then not modelled.
+    debug_assert!(vapour.is_ok(), "{vapour:?}");
+    vapour.map_or(Modelled::NotModelled, |vapour| Modelled::Ok(Some(vapour)))
 }
 
 /// The mass of sulphur in the mantle of a body whose element inventory is `elements` (P14.T50.a),
@@ -6640,9 +6692,10 @@ fn record_air_sections(
 
 /// The record's crust of a body whose published pass took the lid `lid`, of figures `figures`
 /// and conditions `conditions` (P14.T51.c, on the record from P14.T54.a; item 17's constraint 1):
-/// that lid with what only the record reads, the figures' volcanism and continental fraction and
-/// the conditions' melt area, read off the body's insolation table `table` (`CrustComposition::of`);
-/// `None` where the pass took no lid.
+/// that lid with what only the record reads, the figures' volcanism, continental fraction and
+/// heat flow (a volcanic lid's active lava's, from generator version 35) and the conditions' melt
+/// area, read off the body's insolation table `table` (`CrustComposition::of`); `None` where the
+/// pass took no lid.
 #[must_use]
 fn record_crust(
     lid: Option<&CrustLid>,
@@ -6655,6 +6708,7 @@ fn record_crust(
             volcanism: figures.volcanism(),
             continental_fraction: figures.continental_fraction(),
             surface: conditions,
+            heat_flow: figures.heat_flow(),
             table: Some(table),
         },
     );
@@ -7549,6 +7603,8 @@ mod present_state_tests;
 mod resources_tests;
 mod rogue;
 mod second_generation;
+#[cfg(test)]
+pub(crate) mod silicate_vapour_tests;
 pub(crate) mod small_bodies;
 #[cfg(test)]
 mod supercritical_envelope_tests;

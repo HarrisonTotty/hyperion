@@ -27,8 +27,8 @@
 //! subsurface ocean's `subsurface_ocean`, an H₂/He envelope's `supercritical`. A member this
 //! generator version does not compute is absent ([`Modelled::NotModelled`]), and a reader takes it
 //! as not modelled, never as none. The members whose tasks land later (P14.T53.d's biosphere and
-//! P14.T55.b's silicate vapour) are absent until they do. The silicate vapour's task may reshape
-//! its member's type while no build has sent a value of it, and the biosphere's shape is fixed at
+//! P14.T55.b's silicate vapour, from generator version 35) are absent until they do. The silicate
+//! vapour's shape is P14.T55.b's, fixed from its first send at 35, and the biosphere's is fixed at
 //! 24 with the members below; once a build has sent a value, a change bumps
 //! [`PROTOCOL_VERSION`](crate::PROTOCOL_VERSION). The condensates (P14.T51.a) and the crust
 //! (P14.T51.c) are sent from P14.T54.a's batch, and from generator version 24 P14.T54.b's: the
@@ -1031,18 +1031,54 @@ pub struct BiosphereDto {
     pub fluxes: Vec<BiosphereFluxDto>,
 }
 
+/// Whether a melt's vapour is held by its body's gravity or streams off it, by its Jeans parameter
+/// λ against the critical value of a thermally driven escape (plan 14, P14.T55.b).
+///
+/// A closed physics class: Volkov, Johnson, Tucker and Erwin 2011 (Astrophys. J. Lett. 729, L24)
+/// find the escape of a gas heated at its base hydrodynamic below λ of about 2.1 for an atomic
+/// gas (2.4 for a diatomic one, the critical value of a vapour led by molecules), and molecule by
+/// molecule above about 3 (3.6), with a transition between, which the bound class takes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum VapourEscapeDto {
+    /// λ at or above the critical value: the vapour is a bound air over its melt, losing gas by
+    /// evaporation at its top, as a lava world's dayside vapour is.
+    Bound,
+    /// λ below it: the vapour streams off the body as a hydrodynamic outflow, its pressure the
+    /// melt's at its surface and not an air's weight, as a small hot body's is.
+    Outflow,
+}
+
 /// The vapour a surface's melt holds over it: the rock-forming species the melt evaporates,
 /// over a volatile-free melt chiefly Na, O₂, O and `SiO` (Schaefer and Fegley 2009, Astrophys. J.
 /// 703, L113), which plan 14's P14.T55.b models as silicate-vapour atmospheres.
 ///
-/// Its members are P14.T55.b's, which no task has built, so the type has no value yet and
-/// every server sends [`BodySurfaceDto::silicate_vapour`] absent. TypeScript sees it as
-/// `never`. P14.T55.b gives it its members, each quantity's name carrying its unit as here, and
-/// may reshape it while no build has sent a value (plan 04's Design note 15). It derives only
-/// what a vapour of figures and registry keys can keep.
+/// It is the vapour in equilibrium with the melt at the melt's warmest temperature, where its
+/// pressure is highest: a starlit melt's warmest climate, or a volcanic lid's eruption
+/// temperature where its active lava is the hotter. Each quantity's name carries its unit.
+/// P14.T55.b gave it its members before any build sent a value (plan 04's Design note 15), so
+/// that its shape is fixed from the first build that sends one.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
-pub enum SilicateVapourDto {}
+pub struct SilicateVapourDto {
+    /// The melt's temperature the vapour is computed at, K, positive.
+    pub melt_temperature_k: f64,
+    /// The vapour's pressure over the melt at that temperature, the sum of its species' partial
+    /// pressures, Pa, positive.
+    pub vapour_pressure_pa: f64,
+    /// Its species by mole fraction, largest first, summing to 1, each a key of the substance
+    /// registry.
+    pub species: Vec<GasShareDto>,
+    /// The species' mean molar mass μ = Σ xᵢ μᵢ, g mol⁻¹, positive.
+    pub mean_molar_mass_g_per_mol: f64,
+    /// Its Jeans parameter λ = G M m ÷ (k T R) at the body's surface, m the molecular mass of
+    /// its mean molar mass, at the melt's temperature: the body's gravitational binding of the gas
+    /// over its thermal energy, dimensionless and positive.
+    pub jeans_parameter: f64,
+    /// Whether it is bound or an outflow, by [`jeans_parameter`](Self::jeans_parameter).
+    pub escape: VapourEscapeDto,
+}
 
 /// A body's surface section: its surface state and material, its surface conditions and climate
 /// regime, its global figures and the members whose tasks land later (design note 16; plan 14,
@@ -1211,16 +1247,18 @@ pub struct BodySurfaceDto {
     #[serde(default, skip_serializing_if = "Modelled::is_not_modelled")]
     #[ts(as = "Option<Option<BiosphereDto>>", optional)]
     pub biosphere: Modelled<BiosphereDto>,
-    /// The melt's own vapour, its silicate vapour (P14.T55.b); absent until that task, from
-    /// every server.
+    /// The melt's own vapour, its silicate vapour (P14.T55.b): absent from a server whose generator
+    /// does not model it, every one before generator version 35; from it `null` on a surface
+    /// holding no melt, and the vapour over melt (decision-backlog-2 §2.3).
     ///
     /// It is not part of the volatile air that `surface_pressure_pa` and `gases` hold: the
     /// melt's temperature sets it where melt lies, not a volatile inventory's weight over the
     /// globe. It applies where a surface holds melt, a fact on the wire: the state `magma_ocean`
     /// (P14.T53.b's `steam_envelope` is never a surface's: such a body has its envelope section)
-    /// and, from P14.T54.a, a `crust.melt_area_fraction` above 0. Elsewhere its absence says
-    /// nothing. From P14.T55.b it is `null` on a surface holding no melt, and the vapour over
-    /// melt (decision-backlog-2 §2.3).
+    /// and, from P14.T54.a, a `crust.melt_area_fraction` above 0. Where it is absent, its absence
+    /// says nothing elsewhere. Every surface holding melt is sent a value, which a console since
+    /// P14.T43.e reads as not none where it reads the surface as holding melt, so that the
+    /// volatiles' zero beside it is never read as clear of gas there.
     #[serde(default, skip_serializing_if = "Modelled::is_not_modelled")]
     #[ts(as = "Option<Option<SilicateVapourDto>>", optional)]
     pub silicate_vapour: Modelled<SilicateVapourDto>,
@@ -2490,6 +2528,7 @@ pub(crate) mod tests {
                 "taxonomic_class" => {
                     surface.taxonomic_class = modelled(value, || TaxonomicClassDto::V);
                 }
+                "silicate_vapour" => surface.silicate_vapour = modelled(value, lava_pool_vapour),
                 _ => surface.biosphere = modelled(value, biosphere),
             }
             surface
@@ -2503,6 +2542,7 @@ pub(crate) mod tests {
             ("modifiers", modifiers_json()),
             ("taxonomic_class", json!("v")),
             ("biosphere", biosphere_json()),
+            ("silicate_vapour", lava_pool_vapour_json()),
         ];
         // Absent: the Earth's own form has none of the keys.
         let absent = earth_surface_json();
@@ -2589,11 +2629,49 @@ pub(crate) mod tests {
         );
     }
 
-    /// P14.T35.f (decision-backlog-2 §2.3): the melt's own vapour is written with no key while it
-    /// is not modelled and a surface with no key reads it so, `null` round-trips as computed none,
-    /// and no value decodes until P14.T55.b gives its type members.
+    /// A lava world's dayside vapour at 2,500 K, bound, its species as P14.T55.b's model gives a
+    /// bulk silicate melt's (rounded).
+    fn lava_pool_vapour() -> SilicateVapourDto {
+        SilicateVapourDto {
+            melt_temperature_k: 2_500.0,
+            vapour_pressure_pa: 922.2,
+            species: vec![
+                GasShareDto {
+                    species: "Na".to_owned(),
+                    mole_fraction: 0.75,
+                },
+                GasShareDto {
+                    species: "O2".to_owned(),
+                    mole_fraction: 0.25,
+                },
+            ],
+            mean_molar_mass_g_per_mol: 25.24,
+            jeans_parameter: 326.4,
+            escape: VapourEscapeDto::Bound,
+        }
+    }
+
+    /// [`lava_pool_vapour`]'s wire form.
+    fn lava_pool_vapour_json() -> Value {
+        json!({
+            "melt_temperature_k": 2_500.0,
+            "vapour_pressure_pa": 922.2,
+            "species": [
+                { "species": "Na", "mole_fraction": 0.75 },
+                { "species": "O2", "mole_fraction": 0.25 },
+            ],
+            "mean_molar_mass_g_per_mol": 25.24,
+            "jeans_parameter": 326.4,
+            "escape": "bound",
+        })
+    }
+
+    /// P14.T35.f and P14.T55.b (decision-backlog-2 §2.3): the melt's own vapour is written with no
+    /// key while it is not modelled and a surface with no key reads it so, `null` round-trips as
+    /// computed none, and a value as its members, its escape a lower-case class (`bound`,
+    /// `outflow`); a value missing a member is refused.
     #[test]
-    fn the_melt_s_vapour_is_absent_or_null_and_holds_no_value_yet() {
+    fn the_melt_s_vapour_is_absent_null_or_its_members() {
         let absent = earth_surface_json();
         assert_eq!(earth_surface().silicate_vapour, Modelled::NotModelled);
         assert!(absent.get("silicate_vapour").is_none(), "{absent}");
@@ -2614,10 +2692,27 @@ pub(crate) mod tests {
         };
         assert_wire_form(&none, wire.clone());
 
-        wire["silicate_vapour"] = json!({ "Na": 1.0 });
+        let outflow = SilicateVapourDto {
+            jeans_parameter: 0.18,
+            escape: VapourEscapeDto::Outflow,
+            ..lava_pool_vapour()
+        };
+        let mut outflow_json = lava_pool_vapour_json();
+        outflow_json["jeans_parameter"] = json!(0.18);
+        outflow_json["escape"] = json!("outflow");
+        wire["silicate_vapour"] = outflow_json.clone();
+        let value = BodySurfaceDto {
+            silicate_vapour: Modelled::Value(outflow),
+            ..earth_surface()
+        };
+        assert_wire_form(&value, wire.clone());
+
+        let mut partial = outflow_json;
+        partial.as_object_mut().unwrap().remove("escape");
+        wire["silicate_vapour"] = partial;
         let error = serde_json::from_value::<BodySurfaceDto>(wire).unwrap_err();
         assert!(
-            error.to_string().contains("there are no variants"),
+            error.to_string().contains("missing field `escape`"),
             "unexpected error: {error}"
         );
     }

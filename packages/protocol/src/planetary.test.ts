@@ -8,6 +8,7 @@ import type { BodySummaryDto } from "./generated/BodySummaryDto";
 import type { ClientMessage } from "./generated/ClientMessage";
 import type { ResponseBody } from "./generated/ResponseBody";
 import type { SectionDto } from "./generated/SectionDto";
+import type { SilicateVapourDto } from "./generated/SilicateVapourDto";
 import { formatBodyId, parseBodyId } from "./hex";
 import { decodeServerMessage, encodeClientMessage } from "./index";
 import type { RequestKind, ResponseFor } from "./requests";
@@ -43,6 +44,30 @@ function envelopeOf(name: FixtureName): BodyEnvelopeDto {
     throw new Error(`the fixture's ${name} carries no envelope`);
   }
   return envelope.value;
+}
+
+/**
+ * The fixture's Earth's surface section decoded from a `body_detail` frame whose surface carries
+ * `silicate_vapour` as `vapour`.
+ */
+function surfaceWithVapour(vapour: SilicateVapourDto | null) {
+  const frame = fixture.body_detail_response;
+  const { record } = frame.body;
+  const text = JSON.stringify({
+    ...frame,
+    body: {
+      ...frame.body,
+      record: {
+        ...record,
+        surface: { ...record.surface, value: { ...record.surface.value, silicate_vapour: vapour } },
+      },
+    },
+  });
+  const message = decodeServerMessage(text);
+  if (message.type !== "response" || !isResponseOf(message.body, "body_detail")) {
+    throw new Error("the frame with the vapour is not a body_detail response");
+  }
+  return okValue(message.body.record.surface);
 }
 
 /** The value of a section that must be `ok`. */
@@ -295,37 +320,33 @@ describe("body_detail", () => {
     // A world locked 1:1 whose night lies below its lid's solidus melts its dayside at most, half
     // the surface (the sim's eyeball, `SurfaceConditions::cold_area`).
     expect(surface.crust?.melt_area_fraction).toBeLessThanOrEqual(0.5);
-    // Every server before P14.T55.b leaves the melt's own vapour out.
+    // Every server below generator version 35 (P14.T55.b) leaves the melt's own vapour out.
     expect("silicate_vapour" in surface).toBe(false);
   });
 
   it("reads a melt's own vapour absent as not modelled and null as none (P14.T35.f)", () => {
     const absent = okValue(response("body_detail_response", "body_detail").record.surface);
-    const frame = fixture.body_detail_response;
-    const { record } = frame.body;
-    const computedNone = {
-      ...frame,
-      body: {
-        ...frame.body,
-        record: {
-          ...record,
-          surface: { ...record.surface, value: { ...record.surface.value, silicate_vapour: null } },
-        },
-      },
-    };
-    const message = decodeServerMessage(JSON.stringify(computedNone));
-    if (message.type !== "response" || !isResponseOf(message.body, "body_detail")) {
-      throw new Error("the frame with the vapour computed as none is not a body_detail response");
-    }
-    const surface = okValue(message.body.record.surface);
-    // The binding admits no value until P14.T55.b gives the vapour its members: this line stops
-    // compiling if the type does.
-    const vapour: null | undefined = surface.silicate_vapour;
+    const none = surfaceWithVapour(null);
 
     expect(absent.silicate_vapour).toBeUndefined();
-    expect("silicate_vapour" in surface).toBe(true);
-    expect(surface.silicate_vapour).toBeNull();
-    expect(vapour).toBeNull();
+    expect("silicate_vapour" in none).toBe(true);
+    expect(none.silicate_vapour).toBeNull();
+  });
+
+  it("reads a melt's own vapour sent as a value by its members (P14.T55.b)", () => {
+    const vapour: SilicateVapourDto = {
+      melt_temperature_k: 1684.4,
+      vapour_pressure_pa: 1.28,
+      species: [
+        { species: "Na", mole_fraction: 0.79 },
+        { species: "O2", mole_fraction: 0.21 },
+      ],
+      mean_molar_mass_g_per_mol: 24.9,
+      jeans_parameter: 0.18,
+      escape: "outflow",
+    };
+
+    expect(surfaceWithVapour(vapour).silicate_vapour).toEqual(vapour);
   });
 
   it("decodes a Jupiter's envelope, its surface not applicable, at the generator's values (P14.T35.e, P14.T54.b.i)", () => {

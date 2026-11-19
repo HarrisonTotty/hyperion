@@ -30,6 +30,7 @@ import type {
   HabitabilityLimit,
   Section,
   SurfaceState,
+  VapourEscape,
 } from "./model";
 
 /** A section that stands in place of its values: withheld, or not computed. */
@@ -278,6 +279,23 @@ export function redoxClassLabel(redox: RedoxClassDto): string {
       break;
     case "oxidised":
       label = "OXIDISED";
+      break;
+  }
+  return label;
+}
+
+/**
+ * Whether a melt's own vapour is held by its body or streams off it (plan 14, P14.T55.b, read by
+ * the `VAPOUR ESCAPE` row), in words: `BOUND`, `OUTFLOW`.
+ */
+export function vapourEscapeLabel(escape: VapourEscape): string {
+  let label: string;
+  switch (escape) {
+    case "bound":
+      label = "BOUND";
+      break;
+    case "outflow":
+      label = "OUTFLOW";
       break;
   }
   return label;

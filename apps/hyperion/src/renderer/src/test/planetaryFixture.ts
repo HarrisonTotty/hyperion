@@ -21,6 +21,7 @@ import {
   type ResponseBody,
   type ResponseFor,
   type ResourceAbundancesDto,
+  type SilicateVapourDto,
   type SurfaceStateDto,
 } from "@hyperion/protocol";
 
@@ -225,9 +226,26 @@ export function hotJupiterDetail(): ResponseFor<"body_detail"> {
 }
 
 /**
+ * `e101`'s silicate vapour as a server of generator version 35 sends it (P14.T55.b): an outflow of
+ * Na and O2 at 1.28 Pa over its melt at 1,684.4 K, λ 0.18, for the tests of a vapour sent as a
+ * value.
+ */
+export const E101_VAPOUR: SilicateVapourDto = {
+  melt_temperature_k: 1684.4,
+  vapour_pressure_pa: 1.28,
+  species: [
+    { species: "Na", mole_fraction: 0.79 },
+    { species: "O2", mole_fraction: 0.21 },
+  ],
+  mean_molar_mass_g_per_mol: 24.9,
+  jeans_parameter: 0.18,
+  escape: "outflow",
+};
+
+/**
  * A locked lava world inside the slice's Earth at the `full` level (P14.T54.a): `airless`, with no
  * volatile air, its crust as the server sends one whose melt area, its dayside pool, is above 0,
- * and no `silicate_vapour` key, as every server sends it before P14.T55.b.
+ * and no `silicate_vapour` key, as every server sends it below generator version 35 (P14.T55.b).
  */
 export function lavaWorldDetail(): ResponseFor<"body_detail"> {
   return response("body_detail_lava_world", "body_detail");

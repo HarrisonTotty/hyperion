@@ -1256,6 +1256,30 @@ fn write_surface(w: &mut GoldenWriter, surface: &Surface) {
         }
         w.f64("area_fraction", entry.area_fraction());
     }
+    // P14.T55.b's, from generator version 35: written only where the record holds it, so that no
+    // golden of 33 or 34 gains a line.
+    if let Modelled::Ok(Some(vapour)) = surface.silicate_vapour() {
+        w.f64(
+            "vapour_melt_temperature_k",
+            vapour.melt_temperature().value(),
+        );
+        w.f64("vapour_pressure_pa", vapour.pressure().value());
+        for &(species, x) in vapour.species() {
+            w.f64(
+                &format!(
+                    "vapour_mole_fraction {}",
+                    species.substance().key().as_str()
+                ),
+                x,
+            );
+        }
+        w.f64(
+            "vapour_mean_molar_mass_g_per_mol",
+            vapour.mean_molar_mass_g_per_mol(),
+        );
+        w.f64("vapour_jeans_parameter", vapour.jeans_parameter());
+        w.line(&format!("vapour_escape: {:?}", vapour.escape()));
+    }
     let Modelled::Ok(crust) = surface.crust() else {
         w.line("crust: not modelled");
         return;
@@ -1278,6 +1302,15 @@ fn write_surface(w: &mut GoldenWriter, surface: &Surface) {
     match crust.peak_central_temperature() {
         Some(peak) => w.f64("peak_central_temperature_k", peak.value()),
         None => w.line("peak_central_temperature_k: none"),
+    }
+    // P14.T55.b's active lava, from generator version 35, likewise.
+    if let Some(lava) = crust.active_lava() {
+        w.f64("starlit_melt_fraction", crust.starlit_melt_fraction());
+        w.f64("active_lava_share", lava.share());
+        w.f64(
+            "eruption_temperature_k",
+            lava.eruption_temperature().value(),
+        );
     }
 }
 

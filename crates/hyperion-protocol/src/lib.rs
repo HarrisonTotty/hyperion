@@ -113,8 +113,8 @@ pub use planetary::{
     RingMaterialDto, SectionDto, SilicateVapourDto, SizeDistributionDto, SpinResonanceDto,
     StormBandDto, SubstanceAreaDto, SubstancePhaseDto, SubsurfaceOceanDto, SurfaceCondensateDto,
     SurfaceMaterialDto, SurfaceModifiersDto, SurfaceStateDto, SystemBodiesDto, SystemBodiesRequest,
-    SystemPlaneDto, TaxonomicClassDto, TectonicRegimeDto, ThermalRegimeDto, VerticalStructureDto,
-    WetEpochDto, ZoneDto,
+    SystemPlaneDto, TaxonomicClassDto, TectonicRegimeDto, ThermalRegimeDto, VapourEscapeDto,
+    VerticalStructureDto, WetEpochDto, ZoneDto,
 };
 pub use primitives::{
     BodyIdHex, DetailSeedHex, EventIdHex, FeatureIdHex, GalacticPosition, ParseBodyIdHexError,

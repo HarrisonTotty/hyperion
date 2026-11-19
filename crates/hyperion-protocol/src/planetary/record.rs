@@ -31,7 +31,8 @@ pub use surface::{
     OceanFloorDto, ProfileNodeDto, RadiationClassDto, RedoxClassDto, SilicateVapourDto,
     SizeDistributionDto, SubstanceAreaDto, SubstancePhaseDto, SubsurfaceOceanDto,
     SurfaceCondensateDto, SurfaceMaterialDto, SurfaceModifiersDto, SurfaceStateDto,
-    TaxonomicClassDto, TectonicRegimeDto, ThermalRegimeDto, VerticalStructureDto, WetEpochDto,
+    TaxonomicClassDto, TectonicRegimeDto, ThermalRegimeDto, VapourEscapeDto, VerticalStructureDto,
+    WetEpochDto,
 };
 
 use crate::modelled::Modelled;

@@ -16,6 +16,7 @@ import type {
   ResourceAbundancesDto,
   ResponseFor,
   SectionDto,
+  SilicateVapourDto,
   SubsurfaceOceanDto,
   SurfaceCondensateDto,
   SurfaceModifiersDto,
@@ -36,6 +37,7 @@ import {
   earthUnderASupercriticalEnvelope,
   earthWithHooks,
   FIXTURE_EARTH,
+  E101_VAPOUR,
   FIXTURE_RING_NORMAL,
   FIXTURE_SYSTEM,
   hotJupiterDetail,
@@ -1189,17 +1191,47 @@ describe("the surface section and the gas envelope (P14.T35.e)", () => {
     );
   });
 
-  it("reads a newer server's silicate vapour as a value, never as a fault", () => {
-    const result = earthWithSurface({
-      ...earthSurface(),
-      // @ts-expect-error -- SilicateVapourDto has no members until P14.T55.b, and a newer server's value must still read.
-      silicate_vapour: { vapour_pressure_pa: 10 },
-    });
+  it("reads a melt's silicate vapour by its members (P14.T55.b)", () => {
+    const result = earthWithSurface({ ...earthSurface(), silicate_vapour: E101_VAPOUR });
 
-    expect(result.kind).toBe("ok");
     expect(okSection(recordOf(result).surface).silicateVapour).toEqual({
       kind: "value",
-      value: { vapour_pressure_pa: 10 },
+      value: {
+        meltTemperatureK: 1684.4,
+        vapourPressurePa: 1.28,
+        species: [
+          { species: "Na", moleFraction: 0.79 },
+          { species: "O2", moleFraction: 0.21 },
+        ],
+        meanMolarMassGPerMol: 24.9,
+        jeansParameter: 0.18,
+        escape: "outflow",
+      },
+    });
+  });
+
+  it.each<readonly [string, SilicateVapourDto, string]>([
+    ["no pressure", { ...E101_VAPOUR, vapour_pressure_pa: 0 }, "silicate vapour unusable"],
+    [
+      "a temperature not a number",
+      { ...E101_VAPOUR, melt_temperature_k: Number.NaN },
+      "silicate vapour unusable",
+    ],
+    [
+      "a negative Jeans parameter",
+      { ...E101_VAPOUR, jeans_parameter: -1 },
+      "silicate vapour unusable",
+    ],
+    ["no species", { ...E101_VAPOUR, species: [] }, "silicate vapour unusable"],
+    [
+      "species summing to a half",
+      { ...E101_VAPOUR, species: [{ species: "Na", mole_fraction: 0.5 }] },
+      "silicate vapour species unusable",
+    ],
+  ])("refuses a silicate vapour with %s", (_, vapour, fault) => {
+    expect(earthWithSurface({ ...earthSurface(), silicate_vapour: vapour })).toEqual({
+      kind: "fault",
+      fault,
     });
   });
 

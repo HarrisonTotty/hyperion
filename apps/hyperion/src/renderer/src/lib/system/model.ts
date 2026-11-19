@@ -988,14 +988,31 @@ export interface Biosphere {
 }
 
 /**
- * The vapour a surface's melt evaporates over it, its silicate vapour (the protocol's
- * `SilicateVapourDto`, on the wire by plan 14's P14.T35.f): uninhabited, as the wire's type is.
- *
- * @remarks
- * Its members are P14.T55.b's, which gives this type them; until then it has no value, and the
- * client reads none of a newer server's figures.
+ * Whether a melt's vapour is held by its body's gravity or streams off it (the protocol's
+ * `VapourEscapeDto`, plan 14's P14.T55.b), by its Jeans parameter against the critical value of a
+ * thermally driven escape: a closed class.
  */
-export type SilicateVapour = never;
+export type VapourEscape = "bound" | "outflow";
+
+/**
+ * The vapour a surface's melt evaporates over it, its silicate vapour (the protocol's
+ * `SilicateVapourDto`, plan 14's P14.T55.b): the rock-forming species over the melt at its warmest
+ * temperature, a starlit melt's warmest climate or a volcanic lid's eruption temperature.
+ */
+export interface SilicateVapour {
+  /** The melt's temperature the vapour is computed at, K, positive. */
+  readonly meltTemperatureK: number;
+  /** The vapour's pressure over the melt at that temperature, Pa, positive. */
+  readonly vapourPressurePa: number;
+  /** Its species by mole fraction, largest first, summing to 1. */
+  readonly species: ReadonlyArray<GasShare>;
+  /** The species' mean molar mass, g mol⁻¹, positive. */
+  readonly meanMolarMassGPerMol: number;
+  /** Its Jeans parameter at the body's surface, dimensionless and positive. */
+  readonly jeansParameter: number;
+  /** Whether it is bound or an outflow, by its Jeans parameter. */
+  readonly escape: VapourEscape;
+}
 
 /**
  * A surface state as the display reads it: the wire's, or `unknown` for one this build does not
@@ -1088,8 +1105,8 @@ export interface BodySurface {
    * {@link BodySurface.surfacePressurePa} and {@link BodySurface.gases}.
    *
    * @remarks
-   * Not modelled from every server until P14.T55.b; from then, `none` on a surface computed to hold
-   * no melt, and a value over melt, whose members this client does not read yet.
+   * Not modelled from every server whose generator predates version 35; from it (P14.T55.b),
+   * `none` on a surface computed to hold no melt, and the vapour over melt.
    */
   readonly silicateVapour: Modelled<SilicateVapour>;
 }

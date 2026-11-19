@@ -32,6 +32,7 @@ import {
   earthMassAndOrbit,
   earthUnderASupercriticalEnvelope,
   earthWithHooks,
+  E101_VAPOUR,
   FIXTURE_DETAIL_SEED,
   FIXTURE_EARTH,
   FIXTURE_JUPITER,
@@ -929,7 +930,31 @@ describe("SystemView's body readout", () => {
     expect(terms("SILICATE VAPOUR")).toHaveLength(0);
   });
 
-  it("reads a melt's empty air as the em dash beside a newer server's silicate vapour, with no row", async () => {
+  it("reads e101's silicate vapour by its pressure and its escape, its empty volatile air NONE (P14.T55.b)", async () => {
+    const { user, socket } = renderView();
+    await answer(socket);
+    await selectRow(user, /\/768/);
+    await answerDetail(
+      socket,
+      e101Earth((surface): BodySurfaceDto => ({ ...surface, silicate_vapour: E101_VAPOUR })),
+    );
+
+    expect(reading("SURFACE PRESSURE")).toBe("NONE");
+    expect(reading("MOLE FRACTION")).toBe("NONE");
+    expect(terms("SILICATE VAPOUR")).toHaveLength(1);
+    expect(reading("SILICATE VAPOUR")).toBe("1.28 Pa · AT 1684 K");
+    expect(reading("VAPOUR ESCAPE")).toBe("OUTFLOW");
+    expect(rowsBetween("SURFACE", "CRUST").map(([label]) => label)).toEqual([
+      "SURFACE",
+      "T SURF",
+      "SURFACE PRESSURE",
+      "MOLE FRACTION",
+      "SILICATE VAPOUR",
+      "VAPOUR ESCAPE",
+    ]);
+  });
+
+  it("reads a magma ocean's steam air by its figures, beside its bound silicate vapour", async () => {
     const { user, socket } = renderView();
     await answer(socket);
     await selectRow(user, /\/768/);
@@ -937,14 +962,24 @@ describe("SystemView's body readout", () => {
       socket,
       e101Earth((surface): BodySurfaceDto => ({
         ...surface,
-        // @ts-expect-error -- SilicateVapourDto has no members until P14.T55.b, and a newer server's value must still read.
-        silicate_vapour: { vapour_pressure_pa: 10 },
+        surface_pressure_pa: 2.5e7,
+        gases: [
+          { species: "H2O", mole_fraction: 0.75 },
+          { species: "CO2", mole_fraction: 0.25 },
+        ],
+        silicate_vapour: {
+          ...E101_VAPOUR,
+          melt_temperature_k: 3000,
+          vapour_pressure_pa: 1.81e4,
+          jeans_parameter: 323,
+          escape: "bound",
+        },
       })),
     );
 
-    expect(reading("SURFACE PRESSURE")).toBe("—");
-    expect(reading("MOLE FRACTION")).toBe("—");
-    expect(terms("SILICATE VAPOUR")).toHaveLength(0);
+    expect(reading("SURFACE PRESSURE")).toBe("25.0 MPa");
+    expect(reading("SILICATE VAPOUR")).toBe("18.1 kPa · AT 3000 K");
+    expect(reading("VAPOUR ESCAPE")).toBe("BOUND");
   });
 
   it("shows no SILICATE VAPOUR row for a temperate world", async () => {
@@ -1008,6 +1043,22 @@ describe("SystemView's body readout", () => {
     expect(reading("EXOSPHERE")).toBe("NOT YET MODELLED");
     expect(terms("SILICATE VAPOUR")).toHaveLength(1);
     expect(reading("SILICATE VAPOUR")).toBe("NOT YET MODELLED");
+  });
+
+  it("reads a lava world's vapour over its dayside pool beside its exosphere NOT YET MODELLED", async () => {
+    const { user, socket } = renderView();
+    await answer(socket);
+    await selectRow(user, /\/768/);
+    await answerDetail(
+      socket,
+      earthWithSurface(() => ({ ...surfaceOf(lavaWorldDetail()), silicate_vapour: E101_VAPOUR })),
+    );
+
+    expect(reading("SURFACE PRESSURE")).toBe("NONE");
+    expect(reading("MOLE FRACTION")).toBe("NONE");
+    expect(reading("EXOSPHERE")).toBe("NOT YET MODELLED");
+    expect(reading("SILICATE VAPOUR")).toBe("1.28 Pa · AT 1684 K");
+    expect(reading("VAPOUR ESCAPE")).toBe("OUTFLOW");
   });
 
   it("reads a lava world's empty air as NONE where its silicate vapour is computed as none", async () => {

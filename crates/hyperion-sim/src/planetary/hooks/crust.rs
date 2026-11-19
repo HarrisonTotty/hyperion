@@ -114,6 +114,21 @@
 //! with the wire's `silicate_vapour` rule. Rendering plan R09.T13.c applies each cell's own
 //! entry's solidus.
 //!
+//! From generator version 35 (P14.T55.b, behind its hold,
+//! [`SILICATE_VAPOUR_VERSION`](crate::planetary::chem::silicate_vapour::SILICATE_VAPOUR_VERSION))
+//! a tidally volcanic lid of a silicate melt adds its active lava ([`ActiveLava`]): the share its
+//! volcanic
+//! power keeps at its eruption temperature, `f_v` F ÷ (σ `T_e`⁴), the lava radiating as a black
+//! body (ε = 1, as Davies et al. 2024 fit Io's hot spots, Planet. Sci. J. 5, 121, Eq. 1), F the
+//! surface heat flow, `f_v` the share of it the volcanoes radiate ([`VOLCANIC_POWER_SHARE`]) and
+//! `T_e` the lid's eruption temperature ([`CrustLithology::eruption_temperature`]). It is an upper
+//! bound on the area at `T_e`, since that area radiates no more than the power. It joins the
+//! starlit share as an area apart from it, f = `f_s` + (1 − `f_s`) `f_a`. Io's comes out 3.5 ×
+//! 10⁻⁶ at 2.5 W m⁻²: decision-pre-23-review item 10's 2 × 10⁻⁵ to 2 × 10⁻⁴ is Io's volcanic power
+//! over σT⁴ at 600–1,070 K, its cooling crust's, below the solidus (plan 14's records, P14.T55.b).
+//! The eruption temperatures are leans (2026-11-19): Keszthelyi et al.'s 1,340 °C is a lower limit
+//! on Io's, and a felsic lava, `granite`'s, erupts cooler than the basaltic figure it takes.
+//!
 //! # In stages
 //!
 //! The derivation runs in three stages, each a pure function, so that the passes can read the lid
@@ -145,7 +160,8 @@
 //! - **minor crust substances**: salts, NH₃ hydrate and clathrate, which the crust's members carry
 //!   no list for;
 //! - **an eruption temperature**: no rule states one, and the melt area reads starlight alone, so
-//!   Io's internally heated lava gives it none.
+//!   Io's internally heated lava gives it none; below generator version 35 alone, whose
+//!   [`ActiveLava`] states one (above).
 //!
 //! # On the record
 //!
@@ -186,6 +202,7 @@ use crate::id::BodyId;
 use crate::math;
 use crate::planetary::chem::envelope_abundances::ALPHA_ELEMENTS;
 use crate::planetary::chem::redox::{RedoxClass, fmq_above_iw};
+use crate::planetary::chem::silicate_vapour::SilicateVapourRules;
 use crate::planetary::chem::solar_magnesium_to_silicon;
 use crate::planetary::derive::atmosphere::{Gas, SurfaceState};
 use crate::planetary::derive::rocky::CoreShareShift;
@@ -197,7 +214,10 @@ use crate::planetary::hooks::figures::{Birthplace, Crust};
 use crate::planetary::hooks::surface::{SurfaceConditions, ZonalInsolation};
 use crate::rng::{ObjectKey, Stream, tags};
 use crate::substance::{Element, PhaseDiagram, SubstanceId};
-use crate::units::{Dex, EarthMasses, Kelvin, Kilograms, Megayears, Metres, Years};
+use crate::units::consts::STEFAN_BOLTZMANN;
+use crate::units::{
+    Dex, EarthMasses, Kelvin, Kilograms, Megayears, Metres, WattsPerSquareMetre, Years,
+};
 
 /// A lithology the crust can name: a registry row with condensed columns ([module](self)'s closed
 /// set).
@@ -334,6 +354,40 @@ impl CrustLithology {
         first_melt(self.substance())
     }
 
+    /// The temperature its lava erupts at, its active lava's (P14.T55.b; [`ActiveLava`]):
+    /// [`ULTRAMAFIC_ERUPTION_TEMPERATURE`] for `komatiite` and `ultramafic`, and
+    /// [`BASALTIC_ERUPTION_TEMPERATURE`] for every other, each held at least at its row's
+    /// [`transition`](Self::transition), so that the lava lies above its solidus. An ice's is its
+    /// transition, which no active lava reads: its melt area is 0.
+    #[must_use]
+    pub fn eruption_temperature(self) -> Kelvin {
+        let lava = match self {
+            Self::Komatiite | Self::Ultramafic => ULTRAMAFIC_ERUPTION_TEMPERATURE,
+            Self::Water => return self.transition(),
+            Self::Graphite
+            | Self::Feldspathic
+            | Self::Basalt
+            | Self::IronRichBasalt
+            | Self::ReducedBasalt
+            | Self::Granite
+            | Self::Phyllosilicate
+            | Self::ChondriteCi
+            | Self::ChondriteCm
+            | Self::ChondriteCv
+            | Self::ChondriteH
+            | Self::ChondriteL
+            | Self::ChondriteLl
+            | Self::ChondriteE
+            | Self::Cometary => BASALTIC_ERUPTION_TEMPERATURE,
+        };
+        let solidus = self.transition();
+        if solidus.value() > lava.value() {
+            solidus
+        } else {
+            lava
+        }
+    }
+
     /// The lithology whose registry key is `key`; `None` for a key outside the closed set.
     ///
     /// # Examples
@@ -349,6 +403,18 @@ impl CrustLithology {
         Self::ALL
             .into_iter()
             .find(|lithology| lithology.key() == key)
+    }
+
+    /// Whether its row holds a silicate melt's record (`substance::liquid`'s melt rows), whose lava
+    /// a volcanic lid erupts (P14.T55.b): not an ice, a chondrite, `cometary`, `phyllosilicate` or
+    /// `graphite`, whose first melt is a condensate's or another row's.
+    #[must_use]
+    fn holds_a_silicate_melt(self) -> bool {
+        self.substance()
+            .substance()
+            .liquid()
+            .and_then(crate::substance::liquid::LiquidColumns::melt_oxides)
+            .is_some()
     }
 
     /// Whether it is an ice, whose liquid is a condensate and not a melt of the crust
@@ -380,12 +446,29 @@ impl CrustLithology {
 }
 
 /// What the crust does not model, a closed set ([module](self)'s "Not modelled"), each with its
-/// reason there.
+/// reason there; its third below generator version 35 alone, whose bump deletes it (P14.T55.b's
+/// hold, [`SILICATE_VAPOUR_VERSION`](crate::planetary::chem::silicate_vapour::SILICATE_VAPOUR_VERSION)).
 pub const NOT_MODELLED: [&str; 3] = [
     "a silica-rich secondary crust",
     "minor crust substances",
     "an eruption temperature",
 ];
+
+/// The share of a volcanic lid's heat flow its volcanoes radiate: 0.54, Io's (Veeder et al. 2015,
+/// Icarus 245, 379, abstract, read: its known hot spots, undetected dark paterae and outbursts
+/// "can account for only ∼56.2 × 10¹² W (or ∼54%) of Io's total heat flow"), held for every
+/// tidally volcanic lid (a lean, 2026-11-19), from generator version 35 ([`ActiveLava`]).
+pub const VOLCANIC_POWER_SHARE: f64 = 0.54;
+
+/// An ultramafic lava's eruption temperature: 1,613.15 K (1,340 °C), Io's ("The highest lower
+/// limit on eruption temperatures on Io is now ∼1340 °C", Keszthelyi et al. 2007, Icarus 192, 491,
+/// §6, read), a `komatiite` or `ultramafic` lid's ([`CrustLithology::eruption_temperature`]).
+pub const ULTRAMAFIC_ERUPTION_TEMPERATURE: Kelvin = Kelvin::new(1_613.15);
+
+/// A basaltic lava's eruption temperature: 1,473.15 K (1,200 °C, "∼1200 °C typical of terrestrial
+/// basalts", Keszthelyi et al. 2007, §1, after McEwen et al. 1998), every other silicate lid's,
+/// held at least at its solidus ([`CrustLithology::eruption_temperature`]).
+pub const BASALTIC_ERUPTION_TEMPERATURE: Kelvin = Kelvin::new(1_473.15);
 
 /// The index of `nh3_h2o`, the ammonia–water solution, whose eutectic is an ammoniated ice's
 /// melting point; the module's tests hold it against its key.
@@ -1075,6 +1158,9 @@ pub struct CrustCompositionInputs<'a> {
     pub formation_temperature: Kelvin,
     /// Its surface conditions (P14.T24.a), for the melt area and the warmest temperature.
     pub surface: &'a SurfaceConditions,
+    /// Its surface heat flow F, P14.T24.b's `GlobalFigures::heat_flow`, W m⁻², finite and at least
+    /// 0, which a volcanic lid's active lava reads from generator version 35 ([`ActiveLava`]).
+    pub heat_flow: WattsPerSquareMetre,
 }
 
 /// An input that must be finite ([`DeriveCrustError::NotFinite`]).
@@ -1094,6 +1180,8 @@ pub enum CrustInput {
     Volcanism,
     /// [`CrustCompositionInputs::continental_fraction`].
     ContinentalFraction,
+    /// [`CrustCompositionInputs::heat_flow`].
+    HeatFlow,
 }
 
 impl CrustInput {
@@ -1108,6 +1196,7 @@ impl CrustInput {
             Self::MoltenUntil => "molten_until",
             Self::Volcanism => "volcanism",
             Self::ContinentalFraction => "continental_fraction",
+            Self::HeatFlow => "heat_flow",
         }
     }
 }
@@ -1149,6 +1238,8 @@ pub enum DeriveCrustError {
     VolcanismNegative(f64),
     /// The continental fraction lay outside [0, 1].
     ContinentalFractionOutsideUnit(f64),
+    /// The surface heat flow was negative.
+    HeatFlowNegative(WattsPerSquareMetre),
 }
 
 impl fmt::Display for DeriveCrustError {
@@ -1193,6 +1284,9 @@ impl fmt::Display for DeriveCrustError {
             Self::ContinentalFractionOutsideUnit(f_c) => {
                 write!(f, "continental fraction {f_c} lies outside [0, 1]")
             }
+            Self::HeatFlowNegative(q) => {
+                write!(f, "heat flow {} W m⁻² is negative", q.value())
+            }
         }
     }
 }
@@ -1218,8 +1312,63 @@ pub struct CrustComposition {
     redox: RedoxClass,
     mantle_delta_iw: Dex,
     melt_area_fraction: f64,
+    starlit_melt_fraction: f64,
+    active_lava: Option<ActiveLava>,
     thermal_history: ThermalHistory,
     peak_central_temperature: Option<Kelvin>,
+}
+
+/// A volcanic lid's active lava (P14.T55.b, from generator version 35; the [module](self)'s "The
+/// melt area"): the share of the surface its volcanic power keeps at its eruption temperature,
+/// part of its melt area.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ActiveLava {
+    share: f64,
+    eruption_temperature: Kelvin,
+}
+
+impl ActiveLava {
+    /// The active lava of a lid of lithology `lithology` under the surface heat flow `heat_flow`,
+    /// finite and at least 0 (`validate_record`'s): `f_v` F ÷ (σ `T_e`⁴), held to at most 1;
+    /// `None` for a heat flow of 0.
+    #[must_use]
+    fn of(lithology: CrustLithology, heat_flow: WattsPerSquareMetre) -> Option<Self> {
+        let eruption_temperature = lithology.eruption_temperature();
+        let share = VOLCANIC_POWER_SHARE * heat_flow.value()
+            / (STEFAN_BOLTZMANN * math::powi(eruption_temperature.value(), 4));
+        if share <= 0.0 {
+            return None;
+        }
+        let share = if share > 1.0 { 1.0 } else { share };
+        Some(Self {
+            share,
+            eruption_temperature,
+        })
+    }
+
+    /// The share of the surface it covers, in (0, 1].
+    #[must_use]
+    pub const fn share(&self) -> f64 {
+        self.share
+    }
+
+    /// The temperature it erupts at, K: its lid's
+    /// [`eruption_temperature`](CrustLithology::eruption_temperature).
+    #[must_use]
+    pub const fn eruption_temperature(&self) -> Kelvin {
+        self.eruption_temperature
+    }
+}
+
+/// A record's melt area by its parts ([`melt_area`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct MeltArea {
+    /// The whole share above the solidus, 0 to 1.
+    total: f64,
+    /// The starlit share, 0 to 1.
+    starlit: f64,
+    /// The active lava, where a volcanic lid has some from generator version 35.
+    active: Option<ActiveLava>,
 }
 
 /// A body's crusts before its lid, as the rules give them at a climate; a melted body's tertiary
@@ -1252,7 +1401,7 @@ impl CrustComposition {
     /// the gas-envelope state; a radius, mass, age, temperature or Mg/Si that is not finite and
     /// positive; mass fractions that do not lie in [0, 1] and sum to 1; a formation time outside
     /// [0, the age]; any other input not finite; a surface age outside [0, the age]; a negative
-    /// volcanism level; and a continental fraction outside [0, 1].
+    /// volcanism level; a continental fraction outside [0, 1]; and a negative heat flow.
     ///
     /// # Examples
     ///
@@ -1334,6 +1483,7 @@ impl CrustComposition {
     ///     state: derived.atmosphere().state(),
     ///     formation_temperature: derived.equilibrium_temperature(),
     ///     surface: &conditions,
+    ///     heat_flow: WattsPerSquareMetre::new(0.0925),
     /// };
     /// let crust = CrustComposition::derive(&inputs)?;
     /// assert_eq!(crust.lid(), LidCrust::Secondary);
@@ -1382,6 +1532,7 @@ impl CrustComposition {
             } if lid.lid == LidCrust::Primary && record.volcanism > 0.0 => secondary,
             Crusts::Bulk(_) | Crusts::Shell(_) | Crusts::Melted { .. } => lid.lithology,
         };
+        let melt = melt_area(lid, record);
         Ok(Self {
             primary: primary.map(CrustLithology::substance),
             secondary: secondary.map(CrustLithology::substance),
@@ -1391,7 +1542,9 @@ impl CrustComposition {
             provinces: provinces.substance(),
             redox: lid.redox,
             mantle_delta_iw: lid.delta_iw,
-            melt_area_fraction: melt_area(lid.state, record, lid.lithology),
+            melt_area_fraction: melt.total,
+            starlit_melt_fraction: melt.starlit,
+            active_lava: melt.active,
             thermal_history: lid.thermal_history,
             peak_central_temperature: lid.peak,
         })
@@ -1472,10 +1625,28 @@ impl CrustComposition {
     }
 
     /// The share of the surface above a silicate lid's solidus, 0 to 1; 0 for an ice lid, whose
-    /// liquid is a condensate, outside the `MagmaOcean` state, which takes 1.
+    /// liquid is a condensate, outside the `MagmaOcean` state, which takes 1. From generator
+    /// version 35 it holds a volcanic lid's active lava ([`active_lava`](Self::active_lava)) beside
+    /// its starlit share ([`starlit_melt_fraction`](Self::starlit_melt_fraction)).
     #[must_use]
     pub const fn melt_area_fraction(&self) -> f64 {
         self.melt_area_fraction
+    }
+
+    /// The share of the surface its starlight keeps above its lid's solidus, `f_s`, 0 to 1: the
+    /// [`melt_area_fraction`](Self::melt_area_fraction) less the active lava's addition beside it,
+    /// (1 − `f_s`) `f_a` ([module](self)'s "The melt area"), all of it below generator version 35
+    /// and where the lid has no active lava.
+    #[must_use]
+    pub const fn starlit_melt_fraction(&self) -> f64 {
+        self.starlit_melt_fraction
+    }
+
+    /// A volcanic lid's active lava (P14.T55.b), from generator version 35: `None` below it, for a
+    /// lid with no tidal volcanism, for an ice lid and where its heat flow keeps none.
+    #[must_use]
+    pub const fn active_lava(&self) -> Option<ActiveLava> {
+        self.active_lava
     }
 
     /// What its thermal history melted, and why.
@@ -1521,6 +1692,7 @@ fn validate(inputs: &CrustCompositionInputs<'_>) -> Result<(), DeriveCrustError>
         ),
         (inputs.volcanism, CrustInput::Volcanism),
         (inputs.continental_fraction, CrustInput::ContinentalFraction),
+        (inputs.heat_flow.value(), CrustInput::HeatFlow),
     ];
     if let Some((_, input)) = finite.into_iter().find(|(x, _)| !x.is_finite()) {
         return Err(DeriveCrustError::NotFinite(input));
@@ -1674,6 +1846,9 @@ pub(crate) struct CrustRecord<'a> {
     pub(crate) continental_fraction: f64,
     /// Its surface conditions, for the melt area.
     pub(crate) surface: &'a SurfaceConditions,
+    /// Its surface heat flow F ([`CrustCompositionInputs::heat_flow`]), for a volcanic lid's
+    /// active lava from generator version 35.
+    pub(crate) heat_flow: WattsPerSquareMetre,
     /// The body's insolation table, of its conditions' obliquity, where its caller holds one: the
     /// melt area's cold profile reads it, the same bits as the conditions' own (lever (h),
     /// [`SurfaceConditions::cold_area_over`]).
@@ -1688,6 +1863,7 @@ impl<'a> CrustRecord<'a> {
             volcanism: inputs.volcanism,
             continental_fraction: inputs.continental_fraction,
             surface: inputs.surface,
+            heat_flow: inputs.heat_flow,
             table: None,
         }
     }
@@ -1793,6 +1969,7 @@ impl CrustBasis {
             thermal_history,
             peak,
             state: at.state,
+            tidal: at.tidal,
         })
     }
 
@@ -1820,6 +1997,8 @@ pub(crate) struct CrustLid {
     thermal_history: ThermalHistory,
     peak: Option<Kelvin>,
     state: SurfaceState,
+    /// Whether the pass's tide makes the body volcanic, which its active lava reads.
+    tidal: TidalVolcanism,
 }
 
 impl CrustLid {
@@ -1948,6 +2127,7 @@ fn validate_record(record: &CrustRecord<'_>) -> Result<(), DeriveCrustError> {
     let finite = [
         (record.volcanism, CrustInput::Volcanism),
         (record.continental_fraction, CrustInput::ContinentalFraction),
+        (record.heat_flow.value(), CrustInput::HeatFlow),
     ];
     if let Some((_, input)) = finite.into_iter().find(|(x, _)| !x.is_finite()) {
         return Err(DeriveCrustError::NotFinite(input));
@@ -1959,6 +2139,9 @@ fn validate_record(record: &CrustRecord<'_>) -> Result<(), DeriveCrustError> {
         return Err(DeriveCrustError::ContinentalFractionOutsideUnit(
             record.continental_fraction,
         ));
+    }
+    if record.heat_flow.value() < 0.0 {
+        return Err(DeriveCrustError::HeatFlowNegative(record.heat_flow));
     }
     Ok(())
 }
@@ -2183,13 +2366,35 @@ fn lid_of(
     }
 }
 
-/// The share of the record's surface above the solidus of `lid` ([module](self)'s "The melt
-/// area"), in [0, 1], in the state `state`: 1 in the `MagmaOcean` state, and otherwise 0 for an
-/// ice lid, whose liquid is a condensate. Its cold area reads the record's insolation table where
-/// it holds one, the same bits: the record built 162 of the 568 tables of the first 20 sample
-/// systems' snapshots for its melt area alone (bless-note-23 §4; decision-24-cost D5's lever).
+/// The record's melt area under the lid `lid` ([module](self)'s "The melt area"): its starlit
+/// share above the lid's solidus ([`starlit_melt_area`]), and from generator version 35 the active
+/// lava beside it of a tidally volcanic lid whose row holds a silicate melt's record (not an ice,
+/// a chondrite, `cometary`, `phyllosilicate` or `graphite`), f = `f_s` + (1 − `f_s`) `f_a`.
 #[must_use]
-fn melt_area(state: SurfaceState, record: &CrustRecord<'_>, lid: CrustLithology) -> f64 {
+fn melt_area(lid: &CrustLid, record: &CrustRecord<'_>) -> MeltArea {
+    let starlit = starlit_melt_area(lid.state, record, lid.lithology);
+    let active = (SilicateVapourRules::in_force() == SilicateVapourRules::Modelled
+        && lid.tidal == TidalVolcanism::Volcanic
+        && lid.lithology.holds_a_silicate_melt())
+    .then(|| ActiveLava::of(lid.lithology, record.heat_flow))
+    .flatten();
+    let total = active.map_or(starlit, |lava| starlit + (1.0 - starlit) * lava.share());
+    MeltArea {
+        // The union of two shares is at most 1 but for a rounding, held by comparison.
+        total: if total > 1.0 { 1.0 } else { total },
+        starlit,
+        active,
+    }
+}
+
+/// The share of the record's surface above the solidus of `lid` that its starlight keeps
+/// ([module](self)'s "The melt area"), in [0, 1], in the state `state`: 1 in the `MagmaOcean`
+/// state, and otherwise 0 for an ice lid, whose liquid is a condensate. Its cold area reads the
+/// record's insolation table where it holds one, the same bits: the record built 162 of the 568
+/// tables of the first 20 sample systems' snapshots for its melt area alone (bless-note-23 §4;
+/// decision-24-cost D5's lever).
+#[must_use]
+fn starlit_melt_area(state: SurfaceState, record: &CrustRecord<'_>, lid: CrustLithology) -> f64 {
     if state == SurfaceState::MagmaOcean {
         return 1.0;
     }

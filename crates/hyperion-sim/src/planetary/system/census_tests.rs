@@ -156,7 +156,8 @@ const UNREACHED: &[(&str, &str)] = &[
     ),
     (
         "ca_al_residue",
-        "a lava world's evaporated lag: no rule makes one before P14.T55.b's silicate vapour",
+        "a lava world's evaporated lag: no rule makes one, P14.T55.b's vapour keeping its \
+         melt's composition (its fractional vaporisation not modelled)",
     ),
     (
         "iron_nickel",
@@ -2143,4 +2144,182 @@ fn composition_census_under_every_28_hold_publishes_no_hot_small_body_past_its_e
             "#{rank} {id} went once its host evolved, not on its main sequence\n{report}"
         );
     }
+}
+
+/// The census's count of P14.T55.b's silicate vapour over the record under every 35 hold
+/// ([`with_every_35_hold`](crate::planetary::testing::with_every_35_hold)).
+#[derive(Debug, Default)]
+struct VapourCount {
+    /// The `Ok` surfaces walked.
+    surfaces: usize,
+    /// The surfaces holding a vapour, by their state's label and their class of escape.
+    by_state: BTreeMap<(String, &'static str), usize>,
+    /// The faults: a vapour's figure wrong (`silicate_vapour_tests::vapour_fault`), a vapour over
+    /// no melt, a melt with none, or a vapour not modelled, each with its body's line.
+    faults: Vec<String>,
+    /// The volcanic lids' active lava: each one's share, its eruption temperature and its body's
+    /// radius, m.
+    lava: Vec<(f64, f64, f64)>,
+    /// Each vapour's melt temperature, K, pressure, Pa, and λ.
+    vapours: Vec<(f64, f64, f64)>,
+}
+
+impl VapourCount {
+    /// Counts the record of `case`, of the system of rank `rank`.
+    fn add(&mut self, rank: usize, case: &AuditCase<'_>) {
+        use super::silicate_vapour_tests::{holds_melt, vapour_fault};
+        let Some(surface) = case.surface() else {
+            return;
+        };
+        let Section::Ok(bulk) = case.record.bulk() else {
+            return;
+        };
+        self.surfaces += 1;
+        let line = format!("#{rank} {} {}", case.record.identity().id(), case.kind);
+        if let Some(lava) = surface.crust().ok().and_then(|crust| crust.active_lava()) {
+            self.lava.push((
+                lava.share(),
+                lava.eruption_temperature().value(),
+                Metres::from(bulk.radius()).value(),
+            ));
+        }
+        match surface.silicate_vapour() {
+            Modelled::Ok(Some(vapour)) => {
+                if !holds_melt(surface) {
+                    self.faults.push(format!("{line}: a vapour over no melt"));
+                }
+                if let Some(fault) = vapour_fault(vapour, surface, bulk) {
+                    self.faults.push(format!("{line}: {fault}"));
+                }
+                let escape = match vapour.escape() {
+                    crate::planetary::chem::silicate_vapour::VapourEscape::Bound => "bound",
+                    crate::planetary::chem::silicate_vapour::VapourEscape::Outflow => "outflow",
+                };
+                *self
+                    .by_state
+                    .entry((format!("{:?}", surface.state()), escape))
+                    .or_default() += 1;
+                self.vapours.push((
+                    vapour.melt_temperature().value(),
+                    vapour.pressure().value(),
+                    vapour.jeans_parameter(),
+                ));
+            }
+            Modelled::Ok(None) => {
+                if holds_melt(surface) {
+                    self.faults.push(format!("{line}: a melt with no vapour"));
+                }
+            }
+            Modelled::NotModelled => self.faults.push(format!("{line}: not modelled")),
+        }
+    }
+
+    /// Adds `share`'s counts.
+    fn merge(&mut self, share: Self) {
+        self.surfaces += share.surfaces;
+        for (key, n) in share.by_state {
+            *self.by_state.entry(key).or_default() += n;
+        }
+        self.faults.extend(share.faults);
+        self.lava.extend(share.lava);
+        self.vapours.extend(share.vapours);
+    }
+}
+
+/// The least and the greatest of `values`, by `total_cmp`; NaN for none.
+fn span(values: impl Iterator<Item = f64>) -> (f64, f64) {
+    values.fold((f64::NAN, f64::NAN), |(lo, hi), x| {
+        (
+            if lo.is_nan() || x.total_cmp(&lo).is_lt() {
+                x
+            } else {
+                lo
+            },
+            if hi.is_nan() || x.total_cmp(&hi).is_gt() {
+                x
+            } else {
+                hi
+            },
+        )
+    })
+}
+
+/// P14.T55.b's census (the brief's, by name): over the ordinary census's systems under every 35
+/// hold, every surface holding melt (the state `MagmaOcean` or a crust's melt area above 0) holds
+/// its melt's vapour, with no figure that is not finite and positive and no other fault
+/// (`silicate_vapour_tests::vapour_fault`), and no surface holding no melt holds one. It prints the
+/// vapours by state and class of escape, their temperatures', pressures' and λ's spans, and the
+/// volcanic lids' active lava, Io-sized ones (radius above 1,000 km) apart.
+#[test]
+#[ignore = "slow: 10⁵ bodies of 6,800 systems under every 35 hold, on sixteen threads"]
+fn composition_census_under_every_35_hold_holds_a_finite_vapour_over_every_melt_and_none_elsewhere()
+{
+    let start = Instant::now();
+    let mut count = VapourCount::default();
+    let shares = crate::planetary::testing::with_every_35_hold(|| {
+        tallies_under_every_28_hold(
+            ORDINARY_SYSTEMS,
+            |tally: &mut VapourCount, rank, ctx, system| {
+                audit_walk_system("census", ctx, system, &mut |case| tally.add(rank, case));
+            },
+        )
+    });
+    for share in shares {
+        count.merge(share);
+    }
+    let line = "a string takes a line";
+    let mut report = format!(
+        "P14.T55.b's census under every 35 hold: {} surfaces\n",
+        count.surfaces
+    );
+    for ((state, escape), n) in &count.by_state {
+        writeln!(report, "  {state} {escape}: {n}").expect(line);
+    }
+    let (t, p, lambda) = (
+        span(count.vapours.iter().map(|v| v.0)),
+        span(count.vapours.iter().map(|v| v.1)),
+        span(count.vapours.iter().map(|v| v.2)),
+    );
+    writeln!(
+        report,
+        "  vapours {}: T {:.1}–{:.1} K, p {:.3e}–{:.3e} Pa, λ {:.3e}–{:.3e}",
+        count.vapours.len(),
+        t.0,
+        t.1,
+        p.0,
+        p.1,
+        lambda.0,
+        lambda.1
+    )
+    .expect(line);
+    let io_sized: Vec<_> = count.lava.iter().filter(|l| l.2 > 1e6).collect();
+    let (all, io) = (
+        span(count.lava.iter().map(|l| l.0)),
+        span(io_sized.iter().map(|l| l.0)),
+    );
+    writeln!(
+        report,
+        "  active lava on {} lids, share {:.3e}–{:.3e}; {} Io-sized, {:.3e}–{:.3e}",
+        count.lava.len(),
+        all.0,
+        all.1,
+        io_sized.len(),
+        io.0,
+        io.1
+    )
+    .expect(line);
+    for fault in count.faults.iter().take(20) {
+        writeln!(report, "  fault: {fault}").expect(line);
+    }
+    eprintln!("{report}({:.1} s)", start.elapsed().as_secs_f64());
+    assert!(count.surfaces > 50_000, "{} surfaces", count.surfaces);
+    assert!(
+        !count.vapours.is_empty(),
+        "no melt holds a vapour\n{report}"
+    );
+    assert!(
+        count.faults.is_empty(),
+        "{} faults\n{report}",
+        count.faults.len()
+    );
 }

@@ -8864,6 +8864,8 @@ Each is labelled "not yet modelled" where a console could show it:
   - Whether such a body survives its system's age is this subtask's question too: Perez-Becker
     and Chiang 2013 find rocky bodies under 0.1 M⊕ above 2,000 K gone in under 10 Gyr
     (decision-triton-and-e101 §2.4);
+  - _Built_ 2026-11-19, held at 35 (`SILICATE_VAPOUR_VERSION`): Risks, "P14.T55.b's silicate
+    vapour and active lava, as built".
 - **P14.T55.c** exospheres, recorded, not drawn;
 - **P14.T55.d** carbon-rich surfaces and refractory carbon from the soot line (Bond, O'Brien and
   Lauretta 2010; Bergin et al. 2023);
@@ -34621,3 +34623,47 @@ ACTIVE HOST · HOST LEAVING MAIN SEQUENCE · EXTRAPOLATED ZONE · FROZEN SURFACE
     `under_the_held_rules_pluto_s_haze_is_not_modelled` and
     `under_the_35_hold_pluto_s_haze_is_its_measured_one`; the census
     `under_every_35_hold_the_tenuous_airs_are_stated` (by name) holds τ(550) ≤ 0.1.
+- **P14.T55.b's silicate vapour and active lava, as built (lane `p14-t55b-silicate-vapour`,
+  2026-11-19).** Held at 35 (`chem::silicate_vapour::SILICATE_VAPOUR_VERSION`;
+  `SilicateVapourRules::{Held, Modelled}`, `with_silicate_vapour`, also under the sim's `testing`
+  feature for the server's tests; a line in `HeldRules`; the union `testing::with_every_35_hold`).
+  Nothing moves at 33 or 34; `golden_diff.py`: extended only (`planetary/silicate_vapour`).
+  - _New items:_ in `chem::silicate_vapour`, `SilicateVapour`, `SilicateVapourInputs`,
+    `MeltComposition`, `VapourEscape`, `DeriveSilicateVapourError`,
+    `ATOMIC_CRITICAL_JEANS_PARAMETER`, `DIATOMIC_CRITICAL_JEANS_PARAMETER` and
+    `bse_log10_pressure_bar`; `record::Surface::silicate_vapour`; in `hooks::crust`, `ActiveLava`,
+    `VOLCANIC_POWER_SHARE`, `ULTRAMAFIC_ERUPTION_TEMPERATURE`, `BASALTIC_ERUPTION_TEMPERATURE`,
+    `CrustLithology::eruption_temperature` and `CrustComposition`'s `starlit_melt_fraction` and
+    `active_lava`; `SurfaceConditions::peak_temperature` and `LiquidColumns::melt_oxides` (crate);
+    `VapourEscapeDto`; the client's `SilicateVapour`, `VapourEscape`, `vapourEscapeLabel` and
+    `Shown`'s `beside`.
+  - _Changed contracts:_ `SilicateVapourDto` has its members (`melt_temperature_k`,
+    `vapour_pressure_pa`, `species`, `mean_molar_mass_g_per_mol`, `jeans_parameter`, `escape`), first
+    sent at 35, `PROTOCOL_VERSION` 3 kept. `CrustCompositionInputs` takes `heat_flow`, refused not
+    finite or negative (`CrustInput::HeatFlow`, `DeriveCrustError::HeatFlowNegative`). From 35 the
+    melt area is f = `f_s` + (1 − `f_s`) `f_a`, `f_a` = 0.54 F ÷ (σ `T_e`⁴) on a tidally volcanic lid
+    of a silicate melt.
+  - _Rule:_ the vapour at the melt's warmest (a starlit melt's `peak_temperature`, a volcanic lid's
+    `T_e` where hotter); its total Fegley and Schaefer's BSE Eq. 13 plus SF09's class offset; its
+    species the BSE's; outflow below λ 2.1, or 2.4 where molecules lead it (Volkov et al. 2011).
+  - _Leans (2026-11-19):_ every class's species are the BSE's; the class by the lid's melt oxides
+    (`SiO₂` ≥ 60 wt% continental, alkalis ≥ 1.0 wt% oceanic), a magma ocean's the BSE's; Eq. 13 read
+    below its fitted 2,000 K; Io's 54% and ε = 1 for every volcanic lid; the eruption temperatures.
+  - _First send:_ every surface holding melt sends a value, which T43.e's consoles read as not none,
+    and older ones ignore (decision-backlog-2 §2.3). The readout reads
+    `SILICATE VAPOUR 1.28 Pa · AT 1684 K` and `VAPOUR ESCAPE OUTFLOW`, an empty volatile air beside
+    a value `NONE`; its species, μ and λ are not read. The view drops its note for a value and draws none of it (the brief).
+  - _Deviation:_ Io's active lava is 3.5 × 10⁻⁶ at 2.5 W m⁻² by the formula, under item 10's 2 ×
+    10⁻⁵ to 2 × 10⁻⁴, which is 56 TW over σT⁴ at 600–1,070 K, cooling crust below the solidus.
+  - _Survival:_ P14.T55.b.a's evaporation answers the entry's last bullet, from 28.
+  - _Left out:_ fractional vaporisation, so `ca_al_residue` stays unreached; an alkali-poor melt's
+    lower pressure (SF09's Moon).
+  - _For the sign-off_ (the UX review's drafts; the guide not edited): `SILICATE VAPOUR`'s value
+    reading, `VAPOUR ESCAPE` with `BOUND` and `OUTFLOW`, `AT` after `SILICATE VAPOUR`, and
+    `SURFACE PRESSURE` and `MOLE FRACTION` reading `NONE` beside a value (to confirm against
+    decision-backlog-2 §2.4's "unless the member is `null`").
+  - _At the bump:_ what `the_silicate_vapour_is_held_only_until_the_35_bump` lists.
+  - _Accept:_ `cargo test -p hyperion-sim --lib --` with `planetary::chem::silicate_vapour`,
+    `planetary::hooks::crust`, `planetary::system::silicate_vapour_tests` and
+    `planetary::testing::held`; `cargo test -p hyperion-server --lib vapour`; the slow
+    `composition_census_under_every_35_hold_holds_a_finite_vapour_over_every_melt_and_none_elsewhere`.

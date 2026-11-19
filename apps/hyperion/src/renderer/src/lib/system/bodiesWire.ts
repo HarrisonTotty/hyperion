@@ -1628,11 +1628,26 @@ function toBiosphere(biosphere: BiosphereDto): Biosphere {
 }
 
 /**
- * A melt's own vapour (P14.T35.f), checked for nothing, since its type has no members until
- * P14.T55.b: a newer server's value reads as a value, never as a fault in the record.
+ * A melt's own vapour (P14.T55.b), checked as the air is: its temperature, pressure, mean molar
+ * mass and Jeans parameter positive, and its species a mixture ({@link toGases}).
  */
 function toSilicateVapour(vapour: SilicateVapourDto): SilicateVapour {
-  return vapour;
+  check(
+    positive(vapour.melt_temperature_k) &&
+      positive(vapour.vapour_pressure_pa) &&
+      positive(vapour.mean_molar_mass_g_per_mol) &&
+      positive(vapour.jeans_parameter) &&
+      vapour.species.length > 0,
+    "silicate vapour unusable",
+  );
+  return {
+    meltTemperatureK: vapour.melt_temperature_k,
+    vapourPressurePa: vapour.vapour_pressure_pa,
+    species: toGases(vapour.species, "silicate vapour species"),
+    meanMolarMassGPerMol: vapour.mean_molar_mass_g_per_mol,
+    jeansParameter: vapour.jeans_parameter,
+    escape: vapour.escape,
+  };
 }
 
 /**

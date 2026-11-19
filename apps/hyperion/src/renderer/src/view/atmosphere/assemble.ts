@@ -12,8 +12,10 @@
  * nothing and says
  * `EXOSPHERE: NOT YET MODELLED` (`signoff-2.md` item 6); a surface holding melt (`magma_ocean`, or a
  * crust whose `meltAreaFraction` is above 0) whose `silicateVapour` is `not_modelled` says
- * `SILICATE VAPOUR: NOT YET MODELLED` beside its other notes; a surface with air and no inventory
- * says `AEROSOLS AND ABSORBERS: NOT YET MODELLED`. A kept scene's body set airless says nothing,
+ * `SILICATE VAPOUR: NOT YET MODELLED` beside its other notes, and one sent as a value (P14.T55.b)
+ * says nothing of it and draws none of it, R08 holding no optics of Na or SiO; a surface with air
+ * and no inventory says `AEROSOLS AND ABSORBERS: NOT YET MODELLED`. A kept scene's body set
+ * airless says nothing,
  * and one left unset `NOT YET MODELLED`.
  *
  * **The medium** for an `ok` surface with gases:
