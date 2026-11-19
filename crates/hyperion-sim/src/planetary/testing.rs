@@ -51,15 +51,28 @@ mod held;
 #[cfg(test)]
 pub(crate) use held::{HeldRules, in_shares};
 
-/// `run`'s result under every planetary hold of generator version 35 on this thread (train 35):
-/// P14.T55.b's silicate vapour and active lava ([`with_silicate_vapour`]). 35's bump deletes it
-/// with the holds; a hold of 35 added later adds its switch here.
+/// `run`'s result with every planetary hold of generator version 35 in force on this thread (train
+/// 35), each switch set back as it returns, a panic in `run` included: P14.T55.e.a's and
+/// P14.T55.n's tenuous air, its methane over its terrain and its haze ([`with_tenuous_air`],
+/// `TenuousAirRules::Published`); P14.T55.b's silicate vapour and active lava
+/// ([`with_silicate_vapour`], `SilicateVapourRules::Modelled`); and Venus's deck only in the air it
+/// hangs in (P14.T53.b part 1 (b)'s follow-up, [`with_deck_base`], `DeckBaseRules::Base`). A test's
+/// own pool of shares reads them through [`in_shares`]. 35's bump deletes it with the holds; a hold
+/// of 35 added later adds its switch here.
 ///
+/// [`with_tenuous_air`]: super::chem::tenuous::with_tenuous_air
 /// [`with_silicate_vapour`]: super::chem::silicate_vapour::with_silicate_vapour
+/// [`with_deck_base`]: super::derive::atmosphere::with_deck_base
 #[cfg(test)]
 pub(crate) fn with_every_35_hold<R>(run: impl FnOnce() -> R) -> R {
     use super::chem::silicate_vapour::{SilicateVapourRules, with_silicate_vapour};
-    with_silicate_vapour(SilicateVapourRules::Modelled, run)
+    use super::chem::tenuous::{TenuousAirRules, with_tenuous_air};
+    use super::derive::atmosphere::{DeckBaseRules, with_deck_base};
+    with_tenuous_air(TenuousAirRules::Published, || {
+        with_silicate_vapour(SilicateVapourRules::Modelled, || {
+            with_deck_base(DeckBaseRules::Base, run)
+        })
+    })
 }
 
 /// An air's partial pressures stated by hand, each gas's `pressure(gas)` in [`Gas::ALL`]'s order,

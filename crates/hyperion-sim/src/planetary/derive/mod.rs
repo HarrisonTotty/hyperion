@@ -2186,7 +2186,8 @@ impl PassBody<'_> {
     ///   it reads ([`passes::solve_in_context`]).
     ///
     /// A published runaway under Venus's deck whose mean surface temperature is below the acid's
-    /// cycling temperature is solved once more, every pass without the deck, and that second solve
+    /// cycling temperature (or, from generator version 35, whose air is thinner than the deck's
+    /// base or reducing) is solved once more, every pass without the deck, and that second solve
     /// is published ([`solved_without_the_deck`]; P14.T53.b part 1 (b), decision-absurd-states-24
     /// R3.2): it reads only the first solve's temperature, so there is no feedback, and nothing
     /// returns to the decked branch.

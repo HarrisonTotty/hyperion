@@ -34667,3 +34667,20 @@ ACTIVE HOST · HOST LEAVING MAIN SEQUENCE · EXTRAPOLATED ZONE · FROZEN SURFACE
     `planetary::hooks::crust`, `planetary::system::silicate_vapour_tests` and
     `planetary::testing::held`; `cargo test -p hyperion-server --lib vapour`; the slow
     `composition_census_under_every_35_hold_holds_a_finite_vapour_over_every_melt_and_none_elsewhere`.
+- **Deviations in P14.T53.b part 1 (b)'s follow-up, the deck base, as built (lane
+  `fix-thin-air-venus-deck`, 2026-11-19).** Held at 35 (`derive::atmosphere::deck_base`,
+  `DeckBaseRules`, `with_deck_base`, a `HeldRules` line, `testing::with_every_35_hold`).
+  - _Rule:_ `solved_without_the_deck` also takes a decked runaway whose first solve's p_s is below
+    `DECK_BASE_PRESSURE` or whose air is `deck_base::reducing`; the deckless solve is arm (b)'s.
+  - _Lean (2026-11-19):_ the base is VIRA's 1.375 bar at 48 km, not the brief's 1 bar (the lower
+    cloud's top); the constant lives in `deck_base`, not `hooks::sulphur`.
+  - _Lean (2026-11-19):_ "reducing" is P14.T51.j's `hooks::modifiers::oxidising` negated (now
+    `pub(crate)`), one definition for the model.
+  - _Not modelled:_ the movers deckless at or above 430 K hold a partial deck (P14.T53.e); a
+    reducing air's sulphur (H₂S, S₈) takes the once-through SO₂ case.
+  - _Left undone, for 35:_ `SurfaceStateDto`'s runaway doc (then `just gen-protocol`) and the
+    guide's state meaning (through the UX sign-off); this lane stayed off the client.
+  - _At the bump:_ delete `DeckBaseRules::Held`, its switch, its `HeldRules` line and the tripwire.
+  - _Accept:_ `cargo test -p hyperion-sim --lib` over `planetary::derive` and
+    `planetary::system::deck_base_tests`; the slow census by name,
+    `composition_census_under_every_35_hold_keeps_venus_s_deck_only_in_an_oxidised_air_at_its_base`.

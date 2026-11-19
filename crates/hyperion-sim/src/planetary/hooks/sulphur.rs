@@ -24,7 +24,8 @@
 //!    decomposes below the deck, returning its sulphur to SO₂, where the air there is hotter than
 //!    [`ACID_CYCLING_TEMPERATURE`]; only the surface removes it. Its column is Φ
 //!    [`DRY_SULPHUR_LIFETIME`], fixed on Venus's measured state.
-//! 2. **A temperate or snowball world, or a runaway too cold beneath its deck to cycle it: once
+//! 2. **A temperate or snowball world, or a runaway too cold beneath its deck to cycle it (from
+//!    generator version 35 also one whose air is thinner than the deck's base or reducing): once
 //!    through.** SO₂ lives [`WET_SULPHUR_LIFETIME`] on a world with liquid water and
 //!    [`DRY_ONCE_THROUGH_LIFETIME`] on one without (a runaway's, its water lost, is dry); only a
 //!    thin stratospheric layer forms ([`sulphate_layer_optical_depth`]).

@@ -66,11 +66,14 @@
 //! σ `T_s`⁴ = σ `T_eq`⁴ + F, as its tides read it (P14.T55.j's record side): the record's `T_eq`
 //! stays the light's.
 
+mod deck_base;
 mod escaping;
 mod present;
 mod supercritical;
 mod surface_mix;
 
+#[cfg(test)]
+pub(crate) use deck_base::{DECK_BASE_PRESSURE, DeckBaseRules, reducing, with_deck_base};
 use escaping::climate_class;
 pub(crate) use escaping::helium_left;
 #[cfg(test)]
@@ -2211,6 +2214,10 @@ pub enum SurfaceState {
     ///   among them, under which its published mean surface temperature can lie below that
     ///   saturation temperature, with no water to condense (P14.T53.b part 1 (c);
     ///   decision-t53b-arm-c, decision-p14-t54b-k-hothouses).
+    /// - From 35 Venus's deck also needs the air it hangs in: a runaway whose surface pressure is
+    ///   below the deck's base, 1.375 bar, or whose air is reducing (hydrogen its largest gas by
+    ///   number, or no carbon dioxide, water or oxygen) is solved without it (P14.T53.b part 1
+    ///   (b)'s follow-up, `deck_base`).
     RunawayGreenhouse,
     /// Between the runaway limit and the maximum-greenhouse limit now, as on Earth and Mars.
     ///
@@ -2298,8 +2305,10 @@ pub enum RunawayDeck {
     /// version 23, and Venus's.
     #[default]
     Kept,
-    /// The climate under the deck is colder than [`ACID_CYCLING_TEMPERATURE`], so it is solved
-    /// without it: a runaway's sulphur passes once through, as a dry world's.
+    /// The climate under the deck is colder than [`ACID_CYCLING_TEMPERATURE`] or holds liquid
+    /// water, or from generator version 35 its air is thinner than the deck's base or reducing
+    /// (`deck_base`), so it is solved without it: a runaway's sulphur passes once through, as a
+    /// dry world's.
     Deckless,
 }
 
@@ -2824,7 +2833,8 @@ impl Atmosphere {
     ///
     /// It is [`RunawayDeck::Deckless`] for a published [`SurfaceState::RunawayGreenhouse`] whose
     /// passes under the deck ended colder than [`ACID_CYCLING_TEMPERATURE`] (from generator
-    /// version 24), solved again without it, its cloud the water cloud's availability; and
+    /// version 24), or from 35 whose air is thinner than the deck's base or reducing
+    /// (`deck_base`), solved again without it, its cloud the water cloud's availability; and
     /// [`RunawayDeck::Kept`] for every other body, every runaway to version 23 and Venus among
     /// them. Only a body's passes (its derivation, its record and its moons') solve again: an
     /// atmosphere from [`atmosphere`] alone is one solve under the deck, so it can be a runaway
@@ -3924,14 +3934,18 @@ fn retained(
 /// [`SurfaceState::RunawayGreenhouse`] under the deck whose mean surface temperature is below
 /// [`ACID_CYCLING_TEMPERATURE`], or from 26 whose published condensates list liquid water, since
 /// no acid haze is sustained over a sea (Loftus, Wordsworth and Morley 2019, ApJ 887, 231;
-/// research-census-25 §4, from 26). It reads that first solve alone, so that the second solve,
-/// whose deck is fixed, is published as it ends: no feedback, nothing returns to the decked branch,
-/// and a dry one at a temperature that is not a number keeps the deck.
+/// research-census-25 §4, from 26), or from 35 whose air is thinner than the deck's base or
+/// reducing ([`deck_base::drops_the_deck`]). It reads that first solve alone, so that the second
+/// solve, whose deck is fixed, is published as it ends: no feedback, nothing returns to the decked
+/// branch, and a dry one at a temperature that is not a number keeps the deck unless the deck
+/// base drops it.
 #[must_use]
 pub(crate) fn solved_without_the_deck(air: &Atmosphere) -> bool {
     air.state == SurfaceState::RunawayGreenhouse
         && air.runaway_deck == RunawayDeck::Kept
-        && (air.surface_temperature.value() < ACID_CYCLING_TEMPERATURE.value() || air.liquid_water)
+        && (air.surface_temperature.value() < ACID_CYCLING_TEMPERATURE.value()
+            || air.liquid_water
+            || deck_base::drops_the_deck(air))
 }
 
 /// The state a body's passes publish (P14.T53.b part 1 (c); decision-t53b-arm-c §4), as the pass's

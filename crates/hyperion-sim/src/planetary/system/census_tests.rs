@@ -49,14 +49,15 @@ use crate::planetary::chem::condense::NotFormed;
 use crate::planetary::chem::partition::{CondensateEntry, CondensatePhase};
 use crate::planetary::derive::atmosphere::SNOWBALL_ICE_COVER;
 use crate::planetary::derive::atmosphere::{
-    AIRLESS_PRESSURE, Gas, SurfaceState, WATER_MELTING_POINT,
+    AIRLESS_PRESSURE, DECK_BASE_PRESSURE, Gas, RunawayDeck, SurfaceState, WATER_MELTING_POINT,
+    reducing,
 };
 use crate::planetary::hooks::aerosols::{AerosolDeck, AerosolMode};
 use crate::planetary::hooks::figures::Subsurface;
 use crate::planetary::hooks::surface::Forcing;
 use crate::planetary::record::{Modelled, RecordSection, SectionState};
-use crate::planetary::testing::in_shares;
 use crate::planetary::testing::{SampleFilter, sample_records};
+use crate::planetary::testing::{in_shares, with_every_35_hold};
 use crate::substance::{self, CondensedOptics, SubstanceId, by_key};
 use crate::time::{ClockWindow, Span, UniverseTime};
 use crate::units::{Kelvin, KilogramsPerCubicMetre, Pascals};
@@ -2322,4 +2323,296 @@ fn composition_census_under_every_35_hold_holds_a_finite_vapour_over_every_melt_
         "{} faults\n{report}",
         count.faults.len()
     );
+}
+
+/// What one body of the census publishes of its runaway's deck (P14.T53.b part 1 (b)'s
+/// follow-up, the deck base; [`composition_census_under_every_35_hold_keeps_venus_s_deck_only_in_an_oxidised_air_at_its_base`]).
+#[derive(Debug, Clone, Copy)]
+struct DeckBody {
+    /// Its state and its published state.
+    states: (SurfaceState, SurfaceState),
+    /// Whether it keeps Venus's deck.
+    deck: RunawayDeck,
+    /// Its mean surface temperature, its surface pressure (none for none) and its Bond albedo.
+    t_s: Kelvin,
+    p_s: Option<Pascals>,
+    albedo: f64,
+    /// Whether its air is reducing for its sulphur (the deck base's test), and its largest gas by
+    /// number.
+    reducing: bool,
+    lead: Option<Gas>,
+}
+
+impl DeckBody {
+    fn of(case: &AuditCase<'_>) -> Self {
+        let air = case.derived.atmosphere();
+        let partials = air.partial_pressures();
+        let moles = |gas: Gas| partials.of(gas).value() / gas.molar_mass_g_per_mol();
+        let lead = Gas::ALL
+            .iter()
+            .copied()
+            .filter(|&gas| moles(gas) > 0.0)
+            .fold(None, |best: Option<Gas>, gas| match best {
+                Some(top) if moles(top) >= moles(gas) => best,
+                Some(_) | None => Some(gas),
+            });
+        Self {
+            states: (air.state(), air.published_state()),
+            deck: air.runaway_deck(),
+            t_s: air.surface_temperature(),
+            p_s: air.surface_pressure(),
+            albedo: air.albedo().value(),
+            reducing: reducing(partials),
+            lead,
+        }
+    }
+
+    /// Whether it is a runaway under Venus's deck.
+    fn decked(&self) -> bool {
+        self.states.0 == SurfaceState::RunawayGreenhouse && self.deck == RunawayDeck::Kept
+    }
+
+    /// Whether its air is thinner than the deck's base.
+    fn thin(&self) -> bool {
+        self.p_s.is_some_and(|p| p < DECK_BASE_PRESSURE)
+    }
+
+    /// Whether it publishes the same as `other`, to the bit.
+    fn same(&self, other: &Self) -> bool {
+        self.states == other.states
+            && self.deck == other.deck
+            && self.t_s.value().total_cmp(&other.t_s.value()).is_eq()
+            && match (self.p_s, other.p_s) {
+                (Some(p), Some(q)) => p.value().total_cmp(&q.value()).is_eq(),
+                (None, None) => true,
+                (Some(_), None) | (None, Some(_)) => false,
+            }
+            && self.albedo.total_cmp(&other.albedo).is_eq()
+    }
+
+    fn line(&self) -> String {
+        format!(
+            "{:?} (published {:?}) {:?}, T_s {:.1} K, p_s {:.4e} bar, A {:.3}, lead {:?}{}",
+            self.states.0,
+            self.states.1,
+            self.deck,
+            self.t_s.value(),
+            self.p_s.map_or(f64::NAN, Pascals::value) / 1e5,
+            self.albedo,
+            self.lead,
+            if self.reducing { ", reducing" } else { "" }
+        )
+    }
+}
+
+/// Every body of the census under one set of rules, by "#{rank} {id} {kind}".
+type DeckBodies = BTreeMap<String, DeckBody>;
+
+/// What [`deck_census`] walks of each body: its [`DeckBody`] alone, or with the census's whole
+/// tally ([`Census::add`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DeckWalk {
+    DecksAlone,
+    WithTheCensus,
+}
+
+/// The census's [`DeckBody`]s under `rules`, which wraps each share's generation on its own
+/// thread, and as `walk` says its [`Census`] too.
+fn deck_census(
+    rules: impl Fn(&dyn Fn() -> (Census, DeckBodies)) -> (Census, DeckBodies) + Sync,
+    walk: DeckWalk,
+) -> (Census, DeckBodies) {
+    let whole = walk == DeckWalk::WithTheCensus;
+    let galaxy = Galaxy::from_params(SEED, GalaxyParams::milky_way_like())
+        .expect("the Milky Way's parameters build a galaxy");
+    let records = sample_records(&galaxy, ORDINARY_SYSTEMS, SampleFilter::ALL)
+        .expect("the solar circle holds the census's systems");
+    let shares = records.len().div_ceil(SYSTEMS_PER_SHARE);
+    let mut census = Census::default();
+    let mut all = DeckBodies::new();
+    for (share, bodies) in in_shares(shares, ORDINARY_THREADS, |k| {
+        let first = k * SYSTEMS_PER_SHARE;
+        let end = records.len().min(first + SYSTEMS_PER_SHARE);
+        rules(&|| {
+            let mut census = Census::default();
+            let mut bodies = DeckBodies::new();
+            for (rank, record) in (first..).zip(&records[first..end]) {
+                let ctx = SystemContext::from_record(&galaxy, record);
+                let class = HostClass::of(&ctx);
+                let system = generate(SEED, &ctx);
+                if whole {
+                    census.systems += 1;
+                    census.classes.entry(class).or_default().0 += 1;
+                }
+                audit_walk_system("census", &ctx, &system, &mut |case| {
+                    if whole {
+                        census.add(class, rank, (&ctx, &system), case);
+                    }
+                    bodies.insert(named(rank, case), DeckBody::of(case));
+                });
+            }
+            (census, bodies)
+        })
+    }) {
+        census.merge(share);
+        all.extend(bodies);
+    }
+    (census, all)
+}
+
+/// The system of a body named by [`named`]: its ID's part before the dot.
+fn system_of(label: &str) -> &str {
+    label
+        .split(' ')
+        .nth(1)
+        .and_then(|id| id.split_once('.'))
+        .map_or(label, |(system, _)| system)
+}
+
+/// The deck base's census at both rules ([`deck_census`]): the runaways under Venus's deck at the
+/// version's rules in an air thinner than the deck's base or a reducing one, by label, and the
+/// bodies that move under every 35 hold, each at both rules.
+struct DeckMoves<'a> {
+    decked: usize,
+    thin: Vec<&'a String>,
+    reducing: Vec<&'a String>,
+    moved: Vec<(&'a String, &'a DeckBody, &'a DeckBody)>,
+}
+
+impl<'a> DeckMoves<'a> {
+    fn of(at_33: &'a DeckBodies, at_35: &'a DeckBodies) -> Self {
+        let decked_where = |test: fn(&DeckBody) -> bool| {
+            at_33
+                .iter()
+                .filter(|(_, b)| b.decked() && test(b))
+                .map(|(label, _)| label)
+                .collect()
+        };
+        Self {
+            decked: at_33.values().filter(|b| b.decked()).count(),
+            thin: decked_where(DeckBody::thin),
+            reducing: decked_where(|b| b.reducing),
+            moved: at_33
+                .iter()
+                .filter_map(|(label, before)| {
+                    let after = &at_35[label];
+                    (!before.same(after)).then_some((label, before, after))
+                })
+                .collect(),
+        }
+    }
+
+    /// The bodies that move in a system with no thin or reducing runaway under the deck.
+    fn strays(&self) -> Vec<&'a String> {
+        let systems: Vec<&str> = self
+            .thin
+            .iter()
+            .chain(&self.reducing)
+            .map(|label| system_of(label))
+            .collect();
+        self.moved
+            .iter()
+            .map(|(label, ..)| *label)
+            .filter(|label| !systems.contains(&system_of(label)))
+            .collect()
+    }
+
+    fn report(&self, bodies: usize) -> String {
+        use crate::planetary::derive::atmosphere::ACID_CYCLING_TEMPERATURE;
+        let partial = self
+            .moved
+            .iter()
+            .filter(|(_, _, after)| {
+                after.deck == RunawayDeck::Deckless && after.t_s >= ACID_CYCLING_TEMPERATURE
+            })
+            .count();
+        let over_a_bar = self
+            .moved
+            .iter()
+            .filter(|(label, before, _)| {
+                self.thin.contains(label) && before.p_s.is_some_and(|p| p.value() >= 1e5)
+            })
+            .count();
+        let mut states = BTreeMap::<String, usize>::new();
+        for (_, before, after) in &self.moved {
+            *states
+                .entry(format!("{:?} → {:?}", before.states.1, after.states.1))
+                .or_default() += 1;
+        }
+        let line = "a string takes a line";
+        let mut report = String::new();
+        writeln!(
+            report,
+            "the deck base over {bodies} bodies: at 33, {} runaways under Venus's deck, {} of them \
+             under {:.0} Pa ({over_a_bar} at or above 1 bar), {} in a reducing air; under every \
+             35 hold {} bodies move, {partial} of them deckless at or above {} K; published \
+             states {states:?}:",
+            self.decked,
+            self.thin.len(),
+            DECK_BASE_PRESSURE.value(),
+            self.reducing.len(),
+            self.moved.len(),
+            ACID_CYCLING_TEMPERATURE.value()
+        )
+        .expect(line);
+        for (label, before, after) in &self.moved {
+            let why = match (self.thin.contains(label), self.reducing.contains(label)) {
+                (true, true) => "thin, reducing",
+                (true, false) => "thin",
+                (false, true) => "reducing",
+                (false, false) => "its system's",
+            };
+            writeln!(
+                report,
+                "  MOVED {label} ({why}): {} → {}",
+                before.line(),
+                after.line()
+            )
+            .expect(line);
+        }
+        report
+    }
+}
+
+/// P14.T53.b part 1 (b)'s follow-up, the deck base (decision-absurd-states-24 R3.2; lane
+/// fix-thin-air-venus-deck), over the ordinary census's systems: at the version's rules it counts
+/// the runaways under Venus's deck in an air thinner than the deck's base
+/// ([`DECK_BASE_PRESSURE`]) or a reducing one; under every 35 hold none is left, every body that
+/// moves shares its system with one of them, and the census's own checks hold (every registry
+/// row reached or listed, none of 25's and 26's fixed findings, no envelope changing section
+/// inside the clock window). The movers are listed, each at both rules, with those whose deckless
+/// `T_s` is at or above the acid's cycling temperature (a partial deck, not modelled).
+#[test]
+#[ignore = "slow: 10⁵ bodies of 6,800 systems at 33 and under every 35 hold, on sixteen threads"]
+fn composition_census_under_every_35_hold_keeps_venus_s_deck_only_in_an_oxidised_air_at_its_base() {
+    let start = Instant::now();
+    let (_, at_33) = deck_census(|run| run(), DeckWalk::DecksAlone);
+    let (census, at_35) = deck_census(|run| with_every_35_hold(run), DeckWalk::WithTheCensus);
+    assert!(census.bodies >= ORDINARY_BODIES, "{} bodies", census.bodies);
+    assert_eq!(
+        at_33.keys().collect::<Vec<_>>(),
+        at_35.keys().collect::<Vec<_>>(),
+        "the same bodies at both rules"
+    );
+    let moves = DeckMoves::of(&at_33, &at_35);
+    let report = moves.report(at_33.len());
+    eprintln!("{report}({:.1} s)", start.elapsed().as_secs_f64());
+    let left: Vec<String> = at_35
+        .iter()
+        .filter(|(_, b)| b.decked() && (b.thin() || b.reducing))
+        .map(|(label, b)| format!("{label}: {}", b.line()))
+        .collect();
+    assert_eq!(
+        left,
+        Vec::<String>::new(),
+        "a runaway under Venus's deck in an air thinner than its base or a reducing one"
+    );
+    assert_eq!(
+        moves.strays(),
+        Vec::<&String>::new(),
+        "a body moved in a system with no thin or reducing decked runaway\n{report}"
+    );
+    census.assert_reached();
+    census.assert_fixed_under_26();
+    census.assert_no_envelope_changes();
 }

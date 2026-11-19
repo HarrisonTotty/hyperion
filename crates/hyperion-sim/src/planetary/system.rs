@@ -7576,6 +7576,8 @@ mod cap_balance_tests;
 mod census_tests;
 #[cfg(test)]
 pub(crate) mod cold_trap_tests;
+#[cfg(test)]
+mod deck_base_tests;
 mod discs;
 pub(crate) mod envelope;
 #[cfg(test)]

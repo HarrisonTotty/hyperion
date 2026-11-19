@@ -1035,9 +1035,10 @@ fn weathering_deposits(
 /// Whether the air of gases `gases` is oxidising (P14.T51.j): it holds carbon dioxide, water or
 /// oxygen, and hydrogen is not its largest gas by number, each gas's moles its weight over its
 /// molar mass, in [`Gas::ALL`]'s order. A trace of an oxidant counts, and methane's reducing power
-/// is not weighed (recorded for the composition audit).
+/// is not weighed (recorded for the composition audit). Venus's deck reads it too: an air that is
+/// not oxidising takes none (P14.T53.b part 1 (b)'s follow-up, from generator version 35).
 #[must_use]
-fn oxidising(gases: &PartialPressures) -> bool {
+pub(crate) fn oxidising(gases: &PartialPressures) -> bool {
     let holds = |gas: Gas| gases.of(gas).value() > 0.0;
     if !(holds(Gas::CarbonDioxide) || holds(Gas::Water) || holds(Gas::Oxygen)) {
         return false;

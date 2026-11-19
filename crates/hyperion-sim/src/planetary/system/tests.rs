@@ -12091,7 +12091,7 @@ fn present_census() -> &'static PresentCensus {
 /// The census's five decked runaways about M dwarfs (decision-absurd-states-24 R3.1), each
 /// published under Venus's deck at 273–360 K by P14.T53.a's batch; from generator version 25
 /// (P14.T53.e) all but [`DECKED_DESERTS`]' two are runaways solved without the deck.
-const DECKED_FIVE: [&str; 5] = [
+pub(super) const DECKED_FIVE: [&str; 5] = [
     "220016587ff80000.0900",
     "02001b2c9ffe0000.0200",
     "01fffb2c20000001.0200",
