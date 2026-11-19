@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import contextlib
 import functools
+import importlib.util
 import io
 import json
 import os
@@ -101,6 +102,16 @@ def dep(name: str, kind: Optional[str] = None, features: Sequence[str] = ()) -> 
     return (name, kind, list(features), True, False, name)
 
 
+# The files that choose what each quality setting makes (R12.T7.a), which run test-render's ladder
+# part alone: the validate skill's `test_select_checks.py` holds the same list.
+LADDER = [
+    "apps/hyperion/src/renderer/src/view/photoreal/renderer.ts",
+    "apps/hyperion/src/renderer/src/view/terrain/materialSet.ts",
+    "apps/hyperion/src/renderer/src/view/terrain/terrainPass.ts",
+    "apps/hyperion/src/renderer/src/view/quality/qualitySetting.ts",
+    "apps/hyperion/src/renderer/src/view/atmosphere/settings.ts",
+    "apps/hyperion/src/renderer/src/view/surface/decoration/decorationSetting.ts",
+]
 # The files of the small workspace, with the contents the scans read.
 FILES: Dict[str, str] = {
     "Cargo.toml": "",
@@ -214,6 +225,7 @@ FILES: Dict[str, str] = {
     "apps/hyperion/src/renderer/src/view/wireframe/submit.ts": "",
     "apps/hyperion/src/renderer/src/view/wireframe/lines.ts": "",
     "apps/hyperion/src/renderer/src/view/shaders/sky.wgsl": "",
+    **{path: "" for path in LADDER},
 }
 
 
@@ -467,6 +479,34 @@ class TheRules(unittest.TestCase):
                 self.assertTrue(plan(path).render)
         self.assertFalse(plan("apps/hyperion/src/renderer/src/view/wireframe/lines.ts").render)
         self.assertFalse(plan("apps/hyperion/src/renderer/src/view/terrain/cube.ts").render)
+
+    def test_what_a_setting_makes_runs_test_renders_ladder_part_alone(self) -> None:
+        # R12.T7.a: a file that chooses a setting's materials or pipelines runs the client's build and
+        # the harness's ladder part alone, both settings and variants, in the suites' hold.
+        for path in LADDER:
+            with self.subTest(path=path):
+                p = plan(path)
+                self.assertEqual((p.ladder, p.render), ({path}, set()))
+                self.assertEqual([s.recipe for s in p.steps if s.recipe[0].startswith("_test-render")],
+                                 [["_test-render-build"], ["_test-render-run", "--part=ladder"]])
+                self.assertEqual([s.phase for s in p.steps if s.recipe[0].startswith("_test-render")],
+                                 ["side", "locked"])
+                self.assertEqual(calls(p)[0], "gen-surface")
+                self.assertIn("just test-render --part=ladder: what each setting makes", p.why[path])
+        runner = FakeRunner()
+        self.assertEqual(smart_ci.execute(plan(LADDER[0]), ROOT, "just", env={}, runner=runner), 0)
+        self.assertEqual(runner.calls[-1], ("run", ["_locked", "just", "_test-render-run", "--part=ladder"]))
+        # With a shader, the whole of test-render runs once, the ladder part in it.
+        p = plan(LADDER[0], "apps/hyperion/src/renderer/src/view/shaders/sky.wgsl")
+        self.assertEqual([s.recipe for s in p.steps if s.recipe[0] == "_test-render-run"], [["_test-render-run"]])
+        self.assertIn(LADDER[0], p.steps[-1].every_cause)
+        # A full plan: `ci`'s phases, with the client's build beside them and the ladder part's run last.
+        full = plan("Cargo.toml", LADDER[0])
+        self.assertEqual(smart_ci.phases_of(full)["locked"][-1], ["_test-render-run", "--part=ladder"])
+        self.assertEqual(full.recipes(), ["ci", "_test-render-build", "_test-render-run"])
+        self.assertIn("--part=ladder", smart_ci.describe(full, [("Cargo.toml", False)], "test", False, env={}))
+        # A terrain file that chooses nothing per setting runs no harness.
+        self.assertFalse(plan("apps/hyperion/src/renderer/src/view/terrain/cube.ts").ladder)
 
     def test_the_whole_workspaces_inputs_run_the_full_ci(self) -> None:
         for path in ("Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "justfile", "pnpm-lock.yaml",
@@ -2417,6 +2457,17 @@ class RealWorkspace(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.ws = real_workspace()
+
+    def test_the_ladders_files_exist_and_the_validate_skill_routes_them_alike(self) -> None:
+        # R12.T7.a: the table names real files, those of the list above, and the validate skill's
+        # `select_checks.py` holds the same table.
+        self.assertEqual(sorted(f for f in self.ws.files if smart_ci.LADDER_PATHS.search(f)), sorted(LADDER))
+        spec = importlib.util.spec_from_file_location(
+            "select_checks", ROOT / ".claude/skills/validate/scripts/select_checks.py")
+        assert spec is not None and spec.loader is not None
+        select_checks = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(select_checks)
+        self.assertEqual(select_checks.LADDER_PATHS.pattern, smart_ci.LADDER_PATHS.pattern)
 
     def test_the_named_crates_and_files_exist(self) -> None:
         crates = set(self.ws.crates)

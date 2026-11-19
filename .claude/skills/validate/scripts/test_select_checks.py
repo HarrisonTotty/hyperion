@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for select_checks.py's reading of its arguments:
+"""Tests for select_checks.py's reading of its arguments and its routing to the smoke harness:
 `python3 -I -B .claude/skills/validate/scripts/test_select_checks.py`.
 
 Standard library only; nothing runs git but `parse_args`'s check of a word that is not a task ID,
@@ -32,6 +32,32 @@ class TaskIds(unittest.TestCase):
     def test_the_arguments_take_a_sub_subtask(self) -> None:
         task, base, feature, warnings = sc.parse_args(sc.repo_root(), ["P14.T54.b.l", "--feature", "galaxy-generation"])
         self.assertEqual((task, base, feature, warnings), ("P14.T54.b.l", "HEAD", "galaxy-generation", []))
+
+
+# The files that choose what each quality setting makes (R12.T7.a): `tools/smart-ci/test_smart_ci.py`
+# holds the same list.
+LADDER = [
+    "apps/hyperion/src/renderer/src/view/photoreal/renderer.ts",
+    "apps/hyperion/src/renderer/src/view/terrain/materialSet.ts",
+    "apps/hyperion/src/renderer/src/view/terrain/terrainPass.ts",
+    "apps/hyperion/src/renderer/src/view/quality/qualitySetting.ts",
+    "apps/hyperion/src/renderer/src/view/atmosphere/settings.ts",
+    "apps/hyperion/src/renderer/src/view/surface/decoration/decorationSetting.ts",
+]
+
+
+class TheHarness(unittest.TestCase):
+    def test_what_a_setting_makes_runs_the_ladder_part_alone(self) -> None:
+        for path in LADDER:
+            with self.subTest(path=path):
+                self.assertEqual(sc.harness_runs([path], set()), ([], [path]))
+        # With a shader, or where the catalogue imports it, the whole of test-render runs, the ladder in it.
+        shader = "apps/hyperion/src/renderer/src/view/shaders/sky.wgsl"
+        self.assertEqual(sc.harness_runs([shader, LADDER[0]], set()), ([shader], [LADDER[0]]))
+        self.assertEqual(sc.harness_runs([LADDER[3]], {LADDER[3]}), ([LADDER[3]], []))
+        for path in ("apps/hyperion/src/renderer/src/view/terrain/cube.ts",
+                     "apps/hyperion/src/renderer/src/view/photoreal/renderer.test.ts"):
+            self.assertEqual(sc.harness_runs([path], set()), ([], []), path)
 
 
 if __name__ == "__main__":

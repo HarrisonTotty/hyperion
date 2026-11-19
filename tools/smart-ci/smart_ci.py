@@ -13,12 +13,12 @@ and the plan runs those checks through the recipes `just ci` runs, scoped to the
 and files concerned, in `ci`'s order and phases: the checks that need no build directory, and vitest
 (which takes no lock), beside the cargo steps, then every Rust suite in one hold of the heavy-test
 lock, with `just test-render`'s run of the smoke harness in the same hold when a shader, the engine
-or the harness changed. Suites small by the timings recorded from earlier runs (`weigh`) run
-without the lock instead, capped. A path that no rule knows, and an input of the whole workspace
-(the justfile, the root manifest, the lock files, the toolchain, `.cargo/`), runs the full `just ci`
-instead. A plan that runs vitest or tsc first runs the Node floor's preflight
-(`tools/node-floor/check.cjs`), and stops there, in its one line, on a Node older than the root
-package.json's `engines.node`.
+or the harness changed, or its ladder part alone when a file that chooses what a quality setting
+makes did. Suites small by the timings recorded from earlier runs (`weigh`) run without the lock
+instead, capped. A path that no rule knows, and an input of the whole workspace (the justfile, the
+root manifest, the lock files, the toolchain, `.cargo/`), runs the full `just ci` instead. A plan
+that runs vitest or tsc first runs the Node floor's preflight (`tools/node-floor/check.cjs`), and
+stops there, in its one line, on a Node older than the root package.json's `engines.node`.
 
 `--plan` prints the plan, each step with the paths that caused it, and runs nothing; a run prints
 the plan first. The tests run are those that reach the changed code through the code's graph
@@ -169,6 +169,19 @@ RENDER_PATHS = re.compile(
 )
 # The shader catalogue: the files it imports hold the materials' specs that the harness renders.
 CATALOGUE = "apps/hyperion/src/renderer/src/view/engine/catalogue.ts"
+# The files that choose what each quality setting makes, its materials and pipelines (plan R12,
+# R12.T7.a): the photorealistic view, the terrain session's materials and the terrain pass, which
+# make them by `createMaterialAsync` and `createComputeAsync` as the setting asks, and the settings'
+# tables they read (R05's, R08's and R11's decoration). They run `just test-render`'s ladder part alone
+# (`LADDER_PART`, `scripts/testRender.sh`), which makes and draws what each setting makes; a change
+# that runs the whole of test-render runs the ladder in it. The validate skill's `select_checks.py`
+# holds the same table.
+LADDER_PATHS = re.compile(
+    r"^apps/hyperion/src/renderer/src/view/(photoreal/renderer|terrain/(materialSet|terrainPass)|"
+    r"quality/qualitySetting|atmosphere/settings|surface/decoration/decorationSetting)\.ts$"
+)
+# test-render's argument for the ladder part alone, both settings and both variants.
+LADDER_PART = "--part=ladder"
 
 # The Node floor's preflight (`tools/node-floor/check.cjs`), which the packages' `test` and
 # `typecheck` scripts run before vitest and tsc. smart-ci runs it once before a plan that runs either
@@ -266,6 +279,14 @@ RENDER_PHASES: Dict[str, List[List[str]]] = {
     "side": [["_test-render-build"]],
     "locked": [["_test-render-run"]],
 }
+
+
+def render_recipes(phase: str, whole: bool) -> List[List[str]]:
+    """`RENDER_PHASES[phase]`'s recipes, with the harness's run of the ladder part alone
+    (`LADDER_PART`) unless `whole`."""
+    return [list(recipe) + ([] if whole or recipe[0] != "_test-render-run" else [LADDER_PART])
+            for recipe in RENDER_PHASES[phase]]
+
 
 # The environment variable naming the command that holds a build slot around smart-ci's phases that
 # build (`slot_command`); unset, they run directly.
@@ -988,6 +1009,9 @@ class Plan:
     # what it found: why they take it, or what they come to.
     unlocked: bool = False
     weight: str = ""
+    # The paths that run `just test-render`'s steps with its ladder part alone (`LADDER_PATHS`); with
+    # any path of `render`, the whole of test-render runs instead, the ladder in it.
+    ladder: Set[str] = field(default_factory=set)
 
     @property
     def is_full(self) -> bool:
@@ -998,7 +1022,7 @@ class Plan:
         if not self.is_full:
             return [step.recipe[0] for step in self.steps]
         return ["ci"] + ([recipe[0] for phase in ("side", "locked") for recipe in RENDER_PHASES[phase]]
-                         if self.render else [])
+                         if self.render or self.ladder else [])
 
 
 class Needs:
@@ -1035,6 +1059,7 @@ class Needs:
         self.meshbuild: Set[str] = set()
         self.smart_ci_tests: Set[str] = set()
         self.render: Set[str] = set()
+        self.ladder: Set[str] = set()  # the paths that run test-render's ladder part alone
         self.why: Dict[str, List[str]] = {}
         self.notes: List[str] = []
 
@@ -1085,6 +1110,9 @@ def classify(path: str, deleted: bool, ws: Workspace, needs: Needs) -> None:
     if RENDER_PATHS.search(path) or path in ws.catalogue_sources:
         needs.render.add(path)
         needs.say(path, "just test-render")
+    elif LADDER_PATHS.search(path):
+        needs.ladder.add(path)
+        needs.say(path, f"just test-render {LADDER_PART}: what each setting makes")
 
     for regex, reader, kinds, why in RUST_READERS:
         if re.search(regex, path) and reader in ws.crates:
@@ -1818,7 +1846,7 @@ def make_plan(changes: Sequence[Tuple[str, bool]], ws: Workspace, dependents: bo
     for path, deleted in changes:
         classify(path, deleted, ws, needs)
     if needs.full:
-        return Plan(needs.full, [], needs.render, needs.why, needs.notes)
+        return Plan(needs.full, [], needs.render, needs.why, needs.notes, ladder=needs.ladder)
 
     # The tests of the changed code: those the code's graph finds reach it, in any crate, or with
     # --all-tests (or no graph) every test of the changed crates, as before the graph. With the graph,
@@ -1897,6 +1925,8 @@ def make_plan(changes: Sequence[Tuple[str, bool]], ws: Workspace, dependents: bo
         steps.append(Step(phase, title, recipe, list(first) + short(set(every) - set(first)), every))
 
     vitest_any = bool(needs.vitest_all or needs.vitest_package or needs.vitest_files)
+    # The paths that run the smoke harness: the whole of test-render, or its ladder part alone.
+    harness = needs.render | needs.ladder
     clippy = sorted(needs.clippy)
     whole = set(needs.tests)  # every test of these crates
     native = sorted(whole | set(needs.native) | graph_crates | source_crates)
@@ -1959,9 +1989,9 @@ def make_plan(changes: Sequence[Tuple[str, bool]], ws: Workspace, dependents: bo
             "Windows, by the guard (decision-test-coverage.md L4); integration's `just ci` lints them there.")
 
     # Setup: `ci`'s own dependencies.
-    if needs.surface_module or needs.typecheck or needs.oxlint or vitest_any or needs.render:
+    if needs.surface_module or needs.typecheck or needs.oxlint or vitest_any or harness:
         readers = ({"the TypeScript checks below, which read it"} if needs.typecheck or needs.oxlint or vitest_any
-                   else set()) | ({"the smoke harness's build below, which bundles it"} if needs.render else set())
+                   else set()) | ({"the smoke harness's build below, which bundles it"} if harness else set())
         step("setup", "the surface module", ["gen-surface"], needs.surface_module or readers)
     groups = (["wasip1"] if wasip1_tests else []) + (["browser"] if browser_tests or browser_clippy else [])
     if groups:
@@ -1995,9 +2025,9 @@ def make_plan(changes: Sequence[Tuple[str, bool]], ws: Workspace, dependents: bo
              causes_of(needs.clippy, cross) | needs.gpu_replay | needs.meshbuild)
     if needs.smart_ci_tests:
         step("side", "smart-ci's own tests", ["_smart-ci-test"], needs.smart_ci_tests)
-    if needs.render:
-        for recipe in RENDER_PHASES["side"]:
-            step("side", "build the client for the smoke harness (just test-render)", recipe, needs.render)
+    if harness:
+        for recipe in render_recipes("side", bool(needs.render)):
+            step("side", "build the client for the smoke harness (just test-render)", recipe, harness)
 
     # vitest, beside the builds and outside the heavy-test lock (decision-test-coverage.md R1).
     if needs.vitest_all:
@@ -2084,9 +2114,12 @@ def make_plan(changes: Sequence[Tuple[str, bool]], ws: Workspace, dependents: bo
         step("locked", "the WebAssembly suites: " + "; ".join(suites),
              ["_wasm-run", wasip1_args if wasip1_tests else "", wasip1_filter if wasip1_tests else "",
               " ".join(browser_tests)], wasm_causes | browser_causes)
-    if needs.render:
-        for recipe in RENDER_PHASES["locked"]:
-            step("locked", "the smoke harness on SwiftShader, both variants (just test-render)", recipe, needs.render)
+    if harness:
+        title = ("the smoke harness on SwiftShader, both variants (just test-render)" if needs.render else
+                 f"the smoke harness's ladder part on SwiftShader, both settings and variants (just test-render "
+                 f"{LADDER_PART})")
+        for recipe in render_recipes("locked", bool(needs.render)):
+            step("locked", title, recipe, harness)
 
     notes = list(needs.notes)
     if chosen is not None:
@@ -2110,7 +2143,7 @@ def make_plan(changes: Sequence[Tuple[str, bool]], ws: Workspace, dependents: bo
             + ", which this plan's do not cover (a `-p` selection is not the workspace's build, nor does it reach "
             "the crates that depend on the change): `--hook-checks` runs the workspace's in their place, inside the "
             "gate's build slot, and the hooks then skip them (`tools/smart-ci/stamp.py`).")
-    plan = Plan({}, steps, needs.render, needs.why, notes, suites=weighed)
+    plan = Plan({}, steps, needs.render, needs.why, notes, suites=weighed, ladder=needs.ladder)
     if chosen is not None and (graph_mode or source_crates):
         plan.details = chosen.describe(graph_crates | source_crates, whole, explain, needs.native)
     return plan
@@ -2342,7 +2375,10 @@ def describe(plan: Plan, changes: Sequence[Tuple[str, bool]], what: str, depende
     lines += plan.details
     if plan.render and plan.is_full:
         lines.append("With `just test-render`'s steps, its run in the same hold of the heavy-test lock, because of "
-                     + ", ".join(short(plan.render)))
+                     + ", ".join(short(plan.render | plan.ladder)))
+    elif plan.ladder and plan.is_full:
+        lines.append(f"With `just test-render`'s steps, its run of the ladder part alone ({LADDER_PART}) in the same "
+                     "hold of the heavy-test lock, because of " + ", ".join(short(plan.ladder)))
     for note in plan.notes:
         lines.append(f"Note: {note}")
     if plan.is_full or plan.steps:
@@ -2393,9 +2429,9 @@ def phases_of(plan: Plan) -> Phases:
     full plan, with `just test-render`'s build and run where it needs them (setup has `gen-surface`)."""
     if plan.is_full:
         phases = {phase: [list(recipe) for recipe in CI_PHASES[phase]] for phase in PHASES}
-        if plan.render:
+        if plan.render or plan.ladder:
             for phase in ("side", "locked"):
-                phases[phase] += [list(recipe) for recipe in RENDER_PHASES[phase]]
+                phases[phase] += render_recipes(phase, bool(plan.render))
         return phases
     phases: Phases = {phase: [] for phase in PHASES}
     for step in plan.steps:
@@ -3072,6 +3108,9 @@ concerned (`--plan` shows each step and the paths that caused it):
                                 (`wasm_sky`) to pinning no value
   shaders, engine, smoke        just test-render's build and run, the run in the suites' hold of
                                 the heavy-test lock
+  what a setting makes          just test-render's build and its ladder part's run (--part=ladder):
+                                the photorealistic view, the terrain's materials and pass, the
+                                settings' tables (LADDER_PATHS)
   the whole workspace's inputs  the full `just ci`: justfile, Cargo.toml, Cargo.lock, pnpm-lock.yaml,
                                 rust-toolchain.toml, .cargo/, tools/portable/, and any path no rule knows
 
