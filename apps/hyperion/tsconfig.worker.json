@@ -50,6 +50,8 @@
     "src/renderer/src/view/atmosphere/absorbers.ts",
     "src/renderer/src/view/atmosphere/aerosol.ts",
     "src/renderer/src/view/clouds/condensates.ts",
+    "src/renderer/src/view/clouds/cloudNoise.ts",
+    "src/renderer/src/view/clouds/cloudShapeNoise.ts",
     "src/renderer/src/view/atmosphere/aggregate.ts",
     "src/renderer/src/view/atmosphere/assemble.ts",
     "src/renderer/src/view/atmosphere/channels.ts",
