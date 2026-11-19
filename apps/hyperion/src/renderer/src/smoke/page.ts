@@ -351,7 +351,11 @@ const VARIANTS: Readonly<Record<string, CapabilityOverrides | undefined>> = {
  * its specialised march. At the last four gates parts 9, 11 and 12 had run 51 to 131 s, 86 to
  * 133 s and 46 to 135 s, which the catalogue, the Earth's twins and the specialised march would
  * take to some 160 to 166 s at their slowest, so part 13 joined, with those three; the
- * Saturn-class figure's twins, the smallest, went to part 3 (67 to 126 s) (2026-10-27).
+ * Saturn-class figure's twins, the smallest, went to part 3 (67 to 126 s) (2026-10-27). The datum
+ * group moved again, to part 24 (49 s) after plan R07's packed cells, when the airless twins'
+ * compiles beside part 10 took it past its watchdog (346 s of 360 at BASE alone at a pod's load of
+ * 36 to 49; 2026-11-19): part 10 then held 251 s and part 24 218 s (in part 35 beside the twins'
+ * checks it took that part to 320 s).
  * R08.T15.a.2's deck brought its marches' catalogue and its twins on Earth and on a Saturn-class
  * figure, which part 13 (156 s on a pod at R08.T14.d.1's gate) and part 9 (112 s) could not take
  * whole, so part 14 joined, with both (2026-10-30). R14's levers took part 7 to 238 to 242 s of
@@ -1179,7 +1183,7 @@ async function run(
   await group(11, "R08.T9.c a drawn surface's transmittance per channel", () =>
     checkSurfaceTransmittance(engine, checks),
   );
-  await group(10, "R10.T16.g the datum inside the figure", () => checkDatumFrame(engine, checks));
+  await group(24, "R10.T16.g the datum inside the figure", () => checkDatumFrame(engine, checks));
   await group(1, "R05.T11.a the terrain's resources", () => checkTerrainResources(engine, checks));
   await group(1, "R05.T11.b the terrain's frames", () => checkTerrainFrames(engine, checks));
   await group(1, "R06.T13.d the sky's band", () => checkSkyBand(engine, checks));

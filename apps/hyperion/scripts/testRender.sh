@@ -79,8 +79,10 @@
 # before and 110 s after, and part 30 197 s, (T)'s row 124 s of it (95 s beside part 12's shared
 # read).
 # Plan R07's airless twins (perf-bodies-pass: their catalogue and the checks that the bodies and
-# the lit terrain drawn by them draw their modules' bytes) took part 35, alone, 150 s on a pod
-# (2026-11-19).
+# the lit terrain drawn by them draw their modules' bytes) took part 35, 150 s on a pod; with the
+# twins compiled beside its groups part 10 went past its watchdog (346 s of 360 at BASE alone, at a
+# pod's load of 36 to 49), so R10.T16.g's datum group moved to part 24, after plan R07's packed
+# cells: part 10 then held 251 s, part 24 218 s and part 35 143 s (2026-11-19).
 # Plan R11's still mount, its job's small still of flat colours and its PNG round trip through the
 # harness's main process took part 28, alone, some 2 s on a pod (2026-11-14; parts 25 to 27 are
 # other lanes').
