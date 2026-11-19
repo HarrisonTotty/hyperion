@@ -3001,6 +3001,149 @@ async fn final_sky_replies_after_a_launch_and_a_relaunch() {
     }
 }
 
+/// The system of rendering plan R12's `nuclear-disc-sky` scene, `perf_scenes.rs`' pin of the same
+/// name, which its test holds to the generator: a K2 V star of the galaxy's nuclear disc, 382.8 ly
+/// from the centre on the +y axis and 0.5 ly above the plane.
+const NUCLEAR_DISC_SYSTEM: u64 = 0x4200_202e_0000_30eb;
+
+/// The camera's limit of R12's `nuclear-disc-sky` scene, V: a view's at 60°, the default field
+/// of view, over a black sky (`viewSky.ts`' `viewSkyRequest`, V 10.15).
+const NUCLEAR_DISC_LIMIT_V: f64 = 10.15;
+
+/// The scene's `n_max`, the low setting's (`setting.ts`' `LOW_SKY`), at which R12 ran it.
+const NUCLEAR_DISC_N_MAX: u32 = 100_000;
+
+/// The variable that lets [`nuclear_disc_sky_replies`] measure; without it the tests return at
+/// once, so that `just test-slow`, which runs every ignored test, does not hold the machine for
+/// hours, nor fail at the harness's default patience waiting for a first reply.
+const NUCLEAR_DISC_ENV: &str = "HYPERION_NUCLEAR_DISC_SKY";
+
+/// perf-first-sky's table of the nuclear disc's sky on `workers` workers: on a server that serves
+/// the sky to its derived caps and warms the global list at an open, as a played server does, the
+/// seconds from a universe's open to its open's answer, and to each reply of the sky R12's
+/// `nuclear-disc-sky` scene asks at [`NUCLEAR_DISC_SYSTEM`]'s barycentre, leaving the system out,
+/// over a fresh data directory, with each reply's listed and overflowing stars and the radius its
+/// census is complete to. Nothing is kept, so that every launch censuses the sky afresh. Its
+/// figures depend on the machine and the build, so it asserts only that the final reply comes, and
+/// the client's wait for each frame is [`common::PATIENCE_ENV`]'s, to be set to some hours. The
+/// server's log goes to standard error at `RUST_LOG`'s levels: `hyperion_server=debug` gives the
+/// sky's phases and each step's census by layer, what holds its first reply. It measures only where
+/// [`NUCLEAR_DISC_ENV`] is set.
+async fn nuclear_disc_sky_replies(workers: usize) {
+    if std::env::var_os(NUCLEAR_DISC_ENV).is_none() {
+        eprintln!("{NUCLEAR_DISC_ENV} is not set: the nuclear disc's sky is not measured");
+        return;
+    }
+    // Refused only if a subscriber is set already, as another test of the binary may have done:
+    // the log then goes there.
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_timer(tracing_subscriber::fmt::time::uptime())
+        .with_writer(std::io::stderr)
+        .try_init();
+    let data_dir = tempfile::tempdir().expect("a temporary directory");
+    let config = TestServer::config(data_dir.path())
+        .workers(NonZeroUsize::new(workers).expect("a worker or more"))
+        .sky_service(SkyService::Served)
+        .global_list_warm_up(hyperion_server::GlobalListWarmUp::AtOpen)
+        .kept_skies(KeptSkies::Off)
+        .build();
+    let server = TestServer::start_with(config).await;
+    let mut client = server.connected().await;
+    let universe = client.create_universe("Sky: nuclear disc", SEED).await.id;
+    let record = hyperion_sim::galaxy::placement::resolve(
+        galaxy(),
+        hyperion_sim::id::SystemId::from_raw(NUCLEAR_DISC_SYSTEM).expect("a system ID"),
+    )
+    .expect("the scene's system resolves");
+    let at = record.epoch_position();
+    let started = std::time::Instant::now();
+    let body = RequestBody::OpenUniverse(OpenUniverseRequest {
+        universe: universe.clone(),
+    });
+    match client.request(body).await {
+        Ok(ResponseBody::OpenUniverse(_)) => {}
+        other => panic!("expected the opened universe, got {other:?}"),
+    }
+    let open = started.elapsed();
+    let request = SkyRequest {
+        observer: GalacticPosition {
+            cell_ly: at.cell().to_array(),
+            offset_m: at.offset_metres(),
+        },
+        camera_limit_v: Some(NUCLEAR_DISC_LIMIT_V),
+        n_max: Some(NUCLEAR_DISC_N_MAX),
+        exclude_system: Some(SystemIdHex::from_u64(NUCLEAR_DISC_SYSTEM)),
+        ..sky(&universe)
+    };
+    eprintln!(
+        "| Workers | Reply | After the open (s) | Listed | Overflow | C to E complete to (ly) |"
+    );
+    eprintln!("| --- | --- | --- | --- | --- | --- |");
+    eprintln!("| {workers} | the open | {:.2} | | | |", open.as_secs_f64());
+    let id = client.send_request(RequestBody::Sky(request)).await;
+    let mut reply = 0;
+    loop {
+        let (last, body) = match client.next_frame().await {
+            Frame::Binary(..) => continue,
+            Frame::Message(ServerMessage::PartialResponse { id: answered, body })
+                if answered == id =>
+            {
+                (false, body)
+            }
+            Frame::Message(ServerMessage::Response {
+                id: answered, body, ..
+            }) if answered == id => (true, body),
+            Frame::Message(other) => panic!("expected the sky's replies, got {other:?}"),
+        };
+        let ResponseBody::Sky(response) = body else {
+            panic!("expected a sky's reply, got {body:?}");
+        };
+        reply += 1;
+        // The radius the shelled layers are all complete to, the step's edge.
+        let complete_to = response
+            .census
+            .iter()
+            .filter(|layer| matches!(layer.layer, MassLayer::C | MassLayer::D | MassLayer::E))
+            .map(|layer| layer.complete_to_ly)
+            .fold(f64::INFINITY, f64::min);
+        eprintln!(
+            "| {workers} | {reply}{} | {:.2} | {} | {} | {complete_to:.0} |",
+            if last { ", final" } else { "" },
+            started.elapsed().saturating_sub(open).as_secs_f64(),
+            response.listed,
+            response.overflow,
+        );
+        if last {
+            assert!(
+                response.is_final,
+                "the terminal response is the final reply"
+            );
+            break;
+        }
+    }
+    client.close().await;
+    server.stop().await;
+}
+
+/// [`nuclear_disc_sky_replies`] on two workers, R12's scene's server's.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "measurement, run by hand: HYPERION_NUCLEAR_DISC_SKY=1 HYPERION_TEST_PATIENCE_SECS=14400 \
+            cargo test --release -p hyperion-server --test sky nuclear_disc_sky_on_two_workers -- \
+            --ignored --nocapture"]
+async fn nuclear_disc_sky_on_two_workers() {
+    nuclear_disc_sky_replies(2).await;
+}
+
+/// [`nuclear_disc_sky_replies`] on eight workers, [`first_answers_after_a_launch_and_a_relaunch`]'s.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "measurement, run by hand: HYPERION_NUCLEAR_DISC_SKY=1 HYPERION_TEST_PATIENCE_SECS=14400 \
+            cargo test --release -p hyperion-server --test sky nuclear_disc_sky_on_eight_workers -- \
+            --ignored --nocapture"]
+async fn nuclear_disc_sky_on_eight_workers() {
+    nuclear_disc_sky_replies(8).await;
+}
+
 /// The first record of `layer`'s cells about the Sun, walking out along x from the Sun's own, whose
 /// stars are `count` discs at the epoch: a single star's at 1, a binary's at 2.
 fn record_of_discs(layer: Layer, count: usize) -> SystemRecord {
