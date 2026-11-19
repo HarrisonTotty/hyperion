@@ -668,8 +668,9 @@ describe("the GPU process's kernel memory", () => {
         // Client 17's 268 KiB once, not four times.
         totalBytes: (67_152 + 268 + 199_320) * KIB,
         sharedBytes: (14_696 + 60) * KIB,
-        // Σresident − ½·Σshared: memory shared between two clients counted once at most.
-        residentLowerBoundBytes: (61_008 + 186_168 - (14_696 + 60) / 2) * KIB,
+        // Per region Σresident − Σshared + the largest client's shared (research-leans-54): in
+        // system0 client 15's 14,696 KiB counts once, client 23's 60 KiB taken to lie within it.
+        residentLowerBoundBytes: (61_008 + 186_168 - (14_696 + 60) + 14_696) * KIB,
         busyNs: 54_327_119_215 + 56_437_356_533,
         clients: 6,
         drivers: ["i915"],
