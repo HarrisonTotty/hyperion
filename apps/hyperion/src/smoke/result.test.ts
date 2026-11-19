@@ -336,6 +336,32 @@ describe.runIf(process.platform !== "win32")("testRender.sh's parts", () => {
     const parts = /^ {4}parts=\(([\d ]+)\)$/mu.exec(script())?.[1];
     expect(parts).toBe(["1", ...LATER_PARTS].join(" "));
   });
+
+  it("runs the ladder after the parts when none is asked for (plan R12, R12.T7.a)", () => {
+    expect(script()).toMatch(/^ {4}parts=\([\d ]+\)\n {4}ladder=1$/mu);
+    expect(scriptArray("units")).toEqual(['${parts[@]+"${parts[@]}"}']);
+    expect(script()).toMatch(/^ {4}units\+=\(ladder\)$/mu);
+  });
+
+  it("takes --part=ladder and --setting=high or low", () => {
+    for (const args of [
+      ["--part=ladder"],
+      ["--part=ladder", "--setting=high"],
+      ["--setting=low"],
+    ]) {
+      expect(runScriptAtScale("1", args).stderr).not.toContain("unknown argument");
+    }
+  });
+
+  it("refuses any other setting, before any run", () => {
+    for (const setting of ["medium", "default", "HIGH"]) {
+      const refused = runScriptAtScale("1", ["--part=ladder", `--setting=${setting}`]);
+      expect([
+        refused.status,
+        refused.stderr.includes(`unknown argument --setting=${setting}`),
+      ]).toEqual([2, true]);
+    }
+  });
 });
 
 /** The words of the array `name` that `scripts/testRender.sh` assigns at the start of a line. */
@@ -399,6 +425,35 @@ describe.runIf(process.platform === "linux")("testRender.sh's launch", () => {
       0,
       [switches],
     ]);
+  });
+
+  /** Each launch's part, setting and variant, sorted: `none` for a launch that names none. */
+  const asked = (args: ReadonlyArray<string>): ReadonlyArray<string> =>
+    launchesOf(args)
+      .launches.map((words) =>
+        ["--smoke-part=", "--smoke-setting=", "--smoke-variant="]
+          .map((flag) => words.find((word) => word.startsWith(flag))?.slice(flag.length) ?? "none")
+          .join(" "),
+      )
+      .toSorted();
+
+  it("launches the ladder once per setting and variant, naming its setting (plan R12, R12.T7.a)", () => {
+    expect(asked(["--part=ladder"])).toEqual([
+      "ladder high default",
+      "ladder high no-subgroups",
+      "ladder low default",
+      "ladder low no-subgroups",
+    ]);
+  });
+
+  it("launches the ladder at the setting asked alone", () => {
+    expect(asked(["--part=ladder", "--setting=low", "--variant=no-subgroups"])).toEqual([
+      "ladder low no-subgroups",
+    ]);
+  });
+
+  it("launches a part's runs at no setting, whatever --setting says", () => {
+    expect(asked(["--part=2", "--setting=low"])).toEqual(["2 none default", "2 none no-subgroups"]);
   });
 
   it("keeps Chromium's GPU watchdog off when the adapter's switches are dropped", () => {

@@ -9,7 +9,8 @@
  * Its switches come from the `just test-render` recipe's command line, never from the client's
  * `graphicsSwitches`, which a test keeps free of the unsafe flag and the adapter override. The
  * page's variant and fixture arrive as `--smoke-variant=` and `--smoke-fixture=`, and the part of
- * its groups to run as `--smoke-part=1` to `30` (every group without it), and
+ * its groups to run as `--smoke-part=1` to `30` or `ladder` (every group without it), the ladder's
+ * at the quality setting `--smoke-setting=high` or `low` names (plan R12, R12.T7.a), and
  * `--smoke-twin-workers=<n>` the atmosphere twins' workers, at most 4 (a quarter of the hardware
  * threads, at most 4, without it);
  * `--smoke-gpu-timing=1` says the run lifted timestamp quantization (the hardware runs of T11),
@@ -97,6 +98,8 @@ const variant = argument("smoke-variant", "default");
 const fixture = argument("smoke-fixture", "none");
 /** The part of the page's groups to run, each its own run under its own watchdog, or `all`. */
 const part = argument("smoke-part", "all");
+/** The quality setting the `ladder` part runs at (plan R12, R12.T7.a), or "" for none. */
+const setting = argument("smoke-setting", "");
 /** The twin workers the page starts, or "" for its default (`twinPool.ts`). */
 const twinWorkers = argument("smoke-twin-workers", "");
 const gpuTiming = argument("smoke-gpu-timing", "0");
@@ -458,6 +461,7 @@ void app
         variant,
         fixture,
         part,
+        ...(setting === "" ? {} : { setting }),
         ...(twinWorkers === "" ? {} : { twinWorkers }),
         // The child-window run lifts the quantization with the client's own timing switch.
         gpuTiming: child === null ? gpuTiming : "1",

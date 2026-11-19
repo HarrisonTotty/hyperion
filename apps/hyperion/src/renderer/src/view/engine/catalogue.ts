@@ -5,7 +5,7 @@
  * @remarks
  * Later plans register theirs here, so that the offline test covers every shader (R01's Generator
  * version section reserves it). An entry may name the settings it renders at; R01 has one setting,
- * `default`, and R12.T7.a adds the ladder's (R01 Design note 18).
+ * `default`, and R12.T7.a adds the ladder's (R01 Design note 18): {@link CatalogueSetting}.
  */
 
 import {
@@ -147,6 +147,7 @@ import {
   WIREFRAME_MATERIALS,
 } from "../wireframe/submit";
 import { ID_READ_MATERIAL, ID_WRITE_MATERIAL } from "./idTarget";
+import type { QualitySetting } from "../quality/qualitySetting";
 import { SUBGROUP_TWINS } from "./twins";
 import type {
   PointSplatSpec,
@@ -155,8 +156,18 @@ import type {
   WgslPostProcessSpec,
 } from "./types";
 
-/** A named rendering setting at which the harness renders an entry. */
-export type CatalogueSetting = "default";
+/**
+ * A named rendering setting at which the harness renders an entry: R01's `default`, once, for an
+ * entry whose WGSL and pipelines are the same at every setting, or one of the ladder's settings
+ * (plan R12, R12.T7.a).
+ *
+ * @remarks
+ * No entry declares a ladder setting: a setting decides which entries a frame makes, never an
+ * entry's source, so each is compiled once at `default` in its part of the smoke page. What each
+ * setting makes, the page's `ladder` part makes and draws at that setting, on both capability
+ * paths (`smoke/ladder.ts`), and checks against this catalogue.
+ */
+export type CatalogueSetting = "default" | QualitySetting;
 
 /** One shader the harness renders. */
 export type CatalogueEntry = (

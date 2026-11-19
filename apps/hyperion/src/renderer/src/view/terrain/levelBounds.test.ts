@@ -97,18 +97,21 @@ interface Style {
   readonly maxPatches: number;
 }
 
-/** The lit terrain on each setting, and the wireframe's (R05.T7.c's three tolerances). */
+/**
+ * The lit terrain on each setting, and the wireframe's on each (R05.T7.c's three tolerances; plan
+ * R12, R12.T7.a: both settings, both styles).
+ */
 const STYLES: ReadonlyArray<Style> = [
   ...(["high", "low"] as const).map((setting) => ({
     setting,
     tauPx: SETTINGS[setting].terrain.tauPx,
     maxPatches: Math.floor(terrainSlotLayout(SETTINGS[setting].terrain, "lit").slotCount / 2),
   })),
-  {
-    setting: "high",
+  ...(["high", "low"] as const).map((setting) => ({
+    setting,
     tauPx: WIREFRAME_TERRAIN_TAU_PX,
     maxPatches: Math.floor(WIREFRAME_TERRAIN_SLOTS / 2),
-  },
+  })),
 ];
 
 const WORLDS: ReadonlyArray<SampleWorld> = fixture.worlds.map(sampleWorld);

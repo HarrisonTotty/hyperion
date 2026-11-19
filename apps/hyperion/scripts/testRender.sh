@@ -5,8 +5,9 @@
 # It exits with the code of the first run, in part and then variant order, that does not exit 0: 1
 # a property failed or a request went out, 2 a setup error (no adapter), 3 the watchdog.
 #
-#   testRender.sh [--variant=NAME]... [--part=N]... [--fixture=broken-wgsl|external-fetch]
-#                 [--drop-adapter-switches] [--captures=DIR] [--geometry=FIELD=VALUE[,...]]
+#   testRender.sh [--variant=NAME]... [--part=N|ladder]... [--setting=high|low]...
+#                 [--fixture=broken-wgsl|external-fetch] [--drop-adapter-switches] [--captures=DIR]
+#                 [--geometry=FIELD=VALUE[,...]]
 #
 # The page's groups are in thirty parts, 1 to 30 (`src/renderer/src/smoke/page.ts`), each a run
 # of its own under its own watchdog, the harness's hang detector (perf-smoke, 2026-10-13): parts 2
@@ -82,6 +83,11 @@
 # (2026-11-13; parts 25 to 28 are the lanes' beside it).
 # --part=N runs that part alone (every part by default).
 #
+# --part=ladder runs plan R12's ladder (R12.T7.a; `src/renderer/src/smoke/ladder.ts`): once per
+# quality setting and variant, side by side, each run making and drawing what its setting makes, so
+# that a setting left to rot fails the render. It runs after the parts when no part is asked for;
+# --setting=NAME runs it at that setting alone (both by default).
+#
 # --captures=DIR also renders the capture frames (R05.T12.c's atmosphere comparison, R08.T8.b's
 # ascent, R05.T11.c's terrain, R05.T13.b's spike, R07.T9's occultation, R07.T10.c's eclipse scene)
 # and saves them in DIR as PNGs, each named for its variant; they are part 1's, and they scale part
@@ -129,6 +135,8 @@ gpu_watchdog_switches=(--disable-gpu-watchdog)
 
 variants=()
 parts=()
+ladder=0
+settings=()
 fixture=none
 captures=()
 geometry=()
@@ -136,6 +144,8 @@ for arg in "$@"; do
     case "$arg" in
         --variant=*) variants+=("${arg#--variant=}") ;;
         --part=[1-9] | --part=1[0-9] | --part=2[0-9] | --part=30) parts+=("${arg#--part=}") ;;
+        --part=ladder) ladder=1 ;;
+        --setting=high | --setting=low) settings+=("${arg#--setting=}") ;;
         --fixture=*) fixture="${arg#--fixture=}" ;;
         --drop-adapter-switches) adapter_switches=() ;;
         --captures=*) captures=("--smoke-captures=${arg#--captures=}") ;;
@@ -146,8 +156,18 @@ done
 if [[ ${#variants[@]} -eq 0 ]]; then
     variants=(default no-subgroups)
 fi
-if [[ ${#parts[@]} -eq 0 ]]; then
+if [[ ${#parts[@]} -eq 0 && $ladder -eq 0 ]]; then
     parts=(1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30)
+    ladder=1
+fi
+if [[ ${#settings[@]} -eq 0 ]]; then
+    settings=(high low)
+fi
+# The units run one after the other: each part's variants side by side, then the ladder's settings
+# and variants side by side.
+units=(${parts[@]+"${parts[@]}"})
+if [[ $ladder -eq 1 ]]; then
+    units+=(ladder)
 fi
 
 # Each run's outer limit, s: 120 s (`outer_margin_s`) over its watchdog (`src/smoke/result.ts`'s
@@ -182,12 +202,14 @@ now_ms() {
     echo "$now"
 }
 
-# Per run, by its index (part by part, each part's variants in order): its part, its variant, its
-# profile and its process group until it has ended, then its exit code and how long it took from
-# its part's start. An ended run's group and profile are gone and are cleared, so that the cleanup
-# never kills a group that has since taken the same ID.
+# Per run, by its index (part by part, each part's variants in order, the ladder's by setting): its
+# part, its variant, its setting (the ladder's, else empty), its profile and its process group until
+# it has ended, then its exit code and how long it took from its part's start. An ended run's group
+# and profile are gone and are cleared, so that the cleanup never kills a group that has since
+# taken the same ID.
 run_parts=()
 run_variants=()
+run_settings=()
 profiles=()
 groups=()
 statuses=()
@@ -212,7 +234,7 @@ cleanup() {
         if [[ $printed -eq 0 ]]; then
             for i in ${run_parts[@]+"${!run_parts[@]}"}; do
                 if [[ -f "$logs/$i.log" ]]; then
-                    echo "== smoke run cut short: variant ${run_variants[i]}, part ${run_parts[i]}, fixture $fixture" >&2
+                    echo "== smoke run cut short: variant ${run_variants[i]}, part ${run_parts[i]}$(setting_words "$i"), fixture $fixture" >&2
                     cat "$logs/$i.log" >&2 || true
                 fi
             done
@@ -221,6 +243,13 @@ cleanup() {
     fi
 }
 trap cleanup EXIT
+
+# The run's setting in its header, `, setting NAME`, for a ladder's run; nothing for a part's.
+setting_words() {
+    if [[ -n "${run_settings[$1]:-}" ]]; then
+        echo ", setting ${run_settings[$1]}"
+    fi
+}
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
@@ -233,32 +262,45 @@ if ! (cd "$here" && node -e 'require("electron")' >&2); then
 fi
 
 logs="$(mktemp -d "${TMPDIR:-/tmp}/hyperion-smoke-logs.XXXXXX")"
-for part in "${parts[@]}"; do
+for part in "${units[@]}"; do
     start=$(now_ms)
     first=${#run_parts[@]}
     limit_s=$(( (outer_limit_s - outer_margin_s) * scale + outer_margin_s ))
     if [[ ${#captures[@]} -gt 0 && "$part" == 1 ]]; then
         limit_s=$((limit_s + captures_allowance_s * scale))
     fi
-    for variant in "${variants[@]}"; do
-        i=${#run_parts[@]}
-        run_parts[i]=$part
-        run_variants[i]=$variant
-        profiles[i]="$(mktemp -d "${TMPDIR:-/tmp}/hyperion-smoke.XXXXXX")"
-        env -u DISPLAY -u WAYLAND_DISPLAY DBUS_SESSION_BUS_ADDRESS=unix:path=/nonexistent \
-            setsid timeout --kill-after=10 "$limit_s" "$electron" \
-            ${adapter_switches[@]+"${adapter_switches[@]}"} "${headless_switches[@]}" \
-            "${gpu_watchdog_switches[@]}" \
-            "--user-data-dir=${profiles[i]}" "$here/out/main/smoke.js" --smoke-variant="$variant" \
-            --smoke-part="$part" --smoke-fixture="$fixture" --smoke-watchdog-scale="$scale" \
-            ${captures[@]+"${captures[@]}"} ${geometry[@]+"${geometry[@]}"} \
-            >"$logs/$i.log" 2>&1 &
-        groups[i]=$!
+    if [[ "$part" == ladder ]]; then
+        unit_settings=("${settings[@]}")
+    else
+        unit_settings=("")
+    fi
+    for setting in "${unit_settings[@]}"; do
+        for variant in "${variants[@]}"; do
+            i=${#run_parts[@]}
+            run_parts[i]=$part
+            run_variants[i]=$variant
+            run_settings[i]=$setting
+            setting_args=()
+            if [[ -n "$setting" ]]; then
+                setting_args=("--smoke-setting=$setting")
+            fi
+            profiles[i]="$(mktemp -d "${TMPDIR:-/tmp}/hyperion-smoke.XXXXXX")"
+            env -u DISPLAY -u WAYLAND_DISPLAY DBUS_SESSION_BUS_ADDRESS=unix:path=/nonexistent \
+                setsid timeout --kill-after=10 "$limit_s" "$electron" \
+                ${adapter_switches[@]+"${adapter_switches[@]}"} "${headless_switches[@]}" \
+                "${gpu_watchdog_switches[@]}" \
+                "--user-data-dir=${profiles[i]}" "$here/out/main/smoke.js" --smoke-variant="$variant" \
+                --smoke-part="$part" ${setting_args[@]+"${setting_args[@]}"} --smoke-fixture="$fixture" \
+                --smoke-watchdog-scale="$scale" \
+                ${captures[@]+"${captures[@]}"} ${geometry[@]+"${geometry[@]}"} \
+                >"$logs/$i.log" 2>&1 &
+            groups[i]=$!
+        done
     done
 
     # Each run's end, seen within a fifth of a second: the shell reaps a run as it ends, after which
     # `kill -0` finds no process, and `wait` then gives the code it kept.
-    running=${#variants[@]}
+    running=$(( ${#run_parts[@]} - first ))
     while [[ $running -gt 0 ]]; do
         for (( i = first; i < ${#run_parts[@]}; i++ )); do
             if [[ -z "${took[i]:-}" ]] && ! kill -0 "${groups[i]}" 2>/dev/null; then
@@ -281,7 +323,7 @@ done
 
 first_failure=0
 for i in "${!run_parts[@]}"; do
-    echo "== smoke run: variant ${run_variants[i]}, part ${run_parts[i]}, fixture $fixture"
+    echo "== smoke run: variant ${run_variants[i]}, part ${run_parts[i]}$(setting_words "$i"), fixture $fixture"
     cat "$logs/$i.log"
     echo "== exit ${statuses[i]} after ${took[i]} ms"
     if [[ $first_failure -eq 0 && ${statuses[i]} -ne 0 ]]; then

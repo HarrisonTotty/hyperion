@@ -233,6 +233,8 @@ describe("selection about a grounded body", () => {
     ["the high setting", "high" as const, TERRAIN_SETTINGS.high.tauPx],
     ["the low setting", "low" as const, TERRAIN_SETTINGS.low.tauPx],
     ["a 4 px view tolerance", "high" as const, 4],
+    // The wireframe's τ on the low setting too (plan R12, R12.T7.a: both settings, both styles).
+    ["a 4 px view tolerance on the low setting", "low" as const, 4],
   ])("selects the finest level under the body and the ramp's margin on %s", (_, setting, tau) => {
     const sel = select([CRAFT], setting, tau);
     const needed = finestKeysWithin(CRAFT.positionM, heldRadiusM(CRAFT, PATCH_M) + PATCH_M);

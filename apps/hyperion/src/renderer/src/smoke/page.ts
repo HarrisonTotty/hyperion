@@ -55,6 +55,10 @@
  * captures after them; a plain
  * `just test-render` runs none of them.
  *
+ * The `ladder` part (plan R12, R12.T7.a; `ladder.ts`) runs at the setting its query names, `high` or
+ * `low`: what that setting's own code makes, made and drawn at it, and found in the catalogue, so
+ * that a setting left to rot fails the run; with no part given the page runs it at both.
+ *
  * With `transfer` in its query (`--smoke-transfer`; plan R10, R10.T15.b) the page runs R03.T15's
  * transfer check instead of every group (`transfer.ts`): no adapter, only the server's socket.
  */
@@ -203,6 +207,8 @@ import {
 } from "./bodies";
 import { runChildWindow } from "./childWindow";
 import { checkTransfer } from "./transfer";
+import { checkLadder } from "./ladder";
+import { QUALITY_SETTINGS, type QualitySetting } from "../view/quality/qualitySetting";
 import { runSoak } from "./soak";
 import { captureSpike } from "./spike";
 import { captureTerrain, checkTerrainFrames, checkTerrainResources } from "./terrain";
@@ -395,7 +401,9 @@ type PagePart =
   | 27
   | 28
   | 29
-  | 30;
+  | 30
+  // Plan R12's ladder (R12.T7.a): a run per setting, which its query names (`ladder.ts`).
+  | "ladder";
 
 /** The part a run's query names, `all` for none, or `null` for one that is not a part. */
 function partOf(value: string | null): PagePart | "all" | null {
@@ -463,9 +471,16 @@ function partOf(value: string | null): PagePart | "all" | null {
       return 29;
     case "30":
       return 30;
+    case "ladder":
+      return "ladder";
     default:
       return null;
   }
+}
+
+/** The setting a `ladder` run's query names, or `null` for none or one that is not a setting. */
+function settingOf(value: string | null): QualitySetting | null {
+  return value === "high" || value === "low" ? value : null;
 }
 
 /** Whether `value` is a known fixture. */
@@ -510,6 +525,7 @@ async function run(
   variant: string,
   fixture: SmokeFixture,
   part: PagePart | "all" | null,
+  ladderSetting: QualitySetting | null,
 ): Promise<Report> {
   const failed = (setupError: string): Report => ({
     variant,
@@ -519,7 +535,10 @@ async function run(
     setupError,
   });
   if (part === null) {
-    return failed("the part asked for is not 1 to 30 or all");
+    return failed("the part asked for is not 1 to 30, ladder or all");
+  }
+  if (part === "ladder" && ladderSetting === null) {
+    return failed("the ladder's part runs at a setting, high or low, and none was given");
   }
   const gpu: unknown = Reflect.get(navigator, "gpu");
   if (gpu === undefined) {
@@ -1181,6 +1200,20 @@ async function run(
     });
   }
 
+  // Plan R12's ladder (R12.T7.a): what each setting makes, made and drawn at it, in a part of its
+  // own, a run per setting; a run of every part takes both.
+  const ladderSettings: ReadonlyArray<QualitySetting> =
+    part === "ladder" && ladderSetting !== null
+      ? [ladderSetting]
+      : part === "all"
+        ? QUALITY_SETTINGS
+        : [];
+  for (const setting of ladderSettings) {
+    // The settings run in turn: each reads its frame back before the next makes its own.
+    // oxlint-disable-next-line no-await-in-loop
+    await checkLadder(engine, setting, checks, (name, work) => checks.group(name, work));
+  }
+
   // T9.i's refusal, on a second engine with float32-blendable withheld.
   await group(1, "T9.i splat refused", async () => {
     const second = await requestAdapterOutcome(navigator.gpu);
@@ -1318,7 +1351,12 @@ void (
       ? soak()
       : childSeconds > 0
         ? childWindow()
-        : run(variant, fixture, partOf(parameters.get("part")))
+        : run(
+            variant,
+            fixture,
+            partOf(parameters.get("part")),
+            settingOf(parameters.get("setting")),
+          )
 )
   .catch((error: unknown): Report => ({
     variant,

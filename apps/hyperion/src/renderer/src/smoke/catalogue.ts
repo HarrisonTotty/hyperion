@@ -21,13 +21,18 @@ import {
 /** The fixtures a run may add, named by `--smoke-fixture`. */
 export type SmokeFixture = "none" | "broken-wgsl" | "external-fetch";
 
-/** A material whose WGSL does not compile, which must fail the run naming it. */
+/**
+ * A material whose WGSL does not compile, which must fail the run naming it, at each of the two
+ * settings it declares: R01.T9.c's entry declaring a second setting, which the run renders at both
+ * (plan R12, R12.T7.a supplies the ladder's settings).
+ */
 export const BROKEN_ENTRY: CatalogueEntry = {
   kind: "material",
   spec: flatSpec("broken fixture", {
     displayName: "TEST FIXTURE",
     fragmentWgsl: "@fragment fn fragmentMain() -> @location(0) vec4f { return oops; }",
   }),
+  settings: ["high", "low"],
 };
 
 /**
