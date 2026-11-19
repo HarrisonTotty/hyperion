@@ -1360,7 +1360,8 @@ Files: `ocean/*`, R01's `WGSL_CATALOGUE`, tests. Acceptance: `pnpm test`, `just 
   is 0 at a 10 m footprint, 0.371 at a 1 m footprint and 1 below 2 cm, and continuous; along 10⁴
   random rays through a split ring the expected photometric transmittance of slab and instances
   together equals the unsplit slab's to 1%; instances never appear on the low setting. Bench on the
-  discrete target, with SpaceEngine's published figures as the comparison.
+  discrete target, with SpaceEngine's published figures as the comparison. _Built 2026-11-18._
+  Records: [11-surface-detail-clouds-oceans-rings-stills/records/R11.T9.d.md](11-surface-detail-clouds-oceans-rings-stills/records/R11.T9.d.md).
 
 Files: `rings/*`, `crates/hyperion-fit/src/rings/{mod,layer,trace}.rs` and its subcommand in
 `crates/hyperion-fit/src/cli.rs`, `rings/shadowingTable.ts` (generated), R01's `WGSL_CATALOGUE`,

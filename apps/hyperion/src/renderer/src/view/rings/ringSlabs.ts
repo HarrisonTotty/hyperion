@@ -82,6 +82,12 @@ export interface RingSlabFrameInput {
   readonly exposureScale: number;
   /** The eclipse term's annuli, the setting's `discAnnuli`. */
   readonly annuli: number;
+  /**
+   * The pixel's angle each ring's particles close to are instanced at this frame (R11.T9.d;
+   * `RingParticles`), by its ring, whose share of its optical depth its slab gives up; none for a
+   * ring absent from it.
+   */
+  readonly instancedPixelRad?: ReadonlyMap<ViewRing, number>;
 }
 
 /** A ring the frame draws: its record's index, its planet and its planet's equatorial radius, m. */
@@ -319,7 +325,11 @@ export class RingSlabs {
         planet,
         stars,
         ringOccludersOf(ring.body, planet.centreM, ring.outerRadiusM, discs),
-        { annuli: input.annuli, exposureScale: input.exposureScale },
+        {
+          annuli: input.annuli,
+          exposureScale: input.exposureScale,
+          instancedPixelRad: input.instancedPixelRad?.get(ring) ?? 0,
+        },
       );
       drawn.push({
         ring: { index: drawn.length, body: ring.body, radiusM: planet.figure.equatorialRadiusM },

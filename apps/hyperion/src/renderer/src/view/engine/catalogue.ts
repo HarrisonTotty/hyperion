@@ -67,6 +67,7 @@ import { TERRAIN_LIT_CLOUD_MATERIALS } from "../terrain/cloudLight";
 import { OCEAN_FAR_PROBE } from "../ocean/oceanFarProbe";
 import { OCEAN_FAR_PASS_MATERIAL } from "../ocean/oceanPass";
 import { OCEAN_DEPTH_COPY_MATERIAL, OCEAN_NEAR_PASS_MATERIAL } from "../ocean/oceanNearPass";
+import { RING_PARTICLE_MATERIAL, RING_PARTICLE_PLACE_KERNEL } from "../rings/ringParticles";
 import { RING_SLAB_MATERIALS } from "../rings/ringSlab";
 import {
   BODY_DISC_AIR_MATERIALS,
@@ -460,13 +461,16 @@ export const CLOUD_ENTRIES: ReadonlyArray<CatalogueEntry> = [
 ];
 
 /**
- * Plan R11's rings (R11.T9.c): the slab drawn into the scene target, testing its depth, and over an
- * air's composite, reading the scene's depth (`rings/ringSlab.ts`). The smoke harness compiles
- * them in part 32, beside its ring slab's group.
+ * Plan R11's rings (R11.T9.c and T9.d): the slab drawn into the scene target, testing its depth,
+ * and over an air's composite, reading the scene's depth (`rings/ringSlab.ts`); and the particles
+ * close to, their field's placement and their material (`rings/ringParticles.ts`). The smoke
+ * harness compiles them in part 32, beside its rings' groups.
  */
 export const RING_ENTRIES: ReadonlyArray<CatalogueEntry> = [
   { kind: "material", spec: RING_SLAB_MATERIALS.attached },
   { kind: "material", spec: RING_SLAB_MATERIALS.sampled },
+  { kind: "compute", spec: RING_PARTICLE_PLACE_KERNEL },
+  { kind: "material", spec: RING_PARTICLE_MATERIAL },
 ];
 
 /** The point splats (R06.T13.h). */

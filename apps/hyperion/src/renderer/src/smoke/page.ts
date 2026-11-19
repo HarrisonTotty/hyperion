@@ -17,7 +17,8 @@
  * packed far limb's kernels and their general forms' check, part 13 R08.T14.c's thick read and R08.T14.f's correction, part 14
  * R08.T15.a.2's deck, part 25 R11.T2.a's decoration library, part 26 R11.T7.b's clouds, part 30
  * R08.T18.b's thermal forms and R08.T11's (T) row, part 32 R11.T9.c's ring slab (its materials'
- * catalogue and its frames against their twin; its captures stay with part 1's), and part 1 every
+ * catalogue and its frames against their twin; its captures stay with part 1's) and R11.T9.d's
+ * particles (their field's placement against its twin and their frames), and part 1 every
  * other; with no part given the page runs them all, in its order.
  * Each part checks its path (T9.c) itself. R08.T6.f's slices and bands run in two groups: the
  * Saturn-class figure's in part 5, with R08.T6.i's layer edges, and Earth's, which took R08.T6.g's
@@ -179,6 +180,7 @@ import { BROKEN_ENTRY, checkCatalogue, makeExternalRequests, type SmokeFixture }
 import { checkIdTarget } from "./idTarget";
 import { checkInstanceCull, checkInstancesAboveClusters, checkParticleFaces } from "./instances";
 import { captureRings, checkRingSlab } from "./rings";
+import { checkRingParticles } from "./ringParticles";
 import { checkDepthLayers } from "./depthLayers";
 import { captureEclipse, checkEclipse } from "./eclipse";
 import { captureViewLight } from "./viewLight";
@@ -661,6 +663,7 @@ async function run(
     checkCatalogue(engine, status, RING_ENTRIES, checks),
   );
   await group(32, "R11.T9.c the ring slab", () => checkRingSlab(engine, checks));
+  await group(32, "R11.T9.d the ring particles", () => checkRingParticles(engine, checks));
   // R11.T8.b's far ocean, in part 27 with its twin's check (plan R11's own part).
   await group(27, "T9.b catalogue: the ocean's kernels", () =>
     checkCatalogue(engine, status, OCEAN_ENTRIES, checks),
@@ -1178,7 +1181,7 @@ async function run(
       images = [...images, ...frames];
       checks.check(
         "R11.T9.c the ring captures",
-        frames.length === 4,
+        frames.length === 6,
         `${String(frames.length)} frames`,
       );
     });

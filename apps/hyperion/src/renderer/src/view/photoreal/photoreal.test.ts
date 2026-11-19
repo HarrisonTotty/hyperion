@@ -98,7 +98,13 @@ describe("photorealisticPasses", () => {
       const labels = passes.map((pass) => pass.label);
       const at = labels.indexOf("ocean");
       expect(passes[at]).toEqual({ label: "ocean", owner: "R11", built: true });
-      expect(labels.slice(at - 1, at + 2)).toEqual(["bodies late", "ocean", "discs"]);
+      // The rings' particles close to (R11.T9.d) among the opaque passes before it.
+      expect(labels.slice(at - 2, at + 2)).toEqual([
+        "bodies late",
+        "ring particles",
+        "ocean",
+        "discs",
+      ]);
       expect(at).toBeLessThan(labels.indexOf("atmosphere"));
     },
   );

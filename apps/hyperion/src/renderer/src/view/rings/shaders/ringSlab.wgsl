@@ -22,7 +22,8 @@
 //   2  the planet's pole; w, c ÷ a;
 //   3  the outer edge's radius ÷ a; the lights; the occluders; exposure ÷ π;
 //   4  the ring's kind, 0 massive and 1 dusty; the annuli per channel; the scale of the profile's
-//      optical depths, its densest band's τ; 0;
+//      optical depths, its densest band's τ; the pixel's angle its particles are instanced at (rad,
+//      R11.T9.d), 0 where none is;
 //   5 + 8j, light j: the star's unit direction from the planet's centre, w its distance ÷ a; its
 //      illuminance face-on per channel (lx), w its radius ÷ a; its annuli for r, g and b, two rows
 //      each, as a disc record's (`bodyDisc.wgsl`);
@@ -142,6 +143,17 @@ fn ring_sphere_hits(ray : vec3f, centre : vec3f, radius : f32) -> SphereHits {
 // sphere of radius 1.
 fn ring_stretched(p : vec3f, pole : vec3f, stretch : f32) -> vec3f {
   return p + (stretch - 1.0) * dot(p, pole) * pole;
+}
+
+// The share of the optical depth instanced where the pixel's footprint is `footprint` m (R11.T9.d;
+// `ringSplit.ts`' `instancedShare`): ln(s_max ÷ s_pix) ÷ ln(s_max ÷ s_min), s_pix half the
+// footprint, within [0, 1]; 0 where the footprint is not positive, no particle being instanced.
+fn ring_instanced_share(footprint : f32) -> f32 {
+  if (!(footprint > 0.0)) {
+    return 0.0;
+  }
+  let share = log(RING_PARTICLE_RADIUS_MAX / (0.5 * footprint)) / log(RING_PARTICLE_RADIUS_MAX / RING_PARTICLE_RADIUS_MIN);
+  return clamp(share, 0.0, 1.0);
 }
 
 // 1 − e^(−x), its series where x is small, so that a thin layer keeps its digits.
@@ -447,7 +459,10 @@ fn fragmentMain(v : RingVarying) -> @location(0) vec4f {
   let first_texel = textureSampleLevel(ring_profile, ring_sampler, vec2f(u, (level + 0.5) / rows), 0.0);
   let second_texel = textureSampleLevel(ring_profile, ring_sampler, vec2f(u, (levels + level + 0.5) / rows), 0.0);
   let mix_texel = textureSampleLevel(ring_profile, ring_sampler, vec2f(u, (2.0 * levels + level + 0.5) / rows), 0.0);
-  let tau_scale = ring_row(4u).z;
+  // The share of the optical depth the ring's particles close to take from the slab (R11.T9.d;
+  // `ringSplit.ts`' `instancedShare`), at the crossing's own footprint; none where row 4's w is 0.
+  let kept = 1.0 - ring_instanced_share(t * draw.radiusM * ring_row(4u).w);
+  let tau_scale = ring_row(4u).z * kept;
   let first = RingComponent(first_texel.rgb, first_texel.a * tau_scale, mix_texel.g);
   let second = RingComponent(second_texel.rgb, second_texel.a * tau_scale, mix_texel.b);
   // The edges' coverage of the pixel, so that the inner and outer edges fall where R02's ellipses

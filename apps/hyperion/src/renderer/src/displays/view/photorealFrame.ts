@@ -633,6 +633,8 @@ export function photorealFrame(inputs: PhotorealInputs): PhotorealFrame {
     oceans,
     // Each drawn as its slab where its planet is larger than a point (plan R11, R11.T9.c).
     rings: scene.rings,
+    // From which a ring's particles close to turn and shear (R11.T9.d).
+    sceneTime: scene.time,
     onAtmosphereFailed: inputs.atmosphereFailed,
   };
 }

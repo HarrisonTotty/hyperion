@@ -45,6 +45,7 @@ import {
   VISIBILITY_RESOLVE_LABEL,
 } from "../clusters/visibility";
 import type { QualitySetting } from "../quality/qualitySetting";
+import { RING_PARTICLES_PASS_LABEL } from "../rings/ringParticles";
 import { RINGS_PASS_LABEL } from "../rings/ringSlab";
 import { TERRAIN_PASS_LABEL, TERRAIN_SHADOW_PASS_LABEL } from "../terrain/gpu/material";
 import { BLOOM_PASS } from "../post/bloomChain";
@@ -189,8 +190,10 @@ export function photorealisticPasses(setting: QualitySetting): PassList {
       slot(VISIBILITY_LATE_RASTER_LABEL, "R14", true),
       slot(VISIBILITY_RESOLVE_LABEL, "R14", true),
       own(PHOTOREAL_PASS_LABELS.bodiesLate),
-      // Each sea over the opaque ground, writing its depth, before the painter's sequence and the
-      // air laid over it (R11.T8.b).
+      // A ring's particles close to (R11.T9.d), opaque with depth, before the painter's sequence.
+      slot(RING_PARTICLES_PASS_LABEL, "R11", true),
+      // Each sea over the opaque ground, the rings' particles among it, writing its depth, before
+      // the painter's sequence and the air laid over it (R11.T8.b).
       slot(OCEAN_PASS_LABEL, "R11", true),
       own(PHOTOREAL_PASS_LABELS.discs),
       // Each body's air over everything opaque drawn before it (R08.T10.b).

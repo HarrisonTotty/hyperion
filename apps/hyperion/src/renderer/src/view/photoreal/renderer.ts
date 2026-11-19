@@ -211,6 +211,12 @@ import {
 import { createSceneTarget } from "./sceneTarget";
 import { RINGS_PASS_LABEL, type TransparentStep, transparentSteps } from "../rings/ringSlab";
 import { type RingSlabFrame, RingSlabs } from "../rings/ringSlabs";
+import {
+  particlesOn,
+  RING_PARTICLES_PASS_LABEL,
+  type RingParticlesFrame,
+  RingParticles,
+} from "../rings/ringParticles";
 import type { ViewRing } from "../scene/model";
 import { log } from "../../lib/pinnedMath";
 import type { MeasuredPass } from "../stills/batchController";
@@ -573,6 +579,11 @@ export interface PhotorealFrame {
    * absent, draws no ring.
    */
   readonly rings?: ReadonlyArray<ViewRing> | undefined;
+  /**
+   * The scene's time (plan R11, R11.T9.d), from which a ring's particles close to turn and shear;
+   * absent, a frame draws no ring particles.
+   */
+  readonly sceneTime?: UniverseTime | undefined;
   /**
    * Takes a throw from the drawing of a body's atmosphere, other than a lost device's
    * (`decision-r08-t10b-leans.md` §2), with the view's name: the view's handle on the cache, which
@@ -984,6 +995,10 @@ export class PhotorealRenderer {
   readonly #bodies: LitBodyRenderer;
   /** The rings' slabs (R11.T9.c), made at the first frame with a ring, as long-lived as this. */
   readonly #rings: RingSlabs;
+  /** The rings' particles close to (R11.T9.d), made at the first frame near a ring on high. */
+  readonly #ringParticles: RingParticles;
+  /** The ring particles' bucket draws of the latest frame, 0 for none (R11.T9.d). */
+  #ringParticleDraws = 0;
   #resources: Resources | null = null;
   #making: Promise<void> | null = null;
   #status: PhotorealStatus = "idle";
@@ -1068,9 +1083,11 @@ export class PhotorealRenderer {
     this.#clouds = new CloudLayers(engine, viewName);
     this.#volumes = new CloudVolumes(engine, viewName);
     this.#rings = new RingSlabs(engine, viewName);
+    this.#ringParticles = new RingParticles(engine, viewName);
     this.#unsubscribe = engine.onRestored(() => {
       // The rings' handles died with the device; the next frame with a ring makes them again.
       this.#rings.restored();
+      this.#ringParticles.restored();
       // The handles died with the device; a making in flight is abandoned, and the next frame
       // makes them again.
       this.#generation += 1;
@@ -1286,6 +1303,9 @@ export class PhotorealRenderer {
         // and lets a making a restore or a dispose abandoned go as it ends. A refusal leaves the
         // view without rings, never its frame.
         this.#rings.prepare(),
+        // The rings' particles' kernels and material on a setting that draws them (R11.T9.d), held
+        // and let go by `RingParticles` as the slabs' are; their path waits for a ring near.
+        particlesOn(setting) ? this.#ringParticles.preparePipelines() : Promise.resolve(),
       ]);
     } catch (error: unknown) {
       // A chain made before the refusal is released with it, and the meshes made for it.
@@ -1720,6 +1740,22 @@ export class PhotorealRenderer {
         colourLoad: "load",
       });
     }
+    // The rings' particles close to, on a setting that draws them (R11.T9.d): placed and culled,
+    // then drawn with depth before the painter's sequence, their share taken from the slab after.
+    const particles = this.#ringParticlesOf(frame, plan, bodies, viewRotation, projection);
+    this.#ringParticleDraws = particles?.draws.length ?? 0;
+    if (particles !== null && particles.draws.length > 0) {
+      resources.target.render({
+        label: RING_PARTICLES_PASS_LABEL,
+        viewRotation,
+        projection,
+        // A still's tile's origin (plan R11, R11.T10.e.2), its particles drawn through its M · P.
+        ...tiled,
+        draws: particles.draws,
+        postProcesses: [],
+        colourLoad: "load",
+      });
+    }
     // Each body's sea over its opaque ground, with its depth, before the painter's sequence and the
     // air composited over it (plan R11, R11.T8.b), its glint past the threshold a glare source.
     const oceanGlares = this.#drawOceans(resources, frame, plan, bodies, {
@@ -1748,6 +1784,9 @@ export class PhotorealRenderer {
       viewport,
       exposureScale: frame.exposureScale,
       annuli: settings.discAnnuli,
+      ...(particles === null
+        ? {}
+        : { instancedPixelRad: new Map([[particles.ring, particles.pixelRad]]) }),
     });
     // Each body's air over everything drawn before it, farthest first (R08.T10.b), into the air
     // targets in turn, and its rings among them (R11.T9.c); the passes after read the last.
@@ -1868,6 +1907,14 @@ export class PhotorealRenderer {
       });
     }
     return plan;
+  }
+
+  /**
+   * The ring particles' bucket draws the latest frame made (plan R11, R11.T9.d), 0 where it drew
+   * none, as on the low setting: for the smoke page's checks.
+   */
+  get ringParticleDraws(): number {
+    return this.#ringParticleDraws;
   }
 
   /**
@@ -2708,6 +2755,52 @@ export class PhotorealRenderer {
   }
 
   /**
+   * The frame's ring particles (R11.T9.d), where its setting draws them and it has a ring and the
+   * scene's time: `RingParticles`' frame; `null` otherwise, the low setting always.
+   */
+  #ringParticlesOf(
+    frame: PhotorealFrame,
+    plan: BodyFramePlan,
+    bodies: ReadonlyArray<LitBodyInput>,
+    viewRotation: Float32Array,
+    projection: Float32Array,
+  ): RingParticlesFrame | null {
+    const rings = frame.rings ?? [];
+    const time = frame.sceneTime;
+    if (!particlesOn(frame.setting)) {
+      // Their path's buffers go with the setting that drew them (the low setting's memory back).
+      this.#ringParticles.release();
+      return null;
+    }
+    if (rings.length === 0 || time === undefined) {
+      return null;
+    }
+    return this.#ringParticles.frame({
+      rings,
+      bodies,
+      plan,
+      camera: frame.camera,
+      viewport: frame.viewport,
+      viewRotation,
+      projection,
+      // A still's tile's width, its M · P the tile's (R11.T10.e.2).
+      targetWidthPx: frame.tile?.sizePx.widthPx,
+      time,
+      exposureScale: frame.exposureScale,
+      annuli: SETTINGS[frame.setting].photoreal.discAnnuli,
+    });
+  }
+
+  /**
+   * Makes the rings' particles' path, kernels and material (R11.T9.d) ahead of their first frame
+   * near a ring on `setting`, as a still and the smoke page need them made before their frames;
+   * resolves once made, or not, and at once on a setting that draws none, making nothing.
+   */
+  prepareRingParticles(setting: QualitySetting): Promise<void> {
+    return particlesOn(setting) ? this.#ringParticles.prepare() : Promise.resolve();
+  }
+
+  /**
    * Makes the rings' slabs' materials, mesh and tables (R11.T9.c) ahead of a ring's first frame,
    * as a still and the smoke page need them made before their frames; resolves once they are made,
    * or could not be.
@@ -2904,6 +2997,7 @@ export class PhotorealRenderer {
     this.#unsubscribe();
     this.#bodies.dispose();
     this.#rings.dispose();
+    this.#ringParticles.dispose();
     this.#releaseAtmospheres();
     this.#clouds.dispose();
     this.#volumes.dispose();
@@ -3373,8 +3467,11 @@ export class PhotorealStillRenderer implements StillRenderer {
           frame.bodies.some((body) => body.air !== undefined) ||
           (frame.atmospheres ?? []).some((each) => discAirOf(each.tables) !== null),
       }),
-      // Its rings' slabs (R11.T9.c), which a view's frame makes at its first ring.
-      ...((frame.rings ?? []).length > 0 ? [this.#scene.prepareRings()] : []),
+      // Its rings' slabs (R11.T9.c), which a view's frame makes at its first ring, and their
+      // particles (R11.T9.d) where its setting draws them, so that no sample is drawn without them.
+      ...((frame.rings ?? []).length > 0
+        ? [this.#scene.prepareRings(), this.#scene.prepareRingParticles(frame.setting)]
+        : []),
     ]);
     if (this.#scene.status !== "ready") {
       throw new Error("the still's photorealistic pipelines could not be made");

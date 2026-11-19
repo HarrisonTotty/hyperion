@@ -52,6 +52,7 @@ import {
 import { type RingBand, type RingProfile, type RingRegion, ringProfile } from "./ringProfile";
 import ringSlabWgsl from "./shaders/ringSlab.wgsl?raw";
 import { type RingFace, shadowingLookup, shadowingRatios } from "./shadowingLookup";
+import { instancedShare, RING_PARTICLE_RADII_M } from "./ringSplit";
 import { SHADOWING_HEADER } from "./shadowingTable";
 
 /**
@@ -149,6 +150,8 @@ const RING_MU_NODES : u32 = ${SHADOWING_HEADER.mu.nodes}u;
 const RING_MU_MIN : f32 = ${f32Literal(SHADOWING_HEADER.mu.min)};
 const RING_PHASE_NODES : u32 = ${SHADOWING_HEADER.phase.nodes}u;
 const RING_PHASE_SCALE : f32 = ${f32Literal(SHADOWING_HEADER.phase.scale)};
+const RING_PARTICLE_RADIUS_MIN : f32 = ${f32Literal(RING_PARTICLE_RADII_M[0])};
+const RING_PARTICLE_RADIUS_MAX : f32 = ${f32Literal(RING_PARTICLE_RADII_M[1])};
 `;
 
 /** A ring as its slab draws it, every length over its planet's equatorial radius a. */
@@ -169,6 +172,13 @@ export interface RingSlabRecord {
   readonly dusty: boolean;
   /** The scale its profile's optical depths are stored over ({@link profileTauScale}). */
   readonly tauScale: number;
+  /** Its planet's equatorial radius a, m. */
+  readonly radiusM: number;
+  /**
+   * The pixel's angle its particles close to are instanced at, rad (R11.T9.d; `ringField.ts`), whose
+   * share of its optical depth the slab gives up; 0 where none is.
+   */
+  readonly instancedPixelRad: number;
   /** The exposure scale over π, so that the slab holds pre-exposed luminance. */
   readonly exposureOverPi: number;
   /** Its planet's stars, at most {@link MAX_RING_LIGHTS}, relative to the planet's centre ÷ a. */
@@ -223,6 +233,8 @@ export interface RingSlabOptions {
   readonly annuli: number;
   /** The frame's exposure scale, so that the slab holds pre-exposed luminance. */
   readonly exposureScale: number;
+  /** The pixel's angle its particles close to are instanced at, rad; none unless given. */
+  readonly instancedPixelRad?: number;
 }
 
 /**
@@ -249,6 +261,8 @@ export function ringSlabRecordOf(
     polarOverEquatorial: c / a,
     dusty: ring.ringKind === "dusty",
     tauScale: profileTauScale(ringProfile(ring)),
+    radiusM: a,
+    instancedPixelRad: options.instancedPixelRad ?? 0,
     exposureOverPi: options.exposureScale / Math.PI,
     lights: stars.slice(0, MAX_RING_LIGHTS).map((light) => {
       const d = norm(light.toStarM);
@@ -287,7 +301,7 @@ export function packRingSlabRecords(records: ReadonlyArray<RingSlabRecord>): Flo
     const lights = record.lights.slice(0, MAX_RING_LIGHTS);
     const occluders = record.occluders.slice(0, MAX_RING_OCCLUDERS);
     put(3, [record.outerOverA, lights.length, occluders.length, record.exposureOverPi]);
-    put(4, [record.dusty ? 1 : 0, annulusCount(record), record.tauScale, 0]);
+    put(4, [record.dusty ? 1 : 0, annulusCount(record), record.tauScale, record.instancedPixelRad]);
     lights.forEach((light, j) => {
       const first = FIRST_LIGHT_ROW + j * LIGHT_ROWS;
       put(first, [light.direction.x, light.direction.y, light.direction.z, light.distance]);
@@ -606,7 +620,13 @@ export function ringSlabFragment(
   const outer = record.outerOverA;
   const span = outer - inner;
   const level = profileLevel(record, footprintOverA);
-  const sample = profileSample(texels, (r - inner) / span, level, record.tauScale);
+  // The share its particles close to take (R11.T9.d), at the crossing's own footprint.
+  const footprintM = t * record.radiusM * record.instancedPixelRad;
+  const kept =
+    footprintM > 0
+      ? 1 - instancedShare(footprintM, RING_PARTICLE_RADII_M[0], RING_PARTICLE_RADII_M[1])
+      : 1;
+  const sample = profileSample(texels, (r - inner) / span, level, record.tauScale * kept);
   const edge = Math.max(footprintOverA, 1e-30);
   const coverage = clamp01((r - inner) / edge + 0.5) * clamp01((outer - r) / edge + 0.5);
   if (!(t > 0 && coverage > 0)) {

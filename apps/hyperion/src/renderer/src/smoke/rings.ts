@@ -14,7 +14,9 @@
  * - the form drawn over an air's composite (`sampled`) hidden wherever the scene's depth is nearer,
  *   and otherwise the same as the scene target's form (`attached`) to {@link SAME_TOLERANCE};
  * - the ring's fragments beyond a planet's air shell and the others, drawn into one target, the
- *   ring whole to {@link SAME_TOLERANCE}.
+ *   ring whole to {@link SAME_TOLERANCE};
+ * - the slab with its particles' share taken (R11.T9.d) at {@link SPLIT_PIXEL_RAD}, against its
+ *   twin's as the whole is, the share's light unlike the whole's by the twin's ratio.
  */
 import { add, dot, norm, normalise, scale, sub, type Vec3, vec3 } from "../geometry/vec3";
 import { PROVISIONAL_PHOTOMETRY } from "../view/appearance/fromWire";
@@ -66,6 +68,11 @@ const RELATIVE_TOLERANCE = 0.02;
 const ABSOLUTE_TOLERANCE = 2e-3;
 /** How far outside or inside the ellipses a pixel's centre must lie to be held, px. */
 const EDGE_MARGIN_PX = 0.6;
+/**
+ * The pixel's angle the slab's particles' share is taken at in the forms' check, rad: a footprint
+ * of 0.6–0.85 m at the ring's 6–8.5 × 10⁸ m, 40–45% of its optical depth the particles'.
+ */
+const SPLIT_PIXEL_RAD = 1e-9;
 /** Two forms' or draws' light that must agree but for rounding, pre-exposed. */
 const SAME_TOLERANCE = 1e-5;
 
@@ -210,16 +217,32 @@ async function drawnFrame(
   }
 }
 
-/** The ring's frame on one setting under one lighting against its twin and R02's ellipses. */
-async function checkSetting(
-  engine: RenderEngine,
-  checks: Checks,
-  setting: QualitySetting,
-  lighting: Lighting,
-): Promise<void> {
-  const drawn = await drawnFrame(engine, setting, lighting);
-  const record = recordOn(setting, lighting);
-  const named = `${setting}, ${lighting}-lit`;
+/** A frame's ring pixels against the twin's: `checkSetting`'s tallies. */
+interface TwinTally {
+  /** Wholly covered pixels away from the bands' edges compared, and those in the planet's shadow. */
+  readonly compared: number;
+  readonly unlit: number;
+  /** The worst excess over the tolerances, ≤ 0 within them, and where. */
+  readonly worst: number;
+  readonly worstAt: string;
+  /** Pixels outside the ellipses by the margin, and those drawn. */
+  readonly outside: number;
+  readonly touched: number;
+  /** Pixels inside by the margin, those the twin leaves uncovered and those it lights left dark. */
+  readonly inside: number;
+  readonly uncovered: number;
+  readonly dark: number;
+  /** The brightest light the twin gives any pixel inside, and the GPU any pixel but the planet's. */
+  readonly twinMost: number;
+  readonly gpuMost: number;
+  readonly gpuMostAt: string;
+  /** The compared pixels' green, the twin's and the GPU's, summed. */
+  readonly twinGreen: number;
+  readonly gpuGreen: number;
+}
+
+/** The ring pixels of `drawn`, the scene's HDR light, against the twin of `record`. */
+function tallyAgainstTwin(drawn: Float32Array, record: RingSlabRecord): TwinTally {
   const texels = ringProfileTexels(ringProfile(RING));
   let compared = 0;
   let worst = 0;
@@ -230,6 +253,8 @@ async function checkSetting(
   let uncovered = 0;
   let unlit = 0;
   let dark = 0;
+  let twinGreen = 0;
+  let gpuGreen = 0;
   // The brightest light the twin gives any pixel inside, and the brightest the GPU gives any pixel
   // of the view but the planet's: an outlier anywhere, an edge's or a penumbra's, exceeds it.
   let twinMost = 0;
@@ -278,6 +303,8 @@ async function checkSetting(
         continue;
       }
       compared += 1;
+      twinGreen += twin.radiance[1];
+      gpuGreen += gpu[1] ?? Number.NaN;
       for (const [c, value] of gpu.entries()) {
         const expected = twin.radiance[c] ?? Number.NaN;
         const excess =
@@ -289,6 +316,48 @@ async function checkSetting(
       }
     }
   }
+  return {
+    compared,
+    unlit,
+    worst,
+    worstAt,
+    outside,
+    touched,
+    inside,
+    uncovered,
+    dark,
+    twinMost,
+    gpuMost,
+    gpuMostAt,
+    twinGreen,
+    gpuGreen,
+  };
+}
+
+/** The ring's frame on one setting under one lighting against its twin and R02's ellipses. */
+async function checkSetting(
+  engine: RenderEngine,
+  checks: Checks,
+  setting: QualitySetting,
+  lighting: Lighting,
+): Promise<void> {
+  const drawn = await drawnFrame(engine, setting, lighting);
+  const record = recordOn(setting, lighting);
+  const named = `${setting}, ${lighting}-lit`;
+  const {
+    compared,
+    unlit,
+    worst,
+    worstAt,
+    outside,
+    touched,
+    inside,
+    uncovered,
+    dark,
+    twinMost,
+    gpuMost,
+    gpuMostAt,
+  } = tallyAgainstTwin(drawn, record);
   checks.check(
     `R11.T9.c the ring slab's light against its twin on ${named}`,
     compared > 100 &&
@@ -471,6 +540,52 @@ async function checkForms(engine: RenderEngine, checks: Checks): Promise<void> {
       `${String(lit)} ring pixels, ${String(beyond)} beyond a shell of 1.6 a; ` +
         `${String(partsDiffer)} channels of the two parts unlike the ring whole`,
     );
+    // The slab's share of the particles taken (R11.T9.d) at a pixel's angle that puts the
+    // footprint 7 × 10⁸ m away between the particles' sizes: the attached form against its twin's
+    // with the share and without it, the share's light unlike the whole slab's.
+    const lights = lightsAt(CENTRE_M, hostsOf("front"), 2);
+    const split = slabs.frame({
+      rings: [RING],
+      bodies: [PLANET_BODY],
+      plan: {
+        regimes: new Map([[PLANET, "disc"]]),
+        sources: new Map([[PLANET, { stars: lights, planetshine: [] }]]),
+      },
+      camera: CAMERA,
+      viewport: VIEWPORT,
+      exposureScale: EXPOSURE,
+      annuli: SETTINGS.high.photoreal.discAnnuli,
+      instancedPixelRad: new Map([[RING, SPLIT_PIXEL_RAD]]),
+    });
+    if (split === null) {
+      throw new Error("the slabs drew no split ring");
+    }
+    const splitTarget = target("split", true);
+    drawAlone(splitTarget, [split.draw(0, "all", 0, null)]);
+    const whole = tallyAgainstTwin(a, recordOn("high", "front"));
+    const shared = tallyAgainstTwin(
+      await read(splitTarget),
+      ringSlabRecordOf(RING, PLANET_BODY, lights, [], {
+        annuli: SETTINGS.high.photoreal.discAnnuli,
+        exposureScale: EXPOSURE,
+        instancedPixelRad: SPLIT_PIXEL_RAD,
+      }),
+    );
+    const twinRatio = shared.twinGreen / whole.twinGreen;
+    const gpuRatio = shared.gpuGreen / whole.gpuGreen;
+    checks.check(
+      "R11.T9.d the ring slab without its particles' share against its twin, the share's light unlike the whole's",
+      [whole, shared].every(
+        (tally) => tally.compared > 100 && tally.worst <= 0 && tally.uncovered === 0,
+      ) &&
+        twinRatio < 0.97 &&
+        Math.abs(gpuRatio / twinRatio - 1) < RELATIVE_TOLERANCE,
+      `whole: ${String(whole.compared)} compared, ` +
+        (whole.worst <= 0 ? "within tolerance" : `worst ${whole.worstAt}`) +
+        `; split at ${SPLIT_PIXEL_RAD.toExponential(1)} rad: ${String(shared.compared)} compared, ` +
+        (shared.worst <= 0 ? "within tolerance" : `worst ${shared.worstAt}`) +
+        `; its light over the whole's ${twinRatio.toFixed(4)} by the twin, ${gpuRatio.toFixed(4)} on the GPU`,
+    );
   } finally {
     slabs.dispose();
     for (const each of made) {
@@ -562,6 +677,79 @@ export async function captureRings(engine: RenderEngine): Promise<CapturedImage[
         renderer.dispose();
         view.dispose();
       }
+    }
+  }
+  images.push(...(await captureClose(engine)));
+  return images;
+}
+
+/**
+ * The ring close to (plan R11, R11.T9.d): 300 m over a Saturn-like ring at 1.8 of its planet's
+ * radius, looking along the orbit 25° below the horizon, the star high behind the camera, on high
+ * (its particles drawn, the slab's share taken) and on low (the slab alone).
+ */
+async function captureClose(engine: RenderEngine): Promise<CapturedImage[]> {
+  const images: CapturedImage[] = [];
+  const normal = vec3(0, 0, 1);
+  const camera: ProjectionCamera = {
+    orientation: lookAlong(vec3(0, Math.cos(0.44), -Math.sin(0.44)), normal),
+    fovXRad: FOV_X_RAD,
+  };
+  const centreM = vec3(-1.8 * A_M, 0, -300);
+  const ring: ViewRing = { ...RING, normal, gravitationalParameterM3S2: 3.79e16 };
+  const planet: LitBodyInput = {
+    ...PLANET_BODY,
+    centreM,
+    figure: { equatorialRadiusM: A_M, polarRadiusM: 0.9 * A_M, pole: normal },
+  };
+  for (const setting of ["high", "low"] as const) {
+    const view = engine.createView(addCanvas(), "smoke rings close");
+    view.resize(CAPTURE_VIEWPORT);
+    const renderer = new PhotorealRenderer(engine, `smoke rings close ${setting}`);
+    try {
+      // Each capture's pipelines are made before its frame, one capture at a time.
+      // oxlint-disable-next-line no-await-in-loop
+      await renderer.prepare(CAPTURE_VIEWPORT, setting, "eye", camera);
+      // Its rings' slabs and particles too, which a view's frame would make at its first ring.
+      // oxlint-disable-next-line no-await-in-loop
+      await Promise.all([renderer.prepareRings(), renderer.prepareRingParticles(setting)]);
+      renderer.render(view, {
+        camera,
+        viewport: CAPTURE_VIEWPORT,
+        presentedPx: CAPTURE_VIEWPORT,
+        role: "eye",
+        setting,
+        exposureScale: 2e-3,
+        sky: [],
+        starSprites: [],
+        hostDraws: new Map(),
+        glareSources: [],
+        lights: [
+          {
+            disc: sunLikeHostDisc(),
+            centreM: add(centreM, scale(normalise(vec3(0.2, -0.5, 0.84)), 9.5 * AU_M)),
+          },
+        ],
+        bodies: withRingShadows([planet], [ring], SETTINGS[setting].ringShadowOnBody),
+        depthWriters: [],
+        previousRegimes: new Map([[PLANET, "disc"]]),
+        overlay: null,
+        meter: null,
+        rings: [ring],
+        sceneTime: { seconds: 1_000_000, nanos: 0 },
+      });
+      // The canvas is read back in the task that drew it.
+      // oxlint-disable-next-line no-await-in-loop
+      const bytes = await view.readBack();
+      images.push({
+        name: `r11-t9d-rings-close-${setting}`,
+        width: CAPTURE_VIEWPORT.widthPx,
+        height: CAPTURE_VIEWPORT.heightPx,
+        rgba: base64Of(bytes instanceof Uint8Array ? bytes : Uint8Array.from(bytes)),
+      });
+    } finally {
+      renderer.dispose();
+      view.dispose();
     }
   }
   return images;

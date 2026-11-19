@@ -226,6 +226,12 @@ export interface ViewRing extends RingShape {
   readonly body: BodyIdHex;
   /** The ring plane's unit normal, along the galactic axes. */
   readonly normal: Vec3;
+  /**
+   * The ringed body's GM, m³ s⁻², from its mass (plan R11, R11.T9.d), by which a ring's particles
+   * close to turn and shear at the Keplerian rate; absent where its mass is not known, when they do
+   * neither.
+   */
+  readonly gravitationalParameterM3S2?: number;
 }
 
 /** An orbit the view draws on request: a body's Kepler orbit about its parent. */

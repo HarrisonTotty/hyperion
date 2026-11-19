@@ -43,6 +43,8 @@ import { bodySymbol } from "../../lib/system/bodySymbols";
 import { orbitNormal } from "../../lib/system/hierarchy";
 import type { Section, SystemBody, SystemBodyRotation } from "../../lib/system/model";
 import { bodyFixedAxesAt } from "../../lib/system/rotation";
+import { EARTH_MASS_KG } from "../../lib/system/bodiesWire";
+import { GRAVITATIONAL_CONSTANT_M3_PER_KG_S2 } from "../../lib/system/constants";
 import { bodyDesignation } from "../../lib/system/wire";
 import { heldAppearanceOf, reportBondRatioFinding } from "../appearance/fromWire";
 import type { CameraPose, CraftId } from "../camera/pose";
@@ -81,6 +83,12 @@ const SOLAR_RADIUS_M = KM_PER_RSUN * 1_000;
 
 /** Galactic north, which stands for the own ship's dorsal side while its attitude is a guess. */
 const GALACTIC_NORTH = vec3(0, 0, 1);
+
+/**
+ * GM⊕, m³ s⁻²: the simulation's Earth mass times G (`bodiesWire.ts`' EARTH_MASS_KG, itself GM⊕ ÷
+ * G, 3.986 004 × 10¹⁴ m³ s⁻² ÷ G), by which a body's mass in Earth masses gives its GM.
+ */
+const EARTH_GM_M3S2 = EARTH_MASS_KG * GRAVITATIONAL_CONSTANT_M3_PER_KG_S2;
 
 /** Why the server's scene cannot be drawn now, or `null` when it can. */
 export type ServerSceneGap = "no_system" | "no_tidal_radius";
@@ -487,6 +495,7 @@ export function viewSceneFromServer(
   const byId = new Map(bodies.map((body) => [body.id, body]));
 
   const rings: ViewRing[] = [];
+  const recordOf = new Map(system.bodies.bodies.map((record) => [record.id, record]));
   for (const record of system.bodies.bodies) {
     if (
       record.population.state !== "ok" ||
@@ -501,6 +510,7 @@ export function viewSceneFromServer(
       continue;
     }
     const ring = record.population.value;
+    const mass = recordOf.get(planet.id)?.massMearth;
     rings.push({
       body: planet.id,
       ringKind: ring.ringKind,
@@ -510,6 +520,8 @@ export function viewSceneFromServer(
       opticalDepth: ring.opticalDepth,
       gapRadiiM: ring.gaps.map((gap) => gap.radiusM),
       normal: ring.normal ?? planet.orbitNormal ?? GALACTIC_NORTH,
+      // GM⊕ times its mass in Earth masses (`bodiesWire.ts`' EARTH_MASS_KG is GM⊕ ÷ G).
+      ...(mass?.state === "ok" ? { gravitationalParameterM3S2: mass.value * EARTH_GM_M3S2 } : {}),
     });
   }
 

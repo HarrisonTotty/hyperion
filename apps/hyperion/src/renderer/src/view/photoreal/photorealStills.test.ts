@@ -11,6 +11,7 @@ import {
   stillTerrainCapture,
 } from "../../test/fakeStillTerrain";
 import { aHostDisc, aLitBody } from "../../test/litFixtures";
+import { aViewRing } from "../../test/ringFixtures";
 import { TEST_STILL_REQUEST } from "../../test/stillFixtures";
 import { type BodyFramePlan, planLitBodies } from "../bodies/draw";
 import { NEAR_PLANE_M, perspectiveReversedInfinite } from "../camera/projection";
@@ -24,6 +25,8 @@ import { oceanSeaOf } from "../ocean/oceanBody";
 import { oceanMapTextureSpec, packOceanTexels } from "../ocean/oceanMap";
 import { oceanMaskOf } from "../ocean/oceanMask";
 import { OCEAN_PASS_LABEL } from "../ocean/oceanPass";
+import { RING_PARTICLES_PASS_LABEL } from "../rings/ringParticles";
+import { RINGS_PASS_LABEL } from "../rings/ringSlab";
 import { GLARE_SOURCE_BYTES } from "../post/bloomChain";
 import { waterWorldAnswer, waterWorldHeader } from "../../test/oceanFixtures";
 import type { FrameSubmission, PassTimes, TexelRect, ViewSize } from "../engine/types";
@@ -685,6 +688,38 @@ describe("the photorealistic still renderer (R11.T10.b)", () => {
     };
   }
 
+  it.each(["high", "low"] as const)(
+    "makes a ring's particles' pipelines before its first sample where its setting draws them, on %s (R11.T9.d)",
+    async (setting) => {
+      const engine = await countingRenderEngine();
+      const base = viewFrame();
+      const [body] = base.bodies;
+      if (body === undefined) {
+        throw new Error("the view's frame has no body");
+      }
+      const a = body.figure.equatorialRadiusM;
+      // 300 m over the ring at 1.8 of its planet's radius, looking down at it.
+      const frame: PhotorealFrame = {
+        ...base,
+        setting,
+        bodies: [{ ...body, centreM: vec3(-1.8 * a, 0, -300) }],
+        rings: [aViewRing(body.id, 1.24 * a, 2.27 * a, vec3(0, 0, 1))],
+        sceneTime: { seconds: 1_000, nanos: 0 },
+      };
+      const renderer = new PhotorealStillRenderer(engine, frame, {
+        tileLimitPx: 64,
+        samples: 2,
+        onUnitTimes: () => undefined,
+        onDispose: () => undefined,
+      });
+      await renderer.prepare();
+      expect(engine.compiles.some(({ name }) => name === "rings:particles")).toBe(
+        setting === "high",
+      );
+      renderer.dispose();
+    },
+  );
+
   it("tone-maps a sea's glint past the threshold as a glare source, its buffer sized for it (R11.T8.b)", async () => {
     const engine = await countingRenderEngine();
     const frame = aSeaFrame(engine);
@@ -731,6 +766,41 @@ describe("the photorealistic still renderer (R11.T10.b)", () => {
       of(OCEAN_PASS_LABEL).map((frame) => frame.tileOriginPx),
       of(OCEAN_PASS_LABEL).map(placing),
     ]).toEqual([origins, of("sky").map(placing)]);
+    renderer.dispose();
+  });
+
+  it("draws a ring's slab and particles in each tile through the tile's M · P and origin (R11.T9, R11.T10.e.2)", async () => {
+    const engine = await countingRenderEngine();
+    const base = viewFrame();
+    const [body] = base.bodies;
+    if (body === undefined) {
+      throw new Error("the view's frame has no body");
+    }
+    const a = body.figure.equatorialRadiusM;
+    // 300 m over the ring at 1.8 of its planet's radius, looking down at it, with no air: tiled.
+    const frame: PhotorealFrame = {
+      ...base,
+      bodies: [{ ...body, centreM: vec3(-1.8 * a, 0, -300) }],
+      rings: [aViewRing(body.id, 1.24 * a, 2.27 * a, vec3(0, 0, 1))],
+      sceneTime: { seconds: 1_000, nanos: 0 },
+    };
+    const renderer = new PhotorealStillRenderer(engine, frame, {
+      tileLimitPx: 64,
+      samples: 1,
+      onUnitTimes: () => undefined,
+      onDispose: () => undefined,
+    });
+    await renderer.prepare();
+    const before = engine.targetFrames.length;
+    submitAll(renderer);
+    const frames = engine.targetFrames.slice(before);
+    const of = (label: string): FrameSubmission[] => frames.filter((each) => each.label === label);
+    const origins = planTiles(SIZE, 64, "high").tiles.map(({ rect }) => [rect.x0Px, rect.y0Px]);
+    expect([
+      of(RINGS_PASS_LABEL).map((each) => each.tileOriginPx),
+      of(RINGS_PASS_LABEL).map(placing),
+      of(RING_PARTICLES_PASS_LABEL).map(placing),
+    ]).toEqual([origins, of("sky").map(placing), of("sky").map(placing)]);
     renderer.dispose();
   });
 

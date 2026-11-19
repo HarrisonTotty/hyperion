@@ -1,4 +1,5 @@
 import { CLUSTER_CULL_KERNEL } from "../clusters/cull";
+import { INSTANCE_CULL_KERNEL } from "../clusters/instanceCull";
 import { VISIBILITY_IDS_TEXTURE } from "../clusters/resolve";
 import {
   VISIBILITY_LATE_RASTER_LABEL,
@@ -14,6 +15,11 @@ import {
 import { describe, expect, it, vi } from "vitest";
 
 import { aViewRing } from "../../test/ringFixtures";
+import {
+  RING_PARTICLE_MATERIAL,
+  RING_PARTICLE_PLACE_KERNEL,
+  RING_PARTICLES_PASS_LABEL,
+} from "../rings/ringParticles";
 import { RING_SCENE_DEPTH_TEXTURE, RING_SLAB_MATERIALS, RINGS_PASS_LABEL } from "../rings/ringSlab";
 
 import { vec3 } from "../../geometry/vec3";
@@ -277,12 +283,14 @@ describe("the photorealistic renderer", () => {
       tasks: 2,
       held: [BLOOM_DOWN_MATERIAL.name, BLOOM_UP_MATERIAL.name],
     },
-    // The rings' slabs, made with the rest since R11.T9.c landed (their own making's release).
+    // The rings' slabs and particles, made with the rest since R11.T9 landed (their own makings'
+    // release).
     {
       step: "the rings' slabs' compile",
       tasks: 2,
       held: [RING_SLAB_MATERIALS.attached.name, RING_SLAB_MATERIALS.sampled.name],
     },
+    { step: "the ring particles' compile", tasks: 2, held: [RING_PARTICLE_MATERIAL.name] },
   ] as const;
   it.each(makingSteps)(
     "leaks no material or mesh when disposed while its making waits on $step",
@@ -1948,11 +1956,12 @@ async function overlayDatums(
  * the mesh bodies' figures' (`LitBodyRenderer.cullFigures`), made with the renderer; since R14.T3.d
  * the depth pyramid's, made with the renderer; since perf-body-shading the `disc cells` kernel's
  * four packed forms (`GeometrySettings.discCells`), its plain one made at the first frame with a
- * disc; and the sky bake's four. Each is a module constant,
+ * disc; since R11.T9.d the rings' particles' placement and R14's instance cull, made with the
+ * renderer on a setting that draws particles; and the sky bake's four. Each is a module constant,
  * its WGSL fixed text with no value of a medium, a body or a
  * setting in it (term counts, slices, bands and light slots are uniforms; the specialised and
  * one-band marches, the thick read and the deck read are variants of fixed text, chosen from the
- * tables), so the records a device's cache holds for VIEW are bounded by this list's length, 122,
+ * tables), so the records a device's cache holds for VIEW are bounded by this list's length, 125,
  * however many bodies a session visits. The smoke's kernel
  * arm (`withKernelArmFormat`, twenty more) and its probes are the smoke's alone.
  */
@@ -2031,6 +2040,8 @@ const VIEW_KERNELS: ReadonlyArray<KernelPair> = [
   RAY_MARCH_THICK_TABLE_SPECIAL_KERNEL,
   ...THICK_LIMB_KERNELS,
   CLUSTER_CULL_KERNEL,
+  RING_PARTICLE_PLACE_KERNEL,
+  INSTANCE_CULL_KERNEL,
   ...BAKE_KERNELS,
 ];
 
@@ -2378,6 +2389,56 @@ describe("the photorealistic renderer's rings (R11.T9.c)", () => {
     const far = bodyAt(planet.id, vec3(0, 0, -3e11));
     renderer.render(view, { ...frameWith([]), bodies: [far], rings: [ring] });
     expect(engine.targetFrames.map((f) => f.label)).not.toContain(RINGS_PASS_LABEL);
+    renderer.dispose();
+  });
+
+  it("draws a ring's particles close to before the discs on high, their share taken from the slab (R11.T9.d)", async () => {
+    const { engine, view, renderer } = await preparedRenderer();
+    await Promise.all([renderer.prepareRings(), renderer.prepareRingParticles("high")]);
+    // 300 m over the ring at 1.8 of its planet's radius, looking down at it.
+    const near = bodyAt(planet.id, vec3(-1.8 * EARTH_RADIUS_M, 0, -300));
+    const flat = aViewRing(planet.id, 1.24 * EARTH_RADIUS_M, 2.27 * EARTH_RADIUS_M, vec3(0, 0, 1));
+    renderer.render(view, {
+      ...frameWith([]),
+      bodies: [near],
+      rings: [flat],
+      sceneTime: { seconds: 1_000, nanos: 0 },
+      previousRegimes: new Map([[planet.id, "disc"]]),
+    });
+    const labels = engine.targetFrames.map((f) => f.label);
+    const at = labels.indexOf(RING_PARTICLES_PASS_LABEL);
+    expect(at).toBeGreaterThan(-1);
+    expect(labels.indexOf(PHOTOREAL_PASS_LABELS.discs)).toBeGreaterThan(at);
+    const slab = engine.targetFrames.find((f) => f.label === RINGS_PASS_LABEL);
+    expect(slab?.draws.length).toBe(1);
+    // The slab's record's row 4 w: the pixel's angle its particles are instanced at.
+    const records = engine.writes.findLast((write) => write.buffer === "test view:ring records");
+    const row4 = records === undefined ? null : new Float32Array(records.data.slice().buffer);
+    expect(row4?.[4 * 4 + 3] ?? 0).toBeGreaterThan(0);
+    renderer.dispose();
+  });
+
+  it("draws no ring particles on the low setting, and makes none of their pipelines even when asked to (R11.T9.d)", async () => {
+    const engine = await countingRenderEngine();
+    const view = new RecordingView();
+    const renderer = new PhotorealRenderer(engine, "test view");
+    await renderer.prepare(VIEWPORT, "low", "eye", {
+      orientation: IDENTITY_QUATERNION,
+      fovXRad: Math.PI / 3,
+    });
+    await Promise.all([renderer.prepareRings(), renderer.prepareRingParticles("low")]);
+    const near = bodyAt(planet.id, vec3(-1.8 * EARTH_RADIUS_M, 0, -300));
+    const flat = aViewRing(planet.id, 1.24 * EARTH_RADIUS_M, 2.27 * EARTH_RADIUS_M, vec3(0, 0, 1));
+    renderer.render(view, {
+      ...frameWith([]),
+      setting: "low",
+      bodies: [near],
+      rings: [flat],
+      sceneTime: { seconds: 1_000, nanos: 0 },
+      previousRegimes: new Map([[planet.id, "disc"]]),
+    });
+    expect(engine.targetFrames.map((f) => f.label)).not.toContain(RING_PARTICLES_PASS_LABEL);
+    expect(engine.compiles.map((each) => each.name)).not.toContain("rings:particles");
     renderer.dispose();
   });
 

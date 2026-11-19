@@ -431,6 +431,19 @@ describe("the server's scene as the view draws it", () => {
     expect(sent.opticalDepth).toBeGreaterThan(0);
   });
 
+  it("carries a ring's planet's GM from its mass, by which its particles turn (R11.T9.d)", () => {
+    const model = sceneModelOf(statePopulated());
+    const planet = recordOf(model, `${FIXTURE_SYSTEM}.0100`);
+    const [ring] = viewSceneOf(model, shipFrameOf(model)).rings;
+    if (planet.massMearth.state !== "ok") {
+      throw new Error("the fixture's planet has a mass");
+    }
+    expect(ring?.gravitationalParameterM3S2).toBeCloseTo(
+      planet.massMearth.value * 3.986_004e14,
+      -6,
+    );
+  });
+
   it("draws a ring an older server sends without a normal in its planet's orbital plane", () => {
     const model = sceneModelOf(statePopulated(populatedBodiesWith(withoutRingNormal)));
     const planet = recordOf(model, `${FIXTURE_SYSTEM}.0100`);
