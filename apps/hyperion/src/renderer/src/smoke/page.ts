@@ -19,8 +19,9 @@
  * R08.T18.b's thermal forms and R08.T11's (T) row, part 32 R11.T9.c's ring slab (its materials'
  * catalogue and its frames against their twin; its captures stay with part 1's) and R11.T9.d's
  * particles (their field's placement against its twin and their frames), parts 33 and 34 R11.T4's
- * rocks (with R14.T5.c, and by the visibility buffer, R14.T5.e), and part 1 every other; with no
- * part given the page runs them all, in its order.
+ * rocks (with R14.T5.c, and by the visibility buffer, R14.T5.e), part 35 plan R07's airless twins and
+ * their check (perf-bodies-pass), and part 1 every other; with no part given the page runs them all,
+ * in its order.
  * Each part checks its path (T9.c) itself. R08.T6.f's slices and bands run in two groups: the
  * Saturn-class figure's in part 5, with R08.T6.i's layer edges, and Earth's, which took R08.T6.g's
  * Earth, in part 8, with R07.T8.e–f's cell pass for every record (`cellPass.ts`) after it;
@@ -80,6 +81,7 @@ import {
   DISC_EMISSIVE_AIR_ENTRIES,
   THERMAL_ENTRIES,
   TABLE_ONLY_ENTRIES,
+  AIRLESS_ENTRIES,
   MARCH_TABLE_ONLY_ENTRIES,
   OCEAN_ENTRIES,
   RING_ENTRIES,
@@ -153,6 +155,7 @@ import {
 } from "./atmosphere";
 import { checkAtmosphereFrame } from "./atmosphereFrame";
 import {
+  checkAirlessTwins,
   checkCellPassEveryRecord,
   checkSourceTableFrames,
   checkSourceTableTwins,
@@ -430,6 +433,7 @@ type PagePart =
   | 32
   | 33
   | 34
+  | 35
   // Plan R12's ladder (R12.T7.a): a run per setting, which its query names (`ladder.ts`).
   | "ladder"
   // Plan R14's rocks cast into the cascades (R14.T6.c).
@@ -509,6 +513,8 @@ function partOf(value: string | null): PagePart | "all" | null {
       return 33;
     case "34":
       return 34;
+    case "35":
+      return 35;
     case "ladder":
       return "ladder";
     case "casters":
@@ -575,7 +581,7 @@ async function run(
     setupError,
   });
   if (part === null) {
-    return failed("the part asked for is not 1 to 34, ladder, casters or all");
+    return failed("the part asked for is not 1 to 35, ladder, casters or all");
   }
   if (part === "ladder" && ladderSetting === null) {
     return failed("the ladder's part runs at a setting, high or low, and none was given");
@@ -659,6 +665,7 @@ async function run(
       !DISC_AIR_ENTRIES.includes(entry) &&
       !DISC_EMISSIVE_AIR_ENTRIES.includes(entry) &&
       !TABLE_ONLY_ENTRIES.includes(entry) &&
+      !AIRLESS_ENTRIES.includes(entry) &&
       !MARCH_TABLE_ONLY_ENTRIES.includes(entry) &&
       !PACKED_CELL_ENTRIES.includes(entry) &&
       !CLOUD_ENTRIES.includes(entry) &&
@@ -680,6 +687,13 @@ async function run(
   // R08.T9.b's lever's table-only twins, in part 16, the lightest (36 s at 0e466e0's gate).
   await group(16, "T9.b catalogue: the table-only twins", () =>
     checkCatalogue(engine, status, TABLE_ONLY_ENTRIES, checks),
+  );
+  // Plan R07's airless twins, in part 35, alone, beside their check (perf-bodies-pass).
+  await group(35, "T9.b catalogue: the airless twins", () =>
+    checkCatalogue(engine, status, AIRLESS_ENTRIES, checks),
+  );
+  await group(35, "plan R07: airless bodies drawn by their airless twins", () =>
+    checkAirlessTwins(engine, checks),
   );
   // R08.T8.e's table's march twins, in part 16 after R08.T9.b's.
   await group(16, "T9.b catalogue: the march's table-only twins", () =>

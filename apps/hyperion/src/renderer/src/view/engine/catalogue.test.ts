@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { type CatalogueEntry, TABLE_ONLY_ENTRIES, WGSL_CATALOGUE } from "./catalogue";
+import {
+  AIRLESS_ENTRIES,
+  type CatalogueEntry,
+  TABLE_ONLY_ENTRIES,
+  WGSL_CATALOGUE,
+} from "./catalogue";
 import { fragmentOutputAt } from "./webgpu/fragmentOutput";
 import {
   assertOutputsFit,
@@ -35,11 +40,15 @@ function displayNameOf(entry: CatalogueEntry): string | null {
 }
 
 /**
- * Every material's and post-process's display name but the table-only twins' (R08.T9.b's lever),
- * which a refusal names by their originals' effects.
+ * Every material's and post-process's display name but the table-only twins' (R08.T9.b's lever)
+ * and the airless twins' (plan R07, perf-bodies-pass), which a refusal names by their originals'
+ * effects.
  */
 const DISPLAY_NAMES: ReadonlyArray<string> = WGSL_CATALOGUE.flatMap((entry) => {
-  const name = TABLE_ONLY_ENTRIES.includes(entry) ? null : displayNameOf(entry);
+  const name =
+    TABLE_ONLY_ENTRIES.includes(entry) || AIRLESS_ENTRIES.includes(entry)
+      ? null
+      : displayNameOf(entry);
   return name === null ? [] : [name];
 });
 
@@ -157,5 +166,23 @@ describe("the catalogue's materials' storage bindings (plan R14, R14.T2.c)", () 
     });
     expect(over).toEqual([]);
     expect(specs.length).toBeGreaterThan(100);
+  });
+});
+
+describe("the airless twins (plan R07, perf-bodies-pass)", () => {
+  it("twins the figure, the disc, the cells and the lit terrain, in the plain and emissive forms alone", () => {
+    const names = AIRLESS_ENTRIES.map((entry) => entry.spec.name);
+    expect(names.every((name) => name.endsWith(" (airless)"))).toBe(true);
+    expect(names).toEqual(
+      expect.arrayContaining([
+        "bodies:smoothMesh (airless)",
+        "bodies:disc (airless)",
+        "BODY DISC CELLS (airless)",
+        "bodies:smoothMeshEmissive (airless)",
+      ]),
+    );
+    expect(names.some((name) => name.startsWith("terrain"))).toBe(true);
+    expect(names.filter((name) => name.includes("Air") || name.includes("table only"))).toEqual([]);
+    expect(new Set(names).size).toBe(names.length);
   });
 });

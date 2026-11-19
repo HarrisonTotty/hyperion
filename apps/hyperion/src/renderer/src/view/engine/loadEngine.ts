@@ -9,7 +9,8 @@
  * The engine it returns survives a lost device: it re-creates the engine on a fresh
  * adapter through the same import, and its views with it (`ResilientEngine`, Design note 9). It
  * draws a lit body of one latitude band by its modules' table-only twins (plan R08, R08.T9.b's
- * lever; `SourceTableEngine`), which draw their modules' bytes.
+ * lever; `SourceTableEngine`), and a lit body without an atmosphere by their airless twins (plan
+ * R07, perf-bodies-pass), which draw their modules' bytes.
  */
 
 import { SourceTableEngine } from "../atmosphere/sourceTableEngine";

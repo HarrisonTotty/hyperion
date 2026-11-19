@@ -109,7 +109,12 @@ import {
   SOURCE_TRANSMITTANCE_KERNEL,
   TRANSMITTANCE_KERNEL,
 } from "../atmosphere/tables";
-import { tableOnlyKernel, tableOnlyMaterial } from "../atmosphere/surfaceLighting";
+import {
+  airlessKernel,
+  airlessMaterial,
+  tableOnlyKernel,
+  tableOnlyMaterial,
+} from "../atmosphere/surfaceLighting";
 import type { KernelPair } from "./kernels";
 import { BLOOM_DOWN_MATERIAL, BLOOM_UP_MATERIAL } from "../post/bloomChain";
 import { HISTOGRAM_KERNEL } from "../post/histogram";
@@ -628,6 +633,39 @@ export const TABLE_ONLY_ENTRIES: ReadonlyArray<CatalogueEntry> = [
 });
 
 /**
+ * The entries plan R07's airless twins are made of (perf-bodies-pass; `sourceTableEngine.ts`):
+ * each lit material and `disc cells` kernel, per cell and packed, of the plain and emissive forms,
+ * which a lit body without an atmosphere is drawn by; the air forms' records carry their air.
+ */
+const AIRLESS_SOURCES: ReadonlyArray<CatalogueEntry> = [
+  ...TERRAIN_ENTRIES,
+  ...LIT_BODY_ENTRIES,
+  ...THERMAL_ENTRIES,
+  { kind: "compute", spec: BODY_DISC_CELLS_PACKED_KERNEL },
+  { kind: "compute", spec: BODY_DISC_CELLS_PACKED_EMISSIVE_KERNEL },
+];
+
+/**
+ * Plan R07's airless twins (perf-bodies-pass; `sourceTableEngine.ts`): each of
+ * {@link AIRLESS_SOURCES}' lit materials and `disc cells` kernels with `surfaceLighting.wgsl`'s
+ * `AIRLESS_ONLY` set. The smoke page compiles them in part 35, alone, beside their check.
+ */
+export const AIRLESS_ENTRIES: ReadonlyArray<CatalogueEntry> = AIRLESS_SOURCES.flatMap(
+  (entry): ReadonlyArray<CatalogueEntry> => {
+    if (entry.kind === "material") {
+      const spec = airlessMaterial(entry.spec);
+      return spec === null ? [] : [{ ...entry, spec }];
+    }
+    // The lit-body probe binds no body's table where a twin would stand in.
+    if (entry.kind === "compute" && entry.spec.name.startsWith("BODY DISC CELLS")) {
+      const spec = airlessKernel(entry.spec);
+      return spec === null ? [] : [{ kind: "compute", spec }];
+    }
+    return [];
+  },
+);
+
+/**
  * R08.T8.e's table's table-only twins of the thin read's marches (`hillaire.ts`'s
  * `MARCH_TABLE_ONLY_KERNELS`): each march a view's frame dispatches with a body of one band's
  * sources' table bound, its sliced lookup a step compiled out (`sourceTableEngine.ts`). The smoke
@@ -708,6 +746,7 @@ export const WGSL_CATALOGUE: ReadonlyArray<CatalogueEntry> = [
   ...PACKED_CELL_ENTRIES,
   ...SKY_ENTRIES,
   ...TABLE_ONLY_ENTRIES,
+  ...AIRLESS_ENTRIES,
   ...MARCH_TABLE_ONLY_ENTRIES,
   ...CLOUD_ENTRIES,
   ...RING_ENTRIES,

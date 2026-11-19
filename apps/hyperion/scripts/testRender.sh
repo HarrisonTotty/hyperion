@@ -9,7 +9,7 @@
 #                 [--fixture=broken-wgsl|external-fetch] [--drop-adapter-switches] [--captures=DIR]
 #                 [--geometry=FIELD=VALUE[,...]]
 #
-# The page's groups are in thirty-four parts, 1 to 34 (`src/renderer/src/smoke/page.ts`), each a run
+# The page's groups are in thirty-five parts, 1 to 35 (`src/renderer/src/smoke/page.ts`), each a run
 # of its own under its own watchdog, the harness's hang detector (perf-smoke, 2026-10-13): parts 2
 # to 6, 8 to 14 and 30 hold the atmosphere's CPU-twin groups (2 R08.T6.b but its four absorbers, 3
 # R08.T6.g and R08.T14.c's thick read on a Saturn-class figure, 4 R08.T8.b's far limb, 5 R08.T6.f's
@@ -78,6 +78,8 @@
 # 30 (2026-11-14; parts 28 and 29 then other lanes'). Alone on a pod (48 vCPU), part 12 took 274 s
 # before and 110 s after, and part 30 197 s, (T)'s row 124 s of it (95 s beside part 12's shared
 # read).
+# Plan R07's airless twins (perf-bodies-pass: their catalogue and the check that they draw their
+# modules' bytes) took part 35, alone (2026-11-19).
 # Plan R11's still mount, its job's small still of flat colours and its PNG round trip through the
 # harness's main process took part 28, alone, some 2 s on a pod (2026-11-14; parts 25 to 27 are
 # other lanes').
@@ -154,7 +156,7 @@ geometry=()
 for arg in "$@"; do
     case "$arg" in
         --variant=*) variants+=("${arg#--variant=}") ;;
-        --part=[1-9] | --part=1[0-9] | --part=2[0-9] | --part=3[0-4]) parts+=("${arg#--part=}") ;;
+        --part=[1-9] | --part=1[0-9] | --part=2[0-9] | --part=3[0-5]) parts+=("${arg#--part=}") ;;
         --part=ladder) ladder=1 ;;
         --part=casters) parts+=(casters) ;;
         --setting=high | --setting=low) settings+=("${arg#--setting=}") ;;
@@ -169,7 +171,7 @@ if [[ ${#variants[@]} -eq 0 ]]; then
     variants=(default no-subgroups)
 fi
 if [[ ${#parts[@]} -eq 0 && $ladder -eq 0 ]]; then
-    parts=(1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34)
+    parts=(1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35)
     ladder=1
     parts+=(casters)
 fi

@@ -74,9 +74,16 @@ const LIT_PROBE : u32 = 0u;
 // compiled out of it, its arithmetic else the module's own.
 const SOURCE_TABLE_ONLY : bool = false;
 
-// Whether the bound body has an atmosphere: a body table whose equatorial radius is above 0.
+// Whether this module is a lit module's airless twin (plan R07, perf-bodies-pass;
+// `sourceTableEngine.ts`): false as written; true in the twin a lit pass draws by where its body's
+// tables are `createAirlessTables`' zeros, through which every lookup reads 1 or 0 as written, so
+// that the lookups' code is compiled out of it, its arithmetic else the module's own.
+const AIRLESS_ONLY : bool = false;
+
+// Whether the bound body has an atmosphere: a body table whose equatorial radius is above 0; never
+// in an airless twin.
 fn atmosphereHasAir(body : OblateBody) -> bool {
-  return body.figure.x > 0.0;
+  return !AIRLESS_ONLY && body.figure.x > 0.0;
 }
 
 // sin and cos of an angle in [−2π, 2π], by `preciseSinCos` of its magnitude reduced to [0, π].

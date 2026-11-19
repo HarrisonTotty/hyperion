@@ -1,7 +1,9 @@
 /**
  * The lit passes' table-only twins (plan R08, R08.T9.b's lever): an engine that draws a lit body of
  * one latitude band by modules with the per-fragment sliced lookup compiled out, and since R08.T8.e's
- * table marches its air by the ray march's twins, the sliced lookup a step compiled out.
+ * table marches its air by the ray march's twins, the sliced lookup a step compiled out; and their
+ * airless twins (plan R07, perf-bodies-pass): a lit body without an atmosphere drawn by modules with
+ * every lookup through the air compiled out.
  *
  * @remarks
  * With `AtmosphereSettings.sourceTransmittance`'s `table` a lit module reads each source's
@@ -27,9 +29,20 @@
  *   build, which never binds one there, takes none. The ray march's thin forms declare the same
  *   table and constant (`marchSourceTable.wgsl`; `AtmosphereSettings.marchSourceTransmittance`'s
  *   `table`), and take their twins the same way; their every step's source is the table's in both.
- * - So a frame of no one-band body with air makes no twin, and every other member is forwarded
- *   unchanged. A release releases the twin with its original; after a restore the callers make
- *   their materials and kernels again, and their twins come again with their draws.
+ * - **Airless twins.** A body without an atmosphere binds `createAirlessTables`' zeros, through
+ *   which `surfaceLighting.wgsl`'s three lookups read transmittance 1 and the sky's irradiance 0 at
+ *   run time, but each lit module still carries their code, which costs where it is never taken:
+ *   on SwiftShader the airless TERRAIN TEST moon's bodies pass took 55–68% less with it compiled
+ *   out (the pod, plan R07's records). So beside each material and kernel that binds a body's
+ *   tables is noted its twin with `surfaceLighting.wgsl`'s `AIRLESS_ONLY` set (`airlessMaterial`,
+ *   `airlessKernel`), asked, made in a task after the asking frame's, prepared and drawn as a
+ *   table-only twin is, wherever the body's table bound is those zeros (`isAirlessTable`): the same
+ *   arithmetic in the same order, each lookup its constant, so that the twin draws the module's
+ *   bytes.
+ * - So a frame of no one-band body with air and no airless body makes no twin, and every other
+ *   member is forwarded unchanged. A release releases the twin with its original; after a restore
+ *   the callers make their materials and kernels again, and their twins come again with their
+ *   draws.
  */
 
 import { untilNextTask } from "../../lib/nextTask";
@@ -68,12 +81,30 @@ import type {
   WgslPostProcessSpec,
 } from "../engine/types";
 import {
+  airlessKernel,
+  airlessMaterial,
+  BODY_TABLE_DRAW_TEXTURE,
+  BODY_TABLE_KERNEL_TEXTURE,
+  isAirlessTable,
   ONE_BAND_SOURCE_TABLE_NAME,
   SOURCE_TABLE_DRAW_TEXTURE,
   SOURCE_TABLE_KERNEL_TEXTURE,
   tableOnlyKernel,
   tableOnlyMaterial,
 } from "./surfaceLighting";
+
+/**
+ * Which twin a draw or a dispatch takes: the table-only one, its body of one band's sources' table
+ * bound (R08.T9.b's lever), or the airless one, `createAirlessTables`' zeros bound as its body's
+ * tables (plan R07, perf-bodies-pass). A body bound by one is never bound by the other.
+ */
+type TwinKind = "tableOnly" | "airless";
+
+/** What each kind of twin is called where it fails. */
+const TWIN_WORDS: Readonly<Record<TwinKind, string>> = {
+  tableOnly: "table-only",
+  airless: "airless",
+};
 
 /** A material's twin: its spec, its handle once made, and its preparations by mesh and target. */
 interface MaterialTwin {
@@ -100,6 +131,18 @@ interface KernelTwin {
   readonly pair: KernelPair;
   made: ComputeHandle | null;
   making: boolean;
+}
+
+/** The kind of twin bindings take, by their sources' table and their body's table, or `null`. */
+function twinKindOf(
+  sourceTable: TextureHandle | undefined,
+  bodyTable: TextureHandle | undefined,
+  oneBand: WeakSet<TextureHandle>,
+): TwinKind | null {
+  if (sourceTable !== undefined && oneBand.has(sourceTable)) {
+    return "tableOnly";
+  }
+  return isAirlessTable(bodyTable) ? "airless" : null;
 }
 
 /** The draws of `frame` by their twins where `twinOf` gives one; `frame` itself where none does. */
@@ -166,11 +209,14 @@ class TwinTarget implements RenderTarget {
   }
 }
 
-/** `inner` drawing each lit body of one band by its modules' table-only twins (the module's remarks). */
+/**
+ * `inner` drawing each lit body of one band by its modules' table-only twins, and each without air
+ * by their airless twins (the module's remarks).
+ */
 export class SourceTableEngine implements RenderEngine {
   readonly #inner: RenderEngine;
-  readonly #materials = new WeakMap<MaterialHandle, MaterialTwin>();
-  readonly #kernels = new WeakMap<ComputeHandle, KernelTwin>();
+  readonly #materials = new WeakMap<MaterialHandle, Partial<Record<TwinKind, MaterialTwin>>>();
+  readonly #kernels = new WeakMap<ComputeHandle, Partial<Record<TwinKind, KernelTwin>>>();
   /** The one-band sources' tables made through this engine. */
   readonly #oneBand = new WeakSet<TextureHandle>();
   /** The preparations and makings of twins in flight, which {@link twinsSettled} awaits. */
@@ -207,19 +253,23 @@ export class SourceTableEngine implements RenderEngine {
     this.#inFlight.add(tracked);
   }
 
-  /** Whether `texture`, bound as a sources' table, is a body of one band's. */
-  #holdsEveryLookup(texture: TextureHandle | undefined): boolean {
-    return texture !== undefined && this.#oneBand.has(texture);
-  }
-
   /**
    * The prepared twin `draw` into a target of `target` takes, or `null`: its making and its
    * preparation there begun where due.
    */
   #materialTwinOf = (draw: DrawItem, target: TargetPreparation): MaterialHandle | null => {
     const { material } = draw;
-    const held = this.#materials.get(material);
-    if (held === undefined || !this.#holdsEveryLookup(draw.textures[SOURCE_TABLE_DRAW_TEXTURE])) {
+    const twins = this.#materials.get(material);
+    if (twins === undefined) {
+      return null;
+    }
+    const kind = twinKindOf(
+      draw.textures[SOURCE_TABLE_DRAW_TEXTURE],
+      draw.textures[BODY_TABLE_DRAW_TEXTURE],
+      this.#oneBand,
+    );
+    const held = kind === null ? undefined : twins[kind];
+    if (kind === null || held === undefined) {
       return null;
     }
     let byTarget = held.prepared.get(draw.mesh);
@@ -237,7 +287,7 @@ export class SourceTableEngine implements RenderEngine {
           // shaders' making held the first frame with air on a pod. A material let go meanwhile
           // takes none.
           await untilNextTask();
-          if (this.#materials.get(material) !== held) {
+          if (this.#materials.get(material)?.[kind] !== held) {
             return;
           }
           let name = held.spec.name;
@@ -249,7 +299,7 @@ export class SourceTableEngine implements RenderEngine {
           } catch (error: unknown) {
             // A loss meanwhile is no failure: the restore makes the material and its twin again.
             if (!(error instanceof EngineUnavailable)) {
-              console.error(`the table-only twin ${name} could not be prepared:`, error);
+              console.error(`the ${TWIN_WORDS[kind]} twin ${name} could not be prepared:`, error);
             }
           }
         })(),
@@ -262,11 +312,19 @@ export class SourceTableEngine implements RenderEngine {
     return held.twin;
   };
 
-  /** Notes `spec`'s twin, to make at its material `material`'s first draw that takes it. */
+  /** Notes `spec`'s twins, to make at its material `material`'s first draw that takes each. */
   #twin(material: MaterialHandle, spec: WgslMaterialSpec): void {
-    const twinSpec = tableOnlyMaterial(spec);
-    if (twinSpec !== null) {
-      this.#materials.set(material, { spec: twinSpec, twin: null, prepared: new WeakMap() });
+    const twins: Partial<Record<TwinKind, MaterialTwin>> = {};
+    const tableOnly = tableOnlyMaterial(spec);
+    if (tableOnly !== null) {
+      twins.tableOnly = { spec: tableOnly, twin: null, prepared: new WeakMap() };
+    }
+    const airless = airlessMaterial(spec);
+    if (airless !== null) {
+      twins.airless = { spec: airless, twin: null, prepared: new WeakMap() };
+    }
+    if (tableOnly !== null || airless !== null) {
+      this.#materials.set(material, twins);
     }
   }
 
@@ -354,21 +412,35 @@ export class SourceTableEngine implements RenderEngine {
     return kernel;
   }
 
-  /** Notes `pair`'s twin to make at its kernel's first dispatch that takes it. */
+  /** Notes `pair`'s twins to make at its kernel's first dispatch that takes each. */
   #kernelTwin(kernel: ComputeHandle, pair: KernelPair): void {
-    const twinPair = tableOnlyKernel(pair);
-    if (twinPair !== null) {
-      this.#kernels.set(kernel, { pair: twinPair, made: null, making: false });
+    const twins: Partial<Record<TwinKind, KernelTwin>> = {};
+    const tableOnly = tableOnlyKernel(pair);
+    if (tableOnly !== null) {
+      twins.tableOnly = { pair: tableOnly, made: null, making: false };
+    }
+    const airless = airlessKernel(pair);
+    if (airless !== null) {
+      twins.airless = { pair: airless, made: null, making: false };
+    }
+    if (tableOnly !== null || airless !== null) {
+      this.#kernels.set(kernel, twins);
     }
   }
 
   /** The made twin a dispatch of `kernel` with `bindings` takes, its making begun where due. */
   #kernelTwinOf(kernel: ComputeHandle, bindings: ComputeBindings): ComputeHandle | null {
-    const held = this.#kernels.get(kernel);
-    if (
-      held === undefined ||
-      !this.#holdsEveryLookup(bindings.sampled[SOURCE_TABLE_KERNEL_TEXTURE])
-    ) {
+    const twins = this.#kernels.get(kernel);
+    if (twins === undefined) {
+      return null;
+    }
+    const kind = twinKindOf(
+      bindings.sampled[SOURCE_TABLE_KERNEL_TEXTURE],
+      bindings.sampled[BODY_TABLE_KERNEL_TEXTURE],
+      this.#oneBand,
+    );
+    const held = kind === null ? undefined : twins[kind];
+    if (kind === null || held === undefined) {
       return null;
     }
     if (held.made === null && !held.making) {
@@ -379,13 +451,16 @@ export class SourceTableEngine implements RenderEngine {
             // Made in a task after the dispatching frame's (lane perf-long-tasks-4), as a
             // material's twin is; a kernel let go meanwhile takes none.
             await untilNextTask();
-            if (this.#kernels.get(kernel) !== held) {
+            if (this.#kernels.get(kernel)?.[kind] !== held) {
               return;
             }
             held.made = await this.#inner.createComputeAsync(held.pair);
           } catch (error: unknown) {
             if (!(error instanceof EngineUnavailable)) {
-              console.error(`the table-only twin of ${kernel.name} could not be made:`, error);
+              console.error(
+                `the ${TWIN_WORDS[kind]} twin of ${kernel.name} could not be made:`,
+                error,
+              );
             }
           } finally {
             held.making = false;
@@ -456,22 +531,26 @@ export class SourceTableEngine implements RenderEngine {
   }
 
   releaseMaterial(material: MaterialHandle): void {
-    const held = this.#materials.get(material);
-    if (held !== undefined) {
+    const twins = this.#materials.get(material);
+    if (twins !== undefined) {
       this.#materials.delete(material);
-      if (held.twin !== null) {
-        this.#inner.releaseMaterial(held.twin);
+      for (const held of [twins.tableOnly, twins.airless]) {
+        if (held !== undefined && held.twin !== null) {
+          this.#inner.releaseMaterial(held.twin);
+        }
       }
     }
     this.#inner.releaseMaterial(material);
   }
 
   releaseCompute(kernel: ComputeHandle): void {
-    const held = this.#kernels.get(kernel);
-    if (held !== undefined) {
+    const twins = this.#kernels.get(kernel);
+    if (twins !== undefined) {
       this.#kernels.delete(kernel);
-      if (held.made !== null) {
-        this.#inner.releaseCompute(held.made);
+      for (const held of [twins.tableOnly, twins.airless]) {
+        if (held !== undefined && held.made !== null) {
+          this.#inner.releaseCompute(held.made);
+        }
       }
     }
     this.#inner.releaseCompute(kernel);

@@ -868,3 +868,154 @@ export async function checkSourceTableTwins(engine: RenderEngine, checks: Checks
     tables?.dispose();
   }
 }
+
+/**
+ * Plan R07's airless twins (perf-bodies-pass; `SourceTableEngine`): airless bodies, a 13 px disc
+ * and a 13 px one under a half-surveyed two-class map, a 96 px mesh body, plain and mapped, and a
+ * 220 px disc, the Sun 80° and 120° off the line of sight, drawn in-fragment and through the
+ * `disc cells` pass, per cell and packed, once on the engine the page's wraps (their modules as
+ * written) and once on the page's, their twins made and prepared by a first draw; every byte the
+ * same, and the twins taken.
+ */
+export async function checkAirlessTwins(engine: RenderEngine, checks: Checks): Promise<void> {
+  const name = "plan R07: airless bodies drawn by their airless twins draw their modules' bytes";
+  if (!(engine instanceof SourceTableEngine)) {
+    checks.check(name, false, "the page's engine is not a SourceTableEngine");
+    return;
+  }
+  const written = keepingSums(engine.inner);
+  const twinned = keepingSums(engine);
+  const writtenRenderer = new LitBodyRenderer(written.engine, WIREFRAME_MATERIALS.starSprite);
+  const twinnedRenderer = new LitBodyRenderer(twinned.engine, WIREFRAME_MATERIALS.starSprite);
+  let weights: ClassMapDiscSurface | null = null;
+  try {
+    const twoClass = packClassMap(4, 2, ({ i, j }) =>
+      (i + j) % 2 !== 0 ? null : i % 2 === 0 ? [1, 0] : [0.25, 0.75],
+    );
+    weights = classMapSurface(
+      engine,
+      "smoke airless twins class map",
+      twoClass,
+      [
+        lawFor([0.12, 0.12, 0.12], [0.6, 0.6, 0.6], "moon"),
+        lawFor([0.5, 0.45, 0.4], [1.3, 1.3, 1.3], "earth"),
+      ],
+      PROVISIONAL_PHOTOMETRY.law,
+    );
+    const mapped = { surface: weights, texels: twoClass };
+    const [writtenKernel, writtenPacked, twinnedKernel, twinnedPacked] = await Promise.all([
+      engine.inner.createComputeAsync(BODY_DISC_CELLS_KERNEL),
+      engine.inner.createComputeAsync(BODY_DISC_CELLS_PACKED_KERNEL),
+      engine.createComputeAsync(BODY_DISC_CELLS_KERNEL),
+      engine.createComputeAsync(BODY_DISC_CELLS_PACKED_KERNEL),
+    ]);
+    const small = { widthPx: 48, heightPx: 48 };
+    const cases: ReadonlyArray<CellCase> = [
+      {
+        name: "a 13 px airless disc",
+        viewport: small,
+        bodies: one({ diameterPx: 13, mesh: false, samples: [4, 4] }),
+        twin: false,
+      },
+      {
+        name: "a 13 px disc under a two-class map",
+        viewport: small,
+        bodies: one({ diameterPx: 13, mapped, mesh: false, samples: [4, 4] }),
+        twin: false,
+      },
+      {
+        name: "a 96 px airless body in the mesh regime",
+        viewport: { widthPx: 128, heightPx: 112 },
+        bodies: one({ diameterPx: 96, mesh: true, samples: [1, 4] }),
+        twin: false,
+      },
+      {
+        name: "a 96 px mesh body under a two-class map",
+        viewport: { widthPx: 128, heightPx: 112 },
+        bodies: one({ diameterPx: 96, mapped, mesh: true, samples: [1, 4] }),
+        twin: false,
+      },
+      {
+        name: "a 220 px airless disc",
+        viewport: { widthPx: 256, heightPx: 256 },
+        bodies: one({ diameterPx: 220, mesh: false, samples: [1, 4] }),
+        twin: false,
+      },
+    ];
+    const ways: ReadonlyArray<{ readonly by: DrawnBy; readonly packed: boolean }> = [
+      { by: "in-fragment", packed: false },
+      { by: "pass", packed: false },
+      { by: "pass", packed: true },
+    ];
+    const draw = (
+      twin: boolean,
+      item: CellCase,
+      sunDeg: number,
+      way: { readonly by: DrawnBy; readonly packed: boolean },
+    ): Promise<{ readonly bytes: ArrayBuffer; readonly throughCells: boolean }> =>
+      drawPlan(
+        twin ? engine : engine.inner,
+        twin ? twinnedRenderer : writtenRenderer,
+        twin ? twinned.sums : written.sums,
+        planOf(item, sunDeg),
+        item.viewport,
+        twin
+          ? way.packed
+            ? twinnedPacked
+            : twinnedKernel
+          : way.packed
+            ? writtenPacked
+            : writtenKernel,
+        way.by,
+      );
+    // A first draw of each through the page's engine makes and prepares its twins.
+    for (const item of cases) {
+      for (const way of ways) {
+        // The harness reads its targets back in order.
+        // oxlint-disable-next-line no-await-in-loop
+        await draw(true, item, 80, way);
+      }
+    }
+    await engine.twinsSettled();
+    // A second round, for the kernels' twins, which stand in from the dispatch after they are made.
+    for (const item of cases) {
+      for (const way of ways) {
+        // oxlint-disable-next-line no-await-in-loop
+        await draw(true, item, 80, way);
+      }
+    }
+    await engine.twinsSettled();
+    const swapsBefore = engine.swaps;
+    let pixels = 0;
+    let differing = 0;
+    const results: string[] = [];
+    for (const item of cases) {
+      for (const sunDeg of [80, 120]) {
+        for (const way of ways) {
+          // oxlint-disable-next-line no-await-in-loop
+          const asWritten = await draw(false, item, sunDeg, way);
+          // oxlint-disable-next-line no-await-in-loop
+          const byTwins = await draw(true, item, sunDeg, way);
+          const apart = halfUlpsApart(asWritten.bytes, byTwins.bytes);
+          pixels += asWritten.bytes.byteLength / 8;
+          differing += apart.differing;
+          results.push(
+            `${item.name} at ${String(sunDeg)}° ${way.by}${way.packed ? " packed" : ""}: ${String(apart.differing)} channels differ`,
+          );
+        }
+      }
+    }
+    const swaps = engine.swaps - swapsBefore;
+    checks.check(
+      name,
+      differing === 0 && swaps > 0,
+      `${String(pixels)} pixels, ${String(differing)} channels differing; ${String(swaps)} draws and dispatches by a twin; ${results.join("; ")}`,
+    );
+  } finally {
+    writtenRenderer.dispose();
+    twinnedRenderer.dispose();
+    if (weights !== null) {
+      engine.releaseTexture(weights.weights);
+    }
+  }
+}

@@ -168,6 +168,74 @@ function tableOnlyWgsl(wgsl: string): string {
   return wgsl.replace(TABLE_ONLY_LINE, "const SOURCE_TABLE_ONLY : bool = true;");
 }
 
+/** The line of `surfaceLighting.wgsl` an airless twin replaces. */
+const AIRLESS_ONLY_LINE = "const AIRLESS_ONLY : bool = false;";
+
+/** The body's table's name in a material's `DrawItem.textures` ({@link surfaceLightingTextures}). */
+export const BODY_TABLE_DRAW_TEXTURE = "atmosphereBody";
+
+/** The body's table's name in `surfaceLighting.wgsl` and a kernel's `sampled`. */
+export const BODY_TABLE_KERNEL_TEXTURE = "atmosphere_body";
+
+/**
+ * `spec`'s airless twin (plan R07, perf-bodies-pass): its modules with `surfaceLighting.wgsl`'s
+ * `AIRLESS_ONLY` set, so that the three lookups through the air are compiled out, each its airless
+ * value (transmittance 1, the sky's irradiance 0), under a name of its own and its original's
+ * display name; `null` for a material that binds no body's tables.
+ *
+ * @remarks
+ * A lit body without an atmosphere binds {@link createAirlessTables}' zeros, through which the
+ * lookups read those values at run time, but its module still carries their code: on SwiftShader
+ * the airless TERRAIN TEST moon's mesh figure took 62% less with it compiled out, and its terrain
+ * about half. Drawn where that body's tables are bound ({@link isAirlessTable}), the twin draws its
+ * module's bytes.
+ */
+export function airlessMaterial(spec: WgslMaterialSpec): WgslMaterialSpec | null {
+  const binds = spec.textures?.some((texture) => texture.name === BODY_TABLE_DRAW_TEXTURE);
+  if (binds !== true || !spec.fragmentWgsl.includes(AIRLESS_ONLY_LINE)) {
+    return null;
+  }
+  return {
+    ...spec,
+    name: `${spec.name} (airless)`,
+    vertexWgsl: airlessWgsl(spec.vertexWgsl),
+    fragmentWgsl: airlessWgsl(spec.fragmentWgsl),
+  };
+}
+
+/**
+ * `pair`'s airless twin (plan R07, perf-bodies-pass), as {@link airlessMaterial} makes a
+ * material's; `null` for a kernel that declares no body's tables.
+ */
+export function airlessKernel(pair: KernelPair): KernelPair | null {
+  if (!pair.reference.includes(AIRLESS_ONLY_LINE)) {
+    return null;
+  }
+  return {
+    ...pair,
+    name: `${pair.name} (airless)`,
+    reference: airlessWgsl(pair.reference),
+    subgroup: pair.subgroup === null ? null : airlessWgsl(pair.subgroup),
+  };
+}
+
+/** `wgsl` with `AIRLESS_ONLY` set, where it composes {@link SURFACE_LIGHTING_WGSL}. */
+function airlessWgsl(wgsl: string): string {
+  return wgsl.replace(AIRLESS_ONLY_LINE, "const AIRLESS_ONLY : bool = true;");
+}
+
+/** The body tables {@link createAirlessTables} made, by their handles. */
+const AIRLESS_TABLES = new WeakSet<TextureHandle>();
+
+/**
+ * Whether `texture` is the one texture of {@link createAirlessTables}' tables, through which every
+ * lookup reads its airless value, so that a lit pass may draw it by its modules' airless twins
+ * (`sourceTableEngine.ts`).
+ */
+export function isAirlessTable(texture: TextureHandle | undefined): boolean {
+  return texture !== undefined && AIRLESS_TABLES.has(texture);
+}
+
 /** A body's atmosphere tables as a lit pass binds them (`surfaceLighting.wgsl`'s head). */
 export interface SurfaceLightingTables {
   /** The body's table (`tables.ts`'s `packOblateBody`), `rgba32float`. */
@@ -233,7 +301,7 @@ const NAMES: Readonly<
     { readonly draw: string; readonly wgsl: string; readonly array: boolean }
   >
 > = {
-  body: { draw: "atmosphereBody", wgsl: "atmosphere_body", array: false },
+  body: { draw: BODY_TABLE_DRAW_TEXTURE, wgsl: BODY_TABLE_KERNEL_TEXTURE, array: false },
   transmittance: { draw: "atmosphereTransmittance", wgsl: "atmosphere_transmittance", array: true },
   absorberColumns: {
     draw: "atmosphereAbsorberColumns",
@@ -335,7 +403,8 @@ export function surfaceLightingKernelTextures(
 
 /**
  * The tables of a body without an atmosphere: one one-texel `rgba32float` texture of zeros in every
- * binding, whose body table's equatorial radius of 0 makes the lookups read 1 and 0. The caller
+ * binding, whose body table's equatorial radius of 0 makes the lookups read 1 and 0, and which
+ * {@link isAirlessTable} knows, so that its draws may take their modules' airless twins. The caller
  * releases {@link SurfaceLightingTables.body}, the one texture.
  *
  * @throws `EngineUnavailable` while the engine has no device (a loss).
@@ -353,6 +422,7 @@ export function createAirlessTables(
     usage: TEXTURE_USAGE.TEXTURE_BINDING,
     category: "atmosphere-tables",
   });
+  AIRLESS_TABLES.add(texture);
   return {
     body: texture,
     transmittance: texture,
