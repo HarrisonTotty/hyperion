@@ -211,6 +211,8 @@ export class FakeStillSource implements StillSource {
   snapshots = 0;
   /** The view's output size, which a test sets; `null`, none known. */
   output: ViewSize | null = null;
+  /** The longest side a still may be drawn at, which a test sets; `null`, none. */
+  limitPx: number | null = null;
   /** Each snapshot's ask, in order (R11.T10.e.1). */
   readonly asks: Array<StillAsk | undefined> = [];
 
@@ -237,6 +239,10 @@ export class FakeStillSource implements StillSource {
 
   outputSize(): ViewSize | null {
     return this.output;
+  }
+
+  sizeLimitPx(): number | null {
+    return this.limitPx;
   }
 
   renderer(scene: StillScene): FakeStillRenderer {

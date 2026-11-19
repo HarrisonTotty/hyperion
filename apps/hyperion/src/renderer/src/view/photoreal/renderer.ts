@@ -227,8 +227,14 @@ import {
 } from "../stills/stillLabel";
 import { IMAGE_DETAIL_LIMITED } from "../budget/viewBudget";
 import { STILL_TILE_ADD_MATERIAL, STILL_TILE_FIRST_MATERIAL } from "../stills/stillAccumulate";
-import { planTiles, type StillTile, type StillTiling, tileProjection } from "../stills/stillPlan";
-import { stillSizeAt } from "../stills/stillSize";
+import {
+  planTiles,
+  type StillTile,
+  type StillTiling,
+  tileLimitPx,
+  tileProjection,
+} from "../stills/stillPlan";
+import { stillSizeAt, stillSizeWithin } from "../stills/stillSize";
 import {
   type StillCoverage,
   type StillTerrainCapture,
@@ -3073,12 +3079,14 @@ interface StillResources {
  * (R11.T10.e.2), each through `tileProjection`'s M · P with its origin in the image
  * (`PhotorealFrame.tile`), into a scene target of the tiles' largest texture, from which each
  * tile's rect is added to the assembled image (`stillAccumulate.wgsl`); its terrain's clusters are
- * culled by the tile's frustum (`tileFrustum`). A frame that draws air is drawn whole, in one tile
- * of the still's size (lean, 2026-11-18): R08's passes rebuild their rays from their own camera at
- * the frame's viewport, with no off-axis projection. A sample's offset moves the tile's origin, so
- * that what is projected through the whole matrix moves by it (the figures, the terrain, R06's sky
- * and host discs), while R07's discs and the sprites keep to the image's pixels and their own
- * anti-aliasing. The terrain of a body handed over is its own terrain view's (plan R11, R11.T10.e;
+ * culled by the tile's frustum (`tileFrustum`); the seas' far and near draws take the tile's M · P
+ * and origin too. A frame that draws air is drawn whole, in one tile of the still's size (lean,
+ * 2026-11-18): R08's passes, and the clouds' layer and volume laid over them, rebuild their rays
+ * from their own camera at the frame's viewport, with no off-axis projection; {@link PhotorealStills}
+ * holds such a still within the tile limit (main's ruling, 2026-11-19). A sample's offset moves
+ * the tile's origin, so that what is projected through the whole matrix moves by it (the figures,
+ * the terrain, R06's sky and host discs), while R07's discs and the sprites keep to the image's
+ * pixels and their own anti-aliasing. The terrain of a body handed over is its own terrain view's (plan R11, R11.T10.e;
  * {@link PhotorealStillOptions.terrain}), drawn by each sample at the time it is drawn. It draws no
  * symbology, meter or histogram.
  *
@@ -3634,6 +3642,22 @@ function coverageTerrain(coverage: StillCoverage): FrameTerrain {
 }
 
 /**
+ * The longest side a still of `drawn` may be drawn at, px (plan R11, R11.T10.e; main's ruling,
+ * 2026-11-19): where its frame draws air and can be made again at another size, the tile limit at
+ * the view's setting, `maxTextureDimension2D` within `STILL_TILE_MAX_PX` (`tileLimitPx`), since a
+ * still with air is drawn whole, in one tile (R08's passes take no off-axis projection); `null`
+ * where it is tiled, or drawn at its frame's own size.
+ */
+function airSizeLimitPxOf(
+  drawn: DrawnPhotorealFrame,
+  maxTextureDimension2D: number,
+): number | null {
+  return drawn.remake === undefined || (drawn.frame.atmospheres ?? []).length === 0
+    ? null
+    : tileLimitPx(maxTextureDimension2D, drawn.frame.setting);
+}
+
+/**
  * The size a still of `drawn` is a multiple of (R11.T10.e.1): its view's output size, its canvas's,
  * where the frame can be made again; else the frame's own, the one size it offers.
  */
@@ -3858,6 +3882,24 @@ export class PhotorealStills implements StillSource {
   }
 
   /**
+   * The longest side a still of the attached view may be drawn at now, px: the tile limit at its
+   * setting where its last photorealistic frame draws air, which a still draws untiled (plan R11,
+   * R11.T10.e; main's ruling, 2026-11-19); `null` where its still is tiled, or before a frame.
+   */
+  sizeLimitPx(): number | null {
+    const view = this.#view;
+    const drawn = view?.drawn() ?? null;
+    return view === null || drawn === null
+      ? null
+      : airSizeLimitPxOf(drawn, this.#textureLimitPx(view.engine));
+  }
+
+  /** The device's `maxTextureDimension2D` a still on `engine` is cut at, or the options' limit. */
+  #textureLimitPx(engine: RenderEngine): number {
+    return this.#options.tileLimitPx ?? engine.capabilities.maxTextureDimension2D;
+  }
+
+  /**
    * The attached view's last photorealistic frame and its label's inputs, frozen now, made again
    * at `ask`'s multiple of its output size (R11.T10.e.1), or why it gives no still now.
    */
@@ -3876,7 +3918,11 @@ export class PhotorealStills implements StillSource {
     const viewFrame = drawn.frame;
     const remake = drawn.remake;
     const scale = ask === undefined || remake === undefined ? 1 : ask.scale;
-    const size = stillSizeAt(baseSizeOf(drawn), scale);
+    // A still with air is drawn untiled, so held within the tile limit, its aspect kept (main's
+    // ruling, 2026-11-19): the size drawn, which the label states.
+    const limitPx = airSizeLimitPxOf(drawn, this.#textureLimitPx(view.engine));
+    const whole = stillSizeAt(baseSizeOf(drawn), scale);
+    const size = limitPx === null ? whole : stillSizeWithin(whole, limitPx);
     if (!isStillSide(size.widthPx) || !isStillSide(size.heightPx)) {
       return { kind: "unavailable", cause: STILL_UNAVAILABLE.oversized };
     }
@@ -3951,7 +3997,7 @@ export class PhotorealStills implements StillSource {
     try {
       made = new PhotorealStillRenderer(engine, frame, {
         terrain,
-        tileLimitPx: this.#options.tileLimitPx ?? engine.capabilities.maxTextureDimension2D,
+        tileLimitPx: this.#textureLimitPx(engine),
         tileSetting: frozen.viewSetting,
         samples: this.#options.samples ?? (frozen.figures ? STILL_SAMPLES[frame.setting] : 1),
         onUnitTimes: (passes) => {

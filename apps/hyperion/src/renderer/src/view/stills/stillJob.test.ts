@@ -403,6 +403,28 @@ describe("a client's stills for the session (R11.T10.b)", () => {
     expect([source.asks, chosen]).toEqual([[{ scale: 4 }, { scale: 3 }], 3]);
   });
 
+  it("offers only the sizes drawn where the view's still is held within a limit, and asks for the one chosen (main's ruling, 2026-11-19)", async () => {
+    const { stills, source } = session();
+    source.output = { widthPx: 1920, heightPx: 1080 };
+    stills.setScale(4);
+    // The view's frame draws air on the high setting: its still is drawn untiled, at most 4,096 px.
+    source.limitPx = 4096;
+    stills.refresh();
+    const offered = stills.getSnapshot().size;
+    await stills.request();
+    expect([offered, source.asks]).toEqual([
+      {
+        scale: 3,
+        options: [
+          { scale: 1, size: { widthPx: 1920, heightPx: 1080 } },
+          { scale: 2, size: { widthPx: 3840, heightPx: 2160 } },
+          { scale: 3, size: { widthPx: 4096, heightPx: 2304 } },
+        ],
+      },
+      [{ scale: 3 }],
+    ]);
+  });
+
   it("takes a still at the view's output size where none is known (R11.T10.e.1)", async () => {
     const { stills, source } = session();
     stills.setScale(2);

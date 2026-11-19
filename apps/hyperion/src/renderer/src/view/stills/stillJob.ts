@@ -454,6 +454,13 @@ export interface StillSource {
    */
   outputSize?(): ViewSize | null;
   /**
+   * The longest side a still of the view may be drawn at now, px: the tile limit where its frame
+   * draws air, which a still draws untiled (plan R11, R11.T10.e; main's ruling, 2026-11-19), or
+   * `null` where it is tiled; absent, none. {@link StillSource.snapshot} holds the still's size
+   * within it, so that the size offered is the size drawn and the label states.
+   */
+  sizeLimitPx?(): number | null;
+  /**
    * Why the view gives no still now, a {@link StillSnapshot}'s cause, or `null` where it gives
    * one: what `TAKE STILL` is held back for, read as the session is made and at each
    * {@link StillSession.refresh}. Absent, the view always gives one.
@@ -464,14 +471,16 @@ export interface StillSource {
 }
 
 /**
- * The size choice over `output`'s offers at the operator's multiple `scale`: the largest offered at
- * most it, the output size where none is; `null` with no output size.
+ * The size choice over `source`'s offers at the operator's multiple `scale`: the largest offered at
+ * most it, the output size where none is, each held within the source's size limit where it has
+ * one; `null` with no output size.
  */
-function sizeChoiceOf(output: ViewSize | null, scale: number): StillSizeChoice | null {
+function sizeChoiceOf(source: StillSource, scale: number): StillSizeChoice | null {
+  const output = source.outputSize?.() ?? null;
   if (output === null) {
     return null;
   }
-  const options = stillSizeOptions(output);
+  const options = stillSizeOptions(output, source.sizeLimitPx?.() ?? null);
   const offered = options.findLast((option) => option.scale <= scale);
   return { scale: offered?.scale ?? 1, options };
 }
@@ -539,7 +548,7 @@ export class StillSession {
     this.#state = {
       ...STILL_CONTROL_IDLE,
       heldBack: heldBackOf(options.source.unavailable?.()),
-      size: sizeChoiceOf(options.source.outputSize?.() ?? null, this.#scale),
+      size: sizeChoiceOf(options.source, this.#scale),
     };
   }
 
@@ -577,7 +586,7 @@ export class StillSession {
 
   /** Offers the sizes of the view's output size as it stands, the operator's multiple chosen. */
   #offerSizes(): void {
-    const size = sizeChoiceOf(this.#options.source.outputSize?.() ?? null, this.#scale);
+    const size = sizeChoiceOf(this.#options.source, this.#scale);
     if (!sameSizeChoice(size, this.#state.size)) {
       this.#set({ ...this.#state, size });
     }
@@ -605,6 +614,8 @@ export class StillSession {
       return null;
     }
     const { source } = this.#options;
+    // The sizes as the view offers them now, so that the size asked for is one drawn.
+    this.#offerSizes();
     let outcome: StillJobOutcome;
     try {
       // Frozen now: what the view holds after this is not the still's.

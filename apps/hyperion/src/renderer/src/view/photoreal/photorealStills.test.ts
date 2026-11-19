@@ -17,9 +17,13 @@ import { NEAR_PLANE_M, perspectiveReversedInfinite } from "../camera/projection"
 import { IDENTITY_QUATERNION } from "../camera/quaternion";
 import { sphereFootprint } from "../bodies/regime";
 import { IDENTITY_ROTATION } from "../coords/rotation";
+import { CLOUD_LAYER_PASS } from "../clouds/cloudLayer";
+import { CLOUD_RESOLVE_PASS, CLOUD_VOLUME_PASS } from "../clouds/cloudVolumePass";
+import type { BodyClouds } from "../clouds/condensates";
 import { oceanSeaOf } from "../ocean/oceanBody";
 import { oceanMapTextureSpec, packOceanTexels } from "../ocean/oceanMap";
 import { oceanMaskOf } from "../ocean/oceanMask";
+import { OCEAN_PASS_LABEL } from "../ocean/oceanPass";
 import { GLARE_SOURCE_BYTES } from "../post/bloomChain";
 import { waterWorldAnswer, waterWorldHeader } from "../../test/oceanFixtures";
 import type { FrameSubmission, PassTimes, TexelRect, ViewSize } from "../engine/types";
@@ -28,6 +32,7 @@ import { PLANETSHINE_SOURCES_HIGH } from "../lighting/planetshine";
 import { AU_M } from "../scenes/kept";
 import type { MeasuredPass } from "../stills/batchController";
 import { formatNumber } from "../../lib/format";
+import { untilNextTask } from "../../lib/nextTask";
 import {
   runStillJob,
   type StillAsk,
@@ -43,6 +48,7 @@ import { timedPass } from "../../test/passTimes";
 import type { QualitySetting } from "../quality/qualitySetting";
 import {
   type DrawnPhotorealFrame,
+  type FrameAtmosphere,
   type FrameTerrain,
   type PhotorealFrame,
   type PhotorealStillView,
@@ -59,6 +65,23 @@ import {
 const SIZE: ViewSize = { widthPx: 100, heightPx: 70 };
 
 const FOV_X_RAD = Math.PI / 3;
+
+/** An Earth-like body's clouds: a liquid water deck from 1 km to 3 km under 67% cover. */
+const EARTH_CLOUDS: BodyClouds = {
+  cloudFraction: 0.67,
+  surfacePressurePa: 101_325,
+  decks: [
+    {
+      condensate: "H2O",
+      phase: "liquid",
+      inCloudOpticalDepth550: 8,
+      coverage: 0.67,
+      baseAltitudeM: 1_000,
+      topAltitudeM: 3_000,
+      optics: null,
+    },
+  ],
+};
 
 /** The frozen frame of a view of one lit body and its star, at {@link SIZE}. */
 function viewFrame(size: ViewSize = SIZE): PhotorealFrame {
@@ -158,6 +181,26 @@ function handedOver(): DrawnPhotorealFrame {
   return { frame, plan: planOf(frame, new Map([[aLitBody().body, "terrain"]])) };
 }
 
+/** A body's air over `tables` in a frame at `viewport`, its body-fixed axes the galactic ones. */
+function airOver(
+  tables: AtmosphereTables,
+  viewport: ViewSize = SIZE,
+  clouds: BodyClouds | null = null,
+): FrameAtmosphere {
+  return {
+    id: aLitBody().body,
+    tables,
+    camera: {
+      positionM: vec3(0, 0, 1e8),
+      orientation: IDENTITY_QUATERNION,
+      fovXRad: FOV_X_RAD,
+      viewport,
+    },
+    toBodyFixed: IDENTITY_QUATERNION,
+    clouds,
+  };
+}
+
 /** The engine's target frames into the still's targets, by label. */
 function stillPasses(engine: CountingRenderEngine): ReadonlyArray<FrameSubmission> {
   return engine.targetFrames.filter((frame) => frame.label.startsWith("still"));
@@ -182,6 +225,11 @@ function sceneOf(stills: PhotorealStills, ask?: StillAsk): StillScene {
     throw new Error(`no still: ${snapshot.cause}`);
   }
   return snapshot.scene;
+}
+
+/** Where a submission draws: its tile's origin and its projection. */
+function placing(frame: FrameSubmission): unknown[] {
+  return [frame.tileOriginPx, Array.from(frame.projection)];
 }
 
 /** Every unit of `renderer`, each its own submission. */
@@ -335,6 +383,62 @@ describe("the photorealistic still source (R11.T10.b)", () => {
     // 2,200 px across: two columns under the low setting's 2,048, one under the high's 4,096.
     expect([renderer.tiling.tileLimitPx, renderer.tiling.columns]).toEqual([2048, 2]);
     renderer.dispose();
+  });
+
+  it("holds a still with air within the tile limit at the view's setting, its aspect kept, its label's size the size drawn (main's ruling, 2026-11-19)", async () => {
+    const engine = await countingRenderEngine();
+    const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, 6.371e6);
+    const presented = { widthPx: 1920, heightPx: 1080 };
+    /**
+     * A 1080p view's still at four times its size: its limit, its request's size and its tiles, one
+     * sample of each, its frame drawing no figure.
+     */
+    const stillAt = (setting: QualitySetting, air: boolean): unknown[] => {
+      const frameAt = (viewport: ViewSize, at: QualitySetting): PhotorealFrame => ({
+        ...viewFrame(viewport),
+        setting: at,
+        presentedPx: presented,
+        ...(air ? { atmospheres: [airOver(tables, viewport)] } : {}),
+      });
+      const drawn: DrawnPhotorealFrame = {
+        ...drawnOf(frameAt(presented, setting)),
+        remake: (ask) => frameAt(ask.viewport, ask.setting),
+      };
+      const stills = new PhotorealStills();
+      stills.attach(viewOver(engine, () => drawn));
+      const scene = sceneOf(stills, { scale: 4 });
+      const renderer = stills.renderer(scene);
+      const result = [
+        stills.sizeLimitPx(),
+        scene.request.size,
+        renderer.tiling.size,
+        renderer.units.filter((unit) => unit.startsWith("scene")).length,
+      ];
+      renderer.dispose();
+      return result;
+    };
+    expect([stillAt("low", true), stillAt("high", true), stillAt("high", false)]).toEqual([
+      // Drawn untiled: 2,048 px across on the low setting, 4,096 on the high, 16:9 kept.
+      [2048, { widthPx: 2048, heightPx: 1152 }, { widthPx: 2048, heightPx: 1152 }, 1],
+      [4096, { widthPx: 4096, heightPx: 2304 }, { widthPx: 4096, heightPx: 2304 }, 1],
+      // With no air, tiled at four times the view's size: two columns and two rows of 4,096.
+      [null, { widthPx: 7680, heightPx: 4320 }, { widthPx: 7680, heightPx: 4320 }, 4],
+    ]);
+    tables.dispose();
+  });
+
+  it("sets no limit on a frame with air that cannot be made again, its one size its own", async () => {
+    const engine = await countingRenderEngine();
+    const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, 6.371e6);
+    const stills = new PhotorealStills();
+    stills.attach(
+      viewOver(engine, () => drawnOf({ ...viewFrame(), atmospheres: [airOver(tables)] })),
+    );
+    expect([stills.sizeLimitPx(), sceneOf(stills, { scale: 4 }).request.size]).toEqual([
+      null,
+      SIZE,
+    ]);
+    tables.dispose();
   });
 
   it("lets its terrain view go where its renderer cannot be made", async () => {
@@ -524,8 +628,11 @@ describe("the photorealistic still renderer (R11.T10.b)", () => {
     renderer.dispose();
   });
 
-  it("tone-maps a sea's glint past the threshold as a glare source, its buffer sized for it (R11.T8.b)", async () => {
-    const engine = await countingRenderEngine();
+  /**
+   * A frame of one planet drawn as a mesh, a depth writer standing for its terrain, under a sea of
+   * water 4 km deep (plan R11, R11.T8.b), with no air: the airless tables light it.
+   */
+  function aSeaFrame(engine: CountingRenderEngine): PhotorealFrame {
     const lit = aLitBody();
     const centreM = vec3(0, 0, -3e7);
     const camera = { orientation: IDENTITY_QUATERNION, fovXRad: FOV_X_RAD };
@@ -555,7 +662,7 @@ describe("the photorealistic still renderer (R11.T10.b)", () => {
     if (planet === undefined) {
       throw new Error("the view's frame has its body");
     }
-    const frame: PhotorealFrame = {
+    return {
       ...base,
       exposureScale: 1e-2,
       lights: [{ disc: aHostDisc(), centreM: vec3(AU_M, 0, centreM.z) }],
@@ -576,6 +683,11 @@ describe("the photorealistic still renderer (R11.T10.b)", () => {
         },
       ],
     };
+  }
+
+  it("tone-maps a sea's glint past the threshold as a glare source, its buffer sized for it (R11.T8.b)", async () => {
+    const engine = await countingRenderEngine();
+    const frame = aSeaFrame(engine);
     const made: Array<{ readonly name: string; readonly bytes: number }> = [];
     engine.onAllocation((event) => {
       if (event.kind === "created") {
@@ -597,6 +709,73 @@ describe("the photorealistic still renderer (R11.T10.b)", () => {
       made.filter((each) => each.name === "still glare sources").map((each) => each.bytes),
     ).toEqual([8 * GLARE_SOURCE_BYTES, GLARE_SOURCE_BYTES]);
     renderer.dispose();
+  });
+
+  it("draws a sea in each tile through the tile's M · P and origin, as its other passes (R11.T10.e.2)", async () => {
+    const engine = await countingRenderEngine();
+    const renderer = new PhotorealStillRenderer(engine, aSeaFrame(engine), {
+      tileLimitPx: 64,
+      samples: 1,
+      onUnitTimes: () => undefined,
+      onDispose: () => undefined,
+    });
+    await renderer.prepare();
+    const before = engine.targetFrames.length;
+    submitAll(renderer);
+    const frames = engine.targetFrames.slice(before);
+    const of = (label: string): FrameSubmission[] =>
+      frames.filter((frame) => frame.label === label);
+    const origins = planTiles(SIZE, 64, "high").tiles.map(({ rect }) => [rect.x0Px, rect.y0Px]);
+    // Each tile's sea at its origin and through its M · P, as its sky is.
+    expect([
+      of(OCEAN_PASS_LABEL).map((frame) => frame.tileOriginPx),
+      of(OCEAN_PASS_LABEL).map(placing),
+    ]).toEqual([origins, of("sky").map(placing)]);
+    renderer.dispose();
+  });
+
+  it("draws a low view's clouds in its still at the high setting's passes, the volume from its first sample, no material or kernel made in a batch (R11.T10.e.3)", async () => {
+    const engine = await countingRenderEngine();
+    const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, 6.371e6);
+    const cloudyAt = (viewport: ViewSize, setting: QualitySetting): PhotorealFrame => ({
+      ...viewFrame(viewport),
+      setting,
+      meter: null,
+      time: { seconds: 1_000, nanos: 0 },
+      timeRate: 1,
+      atmospheres: [airOver(tables, viewport, EARTH_CLOUDS)],
+    });
+    // The view, on the low setting, has drawn its frame, its air's tables built.
+    const view = new PhotorealRenderer(engine, "view");
+    const low = cloudyAt(SIZE, "low");
+    await view.prepare(SIZE, "low", low.role, low.camera);
+    view.render(null, low);
+    const drawn: DrawnPhotorealFrame = {
+      ...drawnOf(low),
+      remake: (ask) => cloudyAt(ask.viewport, ask.setting),
+    };
+    const stills = new PhotorealStills();
+    stills.attach(viewOver(engine, () => drawn));
+    const renderer = stills.renderer(sceneOf(stills));
+    await renderer.prepare();
+    const made = { ...engine.counts };
+    const before = engine.targetFrames.length;
+    renderer.submit(0, 1);
+    const first = engine.targetFrames.slice(before).map((frame) => frame.label);
+    submitAll(renderer);
+    const at = first.indexOf(CLOUD_VOLUME_PASS);
+    expect([
+      first.slice(at - 1, at + 3),
+      engine.counts.materials - made.materials,
+      engine.counts.kernels - made.kernels,
+    ]).toEqual([
+      [ATMOSPHERE_COMPOSITE_PASS, CLOUD_VOLUME_PASS, CLOUD_RESOLVE_PASS, CLOUD_LAYER_PASS],
+      0,
+      0,
+    ]);
+    renderer.dispose();
+    view.dispose();
+    tables.dispose();
   });
 
   it("orders its units as each sample's tiles, sample by sample, then its bloom, then its tone mapping (R11.T10.e.2)", async () => {
@@ -861,6 +1040,41 @@ describe("the photorealistic still renderer (R11.T10.b)", () => {
       buffers: before.buffers,
     });
   });
+
+  it.each([0, 1, 2, 3])(
+    "releases everything it made when disposed after %i of the tasks its scene's making runs in (R10.T14.f)",
+    async (tasks) => {
+      const engine = await countingRenderEngine();
+      const frame = aSeaFrame(engine);
+      const before = engine.live;
+      const renderer = new PhotorealStillRenderer(engine, frame, {
+        tileLimitPx: 64,
+        samples: 2,
+        onUnitTimes: () => undefined,
+        onDispose: () => undefined,
+      });
+      // Abandoned before its pipelines' task, its scene's making ends unmade and prepare() fails.
+      const preparing = renderer.prepare().then(
+        () => "made",
+        () => "abandoned",
+      );
+      for (let task = 0; task < tasks; task += 1) {
+        // Each task in turn, as the making's own come one after another.
+        // oxlint-disable-next-line no-await-in-loop
+        await untilNextTask();
+      }
+      renderer.dispose();
+      const ended = await preparing;
+      // The counting engine's render targets keep their textures counted past their disposal.
+      const { materials, meshes, buffers } = engine.live;
+      expect({ ended, materials, meshes, buffers }).toEqual({
+        ended: tasks < 2 ? "abandoned" : "made",
+        materials: before.materials,
+        meshes: before.meshes,
+        buffers: before.buffers,
+      });
+    },
+  );
 
   it("makes a still end to end through the job on the engine's queue: five empty submits, one batch in flight", async () => {
     const engine = await countingRenderEngine();
