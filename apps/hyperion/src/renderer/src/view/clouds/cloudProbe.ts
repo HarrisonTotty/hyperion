@@ -276,8 +276,8 @@ export function expectedCloudProbe(
           {
             originM,
             direction,
-            t0,
-            t1: Math.fround(probe.t1),
+            t0M: t0,
+            t1M: Math.fround(probe.t1),
             suns: [f32Of(probe.sun), null],
             footprintPerM,
             jitter: Math.fround(probe.jitter),
@@ -360,7 +360,7 @@ export function packCloudProbeMarch(scene: CloudMarchScene): Float32Array {
   const at = 4 * CLOUD_MAP_MEMBERS.length;
   out.set([scene.inputs.baseM, scene.topM, scene.inputs.depthM, scene.datumRadiusM], at);
   out.set(
-    [scene.flattening, scene.optics.asymmetry, scene.optics.coAlbedo, scene.inputs.flat],
+    [scene.axisRatio, scene.optics.asymmetry, scene.optics.coAlbedo, scene.inputs.flat],
     at + 4,
   );
   out.set([scene.shellRadiusM, 0, 0, 0], at + 8);

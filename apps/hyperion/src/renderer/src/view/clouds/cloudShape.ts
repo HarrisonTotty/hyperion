@@ -19,8 +19,9 @@
  *   {@link STRATUS_COVER}: a cumulus field below, a stratocumulus sheet above, blended between); an
  *   ice deck is a sheet (labelled heuristics, lean 2026-11-19).
  * - **Its profile.** Within the cloud, at u = η ÷ η_top of its height, the extinction goes as
- *   (1 + κ) u^κ, κ = 2/3 for a liquid deck (the adiabatic profile above) and 0 for an ice deck,
- *   which integrates to 1 over the cloud, so that the column's τ is the field's.
+ *   (1 + κ) u^κ, κ = 2/3 for a liquid deck (the adiabatic profile above) and 0 for an ice deck
+ *   (lean, 2026-11-19: a uniform ice layer, which no adiabatic law shapes), which integrates to 1
+ *   over the cloud, so that the column's τ is the field's.
  * - **Its erosion** by the noises, after Nubis's (Schneider and Vos 2015): the envelope 1 − u, 1 at
  *   the base and 0 at the top, remapped by the base noise n_b, so that where n_b is low the cloud's
  *   upper part is eaten into billows, then by the detail noise n_d, which frays the edges left (its
@@ -166,7 +167,10 @@ export const CELL_MESOSCALE = 0.5;
 
 /**
  * The least in-cloud τ of a column's cells, over the condensate's τ̄ (lean, 2026-11-19): 0.6, about 5
- * for liquid water, a cumulus humilis's. The field ties its in-cloud τ to a mass's depth past its
+ * for liquid water, a cumulus humilis's: by the adiabatic law above, a cloud 200 m deep at 100–300
+ * droplets per cm³ has τ 8–11, and 5–7 at half its adiabatic water, so that τ 5 is one some
+ * 150–250 m deep, the thin end of a humilis's "slight vertical extent" (WMO International Cloud
+ * Atlas). The field ties its in-cloud τ to a mass's depth past its
  * threshold, so that where it is broken at a cell's region, about a mass's edge, its in-cloud τ is
  * 1–3, see-through and dark (the eye check of 2026-11-19); a cumulus's τ is its own, so the cells
  * keep at least this and cover less, their mean over the region still the field's.
@@ -259,8 +263,9 @@ export const CELL_TALL_SHARE = 1.5;
 /**
  * The cells' noise's excess past its threshold, Δu = u − (1 − f), at which a cell's rise saturates
  * (lean, 2026-11-19): 0.25. A cell's excess is at most its cover f, so that sparse cells are small,
- * low domes and a dense field's cells larger and tall, flat-topped ones, near a cumulus's aspect of
- * 1.
+ * low domes and a dense field's cells larger and tall, flat-topped ones, their aspect near 1, a
+ * cumulus mediocris's "moderate vertical extent" (WMO International Cloud Atlas; the aspect a
+ * lean).
  */
 export const CELL_SATURATION = 0.25;
 

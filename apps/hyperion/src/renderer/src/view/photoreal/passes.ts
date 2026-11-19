@@ -35,7 +35,8 @@ import {
 } from "../atmosphere/hillaire";
 import { ATMOSPHERE_TABLES_PASS } from "../atmosphere/tables";
 import { CLOUD_LAYER_PASS } from "../clouds/cloudLayer";
-import { CLOUD_RESOLVE_PASS, CLOUD_VOLUME_PASS } from "../clouds/cloudVolumePass";
+import { CLOUD_SHADOW_PASS } from "../clouds/cloudShadowMap";
+import { CLOUD_MAP_PASS, CLOUD_RESOLVE_PASS, CLOUD_VOLUME_PASS } from "../clouds/cloudVolumePass";
 import { DISC_CELLS_PASS } from "../bodies/draw";
 import { OCEAN_PASS_LABEL } from "../ocean/oceanPass";
 import { DEPTH_PYRAMID_LABEL } from "../clusters/hzb";
@@ -108,10 +109,13 @@ export const ATMOSPHERE_PASS_LABELS: ReadonlyArray<string> = [
 
 /**
  * The labels R11's clouds submit their passes under (plan R11, R11.T7.b and T7.c), in a frame's
- * order: the volume's march and its temporal resolve, for the body drawn as a volume, then each
- * body's layer or the volume's composite over its air.
+ * order: the volume's map and its shadow map, before the terrain draws, then its march and its
+ * temporal resolve, for the body drawn as a volume, then each body's layer or the volume's
+ * composite over its air.
  */
 export const CLOUD_PASS_LABELS: ReadonlyArray<string> = [
+  CLOUD_MAP_PASS,
+  CLOUD_SHADOW_PASS,
   CLOUD_VOLUME_PASS,
   CLOUD_RESOLVE_PASS,
   CLOUD_LAYER_PASS,

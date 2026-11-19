@@ -8,7 +8,7 @@ import { CLOUD_LAYER_PASS, type CloudLayerView, cloudShellOf } from "./cloudLaye
 import { CLOUD_LEAST_MU, CLOUD_SKY_MU } from "./cloudShadow";
 import { octaveCorrectionOf } from "./cloudVolume";
 import { BASE_NOISE_SIZE, CURL_NOISE_SIZE, DETAIL_NOISE_SIZE } from "./cloudShapeNoise";
-import type { ShapeNoiseReply, ShapeNoiseRequest } from "./cloudShapeNoise";
+import type { ShapeNoiseRequest } from "./cloudShapeNoise";
 import {
   CLOUD_MAP_PASS,
   CLOUD_RESOLVE_PASS,
@@ -72,13 +72,14 @@ function viewFrom(heightM: number, direction = { x: -1, y: 0, z: 0 }): CloudLaye
 
 /** A shape-noise worker that answers at once with blank noises of the right sizes. */
 class InstantNoiseWorker {
-  readonly #listeners: Array<(event: MessageEvent<ShapeNoiseReply>) => void> = [];
+  readonly #listeners: Array<(event: MessageEvent<unknown>) => void> = [];
 
-  addEventListener(
-    _type: "message",
-    listener: (event: MessageEvent<ShapeNoiseReply>) => void,
-  ): void {
-    this.#listeners.push(listener);
+  addEventListener(type: "message", listener: (event: MessageEvent<unknown>) => void): void;
+  addEventListener(type: "error" | "messageerror", listener: (event: Event) => void): void;
+  addEventListener(type: string, listener: (event: MessageEvent<unknown>) => void): void {
+    if (type === "message") {
+      this.#listeners.push(listener);
+    }
   }
 
   postMessage(message: ShapeNoiseRequest): void {

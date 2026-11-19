@@ -130,7 +130,7 @@ export type VolumeStep = "full" | "stepped" | "lowest";
  * The march's levers at each step of the frame-rate floor (lean, 2026-11-19): in full, 64 view
  * samples, 6 towards the source and the detail noise; once the floor steps the air down, 40, 4 and
  * no detail; at its lowest step, 24 and 3. The floor degrades the volume and never sheds it
- * (the owner's requirement, 2026-11-19); the levers are the owner's Mac pair (`--cloud-steps`).
+ * (the owner's requirement, 2026-11-19); the levers are the owner's Mac pair (`--cloud-volume`).
  */
 export const VOLUME_LEVERS: Readonly<Record<VolumeStep, CloudMarchLevers>> = {
   full: { viewSteps: 64, lightSteps: 6, detail: true },
@@ -860,7 +860,8 @@ export class CloudVolumes {
       map: mapped.mapFrame,
       sun,
       datumRadiusM: view.figure.equatorialRadiusM,
-      flattening: k,
+      axisRatio: k,
+      deck: { baseM: condensate.baseAltitudeM, topM: condensate.topAltitudeM },
     };
     shadow.render({
       label: CLOUD_SHADOW_PASS,
@@ -871,12 +872,7 @@ export class CloudVolumes {
           mesh: materials.triangle,
           material: materials.shadow,
           offsetFromCameraM: new Float32Array(3),
-          uniforms: shadowMapUniforms(
-            frame,
-            { baseM: condensate.baseAltitudeM, topM: condensate.topAltitudeM },
-            view.shell.equatorialRadiusM,
-            condensate,
-          ),
+          uniforms: shadowMapUniforms(frame, view.shell.equatorialRadiusM, condensate),
           textures: {
             [CLOUD_SHADOW_TEXTURES.map]: this.#mapTarget().colour,
             [CLOUD_SHADOW_TEXTURES.baseNoise]: noises.base,

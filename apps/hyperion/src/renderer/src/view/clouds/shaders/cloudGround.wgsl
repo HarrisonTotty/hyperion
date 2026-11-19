@@ -2,8 +2,8 @@
 // volume's shadow map (`cloudShadowMap.wgsl`) where it holds the place, blended to the layer's own
 // tap (`cloudShadow.wgsl`'s `terrain_cloud_light`) at its edge and wherever it holds nothing: a
 // second source, the low setting, a frame that draws no volume. The twin of `clouds/cloudShadowMap.ts`'
-// remarks' read. Any pass that lights a surface under the clouds composes it, the terrain's cloudy
-// forms (`terrain/cloudLight.ts`) first, the sea's to come.
+// `cloudGroundLightAt`. Any pass that lights a surface under the clouds composes it, the terrain's
+// cloudy forms (`terrain/cloudLight.ts`) first, the sea's to come.
 //
 // Composed after `cloudShadow.wgsl` (and so `preciseTrig.wgsl`, `cloudField.wgsl` and
 // `cloudOptics.wgsl`, with `cloudField.wgsl`'s bindings); its includer declares besides:
@@ -13,11 +13,15 @@
 //     (`cloudShadowMap.ts`' `packCloudShadow`), all 0 where the map holds nothing.
 //
 // `cloud_ground_light(p, sun, source_radius)` takes `terrain_cloud_light`'s arguments, the place ÷
-// a, and returns its three factors (`cloudShadow.wgsl`'s header).
+// a, and returns its three factors (`cloudShadow.wgsl`'s header). A place above the datum reads its
+// direct light at the datum's place on its ray towards the source, and its sky's and scattered
+// light at its own column; ground that rises to the deck's base takes the layer's tap
+// (`cloudShadowMap.ts`' remarks).
 
 const CLOUD_SHADOW_ROWS : u32 = 9u;
 const CLOUD_SHADOW_ROW_SOURCE : u32 = 6u;
 const CLOUD_SHADOW_ROW_DATUM : u32 = 7u;
+const CLOUD_SHADOW_ROW_DECK : u32 = 8u;
 // The least cosine between the map's source and the one asked of it at which the map serves it.
 const CLOUD_SHADOW_SAME_SOURCE : f32 = 0.99999;
 
@@ -35,19 +39,15 @@ fn cloud_shadow_read_level(level : u32, plane : vec2f) -> vec3f {
   return textureSampleLevel(cloud_shadow_map, cloud_sampler, vec2f(uv.x, (f32(level) + uv.y) * 0.5), 0.0).xyz;
 }
 
-fn cloud_ground_light(p : vec3f, sun : vec3f, source_radius : f32) -> vec3f {
-  let layer = terrain_cloud_light(p, sun, source_radius);
-  let source = cloud_shadow_row(CLOUD_SHADOW_ROW_SOURCE);
-  if (source.w < 0.5 || dot(source.xyz, sun) < CLOUD_SHADOW_SAME_SOURCE) {
-    return layer;
-  }
+// The map's levels at a place, m: xyz their light, w the share of it a read takes over the layer's
+// tap, 0 off the map (`cloudShadowMap.ts`' `mapReadAt`).
+fn cloud_shadow_map_at(place : vec3f) -> vec4f {
   let datum = cloud_shadow_row(CLOUD_SHADOW_ROW_DATUM);
   let anchor = cloud_shadow_row(0u);
-  let place = p * datum.x;
   let r = length(place);
   let c = dot(place, anchor.xyz) / r;
   if (!(c > 0.05)) {
-    return layer;
+    return vec4f(0.0);
   }
   let scale = anchor.w / (c * r);
   let plane = vec2f(dot(place, cloud_shadow_row(1u).xyz), dot(place, cloud_shadow_row(2u).xyz)) * scale;
@@ -61,11 +61,37 @@ fn cloud_ground_light(p : vec3f, sun : vec3f, source_radius : f32) -> vec3f {
   let r0 = max(d0.x, d0.y) / half0;
   let r1 = max(d1.x, d1.y) / half1;
   if (r1 >= 1.0) {
+    return vec4f(0.0);
+  }
+  let weight = 1.0 - smoothstep(datum.w, 1.0, r1);
+  let outer = cloud_shadow_read_level(1u, plane);
+  if (r0 >= 1.0) {
+    return vec4f(outer, weight);
+  }
+  return vec4f(mix(cloud_shadow_read_level(0u, plane), outer, smoothstep(datum.w, 1.0, r0)), weight);
+}
+
+fn cloud_ground_light(p : vec3f, sun : vec3f, source_radius : f32) -> vec3f {
+  let layer = terrain_cloud_light(p, sun, source_radius);
+  let source = cloud_shadow_row(CLOUD_SHADOW_ROW_SOURCE);
+  if (source.w < 0.5 || dot(source.xyz, sun) < CLOUD_SHADOW_SAME_SOURCE) {
     return layer;
   }
-  let outer = mix(cloud_shadow_read_level(1u, plane), layer, smoothstep(datum.w, 1.0, r1));
-  if (r0 >= 1.0) {
-    return outer;
+  let datum = cloud_shadow_row(CLOUD_SHADOW_ROW_DATUM);
+  let deck = cloud_shadow_row(CLOUD_SHADOW_ROW_DECK);
+  let k = datum.y;
+  let place = p * datum.x;
+  let r = length(place);
+  let height = r - datum.x * r / length(vec3f(place.xy, place.z * k));
+  let under = smoothstep(0.0, deck.z * max(deck.y - deck.x, 1.0), deck.x - height);
+  if (!(under > 0.0)) {
+    return layer;
   }
-  return mix(cloud_shadow_read_level(0u, plane), outer, smoothstep(datum.w, 1.0, r0));
+  let mu = max(dot(normalize(vec3f(place.xy, place.z * k * k)), sun), deck.w);
+  let towards = cloud_shadow_map_at(place - (max(height, 0.0) / mu) * sun);
+  let column = cloud_shadow_map_at(place);
+  return vec3f(
+    mix(layer.x, towards.x, under * towards.w),
+    mix(layer.yz, column.yz, under * column.w),
+  );
 }

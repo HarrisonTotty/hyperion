@@ -299,7 +299,8 @@ class Equaliser {
   }
 
   #width(): number {
-    return (this.#most - this.#least) / RANK_BINS || 1;
+    const span = this.#most - this.#least;
+    return span > 0 ? span / RANK_BINS : 1;
   }
 
   #binOf(v: number, width: number): number {
@@ -480,19 +481,66 @@ export interface ShapeNoiseReply {
   readonly noises: CloudShapeNoises;
 }
 
+/** A message read as a {@link ShapeNoiseRequest}, `null` for any other. */
+export function shapeNoiseRequestOf(data: unknown): ShapeNoiseRequest | null {
+  if (typeof data !== "object" || data === null || !("kind" in data) || !("seed" in data)) {
+    return null;
+  }
+  const { kind, seed } = data;
+  return kind === "make" && typeof seed === "number" && Number.isInteger(seed)
+    ? { kind, seed }
+    : null;
+}
+
+/** A field of a message as a world's noise of `length` texels, `null` for any other. */
+function noiseOf(data: object, name: keyof CloudShapeNoises, length: number): Uint8Array | null {
+  const field: unknown = Reflect.get(data, name);
+  return field instanceof Uint8Array && field.length === length ? field : null;
+}
+
+/**
+ * A message read as a {@link ShapeNoiseReply}, `null` for any other: its noises each a
+ * `Uint8Array` of its size, which the volume writes into its textures whole.
+ */
+export function shapeNoiseReplyOf(data: unknown): ShapeNoiseReply | null {
+  if (typeof data !== "object" || data === null || !("kind" in data) || !("seed" in data)) {
+    return null;
+  }
+  const { kind, seed } = data;
+  const noises: unknown = Reflect.get(data, "noises");
+  if (
+    kind !== "made" ||
+    typeof seed !== "number" ||
+    typeof noises !== "object" ||
+    noises === null
+  ) {
+    return null;
+  }
+  const base = noiseOf(noises, "base", BASE_NOISE_SIZE ** 3);
+  const detail = noiseOf(noises, "detail", DETAIL_NOISE_SIZE ** 3);
+  const curl = noiseOf(noises, "curl", CURL_NOISE_SIZE ** 2);
+  return base === null || detail === null || curl === null
+    ? null
+    : { kind, seed, noises: { base, detail, curl } };
+}
+
 /** The part of a worker's scope {@link serveShapeNoises} uses, so that a test can stand in for it. */
 export interface ShapeNoiseScope {
-  addEventListener(
-    type: "message",
-    listener: (event: MessageEvent<ShapeNoiseRequest>) => void,
-  ): void;
+  addEventListener(type: "message", listener: (event: MessageEvent<unknown>) => void): void;
   postMessage(reply: ShapeNoiseReply, transfer: Transferable[]): void;
 }
 
-/** Serves a worker's requests: each world's noises made at once and posted back, transferred. */
+/**
+ * Serves a worker's requests: each world's noises made at once and posted back, transferred; a
+ * message that is not a request is let go.
+ */
 export function serveShapeNoises(scope: ShapeNoiseScope): void {
   scope.addEventListener("message", (event) => {
-    const { seed } = event.data;
+    const request = shapeNoiseRequestOf(event.data);
+    if (request === null) {
+      return;
+    }
+    const { seed } = request;
     const noises = cloudShapeNoises(seed);
     scope.postMessage({ kind: "made", seed, noises }, [
       noises.base.buffer,
@@ -504,7 +552,8 @@ export function serveShapeNoises(scope: ShapeNoiseScope): void {
 
 /** The part of a `Worker` {@link CloudShapeNoiseSource} uses, so that tests can stand in for one. */
 export interface ShapeNoiseWorkerLike {
-  addEventListener(type: "message", listener: (event: MessageEvent<ShapeNoiseReply>) => void): void;
+  addEventListener(type: "message", listener: (event: MessageEvent<unknown>) => void): void;
+  addEventListener(type: "error" | "messageerror", listener: (event: Event) => void): void;
   postMessage(message: ShapeNoiseRequest, transfer: Transferable[]): void;
   terminate(): void;
 }
@@ -515,10 +564,11 @@ export const SHAPE_NOISE_STEP_BUDGET_MS = 2;
 /**
  * A world's shape noises as frames ask for them: made by a worker off the page's thread where one
  * is given, else a step at a time within each frame's budget ({@link CloudShapeNoiseBuilder}); one
- * world's held at a time, the last asked for.
+ * world's held at a time, the last asked for. A worker that fails, or answers with anything but a
+ * world's noises, is stopped with a warning, and the builder makes them from then on.
  */
 export class CloudShapeNoiseSource {
-  readonly #worker: ShapeNoiseWorkerLike | null;
+  #worker: ShapeNoiseWorkerLike | null;
   #seed: number | null = null;
   #made: CloudShapeNoises | null = null;
   #builder: CloudShapeNoiseBuilder | null = null;
@@ -526,10 +576,33 @@ export class CloudShapeNoiseSource {
   constructor(worker: ShapeNoiseWorkerLike | null) {
     this.#worker = worker;
     worker?.addEventListener("message", (event) => {
-      if (event.data.seed === this.#seed) {
-        this.#made = event.data.noises;
+      const reply = shapeNoiseReplyOf(event.data);
+      if (reply === null) {
+        this.#fail("the shape-noise worker answered with no world's noises");
+      } else if (reply.seed === this.#seed) {
+        this.#made = reply.noises;
       }
     });
+    worker?.addEventListener("error", (event) => {
+      const message: unknown = Reflect.get(event, "message");
+      this.#fail(typeof message === "string" ? message : "the shape-noise worker failed");
+    });
+    worker?.addEventListener("messageerror", () => {
+      this.#fail("the shape-noise worker's answer could not be read");
+    });
+  }
+
+  /** Stops a failed worker, and makes the world asked for here. */
+  #fail(reason: string): void {
+    if (this.#worker === null) {
+      return;
+    }
+    console.warn(`the cloud volume's shape noises are made on the page's thread: ${reason}`);
+    this.#worker.terminate();
+    this.#worker = null;
+    if (this.#seed !== null && this.#made === null) {
+      this.#builder = new CloudShapeNoiseBuilder(this.#seed);
+    }
   }
 
   /**

@@ -18,13 +18,22 @@
  *   δ-Eddington's total transmittance at the diffusivity's cosine 0.6, and z the source's light it
  *   scatters down, δ-Eddington's T_diff at the source's cosine. The density is the march's
  *   (`cloudMarch.ts`), at the texel's footprint, without the detail noise.
- * - **A read** (`cloudGround.wgsl`'s `cloud_ground_light`) at a place takes level 0 within 0.8 of
- *   its half-width, blends to level 1 across the rest, and beyond 0.8 of level 1's blends to the
- *   layer's own tap, which also serves a second source, the low setting, and a frame that draws no
- *   volume: so the map changes nothing where it has nothing to say.
+ * - **A read** (`cloudGround.wgsl`'s `cloud_ground_light`, its twin {@link cloudGroundLightAt}) at a
+ *   place takes level 0 within 0.8 of its half-width, blends to level 1 across the rest, and beyond
+ *   0.8 of level 1's blends to the layer's own tap, which also serves a second source, the low
+ *   setting, and a frame that draws no volume: so the map changes nothing where it has nothing to
+ *   say.
+ * - **The ground's height:** a texel holds its place on the datum. A place at height h above it
+ *   reads its direct light at the datum's place on its ray towards the source, h ÷ μ₀ back along it,
+ *   whose march is its own ray's but for the stretch below the place, below the deck; and its sky's
+ *   and scattered light at its own column, whose cloud all stands above it. Ground that rises to
+ *   the deck's base gives way to the layer's tap, whose crossing of the shell takes its height,
+ *   across the last {@link SHADOW_BASE_BLEND} of the deck's depth below the base.
  * - Memory: 256 × 512 `rgba16float`, 1 MiB, and 9 rows, in the `clouds` category.
+ * - Any pass that lights a surface under the clouds reads it so, the sea's among them: compose
+ *   `cloudGround.wgsl` and bind the map and its rows as its header says.
  */
-import type { Vec3 } from "../../geometry/vec3";
+import { dot, norm, type Vec3 } from "../../geometry/vec3";
 import type { WgslMaterialSpec } from "../engine/types";
 import frameWgsl from "../shaders/frame.wgsl?raw";
 import preciseTrigWgsl from "../shaders/preciseTrig.wgsl?raw";
@@ -34,6 +43,7 @@ import {
   type CloudMapFrame,
   cloudMapUniforms,
   mapTexelM,
+  onMapPlane,
   texelPlace,
 } from "./cloudMap";
 import { type CloudMarchScene, deckStretch, densityPerMAt } from "./cloudMarch";
@@ -60,7 +70,21 @@ export const SHADOW_INNER = 0.8;
 
 export { CLOUD_SHADOW_ROWS } from "./cloudShadowRows";
 
-/** The diffusivity's cosine the sky's light takes through the clouds. */
+/**
+ * The share of the deck's depth below its base across which the map gives way to the layer's tap
+ * as the ground rises to the base (the module's remarks; lean, 2026-11-19).
+ */
+export const SHADOW_BASE_BLEND = 0.2;
+
+/** The least cosine of the source along whose ray a read moves a place to the datum. */
+export const SHADOW_READ_LEAST_MU = 0.05;
+
+/**
+ * The diffusivity's cosine the sky's light takes through the clouds: 1 ÷ 1.66 rounded, Elsasser's
+ * diffusivity factor (Elsasser 1942, Harvard Meteorological Studies 6) for a layer that absorbs;
+ * for a scattering cloud an approximation, δ-Eddington's T at 0.6 within 1% of its mean over an
+ * isotropic sky at τ ≤ 2 and 4–5% under it at τ 8–30. The layer's own (`cloudShadow.ts`).
+ */
 const SKY_MU = 0.6;
 
 /** The least cosine of the source the slab's optics are taken at. */
@@ -74,13 +98,17 @@ export interface CloudShadowFrame {
   /** a, the datum's equatorial radius, m, by which the terrain's places ÷ a are turned to metres. */
   readonly datumRadiusM: number;
   /** k, the deck's spheroids' a ÷ c. */
-  readonly flattening: number;
+  readonly axisRatio: number;
+  /** The deck's base and top above the datum, m. */
+  readonly deck: { readonly baseM: number; readonly topM: number };
 }
 
 /**
  * The shadow map's rows (`cloudGround.wgsl`'s layout), into `out`: 0 to 5 the map's plane
  * (`cloudMapUniforms`, its members in order); 6 the source's direction and 1 where the map holds; 7
- * x the datum's a, m, y k, z level 1's half-width over level 0's, w {@link SHADOW_INNER}; 8 unused.
+ * x the datum's a, m, y k, z level 1's half-width over level 0's, w {@link SHADOW_INNER}; 8 x the
+ * deck's base and y its top above the datum, m, z {@link SHADOW_BASE_BLEND}, w
+ * {@link SHADOW_READ_LEAST_MU}.
  * `null` packs a map that holds nothing, so that every read takes the layer's tap.
  */
 export function packCloudShadow(
@@ -96,9 +124,106 @@ export function packCloudShadow(
     out.set(plane[name] ?? new Float32Array(4), 4 * i);
   });
   out.set([frame.sun.x, frame.sun.y, frame.sun.z, 1], 24);
-  out.set([frame.datumRadiusM, frame.flattening, mapTexelM(1) / mapTexelM(0), SHADOW_INNER], 28);
+  out.set([frame.datumRadiusM, frame.axisRatio, mapTexelM(1) / mapTexelM(0), SHADOW_INNER], 28);
+  out.set([frame.deck.baseM, frame.deck.topM, SHADOW_BASE_BLEND, SHADOW_READ_LEAST_MU], 32);
   return out;
 }
+
+/** A level of the map read at a place on its plane, m: its three factors there, bilinear. */
+export type ShadowLevelRead = (
+  level: number,
+  plane: { readonly x: number; readonly y: number },
+) => CloudGroundLight;
+
+/** Smoothstep from e0 to e1. */
+function smoothstep(e0: number, e1: number, x: number): number {
+  const t = Math.min(Math.max((x - e0) / (e1 - e0), 0), 1);
+  return t * t * (3 - 2 * t);
+}
+
+/**
+ * The map's levels read at a place, m, through `read`: their light and the share of it the read
+ * takes over the layer's tap, 0 off the map (the module's remarks).
+ */
+function mapReadAt(
+  frame: CloudShadowFrame,
+  placeM: Vec3,
+  read: ShadowLevelRead,
+): { readonly light: CloudGroundLight; readonly weight: number } | null {
+  const plane = onMapPlane(frame.map, placeM);
+  const [o0, o1] = frame.map.origins;
+  if (plane === null || o0 === undefined || o1 === undefined) {
+    return null;
+  }
+  const half0 = (CLOUD_MAP_SIDE * mapTexelM(0)) / 2;
+  const half1 = (CLOUD_MAP_SIDE * mapTexelM(1)) / 2;
+  const reach = (origin: { readonly x: number; readonly y: number }, half: number): number =>
+    Math.max(Math.abs(plane.x - origin.x - half), Math.abs(plane.y - origin.y - half)) / half;
+  const r0 = reach(o0, half0);
+  const r1 = reach(o1, half1);
+  if (r1 >= 1) {
+    return null;
+  }
+  const outer = read(1, plane);
+  if (r0 >= 1) {
+    return { light: outer, weight: 1 - smoothstep(SHADOW_INNER, 1, r1) };
+  }
+  const inner = read(0, plane);
+  const t = smoothstep(SHADOW_INNER, 1, r0);
+  return {
+    light: {
+      direct: inner.direct + t * (outer.direct - inner.direct),
+      sky: inner.sky + t * (outer.sky - inner.sky),
+      diffuse: inner.diffuse + t * (outer.diffuse - inner.diffuse),
+    },
+    weight: 1 - smoothstep(SHADOW_INNER, 1, r1),
+  };
+}
+
+/**
+ * The clouds' light on the ground at a place, m, body-fixed, for the source towards `sun`: the
+ * twin of `cloudGround.wgsl`'s `cloud_ground_light` (the module's remarks), the map's levels read
+ * through `read`, `layer` the layer's own tap there.
+ */
+export function cloudGroundLightAt(
+  frame: CloudShadowFrame,
+  placeM: Vec3,
+  sun: Vec3,
+  layer: CloudGroundLight,
+  read: ShadowLevelRead,
+): CloudGroundLight {
+  if (dot(frame.sun, sun) < SAME_SOURCE) {
+    return layer;
+  }
+  const k = frame.axisRatio;
+  const r = norm(placeM);
+  const datumM = frame.datumRadiusM / Math.hypot(placeM.x / r, placeM.y / r, (placeM.z / r) * k);
+  const heightM = r - datumM;
+  const depthM = Math.max(frame.deck.topM - frame.deck.baseM, 1);
+  const under = smoothstep(0, SHADOW_BASE_BLEND * depthM, frame.deck.baseM - heightM);
+  if (!(under > 0)) {
+    return layer;
+  }
+  const n = { x: placeM.x, y: placeM.y, z: placeM.z * k * k };
+  const mu = Math.max(dot(n, sun) / norm(n), SHADOW_READ_LEAST_MU);
+  const back = Math.max(heightM, 0) / mu;
+  const towards = mapReadAt(
+    frame,
+    { x: placeM.x - back * sun.x, y: placeM.y - back * sun.y, z: placeM.z - back * sun.z },
+    read,
+  );
+  const column = mapReadAt(frame, placeM, read);
+  const direct = under * (towards?.weight ?? 0);
+  const above = under * (column?.weight ?? 0);
+  return {
+    direct: layer.direct + direct * ((towards?.light.direct ?? 0) - layer.direct),
+    sky: layer.sky + above * ((column?.light.sky ?? 0) - layer.sky),
+    diffuse: layer.diffuse + above * ((column?.light.diffuse ?? 0) - layer.diffuse),
+  };
+}
+
+/** The least cosine between the map's source and the one asked of it at which the map serves it. */
+const SAME_SOURCE = 0.99999;
 
 /** The shadow map pass's `Draw` members after `offsetFromCameraM`. */
 const SHADOW_MEMBERS = [...CLOUD_MAP_MEMBERS, "sun", "deck", "optics"] as const;
@@ -182,7 +307,7 @@ export function shadowTexelPlace(
   const a = frame.datumRadiusM;
   return texelPlace(
     frame.map,
-    { equatorialRadiusM: a, polarRadiusM: a / frame.flattening },
+    { equatorialRadiusM: a, polarRadiusM: a / frame.axisRatio },
     level,
     i,
     j,
@@ -202,7 +327,7 @@ export function shadowTexelAt(
   placeM: Vec3,
   footprintM: number,
 ): CloudGroundLight {
-  const k = scene.flattening;
+  const k = scene.axisRatio;
   const n = { x: placeM.x, y: placeM.y, z: placeM.z * k * k };
   const length = Math.hypot(n.x, n.y, n.z);
   const up = { x: n.x / length, y: n.y / length, z: n.z / length };
@@ -258,14 +383,13 @@ export function shadowTexelAt(
 /** The shadow map's draw members for a frame's map, source and deck. */
 export function shadowMapUniforms(
   frame: CloudShadowFrame,
-  deck: { readonly baseM: number; readonly topM: number },
   shellRadiusM: number,
   optics: { readonly asymmetry: number; readonly coAlbedo: number },
 ): Readonly<Record<string, Float32Array>> {
   return {
     ...cloudMapUniforms(frame.map),
     sun: new Float32Array([frame.sun.x, frame.sun.y, frame.sun.z, frame.datumRadiusM]),
-    deck: new Float32Array([deck.baseM, deck.topM, frame.flattening, shellRadiusM]),
+    deck: new Float32Array([frame.deck.baseM, frame.deck.topM, frame.axisRatio, shellRadiusM]),
     optics: new Float32Array([optics.asymmetry, optics.coAlbedo, CLOUD_MAP_SIDE, 0]),
   };
 }

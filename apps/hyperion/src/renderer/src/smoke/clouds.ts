@@ -435,7 +435,7 @@ async function volumeProbeOf(
     },
     topM: CONDENSATE.topAltitudeM,
     datumRadiusM: FIGURE.equatorialRadiusM,
-    flattening: shell.equatorialRadiusM / shell.polarRadiusM,
+    axisRatio: shell.equatorialRadiusM / shell.polarRadiusM,
     optics: CONDENSATE,
     correction: octaveCorrectionOf(CONDENSATE),
   };
@@ -501,7 +501,7 @@ function marchCases(scene: CloudMarchScene): CloudProbeCase[] {
     const stretch = deckStretch(
       originM,
       direction,
-      scene.flattening,
+      scene.axisRatio,
       scene.datumRadiusM,
       scene.inputs.baseM,
       scene.topM,
@@ -720,7 +720,8 @@ async function shadowMapOf(
     map: volume.frame,
     sun: shadowSun(),
     datumRadiusM: FIGURE.equatorialRadiusM,
-    flattening: scene.flattening,
+    axisRatio: scene.axisRatio,
+    deck: DECK,
   };
   const target = engine.createRenderTarget({
     name: "smoke cloud shadow map",
@@ -738,7 +739,7 @@ async function shadowMapOf(
           engine.createMaterial(CLOUD_SHADOW_MAP_MATERIAL),
           [0, 0, 0, 0],
           {
-            uniforms: shadowMapUniforms(frame, DECK, scene.shellRadiusM, CONDENSATE),
+            uniforms: shadowMapUniforms(frame, scene.shellRadiusM, CONDENSATE),
             textures: {
               [CLOUD_SHADOW_TEXTURES.map]: volume.map.colour,
               [CLOUD_SHADOW_TEXTURES.baseNoise]: volume.noises.base,

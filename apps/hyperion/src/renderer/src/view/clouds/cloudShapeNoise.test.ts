@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   BASE_NOISE_SIZE,
@@ -7,9 +7,10 @@ import {
   CloudShapeNoiseSource,
   CURL_NOISE_SIZE,
   DETAIL_NOISE_SIZE,
-  type ShapeNoiseReply,
   type ShapeNoiseRequest,
   serveShapeNoises,
+  shapeNoiseReplyOf,
+  shapeNoiseRequestOf,
 } from "./cloudShapeNoise";
 
 const SEED = 0x2c5f_9a13;
@@ -100,35 +101,48 @@ describe("the cloud volume's shape noises", () => {
   });
 });
 
-/** A worker that answers each request at once through `serveShapeNoises`, as the real one does. */
+/**
+ * A worker that answers each request at once through `serveShapeNoises`, as the real one does, or,
+ * `failing`, fails when asked, or answers with `answer` where one is given.
+ */
 class FakeShapeNoiseWorker {
-  readonly #replies: Array<(event: MessageEvent<ShapeNoiseReply>) => void> = [];
-  readonly #requests: Array<(event: MessageEvent<ShapeNoiseRequest>) => void> = [];
+  readonly #replies: Array<(event: MessageEvent<unknown>) => void> = [];
+  readonly #failures: Array<(event: MessageEvent<unknown>) => void> = [];
+  readonly #requests: Array<(event: MessageEvent<unknown>) => void> = [];
+  readonly #failing: boolean;
+  readonly #answer: unknown;
   readonly posted: number[] = [];
   terminated = false;
 
-  constructor() {
+  constructor(failing = false, answer?: unknown) {
+    this.#failing = failing;
+    this.#answer = answer;
     serveShapeNoises({
       addEventListener: (_type, listener) => {
         this.#requests.push(listener);
       },
       postMessage: (reply) => {
         for (const listener of this.#replies) {
-          listener(new MessageEvent("message", { data: reply }));
+          listener(new MessageEvent("message", { data: this.#answer ?? reply }));
         }
       },
     });
   }
 
-  addEventListener(
-    _type: "message",
-    listener: (event: MessageEvent<ShapeNoiseReply>) => void,
-  ): void {
-    this.#replies.push(listener);
+  addEventListener(type: "message", listener: (event: MessageEvent<unknown>) => void): void;
+  addEventListener(type: "error" | "messageerror", listener: (event: Event) => void): void;
+  addEventListener(type: string, listener: (event: MessageEvent<unknown>) => void): void {
+    (type === "message" ? this.#replies : this.#failures).push(listener);
   }
 
   postMessage(message: ShapeNoiseRequest): void {
     this.posted.push(message.seed);
+    if (this.#failing) {
+      for (const listener of this.#failures) {
+        listener(new MessageEvent("error"));
+      }
+      return;
+    }
     for (const listener of this.#requests) {
       listener(new MessageEvent("message", { data: message }));
     }
@@ -168,6 +182,37 @@ describe("a world's shape noises as frames ask for them", () => {
     expect(calls).toBeGreaterThan(100);
     expect(made.detail).toEqual(NOISES.detail);
     expect(source.noisesNow(SEED)).toBe(made);
+  });
+
+  it("are made here, with a warning, once the worker fails", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const worker = new FakeShapeNoiseWorker(true);
+    const source = new CloudShapeNoiseSource(worker);
+    // A clock that stands still gives the builder all it needs in one call.
+    expect(source.noisesOf(SEED, () => 0, 1)?.curl).toEqual(NOISES.curl);
+    expect(worker.terminated).toBe(true);
+    expect(warn).toHaveBeenCalledOnce();
+    expect(source.noisesOf(SEED + 1, () => 0, 1)).not.toBeNull();
+    expect(worker.posted).toEqual([SEED]);
+  });
+
+  it("are made here once the worker answers with anything but a world's noises", () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const short = { base: new Uint8Array(8), detail: NOISES.detail, curl: NOISES.curl };
+    const worker = new FakeShapeNoiseWorker(false, { kind: "made", seed: SEED, noises: short });
+    const source = new CloudShapeNoiseSource(worker);
+    expect(source.noisesOf(SEED, () => 0, 1)?.base).toEqual(NOISES.base);
+    expect(worker.terminated).toBe(true);
+  });
+
+  it("read a request and a reply only of their shapes", () => {
+    expect(shapeNoiseRequestOf({ kind: "make", seed: 7 })).toEqual({ kind: "make", seed: 7 });
+    expect(shapeNoiseRequestOf({ kind: "make", seed: "7" })).toBeNull();
+    expect(shapeNoiseRequestOf(null)).toBeNull();
+    const reply = { kind: "made", seed: SEED, noises: NOISES };
+    expect(shapeNoiseReplyOf(reply)).toEqual(reply);
+    expect(shapeNoiseReplyOf({ ...reply, kind: "make" })).toBeNull();
+    expect(shapeNoiseReplyOf({ ...reply, noises: { ...NOISES, curl: [0] } })).toBeNull();
   });
 
   it("lets the last world's go when another is asked for", () => {

@@ -84,7 +84,12 @@ export const SHARE_SD_RANGE = [0.1, 0.5] as const;
 /** The least share a ray is drawn in. */
 export const LEAST_SHARE = 1e-4;
 
-/** The cosine of the sky's light on the slab: 0.6, the two-stream diffusivity's 1 ÷ 1.66. */
+/**
+ * The cosine of the sky's light on the slab: 0.6, the diffusivity factor's 1 ÷ 1.66 rounded
+ * (Elsasser 1942, Harvard Meteorological Studies 6), exact for a layer that absorbs and an
+ * approximation for one that scatters: δ-Eddington's T at 0.6 is within 1% of its mean over an
+ * isotropic sky at τ ≤ 2 and 4–5% under it at τ 8–30. The layer's own (`cloudShadow.ts`).
+ */
 export const SKY_MU = 0.6;
 
 function clamp01(x: number): number {
@@ -187,12 +192,12 @@ const CLEAR: CloudColumn = {
  * holds (`cloudShape.ts`' `columnFromMap`); clear beyond the map.
  */
 export function columnAt(
-  scene: Pick<CloudMarchScene, "map" | "field" | "inputs" | "flattening" | "shellRadiusM">,
+  scene: Pick<CloudMarchScene, "map" | "field" | "inputs" | "axisRatio" | "shellRadiusM">,
   x: Vec3,
   footprintM: number,
   refine: boolean,
 ): CloudColumn {
-  const k = scene.flattening;
+  const k = scene.axisRatio;
   const onShell = scene.shellRadiusM / Math.hypot(x.x, x.y, x.z * k);
   const p = { x: x.x * onShell, y: x.y * onShell, z: x.z * onShell };
   const read = scene.map.readAt(p, footprintM);
@@ -206,13 +211,13 @@ export function columnAt(
  * the view's cosine against the deck.
  */
 export function entryFootprintM(
-  scene: Pick<CloudMarchScene, "flattening">,
+  scene: Pick<CloudMarchScene, "axisRatio">,
   originM: Vec3,
   direction: Vec3,
   t0: number,
   footprintPerM: number,
 ): number {
-  const k = scene.flattening;
+  const k = scene.axisRatio;
   const x0 = along(originM, direction, t0);
   const n = { x: x0.x, y: x0.y, z: x0.z * k * k };
   const muView = Math.max(
@@ -278,7 +283,7 @@ export interface CloudMarchScene {
   /** a, the datum's equatorial radius, m. */
   readonly datumRadiusM: number;
   /** k, the deck's spheroids' a ÷ c. */
-  readonly flattening: number;
+  readonly axisRatio: number;
   readonly optics: CloudOptics;
   readonly correction: OctaveCorrection;
 }
@@ -297,9 +302,10 @@ export interface CloudMarchLevers {
 export interface CloudMarchRay {
   readonly originM: Vec3;
   readonly direction: Vec3;
-  /** Its stretch, m along it, cut where the scene stands nearer. */
-  readonly t0: number;
-  readonly t1: number;
+  /** Its stretch's start, m along it. */
+  readonly t0M: number;
+  /** Its stretch's end, m along it, cut where the scene stands nearer. */
+  readonly t1M: number;
   /** The unit directions to its sources, body-fixed: the first marched, the second plane-parallel. */
   readonly suns: readonly [Vec3, Vec3 | null];
   /** The footprint's growth with distance, m per m; at least 1 m. */
@@ -374,7 +380,7 @@ function densityAt(
   regionIn: CloudColumn | null,
 ): SampleDensity {
   const { inputs, frame, noises, map } = scene;
-  const { height } = heightAndNormal(x, scene.flattening, scene.datumRadiusM);
+  const { height } = heightAndNormal(x, scene.axisRatio, scene.datumRadiusM);
   const column = columnAt(scene, x, fieldFootprintM(scene, footprintM), refine);
   if (!(column.meanTau > 0)) {
     return { sigma: 0, columnTau: 0, above: 0, region: regionIn };
@@ -413,7 +419,7 @@ function densityAt(
   }
   // The cell's pattern is the cells' noise on the layer's shell above or below the sample, its
   // cover and τ the region's.
-  const k = scene.flattening;
+  const k = scene.axisRatio;
   const onShell = scene.shellRadiusM / Math.hypot(x.x, x.y, x.z * k);
   const region = regionIn ?? columnAt(scene, x, Math.max(footprintM, CELL_REGION_M), false);
   const shell = { x: x.x * onShell, y: x.y * onShell, z: x.z * onShell };
@@ -477,7 +483,7 @@ export function marchCloudRay(
   ray: CloudMarchRay,
   entry: CloudColumn,
 ): CloudMarch {
-  const { originM: o, direction: d, t0, t1, footprintPerM } = ray;
+  const { originM: o, direction: d, t0M: t0, t1M: t1, footprintPerM } = ray;
   const flat = scene.inputs.flat;
   const share = rayShare(
     entry,
@@ -529,7 +535,7 @@ export function marchCloudRay(
     if (!(sigma > 0)) {
       continue;
     }
-    const { height, normal } = heightAndNormal(x, scene.flattening, scene.datumRadiusM);
+    const { height, normal } = heightAndNormal(x, scene.axisRatio, scene.datumRadiusM);
     const viewStep = sigma * dt;
     const scattered = view * sigma * dt * escape(viewStep);
     for (const [j, sun] of suns.entries()) {

@@ -85,7 +85,7 @@ function sceneOf(clouds: CloudLightInput): CloudMarchScene {
     },
     topM: 3_000,
     datumRadiusM: 6_378_137,
-    flattening: clouds.shell.equatorialRadiusM / clouds.shell.polarRadiusM,
+    axisRatio: clouds.shell.equatorialRadiusM / clouds.shell.polarRadiusM,
     optics: clouds.optics,
     correction: CORRECTION,
   };
@@ -191,8 +191,8 @@ describe("the clouds' probe", () => {
       {
         originM,
         direction,
-        t0: 9_000,
-        t1: 11_000,
+        t0M: 9_000,
+        t1M: 11_000,
         suns: [{ x: Math.fround(0.8), y: Math.fround(0.6), z: 0 }, null],
         footprintPerM,
         jitter: 0.25,

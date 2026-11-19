@@ -276,6 +276,7 @@ describe("the photorealistic renderer's cloud volume (R11.T7.c)", () => {
       readonly noises?: boolean;
       readonly atmosphereSetting?: "low";
       readonly floorLowest?: boolean;
+      readonly cloudVolume?: "full" | "lowest";
     } = {},
   ): Promise<{
     readonly labels: ReadonlyArray<string>;
@@ -292,6 +293,9 @@ describe("the photorealistic renderer's cloud volume (R11.T7.c)", () => {
         ? {}
         : { atmosphereSetting: options.atmosphereSetting }),
       ...(options.floorLowest === undefined ? {} : { floorLowest: options.floorLowest }),
+      ...(options.cloudVolume === undefined
+        ? {}
+        : { atmosphereLevers: { cloudVolume: options.cloudVolume } }),
     };
     if (options.noises === true) {
       // The noises at once and the correction with them, as a still's first sample takes them.
@@ -350,6 +354,19 @@ describe("the photorealistic renderer's cloud volume (R11.T7.c)", () => {
     expect(lowest.levers?.[0]).toBe(VOLUME_LEVERS.lowest.viewSteps);
   });
 
+  it("holds the volume at the frame profile's lever's step over the floor's (--cloud-volume)", async () => {
+    const full = await lastFrame("high", 1, {
+      noises: true,
+      atmosphereSetting: "low",
+      cloudVolume: "full",
+    });
+    const lowest = await lastFrame("high", 1, { noises: true, cloudVolume: "lowest" });
+    expect([full.levers?.[0], lowest.levers?.[0]]).toEqual([
+      VOLUME_LEVERS.full.viewSteps,
+      VOLUME_LEVERS.lowest.viewSteps,
+    ]);
+  });
+
   it("draws the layer on low, and on high beyond the deck's reach", async () => {
     const low = await lastFrame("low", 1, { noises: true });
     const far = await lastFrame("high", 1, { heightM: 1e8, noises: true });
@@ -370,6 +387,7 @@ describe("the cloud volume's materials and history in the renderer (R11.T7.c)", 
     "cloud volume resolve",
     "cloud volume composite",
     "cloud map",
+    "cloud shadow map",
   ];
 
   it("releases the volume's materials with the view", async () => {
@@ -393,7 +411,12 @@ describe("the cloud volume's materials and history in the renderer (R11.T7.c)", 
       fovXRad: Math.PI / 3,
     });
     expect(released.mock.calls.map(([material]) => material.name)).toEqual(
-      expect.arrayContaining(["cloud volume", "cloud volume composite", "cloud map"]),
+      expect.arrayContaining([
+        "cloud volume",
+        "cloud volume composite",
+        "cloud map",
+        "cloud shadow map",
+      ]),
     );
     expect(warned).toHaveBeenCalled();
     renderer.prepareClouds();

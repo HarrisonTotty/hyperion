@@ -80,7 +80,7 @@ function uniformScene(cover: number, tau: number, flat: number): CloudMarchScene
     },
     topM: 3_000,
     datumRadiusM: A,
-    flattening: K,
+    axisRatio: K,
     optics: WATER,
     correction: CORRECTION,
   };
@@ -110,8 +110,8 @@ function marched(
     {
       originM,
       direction,
-      t0: stretch[0],
-      t1: stretch[1],
+      t0M: stretch[0],
+      t1M: stretch[1],
       suns: [sun, null],
       footprintPerM,
       jitter: options.jitter ?? 0.5,
@@ -217,6 +217,51 @@ describe("the volume's march through its 3D density (R11.T7.c)", () => {
     );
     expect(flat.share).toBeCloseTo(1, 6);
   });
+
+  it.each([0.3, 0.6])(
+    "is the uniform deck's march when flattened under a broken cover of %s, the layer's share of it",
+    (fraction) => {
+      // Under broken cover the cells give way to the layer's slab as the volume flattens, so that
+      // at the hand-over the march is the layer's independent-pixel form, its share the field's.
+      const clouds = {
+        coverage: coverageTexels(
+          {
+            widthCells: 64,
+            heightCells: 32,
+            fractions: new Float64Array(64 * 32).fill(fraction),
+            offset: 0,
+          },
+          () => ({ eastMps: 0, northMps: 0 }),
+        ),
+        noise: cloudNoiseTexels(),
+        params: cloudFieldParams({
+          seed: 1,
+          condensate: { inCloudOpticalDepth550: 4 },
+          radiusM: A,
+          time: { seconds: 0, nanos: 0 },
+          rate: 1e9,
+          windMps: 20,
+          octaves: CLOUD_OCTAVES_MAX,
+        }),
+        shell: cloudShellOf({ equatorialRadiusM: A, polarRadiusM: C }, 1_500),
+        optics: WATER,
+        datumRadiusM: A,
+      };
+      const sun = { x: 0.8, y: 0.6, z: 0 };
+      // The reference marches the covered part at its in-cloud τ, the layer's form.
+      const reference = marchDeckRay(clouds, { baseM: 1_000, topM: 3_000 }, CORRECTION, {
+        originM: over(10_000),
+        direction: DOWN,
+        sun,
+        steps: 48,
+        footprintPerM: 10,
+        share: fraction,
+      });
+      const flat = marched(uniformScene(fraction, 4, 1), over(10_000), DOWN, sun, { steps: 48 });
+      expect(flat.share).toBeCloseTo(fraction, 6);
+      expect(flat.sun[0]).toBeCloseTo(reference.radiance, 6);
+    },
+  );
 
   it("finds the sun's path through a uniform deck by its march towards it to 5% of the plane-parallel's", () => {
     // Unflattened, the profile's u^(2/3) and the march towards the source; the plane-parallel twin
