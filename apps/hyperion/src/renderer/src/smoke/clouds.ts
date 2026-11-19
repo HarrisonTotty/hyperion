@@ -93,6 +93,15 @@ import {
   DETAIL_NOISE_SIZE,
 } from "../view/clouds/cloudShapeNoise";
 import {
+  CLOUD_SHADOW_MAP_MATERIAL,
+  CLOUD_SHADOW_TEXTURES,
+  type CloudShadowFrame,
+  SHADOW_MAP_LEVELS,
+  shadowMapUniforms,
+  shadowTexelAt,
+  shadowTexelPlace,
+} from "../view/clouds/cloudShadowMap";
+import {
   CLOUD_COMPOSITE_MATERIAL,
   CLOUD_MAP_MATERIAL,
   CLOUD_RESOLVE_MATERIAL,
@@ -289,6 +298,9 @@ function probeCases(twin: CloudLightInput): CloudProbeCase[] {
   });
   return [...field, ...optics, ...ground, ...volumeCases()];
 }
+
+/** The volume's deck, from 1 km to 3 km, as {@link CONDENSATE}'s. */
+const DECK = { baseM: CONDENSATE.baseAltitudeM, topM: CONDENSATE.topAltitudeM };
 
 /** The place the volume's probe stands over, the map's anchor's nadir: 10° N, 20° E. */
 const MARCH_PLACE = directionAt(10, 20);
@@ -569,6 +581,7 @@ export async function checkCloudTwins(engine: RenderEngine, checks: Checks): Pro
   // Made one by one, each released however a later one fails.
   const made: { texture?: TextureHandle; buffer?: BufferHandle; target?: RenderTarget } = {};
   let results: number[][];
+  let shadow: ShadowMapRead;
   try {
     const correctionTexture = engine.createTexture({
       name: "cloud octave correction",
@@ -635,6 +648,7 @@ export async function checkCloudTwins(engine: RenderEngine, checks: Checks): Pro
       await engine.readTexture(target.colour, 0, undefined, "tolerance"),
       cases.length,
     );
+    shadow = await shadowMapOf(engine, gpu, volume, correctionTexture);
   } finally {
     made.target?.dispose();
     if (made.buffer !== undefined) {
@@ -671,6 +685,125 @@ export async function checkCloudTwins(engine: RenderEngine, checks: Checks): Pro
     compared.filter(({ probe }) => probe.kind === "march"),
   );
   checkMap(checks, volume, twin);
+  checkShadowMap(checks, volume, shadow);
+}
+
+/** The sun the shadow map is drawn for: 40° up at the probe's place, towards its east. */
+function shadowSun(): Vec3 {
+  const u = MARCH_PLACE;
+  const east = unit({ x: -u.y, y: u.x, z: 0 });
+  return unit({
+    x: Math.sin(0.7) * u.x + Math.cos(0.7) * east.x,
+    y: Math.sin(0.7) * u.y + Math.cos(0.7) * east.y,
+    z: Math.sin(0.7) * u.z + Math.cos(0.7) * east.z,
+  });
+}
+
+/** A shadow map drawn by its pass and read back, with its frame. */
+interface ShadowMapRead {
+  readonly frame: CloudShadowFrame;
+  readonly texels: Float32Array;
+}
+
+/**
+ * The cloud volume's shadow map (R11.T7.c) drawn by its pass over the volume's probe's map and
+ * noises, for {@link shadowSun}, and read back.
+ */
+async function shadowMapOf(
+  engine: RenderEngine,
+  gpu: NonNullable<ReturnType<CloudLayers["frame"]>>,
+  volume: VolumeProbe,
+  correction: TextureHandle,
+): Promise<ShadowMapRead> {
+  const { scene } = volume;
+  const frame: CloudShadowFrame = {
+    map: volume.frame,
+    sun: shadowSun(),
+    datumRadiusM: FIGURE.equatorialRadiusM,
+    flattening: scene.flattening,
+  };
+  const target = engine.createRenderTarget({
+    name: "smoke cloud shadow map",
+    size: { widthPx: CLOUD_MAP_SIDE, heightPx: CLOUD_MAP_SIDE * SHADOW_MAP_LEVELS },
+    format: "rgba16float",
+    mips: 1,
+    depth: false,
+    category: "clouds",
+  });
+  try {
+    target.render(
+      frameOf("smoke cloud shadow map", [
+        drawOf(
+          fullScreenMesh(engine, "smoke cloud shadow map's triangle"),
+          engine.createMaterial(CLOUD_SHADOW_MAP_MATERIAL),
+          [0, 0, 0, 0],
+          {
+            uniforms: shadowMapUniforms(frame, DECK, scene.shellRadiusM, CONDENSATE),
+            textures: {
+              [CLOUD_SHADOW_TEXTURES.map]: volume.map.colour,
+              [CLOUD_SHADOW_TEXTURES.baseNoise]: volume.noises.base,
+              [CLOUD_SHADOW_TEXTURES.detailNoise]: volume.noises.detail,
+              [CLOUD_SHADOW_TEXTURES.curlNoise]: volume.noises.curl,
+              [CLOUD_SHADOW_TEXTURES.fieldNoise]: gpu.noise,
+              [CLOUD_SHADOW_TEXTURES.correction]: correction,
+            },
+            storageBuffers: {
+              [CLOUD_SHADOW_TEXTURES.layer]: gpu.layer,
+              [CLOUD_SHADOW_TEXTURES.shape]: volume.shape,
+            },
+          },
+        ),
+      ]),
+    );
+    return { frame, texels: halfTexels(await engine.readTexture(target.colour)) };
+  } finally {
+    target.dispose();
+  }
+}
+
+/** A shadow map texel's factors against its twin's, absolute. */
+const SHADOW_TOLERANCE = 0.03;
+/** The texels sampled a level: a 6 × 6 grid of them. */
+const SHADOW_SAMPLES = 6;
+
+/**
+ * R11.T7.c's shadow map as its pass drew it against its twin's texels (`cloudShadowMap.ts`'
+ * `shadowTexelAt` over the map the GPU drew): over 36 texels a level, each of its three factors to
+ * {@link SHADOW_TOLERANCE}, every texel within [0, 1], and some in shadow.
+ */
+function checkShadowMap(checks: Checks, volume: VolumeProbe, shadow: ShadowMapRead): void {
+  let worst = 0;
+  let sound = true;
+  let shaded = 0;
+  for (let level = 0; level < SHADOW_MAP_LEVELS; level += 1) {
+    for (let a = 0; a < SHADOW_SAMPLES; a += 1) {
+      for (let b = 0; b < SHADOW_SAMPLES; b += 1) {
+        const i = Math.floor(((a + 0.5) * CLOUD_MAP_SIDE) / SHADOW_SAMPLES);
+        const j = Math.floor(((b + 0.5) * CLOUD_MAP_SIDE) / SHADOW_SAMPLES);
+        const at = 4 * ((level * CLOUD_MAP_SIDE + j) * CLOUD_MAP_SIDE + i);
+        const gpu = Array.from(shadow.texels.subarray(at, at + 3));
+        const cpu = shadowTexelAt(
+          volume.scene,
+          shadow.frame,
+          shadowTexelPlace(shadow.frame, level, i, j),
+          mapTexelM(level),
+        );
+        sound &&= gpu.every((v) => Number.isFinite(v) && v >= 0 && v <= 1.001);
+        worst = Math.max(
+          worst,
+          Math.abs((gpu[0] ?? Number.NaN) - cpu.direct),
+          Math.abs((gpu[1] ?? Number.NaN) - cpu.sky),
+          Math.abs((gpu[2] ?? Number.NaN) - cpu.diffuse),
+        );
+        shaded += cpu.direct < 0.5 ? 1 : 0;
+      }
+    }
+  }
+  checks.check(
+    "R11.T7.c the cloud shadow map's pass draws its twin's light on the ground",
+    sound && worst <= SHADOW_TOLERANCE && shaded > 0,
+    `largest |Δ| ${worst.toExponential(2)} (≤ ${SHADOW_TOLERANCE}) over ${2 * SHADOW_SAMPLES * SHADOW_SAMPLES} texels, ${shaded} of them in shadow, every one ${sound ? "within [0, 1]" : "NOT within [0, 1]"}`,
+  );
 }
 
 /** The map's texels sampled a level: an 8 × 8 grid of them. */
@@ -1072,6 +1205,7 @@ export async function checkCloudVolumeDraw(engine: RenderEngine, checks: Checks)
       resolve: engine.createMaterial(CLOUD_RESOLVE_MATERIAL),
       composite: engine.createMaterial(CLOUD_COMPOSITE_MATERIAL),
       map: engine.createMaterial(CLOUD_MAP_MATERIAL),
+      shadow: engine.createMaterial(CLOUD_SHADOW_MAP_MATERIAL),
       triangle: fullScreenMesh(engine, "cloud volume's triangle"),
     };
     volumes.prepareNoises(FRAME.id);
@@ -1223,6 +1357,7 @@ export async function captureClouds(engine: RenderEngine): Promise<CapturedImage
       resolve: engine.createMaterial(CLOUD_RESOLVE_MATERIAL),
       composite: engine.createMaterial(CLOUD_COMPOSITE_MATERIAL),
       map: engine.createMaterial(CLOUD_MAP_MATERIAL),
+      shadow: engine.createMaterial(CLOUD_SHADOW_MAP_MATERIAL),
       triangle: fullScreenMesh(engine, "cloud captures' triangle"),
     };
     volumes.prepareNoises(frame.id);

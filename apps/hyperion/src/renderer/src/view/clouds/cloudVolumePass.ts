@@ -44,6 +44,7 @@ import {
   surfaceLightingTextures,
 } from "../atmosphere/surfaceLighting";
 import { NEAR_PLANE_M } from "../camera/projection";
+import type { Quaternion } from "../camera/pose";
 import { rotate } from "../camera/quaternion";
 import { BUFFER_USAGE, TEXTURE_USAGE } from "../engine/gpuFlags";
 import type {
@@ -74,13 +75,22 @@ import {
   CLOUD_MAP_MEMBERS,
   CLOUD_MAP_SIDE,
   CloudMapAnchor,
+  type CloudMapFrame,
   cloudMapUniforms,
 } from "./cloudMap";
+import {
+  CLOUD_SHADOW_MAP_MATERIAL,
+  CLOUD_SHADOW_PASS,
+  CLOUD_SHADOW_ROWS,
+  CLOUD_SHADOW_TEXTURES,
+  packCloudShadow,
+  SHADOW_MAP_LEVELS,
+  shadowMapUniforms,
+} from "./cloudShadowMap";
 import type { CloudMarchLevers } from "./cloudMarch";
 import {
   BASE_FEATURE_TILES,
   CELL_FEATURE_TILES,
-  cellRiseTable,
   type CloudShapeFrame,
   cloudShapeFrame,
   type CloudShapeKind,
@@ -178,6 +188,12 @@ export function withinVolumeReach(heightAboveTopM: number): boolean {
  */
 export function volumeWanted(setting: QualitySetting, heightAboveTopM: number): boolean {
   return SETTINGS[setting].clouds === "volume" && withinVolumeReach(heightAboveTopM);
+}
+
+/** The unit direction to a source, body-fixed, from its offset in the frame's axes. */
+export function towardsBodyFixed(toBodyFixed: Quaternion, towardsM: Vec3): Vec3 {
+  const d = rotate(toBodyFixed, towardsM);
+  return scale(d, 1 / norm(d));
 }
 
 /** A camera's height above a deck's top, m, from its place, body-fixed, on the body's datum. */
@@ -408,14 +424,15 @@ export const CLOUD_COMPOSITE_MATERIAL: WgslMaterialSpec = {
 };
 
 /**
- * The volume's four materials, in the order the renderer makes them (`march`, `resolve`,
- * `composite`, `map`), for the catalogue (compiled in the smoke's part 26).
+ * The volume's five materials, in the order the renderer makes them (`march`, `resolve`,
+ * `composite`, `map`, `shadow`), for the catalogue (compiled in the smoke's part 26).
  */
 export const CLOUD_VOLUME_MATERIALS: ReadonlyArray<WgslMaterialSpec> = [
   CLOUD_VOLUME_MATERIAL,
   CLOUD_RESOLVE_MATERIAL,
   CLOUD_COMPOSITE_MATERIAL,
   CLOUD_MAP_MATERIAL,
+  CLOUD_SHADOW_MAP_MATERIAL,
 ];
 
 /** The volume's targets' size for a view of `size`: half its width and height, rounded up. */
@@ -528,7 +545,21 @@ export interface CloudVolumeMaterials {
   readonly resolve: MaterialHandle;
   readonly composite: MaterialHandle;
   readonly map: MaterialHandle;
+  readonly shadow: MaterialHandle;
   readonly triangle: MeshHandle;
+}
+
+/** What a body's volume is prepared from before its ground draws ({@link CloudVolumes.prepare}). */
+export interface CloudVolumePrepare {
+  readonly id: BodyIdHex;
+  readonly gpu: CloudBodyGpu;
+  readonly condensate: CloudCondensate;
+  readonly view: Pick<CloudLayerView, "camera" | "figure" | "shell" | "octaves">;
+  readonly correction: TextureHandle;
+  readonly timeS: number;
+  readonly rate: number;
+  /** The unit direction to the frame's brightest source, body-fixed; `null` for none. */
+  readonly sun: Vec3 | null;
 }
 
 /** A pass's rotation and projection, which its full-screen draws read none of. */
@@ -548,12 +579,12 @@ interface VolumeTargets {
 export const CORRECTION_STEP_BUDGET_MS = 1;
 
 /** The shape's rows (`cloudShape.wgsl`'s CLOUD_SHAPE_ROWS). */
-export const CLOUD_SHAPE_ROWS = 33;
+export const CLOUD_SHAPE_ROWS = 25;
 
 /**
  * A deck's shape rows (`cloudShape.wgsl`'s layout), into `out`, {@link CLOUD_SHAPE_ROWS} × 4 `f32`s:
  * its noises' tiles and drifts, their features and time-rate shares, its kind, κ's normalisation
- * table and the cells' rise's means.
+ * table.
  */
 export function packCloudShape(
   frame: CloudShapeFrame,
@@ -583,7 +614,6 @@ export function packCloudShape(
     12,
   );
   out.set(normalisationTable(kind.profileExponent), 16);
-  out.set(cellRiseTable(), 4 * 25);
   return out;
 }
 
@@ -658,6 +688,16 @@ export class CloudVolumes {
   #targets: VolumeTargets | null = null;
   #map: RenderTarget | null = null;
   #shape: BufferHandle | null = null;
+  #shadow: RenderTarget | null = null;
+  #shadowRows: BufferHandle | null = null;
+  readonly #shadowRowsData = new Float32Array(4 * CLOUD_SHADOW_ROWS);
+  /** The map this frame's {@link CloudVolumes.prepare} drew, which its draw takes. */
+  #prepared: {
+    readonly id: BodyIdHex;
+    readonly mapFrame: CloudMapFrame;
+    readonly mapUniforms: Readonly<Record<string, Float32Array>>;
+    readonly shape: BufferHandle;
+  } | null = null;
   #noiseTextures: NoiseTextures | null = null;
   /** The history the last frame resolved into, and what it resolved; `null` where none holds. */
   #last: {
@@ -788,6 +828,134 @@ export class CloudVolumes {
   }
 
   /**
+   * Prepares a body's volume this frame before its ground draws: its map, and its shadow map for
+   * the brightest source, `null` for none, whose texture and rows the ground beneath reads
+   * (`cloudGround.wgsl`), returned; the frame's {@link CloudVolumes.draw} then draws from the map.
+   * The world's noises must be ready.
+   *
+   * @throws Error where the world's noises are not on the GPU.
+   */
+  prepare(
+    volume: CloudVolumePrepare,
+    materials: Pick<CloudVolumeMaterials, "map" | "shadow" | "triangle">,
+    pass: PassMatrices,
+  ): { readonly shadowMap: TextureHandle; readonly shadowRows: BufferHandle } {
+    const noises = this.#noiseTextures;
+    if (noises?.seed !== cloudSeedOf(volume.id)) {
+      throw new Error(
+        `the cloud volume of ${volume.id} was prepared before its world's noises were made`,
+      );
+    }
+    const mapped = this.#mapped(volume, materials, pass);
+    this.#prepared = { id: volume.id, ...mapped };
+    const rows = this.#shadowRowsBuffer();
+    const shadow = this.#shadowTarget();
+    const { view, gpu, condensate, sun } = volume;
+    if (sun === null) {
+      this.#engine.writeBuffer(rows, 0, packCloudShadow(null, this.#shadowRowsData));
+      return { shadowMap: shadow.colour, shadowRows: rows };
+    }
+    const k = view.shell.equatorialRadiusM / view.shell.polarRadiusM;
+    const frame = {
+      map: mapped.mapFrame,
+      sun,
+      datumRadiusM: view.figure.equatorialRadiusM,
+      flattening: k,
+    };
+    shadow.render({
+      label: CLOUD_SHADOW_PASS,
+      viewRotation: pass.viewRotation,
+      projection: pass.projection,
+      draws: [
+        {
+          mesh: materials.triangle,
+          material: materials.shadow,
+          offsetFromCameraM: new Float32Array(3),
+          uniforms: shadowMapUniforms(
+            frame,
+            { baseM: condensate.baseAltitudeM, topM: condensate.topAltitudeM },
+            view.shell.equatorialRadiusM,
+            condensate,
+          ),
+          textures: {
+            [CLOUD_SHADOW_TEXTURES.map]: this.#mapTarget().colour,
+            [CLOUD_SHADOW_TEXTURES.baseNoise]: noises.base,
+            [CLOUD_SHADOW_TEXTURES.detailNoise]: noises.detail,
+            [CLOUD_SHADOW_TEXTURES.curlNoise]: noises.curl,
+            [CLOUD_SHADOW_TEXTURES.fieldNoise]: gpu.noise,
+            [CLOUD_SHADOW_TEXTURES.correction]: volume.correction,
+          },
+          storageBuffers: {
+            [CLOUD_SHADOW_TEXTURES.layer]: gpu.layer,
+            [CLOUD_SHADOW_TEXTURES.shape]: mapped.shape,
+          },
+        },
+      ],
+      postProcesses: [],
+    });
+    this.#engine.writeBuffer(rows, 0, packCloudShadow(frame, this.#shadowRowsData));
+    return { shadowMap: shadow.colour, shadowRows: rows };
+  }
+
+  /**
+   * A frame's map of a body's volume: its noises' shape rows written, its map's frame from the
+   * anchor and its pass drawn.
+   */
+  #mapped(
+    volume: Pick<CloudVolumeDraw, "gpu" | "condensate" | "timeS" | "rate"> & {
+      readonly view: Pick<CloudLayerView, "camera" | "shell" | "octaves">;
+    },
+    materials: Pick<CloudVolumeMaterials, "map" | "triangle">,
+    pass: PassMatrices,
+  ): {
+    readonly mapFrame: CloudMapFrame;
+    readonly mapUniforms: Readonly<Record<string, Float32Array>>;
+    readonly shape: BufferHandle;
+  } {
+    const { view, gpu, condensate } = volume;
+    const depthM = Math.max(condensate.topAltitudeM - condensate.baseAltitudeM, 1);
+    const kind = cloudShapeKindOf(condensate);
+    const shapeFrame = cloudShapeFrame(
+      depthM,
+      gpu.texels === undefined ? { x: 0, y: 0, z: 0 } : windAtM(gpu.texels, view.camera.positionM),
+      volume.timeS,
+      volume.rate,
+    );
+    const shape = this.#shapeBuffer();
+    this.#engine.writeBuffer(shape, 0, packCloudShape(shapeFrame, kind, this.#shapeRows));
+    const mapFrame = this.#anchor.frameFor(view.camera.positionM, view.shell.equatorialRadiusM);
+    const mapUniforms = cloudMapUniforms(mapFrame);
+    this.#mapTarget().render({
+      label: CLOUD_MAP_PASS,
+      viewRotation: pass.viewRotation,
+      projection: pass.projection,
+      draws: [
+        {
+          mesh: materials.triangle,
+          material: materials.map,
+          offsetFromCameraM: new Float32Array(3),
+          uniforms: {
+            ...mapUniforms,
+            shape: new Float32Array([
+              view.shell.equatorialRadiusM / view.shell.polarRadiusM,
+              view.octaves,
+              0,
+              0,
+            ]),
+          },
+          textures: {
+            [CLOUD_TEXTURES.coverage]: gpu.coverage,
+            [CLOUD_TEXTURES.noise]: gpu.noise,
+          },
+          storageBuffers: { [CLOUD_TEXTURES.layer]: gpu.layer },
+        },
+      ],
+      postProcesses: [],
+    });
+    return { mapFrame, mapUniforms, shape };
+  }
+
+  /**
    * Draws a body's volume: its map, its march and its resolve into the volume's own targets, then
    * its composite into `target`, within `scissor` where given, over what the body's composite drew.
    * The world's noises must be ready ({@link CloudVolumes.noisesReady}).
@@ -819,46 +987,11 @@ export class CloudVolumes {
     const layer = cloudLayerUniforms(marchView);
     const jitter = volumeJitter(this.#frames);
     this.#frames += 1;
-    const depthM = Math.max(condensate.topAltitudeM - condensate.baseAltitudeM, 1);
-    const kind = cloudShapeKindOf(condensate);
-    const shapeFrame = cloudShapeFrame(
-      depthM,
-      gpu.texels === undefined ? { x: 0, y: 0, z: 0 } : windAtM(gpu.texels, view.camera.positionM),
-      volume.timeS,
-      volume.rate,
-    );
-    const shape = this.#shapeBuffer();
-    this.#engine.writeBuffer(shape, 0, packCloudShape(shapeFrame, kind, this.#shapeRows));
-    const mapFrame = this.#anchor.frameFor(view.camera.positionM, view.shell.equatorialRadiusM);
+    // The map this frame's preparation drew, or drawn here where none was.
+    const prepared = this.#prepared?.id === volume.id ? this.#prepared : null;
+    this.#prepared = null;
+    const { mapUniforms, shape } = prepared ?? this.#mapped(volume, materials, pass);
     const mapTarget = this.#mapTarget();
-    const mapUniforms = cloudMapUniforms(mapFrame);
-    mapTarget.render({
-      label: CLOUD_MAP_PASS,
-      viewRotation: pass.viewRotation,
-      projection: pass.projection,
-      draws: [
-        {
-          mesh: materials.triangle,
-          material: materials.map,
-          offsetFromCameraM: new Float32Array(3),
-          uniforms: {
-            ...mapUniforms,
-            shape: new Float32Array([
-              view.shell.equatorialRadiusM / view.shell.polarRadiusM,
-              view.octaves,
-              kind.cumuliform ? 1 : 0,
-              0,
-            ]),
-          },
-          textures: {
-            [CLOUD_TEXTURES.coverage]: gpu.coverage,
-            [CLOUD_TEXTURES.noise]: gpu.noise,
-          },
-          storageBuffers: { [CLOUD_TEXTURES.layer]: gpu.layer },
-        },
-      ],
-      postProcesses: [],
-    });
     const flat = volumeFlatteningAt(
       heightAboveDeckM(view.camera.positionM, view.figure, condensate),
     );
@@ -998,10 +1131,17 @@ export class CloudVolumes {
     this.#releaseNoises();
     this.#map?.dispose();
     this.#map = null;
+    this.#shadow?.dispose();
+    this.#shadow = null;
     if (this.#shape !== null) {
       this.#engine.releaseBuffer(this.#shape);
       this.#shape = null;
     }
+    if (this.#shadowRows !== null) {
+      this.#engine.releaseBuffer(this.#shadowRows);
+      this.#shadowRows = null;
+    }
+    this.#prepared = null;
     this.#noises.dispose();
     this.#anchor.reset();
     this.#last = null;
@@ -1029,6 +1169,32 @@ export class CloudVolumes {
       });
     }
     return this.#map;
+  }
+
+  #shadowTarget(): RenderTarget {
+    if (this.#shadow === null) {
+      this.#shadow = this.#engine.createRenderTarget({
+        name: `${this.#name}:cloud shadow`,
+        size: { widthPx: CLOUD_MAP_SIDE, heightPx: CLOUD_MAP_SIDE * SHADOW_MAP_LEVELS },
+        format: HDR_COLOUR_FORMAT,
+        mips: 1,
+        depth: false,
+        category: "clouds",
+      });
+    }
+    return this.#shadow;
+  }
+
+  #shadowRowsBuffer(): BufferHandle {
+    if (this.#shadowRows === null) {
+      this.#shadowRows = this.#engine.createBuffer({
+        name: `${this.#name} cloud shadow rows`,
+        bytes: 16 * CLOUD_SHADOW_ROWS,
+        usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST,
+        category: "clouds",
+      });
+    }
+    return this.#shadowRows;
   }
 
   #shapeBuffer(): BufferHandle {

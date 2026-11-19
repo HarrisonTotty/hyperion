@@ -59,6 +59,7 @@ import type { QualitySetting } from "../quality/qualitySetting";
 import frameWgsl from "../shaders/frame.wgsl?raw";
 import { fromHalfBits, toHalfBits } from "../sky/half";
 import { CLOUD_NOISE_SIZE, CloudNoiseBuilder } from "./cloudNoise";
+import { CLOUD_SHADOW_ROWS } from "./cloudShadowRows";
 import {
   CLOUD_OCTAVE_RATIO,
   type CloudFieldParams,
@@ -164,6 +165,9 @@ export const CLOUD_TEXTURES = {
   noise: "cloudNoise",
   layer: "cloudLayer",
   sampler: "cloudSampler",
+  /** The cloud volume's shadow map and its rows, which the ground reads (`cloudGround.wgsl`). */
+  shadowMap: "cloudShadowMap",
+  shadowRows: "cloudShadowRows",
 } as const;
 
 /**
@@ -352,6 +356,13 @@ export interface CloudBodyGpu {
    * R11.T7.c; `cloudVolumePass.ts`' `windAtM`); absent, still air.
    */
   readonly texels?: CoverageTexels;
+  /**
+   * The cloud volume's shadow map the ground beneath reads, and its rows (plan R11, R11.T7.c;
+   * `cloudShadowMap.ts`): the volume's where the frame draws it, else a map that holds nothing,
+   * whose every read takes the layer's tap.
+   */
+  readonly shadowMap: TextureHandle;
+  readonly shadowRows: BufferHandle;
 }
 
 /** A body's state held across frames. */
@@ -404,6 +415,8 @@ export class CloudLayers {
   readonly #bodies = new Map<BodyIdHex, HeldBody>();
   #builder: CloudNoiseBuilder | null = new CloudNoiseBuilder();
   #noise: TextureHandle | null = null;
+  /** The shadow map that holds nothing and its rows, made with the noise tile. */
+  #noShadow: { readonly map: TextureHandle; readonly rows: BufferHandle } | null = null;
 
   constructor(
     engine: Pick<
@@ -460,6 +473,31 @@ export class CloudLayers {
     this.#engine.writeTexture(noise, { x: 0, y: 0, z: 0 }, size, texels);
     this.#noise = noise;
     this.#builder = null;
+    // The shadow map that holds nothing: a texel of the clear sky's factors, (1, 1, 0), and rows
+    // of 0, which `cloudGround.wgsl` reads as the layer's tap everywhere.
+    const map = this.#engine.createTexture({
+      name: `${this.#name} no cloud shadow`,
+      size: { width: 1, height: 1 },
+      dimension: "2d",
+      format: "rgba16float",
+      mips: 1,
+      usage: TEXTURE_USAGE.TEXTURE_BINDING | TEXTURE_USAGE.COPY_DST,
+      category: "clouds",
+    });
+    this.#engine.writeTexture(
+      map,
+      { x: 0, y: 0 },
+      { width: 1, height: 1 },
+      Uint16Array.from([1, 1, 0, 1], (v) => toHalfBits(v)),
+    );
+    const rows = this.#engine.createBuffer({
+      name: `${this.#name} no cloud shadow rows`,
+      bytes: 16 * CLOUD_SHADOW_ROWS,
+      usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST,
+      category: "clouds",
+    });
+    this.#engine.writeBuffer(rows, 0, new Float32Array(4 * CLOUD_SHADOW_ROWS));
+    this.#noShadow = { map, rows };
   }
 
   /**
@@ -468,7 +506,8 @@ export class CloudLayers {
    */
   frame(frame: CloudFrame): CloudBodyGpu | null {
     const noise = this.#noise;
-    if (noise === null) {
+    const noShadow = this.#noShadow;
+    if (noise === null || noShadow === null) {
       return null;
     }
     const held = this.#held(frame.id);
@@ -501,7 +540,14 @@ export class CloudLayers {
     const shell = cloudShellOf(frame.figure, cloudLayerHeightM(frame.condensate));
     packCloudLayer(params, shell, frame.condensate, frame.figure.equatorialRadiusM, held.rows);
     this.#engine.writeBuffer(held.layer, 0, held.rows);
-    return { layer: held.layer, coverage: held.coverage, noise, texels: made.texels };
+    return {
+      layer: held.layer,
+      coverage: held.coverage,
+      noise,
+      texels: made.texels,
+      shadowMap: noShadow.map,
+      shadowRows: noShadow.rows,
+    };
   }
 
   /** Lets go of every body's state but those in `kept`. */
@@ -520,6 +566,11 @@ export class CloudLayers {
     if (this.#noise !== null) {
       this.#engine.releaseTexture(this.#noise);
       this.#noise = null;
+    }
+    if (this.#noShadow !== null) {
+      this.#engine.releaseTexture(this.#noShadow.map);
+      this.#engine.releaseBuffer(this.#noShadow.rows);
+      this.#noShadow = null;
     }
     this.#builder = null;
   }

@@ -243,7 +243,12 @@ describe("a column's cumulus cells (R11.T7.c)", () => {
       let tau = 0;
       const n = 20_000;
       for (let i = 0; i < n; i += 1) {
-        const cell = cellOf(region, region, cellNoiseAt(SHAPES.base, frame, fibonacciPoint(i, n)));
+        const cell = cellOf(
+          region,
+          region,
+          cellNoiseAt(SHAPES.base, frame, fibonacciPoint(i, n)),
+          8,
+        );
         covered += cell.inCloudTau > 0 ? 1 : 0;
         tau += cell.inCloudTau;
       }
@@ -254,26 +259,52 @@ describe("a column's cumulus cells (R11.T7.c)", () => {
 
   it("follow the field's own masses by half, never solid where the region is broken", () => {
     const region = { fraction: 0.4, meanTau: 3.2, excess: 0.8 };
-    const zeta = 0.2;
-    const inMass = cellOf(region, { fraction: 1 }, zeta);
-    const inClearing = cellOf(region, { fraction: 0 }, zeta);
-    expect(inMass.inCloudTau).toBeGreaterThan(0);
-    expect(inClearing.inCloudTau).toBe(0);
-    // In a mass the cells cover 0.7 of it, ζ_c = Φ⁻¹(0.3); a ζ below that is a gap.
-    expect(cellOf(region, { fraction: 1 }, -0.6).inCloudTau).toBe(0);
+    // In a mass the cells cover 0.7 of it, beyond u = 0.3; in a clearing 0.2, beyond 0.8.
+    expect(cellOf(region, { fraction: 1 }, 0.6, 8).inCloudTau).toBeGreaterThan(0);
+    expect(cellOf(region, { fraction: 0 }, 0.6, 8).inCloudTau).toBe(0);
+    expect(cellOf(region, { fraction: 1 }, 0.25, 8).inCloudTau).toBe(0);
+  });
+
+  it("keep at least 0.6 τ̄ in cloud about a mass's thin edge, fewer, their mean τ still the region's", () => {
+    const frame = cloudShapeFrame(2_000, { x: 0, y: 0, z: 0 }, 0, 0);
+    const region = { fraction: 0.5, meanTau: 1, excess: 0.2 };
+    let covered = 0;
+    let tau = 0;
+    const n = 20_000;
+    for (let i = 0; i < n; i += 1) {
+      const cell = cellOf(region, region, cellNoiseAt(SHAPES.base, frame, fibonacciPoint(i, n)), 8);
+      covered += cell.inCloudTau > 0 ? 1 : 0;
+      tau += cell.inCloudTau;
+    }
+    // The region's in-cloud τ is 2: the cells take 0.6 of τ̄ 8, 4.8, and 2 ÷ 4.8 of its cover.
+    expect(Math.abs(covered / n - (0.5 * 2) / 4.8)).toBeLessThan(0.01);
+    expect(tau / covered).toBeGreaterThan(4.5);
+    expect(Math.abs(tau / n / region.meanTau - 1)).toBeLessThan(0.05);
   });
 
   it("rise steeply from their edges to a plateau, their tops flat at their cores", () => {
     const region = { fraction: 0.4, meanTau: 3.2, excess: 0.8 };
-    const edge = cellOf(region, region, 0.3);
-    const core = cellOf(region, region, 2.5);
-    const deeper = cellOf(region, region, 3.5);
+    // The cells cover 0.4, beyond u = 0.6.
+    const edge = cellOf(region, region, 0.62, 8);
+    const core = cellOf(region, region, 0.9, 8);
+    const deeper = cellOf(region, region, 0.99, 8);
     expect(edge.inCloudTau).toBeGreaterThan(0);
     expect(core.inCloudTau).toBeGreaterThan(2 * edge.inCloudTau);
     expect(deeper.inCloudTau).toBe(core.inCloudTau);
     expect(deeper.topShare).toBe(core.topShare);
     expect(core.topShare).toBeGreaterThan(edge.topShare);
-    expect(cellOf(region, region, 0).inCloudTau).toBe(0);
+    expect(cellOf(region, region, 0.5, 8).inCloudTau).toBe(0);
+  });
+
+  it("stand lower where sparse: their excess is at most their cover", () => {
+    const sparse = cellOf(
+      { fraction: 0.1, meanTau: 0.8, excess: 0.8 },
+      { fraction: 0.1 },
+      0.999,
+      8,
+    );
+    const dense = cellOf({ fraction: 0.6, meanTau: 4.8, excess: 0.8 }, { fraction: 0.6 }, 0.999, 8);
+    expect(sparse.topShare).toBeLessThan(dense.topShare);
   });
 
   it("hide their noise's tile: two readings a tile apart differ", () => {

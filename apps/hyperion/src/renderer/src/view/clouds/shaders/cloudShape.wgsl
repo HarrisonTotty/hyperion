@@ -17,16 +17,13 @@
 // w κ; 1 the base noise's drift in its tiles, w its time-rate share; 2 the detail's, w its share; 3
 // x and y the base's and the detail's features for their fades, m, z 1 where the deck may be
 // cumuliform, w a cumulus cell's feature, m; 4 to 24 the normalisation G at w_b = i ÷ 8, w_d = j ÷ 8,
-// at 9 i + j, four a row (`cloudShape.ts`' `normalisationTable`); 25 to 32 the cells' rise's mean at
-// f = (i + ½) ÷ 32, four a row (`cloudShape.ts`' `cellRiseTable`).
+// at 9 i + j, four a row (`cloudShape.ts`' `normalisationTable`).
 const CLOUD_SHAPE_ROW_TILES : u32 = 0u;
 const CLOUD_SHAPE_ROW_BASE : u32 = 1u;
 const CLOUD_SHAPE_ROW_DETAIL : u32 = 2u;
 const CLOUD_SHAPE_ROW_FEATURES : u32 = 3u;
 const CLOUD_SHAPE_ROW_TABLE : u32 = 4u;
-const CLOUD_SHAPE_ROW_RISE : u32 = 25u;
-const CLOUD_SHAPE_ROWS : u32 = 33u;
-const CLOUD_CELL_RISE_STEPS : u32 = 32u;
+const CLOUD_SHAPE_ROWS : u32 = 25u;
 const CLOUD_SHAPE_TABLE_STEPS : u32 = 9u;
 
 // `cloudShape.ts`' BASE_EROSION, DETAIL_EROSION, EDGE_SHARPNESS, WISP_SHARE, CURL_GAIN and
@@ -339,36 +336,21 @@ fn cloud_cumulus_share(cover : f32) -> f32 {
   return clamp((CLOUD_STRATUS_COVER - cover) / (CLOUD_STRATUS_COVER - CLOUD_CUMULUS_COVER), 0.0, 1.0);
 }
 
-// Φ⁻¹(p), by Acklam's rational approximation (`cloudNoise.ts`' `inverseNormal`).
-fn cloud_inverse_normal(p : f32) -> f32 {
-  let low = 0.02425;
-  if (p < low || p > 1.0 - low) {
-    let q = sqrt(-2.0 * log(min(p, 1.0 - p)));
-    let tail = (((((-0.007784894002430293 * q - 0.3223964580411365) * q - 2.400758277161838) * q
-      - 2.549732539343734) * q + 4.374664141464968) * q + 2.938163982698783)
-      / ((((0.007784695709041462 * q + 0.3224671290700398) * q + 2.445134137142996) * q
-      + 3.754408661907416) * q + 1.0);
-    return select(-tail, tail, p < low);
-  }
-  let q = p - 0.5;
-  let r = q * q;
-  return (((((-39.69683028665376 * r + 220.9460984245205) * r - 275.9285104469687) * r
-    + 138.357751867269) * r - 30.66479806614716) * r + 2.506628277459239) * q
-    / (((((-54.47609879822406 * r + 161.5858368580409) * r - 155.6989798598866) * r
-    + 66.80131188771972) * r - 13.28068155288572) * r + 1.0);
-}
-
 // The least share a column's cells are formed at (`cloudShape.ts`' CELL_LEAST_SHARE), the cells'
-// region's footprint, m, their mesoscale share, and the second reading's scale and offset of
-// their noise (`cloudShape.ts`' CELL_REGION_M, CELL_MESOSCALE, CELL_SECOND_SCALE and
-// CELL_SECOND_OFFSET).
+// region's footprint, m, their mesoscale share, their least in-cloud τ over τ̄, the second reading's
+// scale and offset of their noise, the tall cell's share and the rise's saturation
+// (`cloudShape.ts`' CELL_REGION_M, CELL_MESOSCALE, CELL_LEAST_TAU_SHARE, CELL_SECOND_SCALE,
+// CELL_SECOND_OFFSET, CELL_TALL_SHARE and CELL_SATURATION).
 const CLOUD_CELL_LEAST_SHARE : f32 = 1e-6;
 const CLOUD_CELL_REGION_M : f32 = 40000.0;
 const CLOUD_CELL_MESOSCALE : f32 = 0.5;
+const CLOUD_CELL_LEAST_TAU_SHARE : f32 = 0.6;
 const CLOUD_CELL_SECOND_SCALE : f32 = 1.7320508;
 const CLOUD_CELL_SECOND_OFFSET : vec3f = vec3f(0.371, 0.613, 0.129);
+const CLOUD_CELL_TALL_SHARE : f32 = 1.5;
+const CLOUD_CELL_SATURATION : f32 = 0.25;
 
-// The cells' standard normal noise at a place on the layer's shell (`cloudShape.ts`' `cellNoiseAt`).
+// The cells' uniform noise at a place on the layer's shell (`cloudShape.ts`' `cellNoiseAt`).
 fn cloud_cell_noise_at(p : vec3f) -> f32 {
   let first = cloud_base_at(p);
   let k2 = cloud_shape_row(CLOUD_SHAPE_ROW_TILES).x / CLOUD_CELL_SECOND_SCALE;
@@ -378,52 +360,46 @@ fn cloud_cell_noise_at(p : vec3f) -> f32 {
     dot(vec3f(-0.6, -0.48, 0.64), p),
   );
   let second = textureSampleLevel(cloud_base_noise, cloud_noise_repeat, turned * k2 + CLOUD_CELL_SECOND_OFFSET, 0.0).r;
-  let lo = CLOUD_CELL_LEAST_SHARE;
-  return (cloud_inverse_normal(clamp(first, lo, 1.0 - lo)) + cloud_inverse_normal(clamp(second, lo, 1.0 - lo)))
-    * 0.70710678;
+  // The sum of two uniforms back to a uniform, by the triangular distribution's CDF.
+  let t = clamp(first + second, 0.0, 2.0);
+  return select(1.0 - 0.5 * (2.0 - t) * (2.0 - t), 0.5 * t * t, t <= 1.0);
 }
 
-// `cloudShape.ts`' CELL_SATURATION and `cellTopShare`.
-const CLOUD_CELL_SATURATION : f32 = 1.5;
-
-fn cloud_cell_rise(ratio : f32) -> f32 {
-  let below = 1.0 - clamp(ratio / CLOUD_CELL_SATURATION, 0.0, 1.0);
+// `cloudShape.ts`' `cellRise`, `cellTopShare` and `cellRiseMean`.
+fn cloud_cell_rise(du : f32) -> f32 {
+  let below = 1.0 - clamp(du / CLOUD_CELL_SATURATION, 0.0, 1.0);
   return 1.0 - below * below;
 }
 
-fn cloud_cell_top(region_excess : f32, ratio : f32) -> f32 {
-  return max(cloud_dome_top(region_excess * CLOUD_CELL_SATURATION) * cloud_cell_rise(ratio), CLOUD_LEAST_TOP_SHARE);
+fn cloud_cell_top(mean_excess : f32, du : f32) -> f32 {
+  return max(cloud_dome_top(mean_excess * CLOUD_CELL_TALL_SHARE) * cloud_cell_rise(du), CLOUD_LEAST_TOP_SHARE);
 }
 
-// The cells' rise's mean at a share, linear between the table's (`cloudShape.ts`' `cellRiseMeanAt`).
-fn cloud_cell_rise_mean(f : f32) -> f32 {
-  let n = CLOUD_CELL_RISE_STEPS;
-  let x = clamp(f * f32(n) - 0.5, 0.0, f32(n - 1u));
-  let i = min(u32(x), n - 2u);
-  let t = x - f32(i);
-  let a = cloud_shape_row(CLOUD_SHAPE_ROW_RISE + i / 4u)[i % 4u];
-  let b = cloud_shape_row(CLOUD_SHAPE_ROW_RISE + (i + 1u) / 4u)[(i + 1u) % 4u];
-  return a + t * (b - a);
+fn cloud_cell_rise_mean(f_in : f32) -> f32 {
+  let f = clamp(f_in, CLOUD_CELL_LEAST_SHARE, 1.0);
+  let s = CLOUD_CELL_SATURATION;
+  return select(1.0 - s / (3.0 * f), f / s - f * f / (3.0 * s * s), f <= s);
 }
 
 // A column's cumulus cell at a place (`cloudShape.ts`' `cellOf`): x its in-cloud τ, y its excess, z
 // its top share, from the region's column, the local one's share and the cells' noise there.
-fn cloud_cell_of(region : CloudColumn, local_fraction : f32, zeta : f32) -> vec3f {
+fn cloud_cell_of(region : CloudColumn, local_fraction : f32, u : f32) -> vec3f {
   if (!(region.mean_tau > 0.0)) {
     return vec3f(0.0, 0.0, CLOUD_LEAST_TOP_SHARE);
   }
   let lo = CLOUD_CELL_LEAST_SHARE;
-  let f_region = clamp(region.fraction, lo, 1.0 - lo);
-  let f = clamp(f_region + CLOUD_CELL_MESOSCALE * (local_fraction - f_region), lo, 1.0 - lo);
-  let threshold = cloud_inverse_normal(1.0 - f);
-  let q = cloud_fine_tail(threshold);
-  let mean = (cloud_fine_density(threshold) - threshold * q) / q;
-  let ratio = max(zeta - threshold, 0.0) / mean;
-  var rise = 0.0;
-  if (ratio > 0.0) {
-    rise = cloud_cell_rise(ratio) / cloud_cell_rise_mean(f);
+  let f_region = clamp(region.fraction, lo, 1.0);
+  let f_cover = f_region + CLOUD_CELL_MESOSCALE * (local_fraction - f_region);
+  let in_cloud = region.mean_tau / f_region;
+  let cell_mean = max(in_cloud, CLOUD_CELL_LEAST_TAU_SHARE * cloud_fine_row(CLOUD_FINE_ROW_SHELL).w);
+  let f = clamp(f_cover * in_cloud / cell_mean, lo, 1.0);
+  let du = max(u - (1.0 - f), 0.0);
+  var share = 0.0;
+  if (du > 0.0) {
+    share = cloud_cell_rise(du) / cloud_cell_rise_mean(f);
   }
-  return vec3f(region.mean_tau / f_region * rise, region.excess * ratio, cloud_cell_top(region.excess, ratio));
+  let excess = region.excess * cell_mean / in_cloud;
+  return vec3f(cell_mean * share, excess * share, cloud_cell_top(excess, du));
 }
 
 // G at (w_b, w_d), bilinear in the table (`cloudShape.ts`' `normalisationAt`).

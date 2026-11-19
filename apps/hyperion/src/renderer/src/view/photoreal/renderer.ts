@@ -82,6 +82,7 @@ import {
   CLOUD_VOLUME_MATERIALS,
   CloudVolumes,
   heightAboveDeckM,
+  towardsBodyFixed,
   VOLUME_LEVERS,
   volumeStepOf,
   volumeWanted,
@@ -747,6 +748,7 @@ interface Resources {
     readonly resolve: MaterialHandle;
     readonly composite: MaterialHandle;
     readonly map: MaterialHandle;
+    readonly shadow: MaterialHandle;
   } | null;
   /**
    * The `ocean` pass's far sea (plan R11, R11.T8.b), made with the rest; `null` where its compiler
@@ -864,6 +866,12 @@ const BODY_CENTRE = { x: 0, y: 0, z: 0 } as const;
 /** The universe clock's zero, for a frame that carries no time. */
 const CLOCK_ZERO = { seconds: 0, nanos: 0 } as const;
 
+/** The matrices a cloud volume's full-screen preparation passes take, which read none of them. */
+const PREPARE_MATRICES = {
+  viewRotation: new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]),
+  projection: new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]),
+} as const;
+
 /**
  * The frame's lit bodies with their clouds (plan R11, R11.T7.b; `LitBodyInput.clouds`), whose light
  * their terrain's cloudy forms take on the ground: each body `clouds` holds, where the setting's
@@ -961,7 +969,7 @@ function volumeMaterialsOf(
   engine: Pick<RenderEngine, "releaseMaterial">,
   made: ReadonlyArray<MaterialHandle | null>,
 ): Resources["cloudVolume"] {
-  const [march, resolve, composite, map] = made;
+  const [march, resolve, composite, map, shadow] = made;
   if (
     march === undefined ||
     march === null ||
@@ -970,7 +978,9 @@ function volumeMaterialsOf(
     composite === undefined ||
     composite === null ||
     map === undefined ||
-    map === null
+    map === null ||
+    shadow === undefined ||
+    shadow === null
   ) {
     for (const material of made) {
       if (material !== null) {
@@ -979,7 +989,7 @@ function volumeMaterialsOf(
     }
     return null;
   }
-  return { march, resolve, composite, map };
+  return { march, resolve, composite, map, shadow };
 }
 
 /** `rect` held to a target of `size`, its pixels from the top left. */
@@ -2711,8 +2721,35 @@ export class PhotorealRenderer {
     this.#volumes.keepOnly([volume.condensate]);
     const noises = this.#volumes.noisesReady(volume.air.id, this.#nowMs);
     const own = drawn.get(volume.air.id);
-    if (correction !== null && noises && own !== undefined) {
-      drawn.set(volume.air.id, { ...own, volume: correction });
+    const materials = resources.cloudVolume;
+    if (correction !== null && noises && own !== undefined && materials !== null) {
+      // Its map and shadow map before the ground draws, which its terrain reads (R11.T7.c).
+      const centreM = centres.get(volume.air.id);
+      const brightest = centreM === undefined ? undefined : lightsAt(centreM, frame.lights, 1)[0];
+      const figure = tablesFigureOf(volume.air.tables);
+      const shadow = this.#volumes.prepare(
+        {
+          id: volume.air.id,
+          gpu: own.gpu,
+          condensate: volume.condensate,
+          view: {
+            camera: volume.air.camera,
+            figure,
+            shell: cloudShellOf(figure, cloudLayerHeightM(volume.condensate)),
+            octaves: LAYER_OCTAVES[frame.setting],
+          },
+          correction,
+          timeS: (frame.time ?? CLOCK_ZERO).seconds + (frame.time ?? CLOCK_ZERO).nanos * 1e-9,
+          rate: frame.timeRate ?? 0,
+          sun:
+            brightest === undefined
+              ? null
+              : towardsBodyFixed(volume.air.toBodyFixed, brightest.toStarM),
+        },
+        { ...materials, triangle: resources.triangle },
+        PREPARE_MATRICES,
+      );
+      drawn.set(volume.air.id, { ...own, gpu: { ...own.gpu, ...shadow }, volume: correction });
     }
     return drawn;
   }
@@ -3056,6 +3093,7 @@ export class PhotorealRenderer {
         resources.cloudVolume?.resolve ?? null,
         resources.cloudVolume?.composite ?? null,
         resources.cloudVolume?.map ?? null,
+        resources.cloudVolume?.shadow ?? null,
       ]) {
         if (material !== null) {
           this.#engine.releaseMaterial(material);

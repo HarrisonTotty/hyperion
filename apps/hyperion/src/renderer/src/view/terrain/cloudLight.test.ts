@@ -62,11 +62,12 @@ describe("the lit terrain's cloudy forms (R11.T7.b)", () => {
     }
   });
 
-  it("takes each source's light on the ground through the one tap of its clouds", () => {
+  it("takes each source's light on the ground through the one read of its clouds", () => {
     const shade = collapseWhitespace(
       wgslFunction(terrainLitCloudMaterialSpec("baked-offsets").fragmentWgsl, "shade_terrain"),
     );
-    expect(shade).toContain("let cloud = terrain_cloud_light(q, towards, star_radius);");
+    // The volume's shadow map where it holds the place, the layer's tap where not (R11.T7.c).
+    expect(shade).toContain("let cloud = cloud_ground_light(q, towards, star_radius);");
     expect(shade).toContain(
       "let clouded_sky = sky * cloud.y + cloud.z * max(mu_datum, 0.0) * transmitted * sky_factor;",
     );
@@ -86,7 +87,7 @@ describe("the lit terrain's cloudy forms (R11.T7.b)", () => {
     expect(head).toBeDefined();
     const restored = (head ?? "")
       .replace(
-        /    let cloud = terrain_cloud_light[\s\S]*?clouded_sky \* visible;\n/u,
+        /    let cloud = cloud_ground_light[\s\S]*?clouded_sky \* visible;\n/u,
         "    out.radiance = out.radiance + light.xyz * misc.y * mean_a * sky * visible;\n",
       )
       .replace(

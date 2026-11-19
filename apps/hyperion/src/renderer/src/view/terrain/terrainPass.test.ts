@@ -342,7 +342,7 @@ afterEach(() => {
   performance.clearMeasures(SELECT_MEASURE);
 });
 
-/** A body's clouds on `engine`: its rows, its coverage texture and the noise tile. */
+/** A body's clouds on `engine`: its rows, its coverage texture, the noise tile and a shadow map. */
 function cloudsOn(engine: CountingRenderEngine): CloudBodyGpu {
   return {
     layer: engine.createBuffer({
@@ -366,6 +366,21 @@ function cloudsOn(engine: CountingRenderEngine): CloudBodyGpu {
       dimension: "3d",
       format: "r8unorm",
       mips: 1,
+      usage: 0,
+      category: "clouds",
+    }),
+    shadowMap: engine.createTexture({
+      name: "the cloud shadow map",
+      size: { width: 1, height: 1 },
+      dimension: "2d",
+      format: "rgba16float",
+      mips: 1,
+      usage: 0,
+      category: "clouds",
+    }),
+    shadowRows: engine.createBuffer({
+      name: "the cloud shadow rows",
+      bytes: 144,
       usage: 0,
       category: "clouds",
     }),

@@ -11,6 +11,7 @@ import {
 import { cloudShellOf } from "./cloudLayer";
 import { CloudMapAnchor, CloudMapTwin } from "./cloudMap";
 import {
+  backgroundTransmittance,
   type CloudMarchScene,
   deckStretch,
   diffuseReflectance,
@@ -145,6 +146,20 @@ function entryOf(fraction: number, unresolvedSd: number): CloudColumn {
   return { fraction, meanTau: 4, topShare: 1, unresolvedSd, excess: 1, cover: fraction };
 }
 
+describe("a cloud's background (R11.T7.c)", () => {
+  it("shows through a thin edge by its δ-scaled share, and none through a thick core", () => {
+    const g = WATER.asymmetry;
+    const thin = backgroundTransmittance(Math.exp(-1), g);
+    expect(thin).toBeGreaterThan(Math.exp(-1));
+    expect(thin).toBeLessThan(Math.exp(-(1 - g * g)));
+    expect(backgroundTransmittance(1, g)).toBe(1);
+    expect(backgroundTransmittance(3e-3, g)).toBe(0);
+    expect(backgroundTransmittance(Math.exp(-3), g)).toBeGreaterThan(
+      backgroundTransmittance(Math.exp(-4), g),
+    );
+  });
+});
+
 describe("a ray's share (R11.T7.c)", () => {
   it("takes each column's own τ where its entry resolves the field, the layer's share where not", () => {
     const at = entryOf;
@@ -195,7 +210,11 @@ describe("the volume's march through its 3D density (R11.T7.c)", () => {
       steps: 48,
     });
     expect(flat.sun[0]).toBeCloseTo(reference.radiance, 6);
-    expect(flat.transmittance).toBeCloseTo(reference.transmittance, 6);
+    // The background through it is the δ-scaled share of the same view transmittance.
+    expect(flat.transmittance).toBeCloseTo(
+      backgroundTransmittance(reference.transmittance, WATER.asymmetry),
+      6,
+    );
     expect(flat.share).toBeCloseTo(1, 6);
   });
 

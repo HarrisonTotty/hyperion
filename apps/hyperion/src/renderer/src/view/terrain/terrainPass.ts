@@ -7937,6 +7937,7 @@ export class TerrainPass {
     const { clouds } = phase;
     if (clouds !== null) {
       storageBuffers[CLOUD_TEXTURES.layer] = clouds.layer;
+      storageBuffers[CLOUD_TEXTURES.shadowRows] = clouds.shadowRows;
     }
     return {
       mesh: resources.mesh,
@@ -7951,7 +7952,11 @@ export class TerrainPass {
         [DISC_NORMALS_TEXTURE]: phase.discNormals,
         ...(clouds === null
           ? {}
-          : { [CLOUD_TEXTURES.coverage]: clouds.coverage, [CLOUD_TEXTURES.noise]: clouds.noise }),
+          : {
+              [CLOUD_TEXTURES.coverage]: clouds.coverage,
+              [CLOUD_TEXTURES.noise]: clouds.noise,
+              [CLOUD_TEXTURES.shadowMap]: clouds.shadowMap,
+            }),
       },
       storageBuffers,
       indirect: { buffer: buffers.indirect, offsetBytes: 0 },
@@ -7984,7 +7989,9 @@ function sameClouds(a: CloudBodyGpu | null, b: CloudBodyGpu | null): boolean {
       b !== null &&
       a.layer === b.layer &&
       a.coverage === b.coverage &&
-      a.noise === b.noise)
+      a.noise === b.noise &&
+      a.shadowMap === b.shadowMap &&
+      a.shadowRows === b.shadowRows)
   );
 }
 

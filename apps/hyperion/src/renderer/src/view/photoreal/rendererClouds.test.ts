@@ -9,6 +9,7 @@ import { AtmosphereTables } from "../atmosphere/tables";
 import type { BodyFramePlan, LitBodyInput } from "../bodies/draw";
 import { IDENTITY_QUATERNION } from "../camera/quaternion";
 import { CLOUD_LAYER_MATERIAL, CLOUD_LAYER_PASS, CLOUD_TEXTURES } from "../clouds/cloudLayer";
+import { CLOUD_SHADOW_PASS } from "../clouds/cloudShadowMap";
 import {
   CLOUD_MAP_PASS,
   CLOUD_RESOLVE_PASS,
@@ -317,13 +318,14 @@ describe("the photorealistic renderer's cloud volume (R11.T7.c)", () => {
     ]).toEqual([false, true]);
     expect(early.labels).toContain(CLOUD_LAYER_PASS);
     const at = made.labels.indexOf(CLOUD_VOLUME_PASS);
-    expect(made.labels.slice(at - 2, at + 3)).toEqual([
+    expect(made.labels.slice(at - 1, at + 3)).toEqual([
       ATMOSPHERE_COMPOSITE_PASS,
-      CLOUD_MAP_PASS,
       CLOUD_VOLUME_PASS,
       CLOUD_RESOLVE_PASS,
       CLOUD_LAYER_PASS,
     ]);
+    // Its map and its shadow map before anything of the scene, which the ground reads (R11.T7.c).
+    expect(made.labels.slice(0, 2)).toEqual([CLOUD_MAP_PASS, CLOUD_SHADOW_PASS]);
   });
 
   it("keeps the volume within the deck's reach while the frame-rate floor steps the air down, at coarser levers", async () => {
@@ -434,6 +436,8 @@ describe("withCloudsOnGround (R11.T7.b)", () => {
     layer: { kind: "buffer", name: "rows", bytes: 544 },
     coverage: { kind: "texture", name: "coverage" },
     noise: { kind: "texture", name: "noise" },
+    shadowMap: { kind: "texture", name: "shadow map" },
+    shadowRows: { kind: "buffer", name: "shadow rows", bytes: 144 },
   } as const;
   const clouds: ReadonlyMap<string, FrameClouds> = new Map([
     [

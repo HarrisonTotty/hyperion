@@ -243,6 +243,19 @@ export function marchEntry(
   return columnAt(scene, along(originM, direction, t0), fieldFootprintM(scene, footprintM), true);
 }
 
+/**
+ * The share of a cloud's background seen through it at its view transmittance `view` and
+ * asymmetry g: the δ-scaled e^(−(1 − g²) τ), the forward peak's light passing as δ-Eddington's
+ * similarity has it (Joseph, Wiscombe and Weinman 1976), taken to 0 where the view's reaches the
+ * march's stop, {@link LEAST_TRANSMITTANCE}, so that a thin edge shows its background, where e^(−τ)
+ * drew a rim darker than it (the eye check of 2026-11-19), and a thick core none.
+ */
+export function backgroundTransmittance(view: number, asymmetry: number): number {
+  const scaled = 1 - asymmetry * asymmetry;
+  const least = LEAST_TRANSMITTANCE ** scaled;
+  return Math.min(Math.max((Math.max(view, 1e-30) ** scaled - least) / (1 - least), 0), 1);
+}
+
 /** The conservative two-stream's diffuse reflectance of a slab (the module's remarks). */
 export function diffuseReflectance(tau: number, asymmetry: number): number {
   const x = 0.75 * (1 - asymmetry) * Math.max(tau, 0);
@@ -300,7 +313,10 @@ export interface CloudMarch {
   readonly sun: readonly [number, number];
   /** The sky's, per unit of its irradiance ÷ π, before the share. */
   readonly sky: number;
-  /** The view's transmittance through the stretch, before the share. */
+  /**
+   * The share of the background seen through the stretch, before the share
+   * ({@link backgroundTransmittance} of the view's transmittance).
+   */
   readonly transmittance: number;
   /** The distance along the ray its opacity is weighed at, m; t₀ where it has none. */
   readonly meanDistanceM: number;
@@ -403,6 +419,7 @@ function densityAt(
     region,
     column,
     cellNoiseAt(noises.base, frame, { x: x.x * onShell, y: x.y * onShell, z: x.z * onShell }),
+    scene.field.params.meanTau,
   );
   const cellPlace = columnPlace(height, cell.topShare, inputs);
   const cellTau = cell.inCloudTau / share;
@@ -413,6 +430,14 @@ function densityAt(
     above: sheetAbove + wCell * (shareAbove(cellPlace, inputs) - sheetAbove),
     region,
   };
+}
+
+/**
+ * σ(550) per metre at a place and footprint as the shadow map reads it (`cloudShadowMap.ts`): the
+ * march's density at a share of 1, the detail left out, the map's columns unrefined.
+ */
+export function densityPerMAt(scene: CloudMarchScene, x: Vec3, footprintM: number): number {
+  return densityAt(scene, x, footprintM, 1, false, false, null).sigma;
 }
 
 /** The sun's optical depth to a sample by the march towards it (the module's remarks). */
@@ -552,7 +577,7 @@ export function marchCloudRay(
   return {
     sun: light,
     sky,
-    transmittance: view,
+    transmittance: backgroundTransmittance(view, g),
     meanDistanceM: weight > 0 ? weighed / weight : t0,
     share,
   };

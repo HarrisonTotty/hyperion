@@ -312,9 +312,11 @@ describe("CloudLayers", () => {
       layers.step(() => clock++, 3);
     }
     expect(layers.ready).toBe(true);
-    const noise = [...engine.textures.values()];
-    expect(noise.map((spec) => [spec.dimension, spec.format, spec.category])).toEqual([
+    // The noise tile, and with it the shadow map that holds nothing (R11.T7.c).
+    const made = [...engine.textures.values()];
+    expect(made.map((spec) => [spec.dimension, spec.format, spec.category])).toEqual([
       ["3d", "r8unorm", "clouds"],
+      ["2d", "rgba16float", "clouds"],
     ]);
     layers.dispose();
   });
@@ -356,9 +358,10 @@ describe("CloudLayers", () => {
   it("writes a body's rows at every frame", () => {
     const engine = new RecordingEngine();
     const layers = readyLayers(engine);
+    const before = engine.bufferWrites.length;
     layers.frame(FRAME);
     layers.frame({ ...FRAME, time: { seconds: 2_000, nanos: 0 } });
-    expect(engine.bufferWrites).toHaveLength(2);
+    expect(engine.bufferWrites.length - before).toBe(2);
   });
 
   it("gives a client joining late the same rows and coverage as one drawing from earlier, bit for bit", () => {
@@ -381,10 +384,12 @@ describe("CloudLayers", () => {
     const layers = readyLayers(engine);
     layers.frame(FRAME);
     layers.frame({ ...FRAME, id: "0200080020000000.0104" });
-    expect(engine.buffers.size).toBe(2);
+    // Each body's rows, and the shadow map's that holds nothing (R11.T7.c).
+    expect(engine.buffers.size).toBe(3);
     layers.keepOnly(new Set([FRAME.id]));
-    expect(engine.buffers.size).toBe(1);
-    expect(engine.textures.size).toBe(2);
+    expect(engine.buffers.size).toBe(2);
+    // The noise tile, the shadow map that holds nothing and the body's coverage.
+    expect(engine.textures.size).toBe(3);
     layers.dispose();
     expect(engine.buffers.size).toBe(0);
     expect(engine.textures.size).toBe(0);

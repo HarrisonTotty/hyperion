@@ -429,7 +429,8 @@ fn cloud_march(
   }
   result.sun = light;
   result.sky = sky;
-  result.transmittance = view;
+  // The background through the clouds, the δ-scaled share (`cloudOptics.wgsl`).
+  result.transmittance = cloud_background_transmittance(view, deck.asymmetry);
   if (weight > 0.0) {
     result.mean_t = weighed / weight;
   }

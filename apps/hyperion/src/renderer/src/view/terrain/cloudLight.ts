@@ -4,8 +4,10 @@
  * setting's `cloudShadows`.
  *
  * @remarks
- * - **One tap a source.** Each source's light takes `cloudShadow.wgsl`'s
- *   `terrain_cloud_light(q, towards, star_radius)` at the texel, once: its x multiplies the direct
+ * - **One read a source.** Each source's light takes `cloudGround.wgsl`'s
+ *   `cloud_ground_light(q, towards, star_radius)` at the texel, once: the cloud volume's shadow map
+ *   where it holds the place for that source (plan R11, R11.T7.c), else `cloudShadow.wgsl`'s
+ *   `terrain_cloud_light`, the layer's tap; its x multiplies the direct
  *   sun in place of `terrain_shadow_factor`, its y the sky's light from the source, and its z, the
  *   share of the source's direct light the cloud scatters down, adds μ₀ E T times it to the sky's,
  *   on the same tilt and eclipse, its T the source's transmittance to the ground, the lookup the
@@ -20,12 +22,14 @@
  *   clouds' light (lean, 2026-11-18; the resolve's sampled textures stand at 15 of 16, plan R14's
  *   ruling of 2026-11-13).
  * - **Bindings.** Its fragment stage reads the body's rows ({@link TERRAIN_LIT_BINDINGS}'
- *   `cloudLayer`), its coverage and the noise tile through a linear, repeating sampler: 15 sampled
- *   textures, two samplers and five fragment storage buffers, inside WebGPU's defaults.
+ *   `cloudLayer`), its coverage, the noise tile and the volume's shadow map through a linear,
+ *   repeating sampler, and the shadow map's rows: 16 sampled textures, WebGPU's default limit, two
+ *   samplers and six fragment storage buffers.
  */
 import { CLOUD_TEXTURES } from "../clouds/cloudLayer";
 import cloudFieldWgsl from "../clouds/shaders/cloudField.wgsl?raw";
 import cloudOpticsWgsl from "../clouds/shaders/cloudOptics.wgsl?raw";
+import cloudGroundWgsl from "../clouds/shaders/cloudGround.wgsl?raw";
 import cloudShadowWgsl from "../clouds/shaders/cloudShadow.wgsl?raw";
 import type { WgslMaterialSpec } from "../engine/types";
 import type { TerrainVertexPath } from "../quality/qualitySetting";
@@ -46,7 +50,7 @@ const SKY_LIGHT =
  * ground looked up once, and the sky's light through the cloud with the light it scatters down.
  */
 const CLOUDED_SKY_LIGHT =
-  "    let cloud = terrain_cloud_light(q, towards, star_radius);\n" +
+  "    let cloud = cloud_ground_light(q, towards, star_radius);\n" +
   "    let transmitted = atmosphere_sun_transmittance(\n" +
   "      height, mu_datum, local.latitude, local_azimuth(local, towards), j\n" +
   "    );\n" +
@@ -73,6 +77,8 @@ const CLOUD_BINDINGS_WGSL = `
 @group(2) @binding(${String(TERRAIN_LIT_BINDINGS.cloudCoverage)}) var cloud_coverage : texture_2d<f32>;
 @group(2) @binding(${String(TERRAIN_LIT_BINDINGS.cloudNoise)}) var cloud_noise : texture_3d<f32>;
 @group(2) @binding(${String(TERRAIN_LIT_BINDINGS.cloudSampler)}) var cloud_sampler : sampler;
+@group(2) @binding(${String(TERRAIN_LIT_BINDINGS.cloudShadowMap)}) var cloud_shadow_map : texture_2d<f32>;
+@group(2) @binding(${String(TERRAIN_LIT_BINDINGS.cloudShadowRows)}) var<storage, read> cloud_shadow_rows : array<vec4f>;
 `;
 
 /** `source` with `part` replaced by `by`, which it holds exactly once. */
@@ -105,7 +111,7 @@ export function withCloudLight(source: string): string {
     "",
     "direct transmittance",
   );
-  return `${clouded}\n${CLOUD_BINDINGS_WGSL}\n${cloudFieldWgsl}\n${cloudOpticsWgsl}\n${cloudShadowWgsl}`;
+  return `${clouded}\n${CLOUD_BINDINGS_WGSL}\n${cloudFieldWgsl}\n${cloudOpticsWgsl}\n${cloudShadowWgsl}\n${cloudGroundWgsl}`;
 }
 
 /** The console names of the cloudy forms, by the plain form's name. */
@@ -154,10 +160,12 @@ export function cloudLitMaterialSpec(plain: WgslMaterialSpec): WgslMaterialSpec 
       ...(plain.textures ?? []),
       { name: CLOUD_TEXTURES.coverage, binding: b.cloudCoverage },
       { name: CLOUD_TEXTURES.noise, binding: b.cloudNoise, viewDimension: "3d" },
+      { name: CLOUD_TEXTURES.shadowMap, binding: b.cloudShadowMap },
     ],
     storageBuffers: [
       ...(plain.storageBuffers ?? []),
       { name: CLOUD_TEXTURES.layer, binding: b.cloudLayer, stages: ["fragment"] },
+      { name: CLOUD_TEXTURES.shadowRows, binding: b.cloudShadowRows, stages: ["fragment"] },
     ],
   };
 }

@@ -178,6 +178,12 @@ export const TERRAIN_LIT_BINDINGS = {
   cloudCoverage: 26,
   cloudNoise: 27,
   cloudSampler: 28,
+  /**
+   * The cloud volume's shadow map and its rows (plan R11, R11.T7.c; `cloudShadowMap.ts`), which the
+   * cloudy forms read through `cloudGround.wgsl`, the layer's tap where it holds nothing.
+   */
+  cloudShadowMap: 29,
+  cloudShadowRows: 30,
 } as const;
 
 /**

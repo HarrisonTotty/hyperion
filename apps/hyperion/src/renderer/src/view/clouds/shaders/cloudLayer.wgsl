@@ -136,11 +136,24 @@ fn fragmentMain(@builtin(position) position : vec4f) -> @location(0) vec4f {
   let d = normalize(unnormalised);
   // The deck's fog about a camera within it, in front of the shell, which has no depth (R11.T7.d).
   let fog = cloud_deck_fog(d);
-  let out = fog + (1.0 - fog.a) * cloud_layer_light(position, d, unnormalised);
+  // Within the deck its fog alone: a shell of no depth below the camera read as a stain on the
+  // ground under the haze (the eye check of 2026-11-19).
+  var out = fog;
+  if (!cloud_camera_within_deck()) {
+    out = cloud_layer_light(position, d, unnormalised);
+  }
   if (out.a < CLOUD_LEAST_DRAWN && !any(out.rgb > vec3f(0.0))) {
     discard;
   }
   return out;
+}
+
+// Whether the camera stands within the deck (`levers` y and z), where its fog is drawn alone.
+fn cloud_camera_within_deck() -> bool {
+  let base = draw.levers.y;
+  let top = draw.levers.z;
+  let h = draw.camera.w;
+  return top > base && h > base && h < top;
 }
 
 // The deck's light along `d` from a camera within it (R11.T7.d's check: a shell of no depth at the
@@ -174,7 +187,8 @@ fn cloud_deck_fog(d : vec3f) -> vec4f {
     return vec4f(0.0);
   }
   let tau = column.in_cloud_tau;
-  let alpha = column.fraction * (1.0 - exp(-tau * path / deck));
+  let optics_g = cloud_row(CLOUD_ROW_OPTICS).x;
+  let alpha = column.fraction * (1.0 - cloud_background_transmittance(exp(-tau * path / deck), optics_g));
   let optics = cloud_row(CLOUD_ROW_OPTICS);
   let place = cloud_place(up);
   let z = (h - base) / deck;
@@ -294,7 +308,9 @@ fn cloud_layer_light(position : vec4f, d : vec3f, unnormalised : vec3f) -> vec4f
     front = from_camera / max(from_hit, vec3f(CLOUD_LEAST_TRANSMITTANCE));
   }
   front = clamp(front, vec3f(0.0), vec3f(1.0));
-  let alpha = field.fraction * (1.0 - exp(-tau / mu_view));
+  // The background seen through the cloud, the δ-scaled share (`cloudOptics.wgsl`), so that a thin
+  // edge does not draw a rim darker than what lies behind it.
+  let alpha = field.fraction * (1.0 - cloud_background_transmittance(exp(-tau / mu_view), optics.x));
   let coloured = front * field.fraction * radiance + alpha * (1.0 - front) * source_function;
   return vec4f(coloured, alpha);
 }

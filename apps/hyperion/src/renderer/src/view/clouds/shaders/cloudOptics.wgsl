@@ -84,3 +84,17 @@ fn cloud_delta_eddington(tau : f32, g : f32, co_albedo : f32, mu0 : f32) -> Clou
   }
   return CloudSlab(clamp(reflectance, 0.0, 1.0), direct, max(total - direct, 0.0));
 }
+
+// The least view transmittance a cloud's background is seen through (`cloudMarch.ts`'
+// LEAST_TRANSMITTANCE, the march's stop).
+const CLOUD_LEAST_BACKGROUND : f32 = 3e-3;
+
+// The share of a cloud's background seen through it at its view transmittance `view` and asymmetry
+// `g` (`cloudMarch.ts`' `backgroundTransmittance`): the δ-scaled e^(−(1 − g²) τ), the forward peak's
+// light passing as δ-Eddington's similarity has it, taken to 0 where the view's reaches the march's
+// stop, so that a thin edge shows its background and a thick core none.
+fn cloud_background_transmittance(view : f32, g : f32) -> f32 {
+  let scaled = 1.0 - g * g;
+  let least = pow(CLOUD_LEAST_BACKGROUND, scaled);
+  return clamp((pow(max(view, 1e-30), scaled) - least) / (1.0 - least), 0.0, 1.0);
+}

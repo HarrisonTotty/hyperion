@@ -208,12 +208,14 @@ describe("CloudVolumes (R11.T7.c)", () => {
     resolve: { kind: "material", name: "cloud volume resolve" },
     composite: { kind: "material", name: "cloud volume composite" },
     map: { kind: "material", name: "cloud map" },
+    shadow: { kind: "material", name: "cloud shadow map" },
     triangle: { kind: "mesh", name: "triangle" },
   } as const satisfies {
     readonly march: MaterialHandle;
     readonly resolve: MaterialHandle;
     readonly composite: MaterialHandle;
     readonly map: MaterialHandle;
+    readonly shadow: MaterialHandle;
     readonly triangle: MeshHandle;
   };
   const PASS = { viewRotation: new Float32Array(16), projection: new Float32Array(16) };
@@ -236,6 +238,13 @@ describe("CloudVolumes (R11.T7.c)", () => {
       layer: engine.createBuffer({ name: "rows", bytes: 544, usage: 0, category: "clouds" }),
       coverage: texture("coverage"),
       noise: texture("noise"),
+      shadowMap: texture("no shadow"),
+      shadowRows: engine.createBuffer({
+        name: "no shadow rows",
+        bytes: 144,
+        usage: 0,
+        category: "clouds",
+      }),
     };
     const air: RenderTarget = engine.createRenderTarget({
       name: "air",

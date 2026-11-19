@@ -11,11 +11,10 @@
  * finite.
  *
  * @remarks
- * The sun stands over the equator at 60° E, an equinox. The place is the first, from 15° N to 28° N
- * on the circle where the sun stands 35° up in the morning, whose clouds by the field's twin are
- * broken about it ({@link scenePlace}): a cumulus field, the zonal stand-in's cover there about 0.4
- * (`cloudShape.ts`' kinds). The views look 110° from the sun's azimuth, side-lit, but the one
- * towards it.
+ * The sun stands over the equator at 60° E, an equinox. The place is the first, from 10° N on the
+ * circle where the sun stands 35° up, whose cumulus cells cover 0.3–0.6 of their region by the
+ * field's twin ({@link scenePlace}). The views look 110° from the sun's azimuth, side-lit, but the one towards
+ * it.
  */
 
 import { cross, norm, scale, type Vec3 } from "../geometry/vec3";
@@ -32,6 +31,7 @@ import {
   seasonCoverage,
 } from "../view/clouds/cloudLayer";
 import { cloudNoiseTexels } from "../view/clouds/cloudNoise";
+import { CELL_LEAST_TAU_SHARE, CELL_REGION_M } from "../view/clouds/cloudShape";
 import type { BodyClouds } from "../view/clouds/condensates";
 import type { RenderEngine } from "../view/engine/types";
 import { sunLikeHostDisc } from "../view/lighting/hostDisc";
@@ -52,7 +52,7 @@ const VIEWPORT = { widthPx: 320, heightPx: 180 };
 
 /**
  * The frames each scene is drawn, for the volume's history to settle (TEMPORAL_WEIGHT 1/8: 66% of
- * the way at 8), within part 26's watchdog on SwiftShader.
+ * the way at 8), within part 26's watchdog on SwiftShader (12 took the part to 354 s of its 360).
  */
 const SCENE_FRAMES = 8;
 
@@ -112,7 +112,7 @@ const VIEWS: ReadonlyArray<SceneView> = [
 ];
 
 /** The views drawn on low as well, where the layer draws (the brief's item 3). */
-const LOW_VIEWS = new Set(["ground-up-45", "ground-horizon", "below-base-500m", "within-deck"]);
+const LOW_VIEWS = new Set(["ground-up-45", "below-base-500m", "within-deck"]);
 
 /** A place's latitude and longitude, degrees. */
 interface Place {
@@ -166,10 +166,10 @@ function towards(place: Place, elevationDeg: number, azimuthDeg: number): Vec3 {
 const FALLBACK_PLACE: Place = { latitudeDeg: 22, longitudeDeg: 8.2 };
 
 /**
- * The scenes' place (the module's remarks): on the circle 55° from the subsolar point, west of it,
- * the first latitude from 15° N whose clouds about it are broken, by the field's twin as the
- * renderer makes it at the scenes' time: its share at a 300 m footprint over 5 × 5 points 3 km apart
- * of mean 0.3–0.7, under 0.1 and over 0.9 somewhere.
+ * The scenes' place (the module's remarks): on the circle 55° from the subsolar point, morning or
+ * afternoon, the first latitude from 10° N whose cumulus cells, by the field's twin as the renderer
+ * makes it at the scenes' time, cover 0.3–0.6 of their region (`cloudShape.ts`' `cellOf`: the
+ * region's share at CELL_REGION_M, shrunk by its in-cloud τ over the cells' least).
  */
 function scenePlace(): Place {
   const coverage = seasonCoverage({ subsolarLatitudeRad: 0 }, EARTH_CLOUDS.cloudFraction);
@@ -188,32 +188,19 @@ function scenePlace(): Place {
   });
   const noise = cloudNoiseTexels();
   const shellM = EARTH_MEAN_RADIUS_M + cloudLayerHeightM(condensate);
+  const least = CELL_LEAST_TAU_SHARE * condensate.inCloudOpticalDepth550;
   const cosine = Math.cos((90 - SUN_ELEVATION_DEG) * RAD);
-  for (let latitudeDeg = 15; latitudeDeg <= 28; latitudeDeg += 0.5) {
+  for (let latitudeDeg = 10; latitudeDeg <= 35; latitudeDeg += 0.25) {
     const c = Math.cos(latitudeDeg * RAD);
-    const place = {
-      latitudeDeg,
-      longitudeDeg: 60 - Math.acos(Math.min(Math.max(cosine / c, -1), 1)) / RAD,
-    };
-    const { up, east, north } = localFrameAt(place);
-    let sum = 0;
-    let least = 1;
-    let most = 0;
-    for (let i = -2; i <= 2; i += 1) {
-      for (let j = -2; j <= 2; j += 1) {
-        const p = {
-          x: shellM * up.x + 3_000 * (i * east.x + j * north.x),
-          y: shellM * up.y + 3_000 * (i * east.y + j * north.y),
-          z: shellM * up.z + 3_000 * (i * east.z + j * north.z),
-        };
-        const f = cloudFieldAt(coverage, noise, params, p, 300).fraction;
-        sum += f;
-        least = Math.min(least, f);
-        most = Math.max(most, f);
+    const reach = Math.acos(Math.min(Math.max(cosine / c, -1), 1)) / RAD;
+    for (const longitudeDeg of [60 - reach, 60 + reach]) {
+      const place = { latitudeDeg, longitudeDeg };
+      const { up } = localFrameAt(place);
+      const region = cloudFieldAt(coverage, noise, params, scale(up, shellM), CELL_REGION_M);
+      const cells = (region.fraction * region.inCloudTau) / Math.max(region.inCloudTau, least);
+      if (cells >= 0.3 && cells <= 0.6) {
+        return place;
       }
-    }
-    if (sum / 25 >= 0.3 && sum / 25 <= 0.7 && least < 0.1 && most > 0.9) {
-      return place;
     }
   }
   return FALLBACK_PLACE;
