@@ -1247,8 +1247,8 @@ tests. Acceptance: `pnpm test`, `just ci`, `just test-render`, by hand at the su
   doc comment; per column, the TypeScript reference march matches δ-Eddington for that column's τ to
   3–5% at μ₀ ≥ 0.5; per coverage cell, the mean of per-texel δ-Eddington equals the march's cell
   mean to 2%; the smoke harness. Bench on the discrete target (the development machine's RTX 3080)
-  against 1.5–3 ms and 10–20 MB, and by the owner on the UHD 620 for the record. _Built 2026-11-18
-  but its noises and transmittance map, its bench pending the owner's runs._
+  against 1.5–3 ms and 10–20 MB, and by the owner on the UHD 620 for the record. _Built 2026-11-18,
+  its noises, 3D density and transmittance map 2026-11-19; its bench pending the owner's runs._
   Records: [11-surface-detail-clouds-oceans-rings-stills/records/R11.T7.c.md](11-surface-detail-clouds-oceans-rings-stills/records/R11.T7.c.md).
   - _The `f32` twin and the reference's bias_ (R11.T7.a.1's notes, 2026-10-20). The volume's
     `f32` δ-Eddington follows T7.b's notes. Against a converged Monte Carlo, δ-Eddington's R at
