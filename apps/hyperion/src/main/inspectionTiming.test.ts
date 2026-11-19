@@ -5,6 +5,7 @@ import type {
   InspectionLongTasks,
   InspectionTimingCompositeCensus,
   InspectionTimingMarchCensus,
+  InspectionTimingPass,
   InspectionTimingRecord,
   InspectionTimingWindow,
 } from "../preload/api";
@@ -257,10 +258,11 @@ const RECORD: InspectionTimingRecord = {
       submitMs: [8, 9],
       gpuMs: [900, 1_100],
       passes: [
-        { label: "tonemap", ms: [100, 100], kernels: [], workgroups: [] },
+        { label: "tonemap", ms: [100, 100], ownMs: [100, 100], kernels: [], workgroups: [] },
         {
           label: "atmosphere view",
           ms: [600, 800],
+          ownMs: [600, 800],
           kernels: ["atmosphere ray march (footprint)"],
           workgroups: [1_000, 1_000],
         },
@@ -374,6 +376,11 @@ function results(
   return buildInspectionTimingResults(
     inputOf(compositeProbe, marchProbe, atmosphereLevers, litProbe, record, profile),
   );
+}
+
+/** A render pass's times in two frames alike: its span's and its own, ms. */
+function twoFramePass(label: string, ms: number, ownMs: number): InspectionTimingPass {
+  return { label, ms: [ms, ms], ownMs: [ownMs, ownMs], kernels: [], workgroups: [] };
 }
 
 /** What {@link results} builds its file from. */
@@ -491,7 +498,9 @@ describe("the frame profile's timing file (the owner's report)", () => {
       name: "orbit",
       // A resolve that reported after the frames' GPU times were read: 3 pass times against 2.
       passes: window.passes.map((pass) =>
-        pass.label === "tonemap" ? { ...pass, ms: [...pass.ms, 100] } : pass,
+        pass.label === "tonemap"
+          ? { ...pass, ms: [...pass.ms, 100], ownMs: [...pass.ownMs, 100] }
+          : pass,
       ),
     };
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
@@ -583,6 +592,49 @@ describe("the frame profile's timing file (the owner's report)", () => {
       ["tonemap", 100, 0.1],
     ]);
     expect(window?.trace.value?.threads[0]?.thread).toBe("CrRendererMain");
+  });
+
+  it("gives each pass its own time beside its span, and its share of the GPU and the terrain's from its own, where Metal's spans overlap (lane fix-mac-gpu-time)", () => {
+    const [close] = RECORD.windows;
+    if (close === undefined) {
+      throw new Error("the record has a window");
+    }
+    // The composite's span holds the march encoded before it, and the shadows' theirs on the lit
+    // pass: 7.8 and 1.5 ms of span, 0.4 and 0.6 ms their own, in frames of 17 ms.
+    const overlapped: InspectionTimingRecord = {
+      ...RECORD,
+      windows: [
+        {
+          ...close,
+          gpuMs: [17, 17],
+          passes: [
+            twoFramePass("atmosphere view", 7.4, 7.4),
+            twoFramePass("atmosphere composite", 7.8, 0.4),
+            twoFramePass("bodies", 8.6, 8.6),
+            twoFramePass("terrain shadows", 1.5, 0.6),
+          ],
+        },
+      ],
+    };
+    const overlappedResults = results(null, null, null, null, overlapped);
+    const [window] = overlappedResults.windows;
+    expect([
+      window?.passes.map((each) => [each.label, each.medianMs, each.ownMedianMs, each.shareOfGpu]),
+      window?.terrainShareOfGpu,
+    ]).toEqual([
+      [
+        ["bodies", 8.6, 8.6, 8.6 / 17],
+        ["atmosphere view", 7.4, 7.4, 7.4 / 17],
+        ["terrain shadows", 1.5, 0.6, 0.6 / 17],
+        ["atmosphere composite", 7.8, 0.4, 0.4 / 17],
+      ],
+      (8.6 + 0.6) / 17,
+    ]);
+    const markdown = inspectionTimingMarkdown(overlappedResults);
+    expect([
+      markdown.includes("| atmosphere composite | 7.80 | 0.40 | 7.80 | 7.80 | 0.40 | 2.4% |"),
+      markdown.includes("`symbology`) take 54.1% of the GPU's time"),
+    ]).toEqual([true, true]);
   });
 
   it("times the ray march a workgroup, and a texel a step at the window's samples (main's ask)", () => {
@@ -1084,7 +1136,9 @@ describe("the frame profile's timing file (the owner's report)", () => {
   it("writes the summary's tables: the frame, the passes, the threads and their functions", () => {
     const markdown = inspectionTimingMarkdown(results());
     expect(markdown).toContain("## close: 2 draws in 2.0 s, 1.00 a second");
-    expect(markdown).toContain("| atmosphere view | 600.00 | 800.00 | 700.00 | 70.0% |");
+    expect(markdown).toContain(
+      "| atmosphere view | 600.00 | 600.00 | 800.00 | 700.00 | 700.00 | 70.0% |",
+    );
     expect(markdown).toContain(
       "| Renderer / CrRendererMain | 1500 | 750.0 | 75.0% | 96.0 | 40 | 1400 |",
     );
@@ -1192,7 +1246,7 @@ describe("the frame profile's timing file (the owner's report)", () => {
     ]);
     expect(JSON.parse(written.get(first.json) ?? "{}")).toMatchObject({
       schema: "hyperion.views-check.inspection-timing",
-      version: 11,
+      version: 12,
       run: {
         compositeProbe: null,
         marchProbe: null,

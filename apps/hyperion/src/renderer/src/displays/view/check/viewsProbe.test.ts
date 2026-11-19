@@ -27,6 +27,7 @@ import {
   SKY_VIEW_THICK_KERNEL,
   THICK_LIMB_KERNELS,
 } from "../../../view/atmosphere/hillaire";
+import { overlappedPasses, serialPasses, timedPass } from "../../../test/passTimes";
 import { atmosphereReadOf, viewOf, ViewsProbe } from "./viewsProbe";
 
 /** A frame with nothing in it, whose label names it. */
@@ -186,9 +187,9 @@ describe("the views probe", () => {
       primary.render(frame("tonemap"));
     });
     expect(probe.passTimes(0, 200)).toEqual([
-      { label: "view:hdr", ms: [1, 0], kernels: [], workgroups: [] },
-      { label: "view", ms: [1, 1], kernels: [], workgroups: [] },
-      { label: "instrument-1", ms: [0.5, 0], kernels: [], workgroups: [] },
+      { label: "view:hdr", ms: [1, 0], ownMs: [1, 0], kernels: [], workgroups: [] },
+      { label: "view", ms: [1, 1], ownMs: [1, 1], kernels: [], workgroups: [] },
+      { label: "instrument-1", ms: [0.5, 0], ownMs: [0.5, 0], kernels: [], workgroups: [] },
     ]);
     expect(probe.window(0, 200, [{ name: "view", style: "photorealistic" }]).frameGpuMs).toEqual([
       2.5, 1,
@@ -232,21 +233,57 @@ describe("the views probe", () => {
     timed.engines[0]?.reportPassTimes({
       frame: engine.passTimesFrame,
       timer: "quantized",
-      passes: [
-        { label: "atmosphere view", ns: 2e6, bracketed: false },
-        { label: "atmosphere view", ns: 5e6, bracketed: false },
-        { label: "tonemap", ns: 1e6, bracketed: false },
-      ],
+      passes: serialPasses([
+        ["atmosphere view", 2e6],
+        ["atmosphere view", 5e6],
+        ["tonemap", 1e6],
+      ]),
     });
     expect(probe.passTimes(0, 200)).toEqual([
-      { label: "atmosphere view", ms: [2], kernels: ["atmosphere ray march"], workgroups: [8] },
+      {
+        label: "atmosphere view",
+        ms: [2],
+        ownMs: [2],
+        kernels: ["atmosphere ray march"],
+        workgroups: [8],
+      },
       {
         label: "atmosphere view #2",
         ms: [5],
+        ownMs: [5],
         kernels: ["atmosphere ray march"],
         workgroups: [100],
       },
-      { label: "tonemap", ms: [1], kernels: [], workgroups: [] },
+      { label: "tonemap", ms: [1], ownMs: [1], kernels: [], workgroups: [] },
+    ]);
+  });
+
+  it("gives each pass its own time beside its span, the frame's GPU time their union, where Metal's spans overlap (lane fix-mac-gpu-time)", async () => {
+    const { probe, page, engine, timed } = await probed();
+    const primary = engine.createView(document.createElement("canvas"), "view");
+    inFrame(page, 100, () => {
+      primary.render(frame("tonemap"));
+    });
+    // The composite's span begins with the march's, as the M5 stamps it, and ends 0.5 ms after.
+    timed.engines[0]?.reportPassTimes({
+      frame: engine.passTimesFrame,
+      timer: "full",
+      passes: overlappedPasses(3e6, 12e6, 0.5e6),
+    });
+    const passes = probe.passTimes(0, 200);
+    const frameGpuMs = probe.window(0, 200, [{ name: "view", style: "photorealistic" }]).frameGpuMs;
+    expect([
+      passes.map(({ label, ms, ownMs }) => [label, ms, ownMs]),
+      frameGpuMs,
+      passes.reduce((sum, pass) => sum + (pass.ownMs[0] ?? 0), 0),
+    ]).toEqual([
+      [
+        ["bodies", [3], [3]],
+        ["atmosphere view", [12], [12]],
+        ["atmosphere composite", [12.5], [0.5]],
+      ],
+      [15.5],
+      15.5,
     ]);
   });
 
@@ -446,7 +483,7 @@ describe("the views probe", () => {
       fake.reportPassTimes({
         frame: free,
         timer: "full",
-        passes: [{ label: "mipmaps", ns: 2e5, bracketed: false }],
+        passes: [timedPass("mipmaps", 2e5)],
       });
       primary.render(frame("view:wireframe"));
     });

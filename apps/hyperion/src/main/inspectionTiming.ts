@@ -84,9 +84,10 @@ export const INSPECTION_TIMING_SCHEMA = "hyperion.views-check.inspection-timing"
  * frame clock and each window's callbacks, frame intervals and measured vsync period (R07.T19), 10
  * since the run's pipeline compiles, each window's compiles alongside it and the primary's first
  * frames (plan R08, fix-r08-decked-air-route), 11 since the run's instance probe (plan R14,
- * R14.T5.d).
+ * R14.T5.d), 12 since each pass's own time beside its span's, its share of the GPU taken from its
+ * own time, and the frame's GPU time the union of its spans (lane fix-mac-gpu-time).
  */
-export const INSPECTION_TIMING_VERSION = 11;
+export const INSPECTION_TIMING_VERSION = 12;
 
 /**
  * V8's CPU profiler's category, which samples every isolate's stack: the renderer's main thread,
@@ -576,13 +577,23 @@ export function summariseTimes(values: ReadonlyArray<number>): TimeSummary {
   };
 }
 
-/** One pass label's GPU time over a window, summarised. */
+/**
+ * One pass label's GPU time over a window, summarised: its spans' (`medianMs`, `p95Ms`, `meanMs`)
+ * and its own time's (lane fix-mac-gpu-time), which on a serial timer are the same.
+ */
 export interface PassFigures {
   readonly label: string;
   readonly medianMs: number | null;
   readonly p95Ms: number | null;
   readonly meanMs: number | null;
-  /** Its mean over the mean of the frames' GPU time, 0 to 1, or `null` with no frame timed. */
+  /** Its own time's median, ms (`InspectionTimingPass.ownMs`): less than its span's on Metal. */
+  readonly ownMedianMs: number | null;
+  /** Its own time's mean, ms. */
+  readonly ownMeanMs: number | null;
+  /**
+   * Its own time's mean over the mean of the frames' GPU time, 0 to 1, or `null` with no frame
+   * timed: the passes' shares sum to 1, as their own times sum to the frame's.
+   */
   readonly shareOfGpu: number | null;
   /** The kernels its dispatches ran, each once; none for a render pass. */
   readonly kernels: ReadonlyArray<string>;
@@ -869,10 +880,13 @@ export interface InspectionTimingWindowResults {
     readonly mainThreadMs: TimeSummary;
     /** The primary's encoding and submission each draw. */
     readonly submitMs: TimeSummary;
-    /** Each frame's passes on the GPU, every view's, of the frames timed in full. */
+    /**
+     * Each frame's passes on the GPU, every view's, of the frames timed in full: each resolve's
+     * union of its passes' spans, the frame-rate floor's reading (`gpuTimeMs`).
+     */
     readonly gpuMs: TimeSummary;
   };
-  /** Each pass label's GPU time, the dearest by its mean first. */
+  /** Each pass label's GPU time, the dearest by its own mean first. */
   readonly passes: ReadonlyArray<PassFigures>;
   readonly untimedFrames: number;
   /**
@@ -1102,6 +1116,7 @@ function windowResults(
   const passes = window.passes
     .map((pass): PassFigures => {
       const summary = summariseTimes(pass.ms);
+      const own = summariseTimes(pass.ownMs);
       const dispatched = pass.workgroups.filter((count) => count > 0);
       const perWorkgroup = pass.ms.flatMap((ms, i) => {
         const count = pass.workgroups[i] ?? 0;
@@ -1113,10 +1128,12 @@ function windowResults(
         medianMs: summary.medianMs,
         p95Ms: summary.p95Ms,
         meanMs: summary.meanMs,
+        ownMedianMs: own.medianMs,
+        ownMeanMs: own.meanMs,
         shareOfGpu:
-          summary.meanMs === null || gpu.meanMs === null || !(gpu.meanMs > 0)
+          own.meanMs === null || gpu.meanMs === null || !(gpu.meanMs > 0)
             ? null
-            : summary.meanMs / gpu.meanMs,
+            : own.meanMs / gpu.meanMs,
         kernels: pass.kernels,
         workgroupsMedian: summariseTimes(dispatched).medianMs,
         nsPerWorkgroup,
@@ -1126,10 +1143,10 @@ function windowResults(
             : null,
       };
     })
-    .toSorted((a, b) => (b.meanMs ?? 0) - (a.meanMs ?? 0));
+    .toSorted((a, b) => (b.ownMeanMs ?? 0) - (a.ownMeanMs ?? 0));
   const terrainMeanMs = passes
     .filter((pass) => TERRAIN_PASS_LABELS.test(pass.label))
-    .reduce((sum, pass) => sum + (pass.meanMs ?? 0), 0);
+    .reduce((sum, pass) => sum + (pass.ownMeanMs ?? 0), 0);
   return {
     name: window.name,
     durationMs,
@@ -1601,11 +1618,11 @@ function windowMarkdown(window: InspectionTimingWindowResults): string[] {
     ...(window.passes.length === 0
       ? ["No pass was timed (the adapter has no `timestamp-query`, or no frame was timed in full)."]
       : [
-          "| Pass | Median (ms) | p95 (ms) | Mean (ms) | Share of GPU | Kernels | Workgroups | µs a workgroup | ns a texel a step |",
-          "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+          "| Pass | Median (ms) | Own median (ms) | p95 (ms) | Mean (ms) | Own mean (ms) | Share of GPU | Kernels | Workgroups | µs a workgroup | ns a texel a step |",
+          "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
           ...listedPasses(window.passes).map(
             (pass) =>
-              `| ${cell(pass.label)} | ${msText(pass.medianMs, 2)} | ${msText(pass.p95Ms, 2)} | ${msText(pass.meanMs, 2)} | ${pass.shareOfGpu === null ? "—" : `${(100 * pass.shareOfGpu).toFixed(1)}%`} | ${pass.kernels.length === 0 ? "—" : cell(pass.kernels.join(", "))} | ${pass.workgroupsMedian === null ? "—" : pass.workgroupsMedian.toFixed(0)} | ${pass.nsPerWorkgroup === null ? "—" : (pass.nsPerWorkgroup / 1000).toFixed(2)} | ${pass.nsPerTexelStep === null ? "—" : pass.nsPerTexelStep.toFixed(1)} |`,
+              `| ${cell(pass.label)} | ${msText(pass.medianMs, 2)} | ${msText(pass.ownMedianMs, 2)} | ${msText(pass.p95Ms, 2)} | ${msText(pass.meanMs, 2)} | ${msText(pass.ownMeanMs, 2)} | ${pass.shareOfGpu === null ? "—" : `${(100 * pass.shareOfGpu).toFixed(1)}%`} | ${pass.kernels.length === 0 ? "—" : cell(pass.kernels.join(", "))} | ${pass.workgroupsMedian === null ? "—" : pass.workgroupsMedian.toFixed(0)} | ${pass.nsPerWorkgroup === null ? "—" : (pass.nsPerWorkgroup / 1000).toFixed(2)} | ${pass.nsPerTexelStep === null ? "—" : pass.nsPerTexelStep.toFixed(1)} |`,
           ),
           ...(window.passes.length > listedPasses(window.passes).length
             ? [
@@ -1613,6 +1630,8 @@ function windowMarkdown(window: InspectionTimingWindowResults): string[] {
                 `${String(window.passes.length - listedPasses(window.passes).length)} passes of under ${String(100 * LISTED_PASS_SHARE)}% of the GPU's time each are left out here, and listed in the JSON.`,
               ]
             : []),
+          "",
+          "A pass's median, p95 and mean are its span's, its end's timestamp less its beginning's; its own time is the part of its span that no pass ending before it covers. The frame's GPU time is the union of its spans, which the own times and the shares sum to; on a timer whose passes overlap (Metal's), the spans sum to more.",
           "",
           `The atmosphere's ray march takes ${String(window.marchSamples)} samples a ray here; its time a texel a step is a workgroup's over its ${String(MARCH_WORKGROUP_TEXELS)} texels and those samples.`,
         ]),

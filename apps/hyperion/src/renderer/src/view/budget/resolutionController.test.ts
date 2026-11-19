@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { PassTimes } from "../engine/types";
 import { SETTINGS } from "../quality/qualitySetting";
+import { overlappedPasses, serialPasses, timedPass } from "../../test/passTimes";
 import {
   CONTROLLER_TUNING,
   gpuTimeMs,
@@ -128,11 +129,6 @@ function quantized(passes: number, seed: number): (ms: number) => number {
 
 /** Every 100 frames, two frames do twice the pixel work. */
 const PIXEL_SPIKES: Load = (scale, frame) => load(2, frame % 100 < 2 ? 12 : 6)(scale, frame);
-
-/** One timed pass of a resolve. */
-function pass(label: string, ns: number): PassTimes["passes"][number] {
-  return { label, ns, bracketed: false };
-}
 
 describe("ResolutionController", () => {
   it("starts at the bounds' max", () => {
@@ -378,13 +374,121 @@ describe("ResolutionController", () => {
   });
 });
 
+/** The reading before lane fix-mac-gpu-time: every pass's `ns` summed, ms. */
+function summedMs(times: ReadonlyArray<PassTimes>): number {
+  let ns = 0;
+  for (const resolve of times) {
+    for (const pass of resolve.passes) {
+      ns += pass.ns;
+    }
+  }
+  return ns / 1e6;
+}
+
+/** A frame's resolves, each its passes' times, ns, stamped end to end as a serial timer does. */
+function serialFrame(...resolves: ReadonlyArray<ReadonlyArray<number>>): PassTimes[] {
+  return resolves.map((passesNs, i) => ({
+    frame: i + 1,
+    timer: "quantized",
+    passes: serialPasses(passesNs.map((ns, j) => [`pass ${String(j)}`, ns] as const)),
+  }));
+}
+
+/**
+ * The frames today's tests time, each its resolves' passes, ns: this file's, the views probe's,
+ * the frame pacing's, the spike's metrics' and the pass timer's own.
+ */
+const FIXTURE_FRAMES: ReadonlyArray<ReadonlyArray<ReadonlyArray<number>>> = [
+  [[65_536, 131_072], [1_000_000]],
+  [[2e6, 5e6, 1e6]],
+  [[2e5]],
+  [[4e6], [3e6], [1.5e6]],
+  [[5e6], [2e6], [2e6]],
+  [[100e6], [1e6]],
+  [[4_000_000], [1], [9_000_000, 1_000_000], [250_000, 500_000]],
+  [[250, 3_000]],
+];
+
+/**
+ * Frame `n` of a sweep: 1 to 5 resolves of 1 to 8 passes each, every pass a whole number of
+ * Dawn's 65,536 ns quanta, as its timer gives them.
+ */
+function quantisedFrame(n: number): number[][] {
+  const resolves: number[][] = [];
+  for (let r = 0; r < 1 + (n % 5); r += 1) {
+    const passes: number[] = [];
+    for (let k = 0; k < 1 + ((n * 7 + r * 3) % 8); k += 1) {
+      passes.push(65_536 * (1 + ((n * 31 + r * 17 + k * 13) % 300)));
+    }
+    resolves.push(passes);
+  }
+  return resolves;
+}
+
 describe("gpuTimeMs", () => {
   it("sums every pass of every resolve the frame made, in ms", () => {
-    expect(
-      gpuTimeMs([
-        { frame: 1, timer: "quantized", passes: [pass("sky", 65_536), pass("discs", 131_072)] },
-        { frame: 2, timer: "quantized", passes: [pass("view:wireframe", 1_000_000)] },
-      ]),
-    ).toBeCloseTo(1.196_608, 9);
+    expect(gpuTimeMs(serialFrame([65_536, 131_072], [1_000_000]))).toBeCloseTo(1.196_608, 9);
+  });
+
+  it("reads serial stamps as the sum it read before, exactly, on today's fixtures and quantised frames", () => {
+    const quantised = Array.from({ length: 200 }, (_, n) => quantisedFrame(n));
+    const frames = [...FIXTURE_FRAMES, ...quantised].map((resolves) => serialFrame(...resolves));
+    expect(frames.filter((frame) => gpuTimeMs(frame) !== summedMs(frame))).toEqual([]);
+  });
+
+  it("counts the composite's wait on the march once, as the M5 stamps a frame", () => {
+    const frame: PassTimes[] = [
+      { frame: 1, timer: "full", passes: overlappedPasses(3_500_000, 12_000_000, 500_000) },
+    ];
+    expect([summedMs(frame), gpuTimeMs(frame)]).toEqual([28, 16]);
+  });
+
+  it("adds the unions of a frame's resolves, whose stamps share no origin", () => {
+    const frame: PassTimes[] = [
+      { frame: 1, timer: "full", passes: overlappedPasses(1_000_000, 4_000_000, 500_000) },
+      { frame: 2, timer: "full", passes: [timedPass("view:wireframe", 2_000_000)] },
+    ];
+    expect(gpuTimeMs(frame)).toBe(7.5);
+  });
+
+  it("skips a pass whose end precedes its begin, and an empty one, which the sum counted", () => {
+    const frame: PassTimes[] = [
+      {
+        frame: 1,
+        timer: "full",
+        passes: [
+          timedPass("reset", -3_000_000, 5_000_000),
+          timedPass("unwritten", 0, 0),
+          timedPass("tonemap", 1_000_000, 6_000_000),
+        ],
+      },
+    ];
+    expect([summedMs(frame), gpuTimeMs(frame)]).toEqual([-2, 1]);
+  });
+});
+
+describe("ResolutionController on the M5's stamps", () => {
+  it("holds scale 1 at 60 fps where the passes' union fits the floor's budget and their sum does not", () => {
+    // The frame-rate floor's target (viewBudget.ts: 0.8 of 30 fps's period, 26.7 ms).
+    const floor: ResolutionTarget = { periodMs: 1000 / 30, gpuBudgetMs: frameGpuBudgetMs(30, 0) };
+    // 16 ms of GPU work a frame, drawn every 16.7 ms; the composite's span holds the 12 ms march.
+    const frame: PassTimes[] = [
+      { frame: 1, timer: "full", passes: overlappedPasses(3_500_000, 12_000_000, 500_000) },
+    ];
+    const read = (reading: (times: ReadonlyArray<PassTimes>) => number): number => {
+      const control = new ResolutionController(SETTINGS.high.internalScaleBounds, floor);
+      let scale = control.scale;
+      for (let n = 0; n < 600; n += 1) {
+        scale = control.update([reading(frame)], 1000 / 60);
+      }
+      return scale;
+    };
+    const [min, max] = SETTINGS.high.internalScaleBounds;
+    expect([summedMs(frame) > floor.gpuBudgetMs, read(summedMs) < max, read(gpuTimeMs)]).toEqual([
+      true,
+      true,
+      max,
+    ]);
+    expect(read(summedMs)).toBeGreaterThanOrEqual(min);
   });
 });

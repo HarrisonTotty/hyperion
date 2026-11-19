@@ -2675,9 +2675,17 @@ export interface InspectionTimingPass {
   readonly label: string;
   /**
    * Its time in each frame of the window whose passes were all timed, ms, in the frames' order,
-   * every pass of the label in the frame summed and 0 in a frame that has none.
+   * every pass of the label in the frame summed and 0 in a frame that has none: each pass's span,
+   * its end's timestamp less its beginning's.
    */
   readonly ms: ReadonlyArray<number>;
+  /**
+   * Its own time in each of the same frames, ms (lane fix-mac-gpu-time): of each pass's span, the
+   * part no pass of its resolve that ends before it covers, each instant going to the pass running
+   * then that ends first (`passOwnNs`); so a frame's own times sum to its GPU time, the union of
+   * its spans. On a serial timer, `ms`; less on Metal, whose spans overlap.
+   */
+  readonly ownMs: ReadonlyArray<number>;
   /**
    * Where the label's passes are a kernel's dispatches, the kernels' names, each once, and their
    * workgroups in each of the same frames, 0 where none was dispatched (an indirect dispatch's

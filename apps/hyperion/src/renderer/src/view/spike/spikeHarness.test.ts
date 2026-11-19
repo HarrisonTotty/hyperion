@@ -9,6 +9,7 @@ import { GraphicsStatusStore, initialGraphicsStatus } from "../engine/status";
 import { planetGeometry } from "../terrain/planet";
 import type { SelectionInput } from "../terrain/select";
 import { selectionTolerancePx } from "../terrain/selectionTolerance";
+import { timedPass } from "../../test/passTimes";
 import { boundedPlanet, type DemandView, levelRatio } from "./demand";
 import { recordProfile, SETTING_VIEWS } from "./demandRecord";
 import { PassReads } from "./passReads";
@@ -230,7 +231,7 @@ describe("the spike's recorder", () => {
       recorder.passTimes({
         frame: n,
         timer: "full",
-        passes: [{ label, ns: 1e6, bracketed: false }],
+        passes: [timedPass(label, 1e6)],
       });
     }
     const report = recorder.report({ widthPx: 1280, heightPx: 720 });
@@ -275,7 +276,7 @@ describe("the spike's recorder", () => {
       recorder.passTimes({
         frame: n,
         timer: "full",
-        passes: [{ label: "terrain", ns: n * 1e6, bracketed: false }],
+        passes: [timedPass("terrain", n * 1e6)],
       });
     }
     const { frames } = recorder.report({ widthPx: 1280, heightPx: 720 });
@@ -304,7 +305,7 @@ describe("the spike's recorder", () => {
       recorder.passTimes({
         frame: n,
         timer: "full",
-        passes: [{ label: "terrain", ns: 1e6, bracketed: false }],
+        passes: [timedPass("terrain", 1e6)],
       });
     }
     expect(reads.inFlight()).toEqual([4]);
@@ -357,7 +358,7 @@ describe("the spike's recorder", () => {
       recorder.passTimes({
         frame: n,
         timer: "full",
-        passes: [{ label: "terrain", ns: 1e6, bracketed: false }],
+        passes: [timedPass("terrain", 1e6)],
       });
     }
     expect(recorder.report({ widthPx: 1280, heightPx: 720 }).frames.missingResolves).toEqual([

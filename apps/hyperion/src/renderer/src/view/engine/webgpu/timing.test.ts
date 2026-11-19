@@ -134,12 +134,48 @@ describe("the pass timer", () => {
         frame: 1,
         timer: "full",
         passes: [
-          { label: "histogram", ns: 250, bracketed: false },
-          { label: "cockpit", ns: 3_000, bracketed: false },
+          { label: "histogram", ns: 250, beginNs: 0, endNs: 250, bracketed: false },
+          { label: "cockpit", ns: 3_000, beginNs: 900, endNs: 3_900, bracketed: false },
         ],
       });
     });
     expect(timer.pending).toEqual([]);
+  });
+
+  it("gives each pass its span from the resolve's earliest stamp, exact however long the counter has run (lane fix-mac-gpu-time)", async () => {
+    // Past 2^53 ns, where a stamp is no longer exact as a number; the composite begins before the
+    // march ends, as Metal stamps them.
+    const t0 = 2n ** 60n;
+    const timer = new PassTimer(
+      timerDevice([t0 + 1_000n, t0 + 13_000n, t0 + 1_001n, t0 + 13_501n]),
+      "full",
+    );
+    const listener = vi.fn<(times: PassTimes) => void>();
+    timer.listen(listener);
+    timer.writesFor("atmosphere view");
+    timer.writesFor("atmosphere composite");
+    timer.resolve(recordingEncoder())?.();
+    await vi.waitFor(() => {
+      expect(listener.mock.calls[0]?.[0].passes).toEqual([
+        { label: "atmosphere view", ns: 12_000, beginNs: 0, endNs: 12_000, bracketed: false },
+        { label: "atmosphere composite", ns: 12_500, beginNs: 1, endNs: 12_501, bracketed: false },
+      ]);
+    });
+  });
+
+  it("gives a pass whose stamp was never written an empty span, and takes the origin from the written ones", async () => {
+    const timer = new PassTimer(timerDevice([0n, 9_000n, 5_000n, 6_000n]), "full");
+    const listener = vi.fn<(times: PassTimes) => void>();
+    timer.listen(listener);
+    timer.writesFor("unwritten");
+    timer.writesFor("tonemap");
+    timer.resolve(recordingEncoder())?.();
+    await vi.waitFor(() => {
+      expect(listener.mock.calls[0]?.[0].passes).toEqual([
+        { label: "unwritten", ns: 9_000, beginNs: 0, endNs: 0, bracketed: false },
+        { label: "tonemap", ns: 1_000, beginNs: 0, endNs: 1_000, bracketed: false },
+      ]);
+    });
   });
 
   it("makes no query set and never reports without timestamp-query", () => {

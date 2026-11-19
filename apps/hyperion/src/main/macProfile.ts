@@ -597,7 +597,10 @@ export function median(values: ReadonlyArray<number>): number | null {
 export interface ProfiledWindow {
   readonly name: InspectionTimingWindowResults["name"];
   readonly frame: Pick<InspectionTimingWindowResults["frame"], "intervalMs" | "gpuMs">;
-  readonly passes: ReadonlyArray<Pick<PassFigures, "label" | "medianMs" | "shareOfGpu">>;
+  readonly passes: ReadonlyArray<
+    Pick<PassFigures, "label" | "medianMs" | "shareOfGpu"> &
+      Partial<Pick<PassFigures, "ownMedianMs">>
+  >;
   /** Its attachments counted, `null` uncounted; absent before the file's version 7, as none. */
   readonly attachments?: InspectionTimingWindowResults["attachments"];
   /** Each body's atmosphere read; absent before the file's version 7, as none known. */
@@ -820,7 +823,10 @@ function cell(text: string): string {
   return text.replaceAll("|", "\\|");
 }
 
-/** The passes a window lists in the runs' table, its dearest by median. */
+/**
+ * The passes a window lists in the runs' table, its dearest by its own time's median (its span's
+ * in a file before version 12, which has no own time).
+ */
 const LISTED_PASSES = 6;
 
 /** The passes a pair's table lists of each window, the dearest of A and B together. */
@@ -875,21 +881,34 @@ function runsTable(
   ];
 }
 
+/**
+ * A pass's median in the windows' table: its span's, and its own beside it where the two differ
+ * (lane fix-mac-gpu-time: Metal's spans overlap, and its share of the GPU is its own time's).
+ */
+function passMsText(pass: ProfiledWindow["passes"][number]): string {
+  const own = pass.ownMedianMs ?? null;
+  return own === null || msText(own) === msText(pass.medianMs)
+    ? msText(pass.medianMs)
+    : `${msText(pass.medianMs)}, own ${msText(own)}`;
+}
+
 /** The windows' table: each kept run's windows, their intervals, GPU and dearest passes. */
 function windowsTable(
   matrix: ReadonlyArray<MacProfileRun>,
   kept: ReadonlyMap<string, KeptRun>,
 ): string[] {
   return [
-    "| Run | Window | Interval median | p95 | fps at the median | Callbacks, draws, vsync | GPU median | Dearest passes, median ms (share of the GPU) | Atmosphere read |",
+    "| Run | Window | Interval median | p95 | fps at the median | Callbacks, draws, vsync | GPU median | Dearest passes, median ms, own where it differs (share of the GPU) | Atmosphere read |",
     "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ...matrix.flatMap((run) =>
       (kept.get(run.id)?.timing.windows ?? []).map((window) => {
         const passes = window.passes
           .filter((pass) => pass.medianMs !== null)
-          .toSorted((a, b) => (b.medianMs ?? 0) - (a.medianMs ?? 0))
+          .toSorted(
+            (a, b) => (b.ownMedianMs ?? b.medianMs ?? 0) - (a.ownMedianMs ?? a.medianMs ?? 0),
+          )
           .slice(0, LISTED_PASSES)
-          .map((pass) => `${pass.label} ${msText(pass.medianMs)} (${shareText(pass.shareOfGpu)})`);
+          .map((pass) => `${pass.label} ${passMsText(pass)} (${shareText(pass.shareOfGpu)})`);
         return (
           `| ${run.id} | ${window.name} | ${msText(window.frame.intervalMs.medianMs)} | ` +
           `${msText(window.frame.intervalMs.p95Ms)} | ${fps(window.frame.intervalMs.medianMs)} | ` +

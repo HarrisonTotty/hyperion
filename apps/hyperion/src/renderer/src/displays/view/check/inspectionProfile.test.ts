@@ -104,7 +104,7 @@ function profiler(
         untimedFrames: nowMs < untimedUntilMs ? 1 : 0,
       }),
       passTimes: () => [
-        { label: "atmosphere view", ms: [30], kernels: ["march"], workgroups: [9] },
+        { label: "atmosphere view", ms: [30], ownMs: [30], kernels: ["march"], workgroups: [9] },
       ],
       memoryTraffic: () => ({
         uploaded: { count: 3, bytes: 96 },
@@ -185,7 +185,9 @@ describe("the inspection run's frame profile (the owner's report)", () => {
       scales: [0.85],
       intervalsMs: [33],
       gpuMs: [40],
-      passes: [{ label: "atmosphere view", ms: [30], kernels: ["march"], workgroups: [9] }],
+      passes: [
+        { label: "atmosphere view", ms: [30], ownMs: [30], kernels: ["march"], workgroups: [9] },
+      ],
       memory: { uploaded: { count: 3, bytes: 96 } },
       atmosphereReads: [{ air: 1, read: "thick", frames: 3_000 }],
       marchSamples: 36,
@@ -365,6 +367,7 @@ describe("the inspection run's frame profile (the owner's report)", () => {
           {
             label: "atmosphere view",
             ms: Array.from({ length: timed }, () => 30),
+            ownMs: Array.from({ length: timed }, () => 30),
             kernels: [],
             workgroups: [],
           },

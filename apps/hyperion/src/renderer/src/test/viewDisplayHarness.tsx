@@ -42,6 +42,7 @@ import { FakeResizeObserver } from "./FakeResizeObserver";
 import { type FakeViewEngine, fakeViewEngineSource } from "./fakeViewEngine";
 import { FakeWebSocket } from "./FakeWebSocket";
 import { anOpenedUniverse, aUniverseList } from "./galaxyFixtures";
+import { timedPass } from "./passTimes";
 import { SCENE_TIDAL_RADIUS_M, sceneClock, shipInSystem, sliceSceneSystem } from "./sceneFixture";
 import { ScriptedHeightWorker } from "./scriptedHeightWorker";
 import { SilentOpticsWorker } from "./silentOpticsWorker";
@@ -336,7 +337,7 @@ export function timedEngineSource(): TimedEngineSource {
         engine?.reportPassTimes({
           frame,
           timer: "quantized",
-          passes: [{ label: name, ns: costMs(name) * 1e6, bracketed: false }],
+          passes: [timedPass(name, costMs(name) * 1e6)],
         });
       }
     },

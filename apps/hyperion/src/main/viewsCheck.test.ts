@@ -693,6 +693,7 @@ describe("the inspection run's frame profile (the owner's report)", () => {
           {
             label: "atmosphere view",
             ms: [30, 33],
+            ownMs: [30, 33],
             kernels: ["atmosphere ray march"],
             workgroups: [100, 100],
           },
@@ -1466,7 +1467,7 @@ describe("the views check's handlers", () => {
               mainThreadMs: [],
               submitMs: [],
               gpuMs: [1, 2],
-              passes: [{ label: "sky", ms: [1], kernels: [], workgroups: [] }],
+              passes: [{ label: "sky", ms: [1], ownMs: [1], kernels: [], workgroups: [] }],
               untimedFrames: 0,
               memory: {
                 uploaded: { count: 4, bytes: 2_097_152 },

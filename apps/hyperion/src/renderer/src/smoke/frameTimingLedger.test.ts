@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ATMOSPHERE_VIEW_PASS } from "../view/atmosphere/hillaire";
 import type { PassTimes } from "../view/engine/types";
+import { serialPasses } from "../test/passTimes";
 import {
   type FrameRecord,
   keptOf,
@@ -41,7 +42,7 @@ class StubTimer implements TimerEngine {
     const times: PassTimes = {
       frame,
       timer: "full",
-      passes: passes.map(([label, ns]) => ({ label, ns, bracketed: false })),
+      passes: serialPasses(passes),
     };
     for (const listener of this.#listeners) {
       listener(times);

@@ -142,7 +142,7 @@ interface PendingFrame {
   readonly first: number;
   readonly last: number;
   received: number;
-  /** The GPU time of the resolves received, ms. */
+  /** The GPU time of the resolves received, ms: the sum of each one's {@link gpuTimeMs}. */
   ms: number;
 }
 
@@ -156,6 +156,10 @@ interface PendingFrame {
  * loss). A group still awaited when a later one completes is discarded without an entry: one of its
  * resolves was dropped, or its read failed, and a frame short of part of its time would read as
  * cheaper than it was. A late report of a discarded group is ignored.
+ *
+ * Each resolve's time is the union of its passes' spans ({@link gpuTimeMs}; lane fix-mac-gpu-time),
+ * and a group's the sum of its resolves': Metal's spans overlap within a resolve, and resolves share
+ * no origin to unite them by.
  *
  * @example
  * ```ts

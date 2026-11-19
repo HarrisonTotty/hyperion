@@ -30,6 +30,7 @@
  * one per frame the view draws.
  */
 
+import { passUnionNs } from "../engine/passSpans";
 import type { PassTimes } from "../engine/types";
 
 /** The least and greatest internal scale, as `ViewSettings.internalScaleBounds` gives them. */
@@ -79,20 +80,27 @@ export const CONTROLLER_TUNING = {
 type Source = "gpu" | "interval";
 
 /**
- * The GPU time of one frame's passes, ms: the sum over the resolves of R01's `onPassTimes` that
- * belong to the frame.
+ * The GPU time of one frame's passes, ms: over the resolves of R01's `onPassTimes` that belong to
+ * the frame, the sum of each resolve's union of its passes' spans (`passUnionNs`; lane
+ * fix-mac-gpu-time).
  *
  * @remarks
  * Each view's and target's render resolves its own, and `PassTimes.frame` counts resolves, not
  * animation frames, so the caller groups a frame's resolves (as the descent spike's metrics do)
  * and calls this once the last of them has arrived.
+ *
+ * Within a resolve the spans are united, since Metal's overlap: the owner's M5 summed 24.3 ms in
+ * a frame drawn every 16.7 ms, and the frame-rate floor stepped a view holding 60 fps down to its
+ * lowest scale and the low setting's air. A span whose end precedes its begin, or is its begin, is
+ * skipped, as the still's unit tally leaves a negative pass unmeasured. Across resolves the
+ * unions are added (a lean, 2026-11-19): their stamps share no origin, and a sum is the
+ * conservative reading. On a serial timer each union is its passes' sum, so the time is the sum of
+ * every pass's `ns`, as before, to the nanosecond.
  */
 export function gpuTimeMs(times: ReadonlyArray<PassTimes>): number {
   let ns = 0;
   for (const resolve of times) {
-    for (const pass of resolve.passes) {
-      ns += pass.ns;
-    }
+    ns += passUnionNs(resolve.passes);
   }
   return ns / 1e6;
 }

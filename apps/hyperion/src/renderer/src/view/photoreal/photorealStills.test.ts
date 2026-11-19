@@ -24,6 +24,7 @@ import { runStillJob, type StillRenderer, type StillScene } from "../stills/stil
 import { STILL_MAX_SIDE_PX } from "../stills/stillLabel";
 import { planTiles } from "../stills/stillPlan";
 import { TONEMAP_MATERIAL } from "../post/tonemap";
+import { timedPass } from "../../test/passTimes";
 import {
   type DrawnPhotorealFrame,
   type FrameTerrain,
@@ -493,7 +494,7 @@ describe("the photorealistic still renderer (R11.T10.b)", () => {
     renderer.submit(0, 1);
     const sampleResolves = engine.targetFrames.length - first;
     const resolve = (frame: number): void => {
-      listener?.({ frame, timer: "full", passes: [{ label: "any", ns: 1_000, bracketed: false }] });
+      listener?.({ frame, timer: "full", passes: [timedPass("any", 1_000)] });
     };
     for (let frame = first + 1; frame < first + sampleResolves; frame += 1) {
       resolve(frame);

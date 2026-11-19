@@ -281,16 +281,37 @@ export class PassTimer {
     };
   }
 
-  /** Reports one frame's passes from their resolved timestamps, in nanoseconds. */
+  /**
+   * Reports one frame's passes from their resolved timestamps, in nanoseconds: each pass's span
+   * from the resolve's earliest valid stamp, so that it stays exact as a `number` however long the
+   * counter has run.
+   */
   #report(frame: number, passes: ReadonlyArray<TimedPass>, stamps: BigUint64Array): void {
+    // WebGPU resolves a query never written to 0, so 0 is no stamp.
+    let origin: bigint | null = null;
+    for (const { begin, end } of passes) {
+      for (const stamp of [stamps[begin] ?? 0n, stamps[end] ?? 0n]) {
+        if (stamp !== 0n && (origin === null || stamp < origin)) {
+          origin = stamp;
+        }
+      }
+    }
+    const earliest = origin ?? 0n;
     const times: PassTimes = {
       frame,
       timer: this.timer,
-      passes: passes.map(({ label, bracketed, begin, end }) => ({
-        label,
-        bracketed,
-        ns: Number((stamps[end] ?? 0n) - (stamps[begin] ?? 0n)),
-      })),
+      passes: passes.map(({ label, bracketed, begin, end }) => {
+        const beginStamp = stamps[begin] ?? 0n;
+        const endStamp = stamps[end] ?? 0n;
+        const written = beginStamp !== 0n && endStamp !== 0n;
+        return {
+          label,
+          bracketed,
+          ns: Number(endStamp - beginStamp),
+          beginNs: written ? Number(beginStamp - earliest) : 0,
+          endNs: written ? Number(endStamp - earliest) : 0,
+        };
+      }),
     };
     for (const listener of this.#listeners) {
       listener(times);

@@ -10255,3 +10255,11 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
   ux-calls-and-checklist-gaps):** amended. Discs held keep lighting the scene through a lost link
   (as built); an ask the link cut off reads `PENDING`, not `NOT RECEIVED`, since it is asked again
   when the link returns: `useHostDiscs`' `pending` no longer needs the link up.
+- **The floor reads the union of the passes' spans (lane fix-mac-gpu-time, 2026-11-19):**
+  `gpuTimeMs` unites a resolve's spans (`view/engine/passSpans.ts`) and adds its resolves' unions
+  (a lean): Metal's overlap, and their sum stepped the M5's 60 fps high to its lowest scale and
+  low's air. A serial timer reads as before, to the nanosecond.
+- **The calm line holds the M5's air stepped at a real 60 fps (lean for main, 2026-11-19):** on
+  the 11-08 batch's figures the orbit's union at the lowest step is about 16.9 ms, over
+  `CALM_SHARE` × 26.7 = 13.3 ms, so once stepped its air never returns; closed in, the union, about
+  29 ms at the lowest step, is over the budget itself. Not changed here.

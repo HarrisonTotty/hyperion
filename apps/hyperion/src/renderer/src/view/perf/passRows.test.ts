@@ -36,6 +36,7 @@ import {
   MESH_OCCLUDER_CULL_LABEL,
   WIREFRAME_PASS_LABEL,
 } from "../wireframe/submit";
+import { timedPass } from "../../test/passTimes";
 import {
   attributePasses,
   passRolesOf,
@@ -108,8 +109,8 @@ function mapped(role: ViewRole, label: string): boolean {
 }
 
 /** A pass of a resolve, timed at one quantum. */
-function pass(label: string): { label: string; ns: number; bracketed: false } {
-  return { label, ns: 65_536, bracketed: false };
+function pass(label: string): ReturnType<typeof timedPass> {
+  return timedPass(label, 65_536);
 }
 
 describe("PASS_ROWS", () => {
@@ -184,9 +185,9 @@ describe("an unmapped pass", () => {
 
   it("throws from a resolve that holds it", () => {
     const roles = passRolesOf(PERF_SCENES["cockpit-descent"].views.low);
-    expect(() =>
-      attributePasses({ passes: [{ label: "rings", ns: 1, bracketed: false }] }, roles),
-    ).toThrow("primary:rings");
+    expect(() => attributePasses({ passes: [timedPass("rings", 1)] }, roles)).toThrow(
+      "primary:rings",
+    );
   });
 });
 

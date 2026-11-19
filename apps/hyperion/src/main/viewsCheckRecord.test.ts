@@ -190,8 +190,14 @@ describe("the terrain run's record (R10.T16.d)", () => {
 
   it("is read back with each phase's GPU time by pass (R14's Mac measurements)", () => {
     const passes = [
-      { label: "bodies", ms: [4.1, 3.9], kernels: [], workgroups: [] },
-      { label: "terrain cluster cull", ms: [0.2, 0.3], kernels: ["cull"], workgroups: [12, 12] },
+      { label: "bodies", ms: [4.1, 3.9], ownMs: [4.1, 3.9], kernels: [], workgroups: [] },
+      {
+        label: "terrain cluster cull",
+        ms: [0.2, 0.3],
+        ownMs: [0.1, 0.3],
+        kernels: ["cull"],
+        workgroups: [12, 12],
+      },
     ];
     const record = {
       ...TERRAIN_RECORD,
@@ -277,8 +283,20 @@ describe("the terrain run's record (R10.T16.d)", () => {
     [["opening", "preparations"], 0.5],
     [["opening", "longestFrameGapMs"], "long"],
     [["phases", 0, "passes"], undefined],
-    [["phases", 0, "passes"], [{ label: "bodies", ms: [-1], kernels: [], workgroups: [] }]],
-    [["phases", 0, "passes"], [{ label: "", ms: [1], kernels: [], workgroups: [] }]],
+    [
+      ["phases", 0, "passes"],
+      [{ label: "bodies", ms: [-1], ownMs: [0], kernels: [], workgroups: [] }],
+    ],
+    [["phases", 0, "passes"], [{ label: "", ms: [1], ownMs: [1], kernels: [], workgroups: [] }]],
+    [["phases", 0, "passes"], [{ label: "bodies", ms: [1], kernels: [], workgroups: [] }]],
+    [
+      ["phases", 0, "passes"],
+      [{ label: "bodies", ms: [1, 2], ownMs: [1], kernels: [], workgroups: [] }],
+    ],
+    [
+      ["phases", 0, "passes"],
+      [{ label: "bodies", ms: [1], ownMs: [-0.5], kernels: [], workgroups: [] }],
+    ],
   ])("refuses a record whose %j is %j", (path, value) => {
     expect(readTerrainCheckRecord(withTerrainField(path, value))).toBeNull();
   });

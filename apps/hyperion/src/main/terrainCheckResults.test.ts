@@ -804,8 +804,8 @@ describe("the terrain run's summary and its files", () => {
       throw new Error("the fixture has no first phase");
     }
     const passes = [
-      { label: "symbology", ms: [0.5, 0.5], kernels: [], workgroups: [] },
-      { label: "bodies", ms: [2, 2.2], kernels: [], workgroups: [] },
+      { label: "symbology", ms: [0.5, 0.5], ownMs: [0.5, 0.5], kernels: [], workgroups: [] },
+      { label: "bodies", ms: [2, 2.2], ownMs: [2, 2.2], kernels: [], workgroups: [] },
     ];
     const results = buildTerrainCheckResults(changed({ phases: [{ ...alone, passes }, ...rest] }));
     // The fixture's frames' GPU time, 2.5 and 2.6 ms, has a mean of 2.55 ms.
@@ -830,6 +830,35 @@ describe("the terrain run's summary and its files", () => {
     const text = terrainCheckMarkdown(results);
     expect(text).toContain("## GPU time by pass (provisional; R14's Mac measurements)");
     expect(text).toContain("| terrain-alone | bodies | 2 | 2.00 / 2.20 / 2.20 | 2.10 | 82.4% |");
+  });
+
+  it("takes each pass's share of the GPU from its own time where Metal's spans overlap, the dearest by it first (lane fix-mac-gpu-time)", () => {
+    const [alone, ...rest] = TERRAIN_RECORD.phases;
+    if (alone === undefined) {
+      throw new Error("the fixture has no first phase");
+    }
+    // The cull's span holds its wait on the lit pass before it: 2.4 ms of span, 0.4 ms its own.
+    const passes = [
+      { label: "bodies", ms: [2, 2.2], ownMs: [2, 2.2], kernels: [], workgroups: [] },
+      {
+        label: "terrain cluster cull",
+        ms: [2.4, 2.4],
+        ownMs: [0.4, 0.4],
+        kernels: ["cull"],
+        workgroups: [12, 12],
+      },
+    ];
+    const results = buildTerrainCheckResults(changed({ phases: [{ ...alone, passes }, ...rest] }));
+    expect(
+      results.phases[0]?.gpuPasses?.map((pass) => [
+        pass.label,
+        pass.gpuMs?.meanMs,
+        pass.shareOfGpu,
+      ]),
+    ).toEqual([
+      ["bodies", 2.1, 2.1 / 2.55],
+      ["terrain cluster cull", 2.4, 0.4 / 2.55],
+    ]);
   });
 
   it("reads no GPU time by pass where the run was not given --hyperion-gpu-timing", () => {

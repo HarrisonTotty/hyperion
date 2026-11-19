@@ -12,6 +12,7 @@ import type {
 } from "../../../../preload/api";
 import type { PassTimes } from "../engine/types";
 import type { WorkerMemory } from "../terrain/workers/pool";
+import { timedPass } from "../../test/passTimes";
 import type { LedgerFigures } from "./ledger";
 import { RELEASE_MIN_BYTES } from "./repetitionMetrics";
 import { PERF_SCENES } from "./scenes";
@@ -211,12 +212,12 @@ class FakeDriver implements PerfSceneDriver {
     sink.passTimes({
       frame: this.#resolves - 1,
       timer: "full",
-      passes: [{ label, ns, bracketed: false }],
+      passes: [timedPass(label, ns)],
     });
     const instrument: PassTimes = {
       frame: this.#resolves,
       timer: "full",
-      passes: [{ label: "view:wireframe", ns: ns / 4, bracketed: false }],
+      passes: [timedPass("view:wireframe", ns / 4)],
     };
     if (this.#stage?.phase === "warm-up") {
       this.#held = instrument;

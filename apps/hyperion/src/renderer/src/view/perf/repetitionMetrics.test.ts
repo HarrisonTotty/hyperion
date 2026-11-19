@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import type { GpuTimer } from "../engine/status";
+import type { PassTimes } from "../engine/types";
+import { serialPasses, timedPass } from "../../test/passTimes";
 import { passRolesOf } from "./passRows";
 import { type PerfFrameSample, RepetitionMetrics, TIMESTAMP_QUANTUM_NS } from "./repetitionMetrics";
 
@@ -45,15 +47,11 @@ function times(
   frameNumber: number,
   passes: ReadonlyArray<readonly [string, number]>,
   timer: GpuTimer = "full",
-): {
-  frame: number;
-  timer: GpuTimer;
-  passes: Array<{ label: string; ns: number; bracketed: boolean }>;
-} {
+): PassTimes {
   return {
     frame: frameNumber,
     timer,
-    passes: passes.map(([label, ns]) => ({ label, ns, bracketed: false })),
+    passes: serialPasses(passes),
   };
 }
 
@@ -143,23 +141,23 @@ describe("a repetition's metrics", () => {
     m.passTimes({
       frame: 3,
       timer: "full",
-      passes: [{ label: "view:wireframe", ns: 2e6, bracketed: false }],
+      passes: [timedPass("view:wireframe", 2e6)],
     });
     m.frame(frame(6, 0));
     m.passTimes({
       frame: 4,
       timer: "full",
-      passes: [{ label: "view:wireframe", ns: 2e6, bracketed: false }],
+      passes: [timedPass("view:wireframe", 2e6)],
     });
     m.passTimes({
       frame: 5,
       timer: "full",
-      passes: [{ label: "bodies", ns: 1e6, bracketed: false }],
+      passes: [timedPass("bodies", 1e6)],
     });
     m.passTimes({
       frame: 6,
       timer: "full",
-      passes: [{ label: "bodies", ns: 1e6, bracketed: false }],
+      passes: [timedPass("bodies", 1e6)],
     });
     m.leaveOutThrough(5);
     expect(m.result(EXTRAS).passes.map(({ key, frames }) => [key, frames])).toEqual([

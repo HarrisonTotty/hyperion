@@ -12,6 +12,7 @@ import { contactRule, TEST_PLANET_FIGURE } from "../spike/spikeScene";
 import type { PreparedDescent, SpikeFrameSample } from "../spike/spikeRun";
 import { planetGeometry } from "../terrain/planet";
 import type { TerrainSurvey } from "../terrain/session";
+import { timedPass } from "../../test/passTimes";
 import { ARRIVAL_SETTLE_S } from "./arrivalHolds";
 import {
   capabilityFlags,
@@ -340,10 +341,9 @@ describe("the descent driver", () => {
       },
     ]);
     const roles = passRolesOf(drawn.views);
-    const keys = attributePasses(
-      { passes: [{ label: "view:wireframe", ns: 65_536, bracketed: false }] },
-      roles,
-    ).map(({ key, row }) => `${key} ${row}`);
+    const keys = attributePasses({ passes: [timedPass("view:wireframe", 65_536)] }, roles).map(
+      ({ key, row }) => `${key} ${row}`,
+    );
     expect([roles, keys]).toEqual([
       { first: "station", wireframe: "station" },
       ["station:view:wireframe station-wireframe"],

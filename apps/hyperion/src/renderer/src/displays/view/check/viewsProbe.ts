@@ -32,8 +32,10 @@ import type {
   ViewsCheckViewRecord,
 } from "../../../../../preload/api";
 import type { CompositeProbe } from "../../../view/atmosphere/hillaire";
+import { gpuTimeMs } from "../../../view/budget/resolutionController";
 import type { MarchCensus, MarchProbe } from "../../../view/atmosphere/marchProbe";
 import type { LitProbe } from "../../../view/atmosphere/surfaceLighting";
+import { passOwnNs } from "../../../view/engine/passSpans";
 import type { GpuTimer, GraphicsFault } from "../../../view/engine/status";
 import type {
   FrameSubmission,
@@ -685,13 +687,15 @@ export class ViewsProbe implements EngineProbe {
    * numbered from its second pass in the frame's order (`atmosphere view #2`), so that one label's
    * several dispatches, or the shadow cascades' four passes, are told apart; a label whose passes
    * are dispatches carries their kernels and workgroups, by which its time a texel and a step is
-   * read (the march's, main's ask of 2026-11-01).
+   * read (the march's, main's ask of 2026-11-01). Beside each span's time, each pass's own
+   * (`passOwnNs`; lane fix-mac-gpu-time): a frame's own times sum to its `frameGpuMs`.
    */
   passTimes(startMs: number, endMs: number): ReadonlyArray<InspectionTimingPass> {
     const frames = [...this.#frames.values()]
       .filter((frame) => frame.atMs >= startMs && frame.atMs < endMs)
       .toSorted((a, b) => a.atMs - b.atMs);
-    const byLabel = new Map<string, number[]>();
+    // Each label's span and own times, one of each a frame timed.
+    const byLabel = new Map<string, { readonly ms: number[]; readonly own: number[] }>();
     const kernels = new Map<string, Set<string>>();
     const groups = new Map<string, number[]>();
     let timed = 0;
@@ -704,16 +708,22 @@ export class ViewsProbe implements EngineProbe {
       // A label the frame repeats is numbered from its second pass, in the frame's order.
       const seen = new Map<string, number>();
       for (const times of resolves) {
-        for (const pass of times?.passes ?? []) {
+        const passes = times?.passes ?? [];
+        const ownNs = passOwnNs(passes);
+        for (const [i, pass] of passes.entries()) {
           const nth = (seen.get(pass.label) ?? 0) + 1;
           seen.set(pass.label, nth);
           const label = nth === 1 ? pass.label : `${pass.label} #${String(nth)}`;
-          let ms = byLabel.get(label);
-          if (ms === undefined) {
-            ms = Array.from({ length: timed + 1 }, () => 0);
-            byLabel.set(label, ms);
+          let series = byLabel.get(label);
+          if (series === undefined) {
+            series = {
+              ms: Array.from({ length: timed + 1 }, () => 0),
+              own: Array.from({ length: timed + 1 }, () => 0),
+            };
+            byLabel.set(label, series);
           }
-          ms[timed] = (ms[timed] ?? 0) + pass.ns / 1e6;
+          series.ms[timed] = (series.ms[timed] ?? 0) + pass.ns / 1e6;
+          series.own[timed] = (series.own[timed] ?? 0) + (ownNs[i] ?? 0) / 1e6;
         }
       }
       // The frame's dispatches, numbered by label as their passes are: one timed pass each.
@@ -733,15 +743,17 @@ export class ViewsProbe implements EngineProbe {
         groups.set(label, counts);
       }
       timed += 1;
-      for (const series of [...byLabel.values(), ...groups.values()]) {
+      const labelSeries = [...byLabel.values()].flatMap(({ ms, own }) => [ms, own]);
+      for (const series of [...labelSeries, ...groups.values()]) {
         while (series.length < timed) {
           series.push(0);
         }
       }
     }
-    return [...byLabel].map(([label, ms]) => ({
+    return [...byLabel].map(([label, { ms, own }]) => ({
       label,
       ms,
+      ownMs: own,
       kernels: [...(kernels.get(label) ?? [])],
       workgroups: kernels.has(label) ? (groups.get(label) ?? []) : [],
     }));
@@ -830,17 +842,20 @@ export class ViewsProbe implements EngineProbe {
     return keys.length === 0 ? null : this.#gpuMsOf(keys);
   }
 
-  /** The GPU time of the resolves `keys`, ms, or `null` while any has not reported. */
+  /**
+   * The GPU time of the resolves `keys`, ms ({@link gpuTimeMs}, as the frame-rate floor reads it),
+   * or `null` while any has not reported.
+   */
   #gpuMsOf(keys: ReadonlyArray<string>): number | null {
-    let ns = 0;
+    const resolves: PassTimes[] = [];
     for (const key of keys) {
       const times = this.#times.get(key);
       if (times === undefined) {
         return null;
       }
-      ns += times.passes.reduce((sum, pass) => sum + pass.ns, 0);
+      resolves.push(times);
     }
-    return ns / 1e6;
+    return gpuTimeMs(resolves);
   }
 
   #key(resolve: number): string {
@@ -894,7 +909,7 @@ export class ViewsProbe implements EngineProbe {
     // resolves, past the argument list a spread can take (R10.T16.d).
     const low = resolves.reduce((least, n) => Math.min(least, n), Number.POSITIVE_INFINITY);
     const high = resolves.reduce((most, n) => Math.max(most, n), Number.NEGATIVE_INFINITY);
-    let ns = 0;
+    const unattributed: PassTimes[] = [];
     for (const [key, times] of this.#times) {
       const [g, n] = key.split("/").map(Number);
       if (
@@ -904,10 +919,10 @@ export class ViewsProbe implements EngineProbe {
         n <= high &&
         !this.#resolves.has(key)
       ) {
-        ns += times.passes.reduce((sum, pass) => sum + pass.ns, 0);
+        unattributed.push(times);
       }
     }
-    return ns / 1e6;
+    return gpuTimeMs(unattributed);
   }
 }
 

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { type RenderStyle, viewId } from "../camera/state";
 import type { PassTimes } from "../engine/types";
 import { SETTINGS } from "../quality/qualitySetting";
+import { overlappedPasses, serialPasses } from "../../test/passTimes";
 import {
   BudgetedScale,
   CALM_FRAMES,
@@ -13,6 +14,7 @@ import {
   PENDING_PRIMARY_FRAMES,
   PrimaryFrameTimes,
 } from "./framePacing";
+import { gpuTimeMs } from "./resolutionController";
 import { SELECTION_SCALE_HOLD_FRAMES, selectionScaleStep } from "./selectionScale";
 import { type ViewBudget, viewBudgets, type ViewSpec } from "./viewBudget";
 
@@ -23,11 +25,7 @@ function resolve(frame: number, ...passesMs: ReadonlyArray<number>): PassTimes {
   return {
     frame,
     timer: "quantized",
-    passes: passesMs.map((ms, i) => ({
-      label: `pass ${String(i)}`,
-      ns: ms * 1e6,
-      bracketed: false,
-    })),
+    passes: serialPasses(passesMs.map((ms, i) => [`pass ${String(i)}`, ms * 1e6] as const)),
   };
 }
 
@@ -599,5 +597,157 @@ describe("BudgetedScale", () => {
       s = scale.update(budget, undefined, 40);
     }
     expect(s < max).toBe(true);
+  });
+});
+
+/** The primary alone on high, with its frame-rate floor, at `rows` render rows. */
+function floorBudget(
+  rows: number,
+): ViewBudget & { readonly control: NonNullable<ViewBudget["control"]> } {
+  const budget = viewBudgets(
+    [{ id: PRIMARY, slot: "primary", style: "photorealistic" }],
+    "high",
+    rows,
+  ).get(PRIMARY);
+  const control = budget?.control;
+  if (budget === undefined || control?.kind !== "floor") {
+    throw new Error("the primary alone on high should have its floor");
+  }
+  return { ...budget, control };
+}
+
+/** The reading before lane fix-mac-gpu-time: every pass's `ns` summed, ms. */
+function summedMs(times: ReadonlyArray<PassTimes>): number {
+  return times.flatMap((each) => each.passes).reduce((sum, pass) => sum + pass.ns, 0) / 1e6;
+}
+
+describe("BudgetedScale on the M5's stamps (lane fix-mac-gpu-time)", () => {
+  it("holds a floor's scale at its max and its air unstepped at 60 fps where the passes' union fits and their sum does not", () => {
+    const floor = floorBudget(1080);
+    const times = new PrimaryFrameTimes(0);
+    const scale = new BudgetedScale();
+    let stepped = false;
+    let lowest = floor.control.bounds[1];
+    // 16 ms of GPU work a frame, drawn every 16.7 ms: 28 ms of spans, the composite's holding the
+    // 12 ms march, against the floor's 26.7 ms.
+    for (let frame = 1; frame <= 600; frame += 1) {
+      times.startFrame(frame - 1);
+      times.passTimes({
+        frame,
+        timer: "full",
+        passes: overlappedPasses(3_500_000, 12_000_000, 500_000),
+      });
+      lowest = Math.min(lowest, scale.update(floor, times.take(), 1000 / 60));
+      stepped ||= scale.airStepped;
+    }
+    const passes = overlappedPasses(3_500_000, 12_000_000, 500_000);
+    const summed = summedMs([{ frame: 1, timer: "full", passes }]);
+    expect([summed > floor.control.target.gpuBudgetMs, lowest, stepped]).toEqual([
+      true,
+      floor.control.bounds[1],
+      false,
+    ]);
+  });
+});
+
+/**
+ * The owner's Mac batch of 2026-11-08 (Apple M5, run `high-dpr1`: the high setting at DPR 1, 886
+ * render rows, display pacing at 60 Hz), each window's frames as its record gives them: the frame's
+ * GPU time as the pass timer's spans summed (its median, p95 and max, ms); of it, the passes
+ * encoded before the atmosphere's composite, whose time the composite's span also holds (the
+ * `atmosphere view` dispatches and `atmosphere behind`, their medians summed, ms; the composite is
+ * them plus about 0.5 ms in all 70 runs); and the composite's median. All were drawn at the
+ * floor's lowest step, its air stepped, and every frame was drawn 16.7 ms apart from orbit.
+ */
+const MAC_BATCH_HIGH_DPR1 = {
+  orbit: { medianMs: 24.31, p95Ms: 29.08, maxMs: 29.48, heldMs: 7.42, compositeMs: 7.95 },
+  close: { medianMs: 41.96, p95Ms: 44.21, maxMs: 45.69, heldMs: 12.95, compositeMs: 13.49 },
+} as const;
+
+type MacWindow = keyof typeof MAC_BATCH_HIGH_DPR1;
+
+/**
+ * Frame `n` of a window of the batch, at `scale` of the floor's lowest step `lowest`, as the M5
+ * stamps it: its summed time the window's median, but its p95 at every 20th frame from the 5th and
+ * its max at every 20th from the 15th; each part grown as the square of the scale, the controller's
+ * own model, from the step it was measured at.
+ */
+function macFrame(window: MacWindow, n: number, scale: number, lowest: number): PassTimes[] {
+  const { medianMs, p95Ms, maxMs, heldMs, compositeMs } = MAC_BATCH_HIGH_DPR1[window];
+  const summed = n % 20 === 5 ? p95Ms : n % 20 === 15 ? maxMs : medianMs;
+  const grown = (scale / lowest) ** 2;
+  const ownMs = compositeMs - heldMs;
+  const ns = (ms: number): number => Math.round(ms * grown * 1e6);
+  return [
+    {
+      frame: n + 1,
+      timer: "full",
+      passes: overlappedPasses(ns(summed - 2 * heldMs - ownMs), ns(heldMs), ns(ownMs)),
+    },
+  ];
+}
+
+/** What a replay of the batch's windows ended at, and the least it went to. */
+interface Replayed {
+  readonly scale: number;
+  readonly airStepped: boolean;
+  readonly lowestScale: number;
+  readonly everStepped: boolean;
+}
+
+/** Replays `frames` frames of each of `windows` in turn through one floor, read by `reading`. */
+function replayMac(
+  windows: ReadonlyArray<MacWindow>,
+  reading: (times: ReadonlyArray<PassTimes>) => number,
+  frames = 600,
+): Replayed[] {
+  const floor = floorBudget(886);
+  const lowest = floor.control.bounds[0];
+  const scale = new BudgetedScale();
+  let s = scale.update(floor, [], 1000 / 60);
+  return windows.map((window) => {
+    let lowestScale = s;
+    let everStepped = scale.airStepped;
+    for (let n = 0; n < frames; n += 1) {
+      s = scale.update(floor, [reading(macFrame(window, n, s, lowest))], 1000 / 60);
+      lowestScale = Math.min(lowestScale, s);
+      everStepped ||= scale.airStepped;
+    }
+    return { scale: s, airStepped: scale.airStepped, lowestScale, everStepped };
+  });
+}
+
+describe("the 2026-11-08 Mac batch's high-dpr1 frames, replayed through the floor (lane fix-mac-gpu-time)", () => {
+  const floor = floorBudget(886);
+  const [lowest, highest] = floor.control.bounds;
+
+  it("step high to the floor's lowest scale and the low setting's air at orbit and closed in on the sum, as the batch found", () => {
+    expect([...replayMac(["orbit"], summedMs), ...replayMac(["close"], summedMs)]).toEqual([
+      { scale: lowest, airStepped: true, lowestScale: lowest, everStepped: true },
+      { scale: lowest, airStepped: true, lowestScale: lowest, everStepped: true },
+    ]);
+  });
+
+  it("hold high at its full scale and its own air from orbit on the union", () => {
+    expect(replayMac(["orbit"], gpuTimeMs)).toEqual([
+      { scale: highest, airStepped: false, lowestScale: highest, everStepped: false },
+    ]);
+  });
+
+  it("still step high closed in on the union, whose frames are over the budget at the lowest step", () => {
+    const atLowest = gpuTimeMs(macFrame("close", 0, lowest, lowest));
+    expect([atLowest > floor.control.target.gpuBudgetMs, replayMac(["close"], gpuTimeMs)]).toEqual([
+      true,
+      [{ scale: lowest, airStepped: true, lowestScale: lowest, everStepped: true }],
+    ]);
+  });
+
+  it("never bring the air back at orbit once it is stepped: every frame's union is over the calm line, at any scale", () => {
+    const calmMs = CALM_SHARE * floor.control.target.gpuBudgetMs;
+    const cheapest = Math.min(
+      ...Array.from({ length: 20 }, (_, n) => gpuTimeMs(macFrame("orbit", n, lowest, lowest))),
+    );
+    const [, orbit] = replayMac(["close", "orbit"], gpuTimeMs, 3_600);
+    expect([cheapest > calmMs, orbit?.airStepped]).toEqual([true, true]);
   });
 });

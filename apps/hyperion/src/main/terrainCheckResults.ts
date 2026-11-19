@@ -290,7 +290,11 @@ export interface TerrainPassFigures {
    * label summed, 0 in a frame without one; `null` with no such frame.
    */
   readonly gpuMs: DurationStats | null;
-  /** Its mean over the mean of those frames' GPU time, 0 to 1, or `null` with none timed. */
+  /**
+   * Its own time's mean (`InspectionTimingPass.ownMs`; lane fix-mac-gpu-time) over the mean of
+   * those frames' GPU time, the union of their passes' spans, 0 to 1, or `null` with none timed:
+   * the passes' shares sum to 1 where the spans overlap, as Metal's do, as on a serial timer.
+   */
   readonly shareOfGpu: number | null;
   /** The kernels its dispatches ran, each once; none for a render pass. */
   readonly kernels: ReadonlyArray<string>;
@@ -473,26 +477,28 @@ function countStats(counts: ReadonlyArray<number>): CountStats | null {
   };
 }
 
-/** Each of a phase's pass labels' GPU time, the dearest by its mean first. */
+/** Each of a phase's pass labels' GPU time, the dearest by its own time's mean first. */
 function passFigures(
   passes: ReadonlyArray<InspectionTimingPass>,
   frameGpuMs: ReadonlyArray<number>,
 ): ReadonlyArray<TerrainPassFigures> {
   const frameMeanMs = durationStats(frameGpuMs)?.meanMs ?? null;
   return passes
-    .map(({ label, ms: times, kernels }): TerrainPassFigures => {
-      const gpuMs = durationStats(times);
-      return {
+    .map(({ label, ms: times, ownMs, kernels }) => {
+      const ownMeanMs = durationStats(ownMs)?.meanMs ?? null;
+      const figures: TerrainPassFigures = {
         label,
-        gpuMs,
+        gpuMs: durationStats(times),
         shareOfGpu:
-          gpuMs === null || frameMeanMs === null || !(frameMeanMs > 0)
+          ownMeanMs === null || frameMeanMs === null || !(frameMeanMs > 0)
             ? null
-            : gpuMs.meanMs / frameMeanMs,
+            : ownMeanMs / frameMeanMs,
         kernels,
       };
+      return { figures, ownMeanMs: ownMeanMs ?? 0 };
     })
-    .toSorted((a, b) => (b.gpuMs?.meanMs ?? 0) - (a.gpuMs?.meanMs ?? 0));
+    .toSorted((a, b) => b.ownMeanMs - a.ownMeanMs)
+    .map(({ figures }) => figures);
 }
 
 function phaseFigures(record: TerrainCheckPhaseRecord, setting: SpikeSetting): TerrainPhaseFigures {

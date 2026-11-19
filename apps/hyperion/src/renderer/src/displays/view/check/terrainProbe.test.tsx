@@ -357,7 +357,7 @@ describe("the terrain probe's GPU time by pass (R14's Mac measurements)", () => 
     stop();
     expect([asked.frameGpuMs, asked.passes, unasked.passes]).toEqual([
       [2.5, 2.5],
-      [{ label: "view", ms: [2.5, 2.5], kernels: [], workgroups: [] }],
+      [{ label: "view", ms: [2.5, 2.5], ownMs: [2.5, 2.5], kernels: [], workgroups: [] }],
       null,
     ]);
   });

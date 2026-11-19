@@ -221,9 +221,20 @@ export interface DepthLayerTarget {
 export interface PassTimes {
   readonly frame: number;
   readonly timer: GpuTimer;
+  /** The resolve's passes, in the order they were encoded. */
   readonly passes: ReadonlyArray<{
     readonly label: string;
+    /** Its end's timestamp less its beginning's, ns: negative where the counter went back. */
     readonly ns: number;
+    /**
+     * Its beginning-of-pass timestamp, ns after the resolve's earliest valid stamp (lane
+     * fix-mac-gpu-time): with `endNs`, its span, by which passes that overlap, as Metal's do, are
+     * told apart (`passSpans.ts`). Both are 0 where either stamp was never written, which WebGPU
+     * resolves to 0.
+     */
+    readonly beginNs: number;
+    /** Its end-of-pass timestamp, ns after the resolve's earliest valid stamp. */
+    readonly endNs: number;
     /** Always `false` now: every pass is the adapter's own and carries its timestamps. */
     readonly bracketed: boolean;
   }>;

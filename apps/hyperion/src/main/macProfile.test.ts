@@ -578,6 +578,30 @@ describe("a lever's pair", () => {
     expect(text).toContain("## The height-worker sweep\n\nNot written yet.");
   });
 
+  it("lists a window's passes the dearest by their own time, each own median beside its span's where they differ (lane fix-mac-gpu-time)", () => {
+    // The composite's span holds the march encoded before it: 8.0 ms of span, 0.5 ms its own.
+    const orbit: ProfiledWindow = {
+      name: "orbit",
+      frame: { intervalMs: summary(16.7, 16.7), gpuMs: summary(17, 17) },
+      passes: [
+        { label: "atmosphere composite", medianMs: 8, ownMedianMs: 0.5, shareOfGpu: 0.5 / 17 },
+        { label: "atmosphere view", medianMs: 7.5, ownMedianMs: 7.5, shareOfGpu: 7.5 / 17 },
+        { label: "bodies", medianMs: 9, ownMedianMs: 9, shareOfGpu: 9 / 17 },
+      ],
+    };
+    const lines = macProfileSummaryLines({
+      machine: "Apple M5, 16 GiB",
+      tree: "e9966e0",
+      body: "41ffecb200000002.0400",
+      options: MAC_PROFILE_DEFAULTS,
+      kept: [keptAs(macProfileMatrix(MAC_PROFILE_DEFAULTS), "high-dpr1", [orbit])],
+      sweep: { table: null, runs: [], flown: true },
+    });
+    expect(lines.join("\n")).toContain(
+      "| bodies 9.0 (53%), atmosphere view 7.5 (44%), atmosphere composite 8.0, own 0.5 (3%) |",
+    );
+  });
+
   it("says the sweep was not run under --no-sweep, not that it is not written yet", () => {
     const text = macProfileSummaryLines({
       machine: "pod",

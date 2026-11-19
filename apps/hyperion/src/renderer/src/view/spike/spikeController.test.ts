@@ -11,6 +11,7 @@ import { TEST_SPIKE_LAUNCH } from "../../test/stubHyperionApi";
 import { goldenLevelTable } from "../../test/terrainFixtures";
 import type { PassTimes } from "../engine/types";
 import { planetGeometry } from "../terrain/planet";
+import { timedPass } from "../../test/passTimes";
 import { RECORD_SEED, recordProfile } from "./demandRecord";
 import { DESCENT_SEGMENTS, DescentProfile, landingSiteOf } from "./descentProfile";
 import { GpuCapture } from "./capture";
@@ -256,7 +257,7 @@ async function readRun(): Promise<
       listener({
         frame: n,
         timer: "full",
-        passes: [{ label: "terrain", ns: 2e6, bracketed: false }],
+        passes: [timedPass("terrain", 2e6)],
       });
     }
   };
@@ -321,7 +322,7 @@ describe("the spike's run control", () => {
       listener({
         frame: 4,
         timer: "full",
-        passes: [{ label: "terrain", ns: 2e6, bracketed: false }],
+        passes: [timedPass("terrain", 2e6)],
       });
     }
     await settle();

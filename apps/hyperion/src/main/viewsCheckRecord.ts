@@ -1305,8 +1305,9 @@ function times(value: unknown): ReadonlyArray<number> | null {
 }
 
 /**
- * One pass label's times over a profiled window: a label, its times, and, for a dispatched one, its
- * kernels' names and a workgroup count for each time; none of either for a render pass.
+ * One pass label's times over a profiled window: a label, its spans' times and its own times, one
+ * for each frame, and, for a dispatched one, its kernels' names and a workgroup count for each time;
+ * none of either for a render pass.
  */
 function timingPass(value: unknown): InspectionTimingPass | null {
   if (!isRecord(value)) {
@@ -1314,12 +1315,15 @@ function timingPass(value: unknown): InspectionTimingPass | null {
   }
   const { label } = value;
   const ms = times(value["ms"]);
+  const ownMs = times(value["ownMs"]);
   const kernels = strings(value["kernels"]);
   const workgroups = numbers(value["workgroups"]);
   if (
     typeof label !== "string" ||
     label.length === 0 ||
     ms === null ||
+    ownMs === null ||
+    ownMs.length !== ms.length ||
     kernels === null ||
     workgroups === null ||
     !workgroups.every(isCount) ||
@@ -1327,7 +1331,7 @@ function timingPass(value: unknown): InspectionTimingPass | null {
   ) {
     return null;
   }
-  return { label, ms, kernels, workgroups };
+  return { label, ms, ownMs, kernels, workgroups };
 }
 
 /** A count and its bytes, each a count. */

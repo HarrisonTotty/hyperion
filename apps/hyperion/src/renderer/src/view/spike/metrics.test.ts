@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { PassTimes } from "../engine/types";
 import { SETTINGS } from "../quality/qualitySetting";
+import { serialPasses } from "../../test/passTimes";
 import {
   type FrameSample,
   SpikeMetrics,
@@ -59,7 +60,7 @@ function times(frame: number, passes: ReadonlyArray<readonly [string, number]>):
   return {
     frame,
     timer: "full",
-    passes: passes.map(([label, ns]) => ({ label, ns, bracketed: false })),
+    passes: serialPasses(passes),
   };
 }
 

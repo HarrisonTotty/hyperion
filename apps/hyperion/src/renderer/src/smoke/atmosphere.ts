@@ -10690,7 +10690,13 @@ interface FarLimbFrameTimes {
 function farLimbFrameTimes(times: PassTimes): FarLimbFrameTimes | null {
   const views = times.passes.filter((pass) => pass.label === ATMOSPHERE_VIEW_PASS);
   const composites = times.passes.filter((pass) => pass.label === FAR_LIMB_TIMING_COMPOSITE_PASS);
-  const unread = { label: ATMOSPHERE_VIEW_PASS, ns: 0, bracketed: false };
+  const unread: PassTimes["passes"][number] = {
+    label: ATMOSPHERE_VIEW_PASS,
+    ns: 0,
+    beginNs: 0,
+    endNs: 0,
+    bracketed: false,
+  };
   const [skyView, aerial, ...rest] = views.length <= 2 ? [unread, unread, ...views] : views;
   const march = rest.slice(0, 2);
   const more = rest.slice(2);
