@@ -59,6 +59,7 @@ import type { QualitySetting } from "../quality/qualitySetting";
 import frameWgsl from "../shaders/frame.wgsl?raw";
 import { fromHalfBits, toHalfBits } from "../sky/half";
 import { CLOUD_NOISE_SIZE, CloudNoiseBuilder } from "./cloudNoise";
+import type { CloudLightInput } from "./cloudShadow";
 import { CLOUD_SHADOW_ROWS } from "./cloudShadowRows";
 import {
   CLOUD_OCTAVE_RATIO,
@@ -363,6 +364,12 @@ export interface CloudBodyGpu {
    */
   readonly shadowMap: TextureHandle;
   readonly shadowRows: BufferHandle;
+  /**
+   * Its layer's field as the CPU's tap reads it (`cloudShadow.ts`' `cloudLightAt`), the same rows'
+   * field: the sea's glare source dims its glint by it at the specular point (plan R11, R11.T7.c;
+   * `ocean/oceanPass.ts`' `OceanGlare`); absent, none dims it.
+   */
+  readonly reference?: CloudLightInput;
 }
 
 /** A body's state held across frames. */
@@ -415,6 +422,8 @@ export class CloudLayers {
   readonly #bodies = new Map<BodyIdHex, HeldBody>();
   #builder: CloudNoiseBuilder | null = new CloudNoiseBuilder();
   #noise: TextureHandle | null = null;
+  /** The noise tile's texels, 256 KiB, kept for each body's {@link CloudBodyGpu.reference}. */
+  #noiseTexels: Uint8Array | null = null;
   /** The shadow map that holds nothing and its rows, made with the noise tile. */
   #noShadow: { readonly map: TextureHandle; readonly rows: BufferHandle } | null = null;
 
@@ -472,6 +481,7 @@ export class CloudLayers {
     });
     this.#engine.writeTexture(noise, { x: 0, y: 0, z: 0 }, size, texels);
     this.#noise = noise;
+    this.#noiseTexels = texels;
     this.#builder = null;
     // The shadow map that holds nothing: a texel of the clear sky's factors, (1, 1, 0), and rows
     // of 0, which `cloudGround.wgsl` reads as the layer's tap everywhere.
@@ -506,8 +516,9 @@ export class CloudLayers {
    */
   frame(frame: CloudFrame): CloudBodyGpu | null {
     const noise = this.#noise;
+    const noiseTexels = this.#noiseTexels;
     const noShadow = this.#noShadow;
-    if (noise === null || noShadow === null) {
+    if (noise === null || noiseTexels === null || noShadow === null) {
       return null;
     }
     const held = this.#held(frame.id);
@@ -547,6 +558,14 @@ export class CloudLayers {
       texels: made.texels,
       shadowMap: noShadow.map,
       shadowRows: noShadow.rows,
+      reference: {
+        coverage: made.texels,
+        noise: noiseTexels,
+        params,
+        shell,
+        optics: frame.condensate,
+        datumRadiusM: frame.figure.equatorialRadiusM,
+      },
     };
   }
 
@@ -567,6 +586,7 @@ export class CloudLayers {
       this.#engine.releaseTexture(this.#noise);
       this.#noise = null;
     }
+    this.#noiseTexels = null;
     if (this.#noShadow !== null) {
       this.#engine.releaseTexture(this.#noShadow.map);
       this.#engine.releaseBuffer(this.#noShadow.rows);

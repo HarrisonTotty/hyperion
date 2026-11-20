@@ -804,48 +804,76 @@ describe("the photorealistic still renderer (R11.T10.b)", () => {
     renderer.dispose();
   });
 
-  it("draws a low view's clouds in its still at the high setting's passes, the volume from its first sample, no material or kernel made in a batch (R11.T10.e.3)", async () => {
-    const engine = await countingRenderEngine();
-    const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, 6.371e6);
-    const cloudyAt = (viewport: ViewSize, setting: QualitySetting): PhotorealFrame => ({
-      ...viewFrame(viewport),
-      setting,
-      meter: null,
-      time: { seconds: 1_000, nanos: 0 },
-      timeRate: 1,
-      atmospheres: [airOver(tables, viewport, EARTH_CLOUDS)],
-    });
-    // The view, on the low setting, has drawn its frame, its air's tables built.
-    const view = new PhotorealRenderer(engine, "view");
-    const low = cloudyAt(SIZE, "low");
-    await view.prepare(SIZE, "low", low.role, low.camera);
-    view.render(null, low);
-    const drawn: DrawnPhotorealFrame = {
-      ...drawnOf(low),
-      remake: (ask) => cloudyAt(ask.viewport, ask.setting),
+  it("draws a low view's clouds in its still at the high setting's passes: within the deck's reach the volume from its first sample, beyond it the layer, no material or kernel made in a batch (R11.T10.e.3, R11.T7.c)", async () => {
+    /**
+     * The first sample's passes of a still of a low view's cloudy body seen from `distanceM` of
+     * its centre, and the materials and kernels its batches made.
+     */
+    const stillOf = async (
+      distanceM: number,
+    ): Promise<{
+      readonly first: ReadonlyArray<string>;
+      readonly materials: number;
+      readonly kernels: number;
+    }> => {
+      const engine = await countingRenderEngine();
+      const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, 6.371e6);
+      const cloudyAt = (viewport: ViewSize, setting: QualitySetting): PhotorealFrame => {
+        const frame = viewFrame(viewport);
+        const air = airOver(tables, viewport, EARTH_CLOUDS);
+        return {
+          ...frame,
+          setting,
+          meter: null,
+          time: { seconds: 1_000, nanos: 0 },
+          timeRate: 1,
+          bodies: frame.bodies.map((body) => ({ ...body, centreM: vec3(0, 0, -distanceM) })),
+          atmospheres: [{ ...air, camera: { ...air.camera, positionM: vec3(0, 0, distanceM) } }],
+        };
+      };
+      // The view, on the low setting, has drawn its frame, its air's tables built.
+      const view = new PhotorealRenderer(engine, "view");
+      const low = cloudyAt(SIZE, "low");
+      await view.prepare(SIZE, "low", low.role, low.camera);
+      view.render(null, low);
+      const drawn: DrawnPhotorealFrame = {
+        ...drawnOf(low),
+        remake: (ask) => cloudyAt(ask.viewport, ask.setting),
+      };
+      const stills = new PhotorealStills();
+      stills.attach(viewOver(engine, () => drawn));
+      const renderer = stills.renderer(sceneOf(stills));
+      await renderer.prepare();
+      const made = { ...engine.counts };
+      const before = engine.targetFrames.length;
+      renderer.submit(0, 1);
+      const first = engine.targetFrames.slice(before).map((frame) => frame.label);
+      submitAll(renderer);
+      const counts = {
+        materials: engine.counts.materials - made.materials,
+        kernels: engine.counts.kernels - made.kernels,
+      };
+      renderer.dispose();
+      view.dispose();
+      tables.dispose();
+      return { first, ...counts };
     };
-    const stills = new PhotorealStills();
-    stills.attach(viewOver(engine, () => drawn));
-    const renderer = stills.renderer(sceneOf(stills));
-    await renderer.prepare();
-    const made = { ...engine.counts };
-    const before = engine.targetFrames.length;
-    renderer.submit(0, 1);
-    const first = engine.targetFrames.slice(before).map((frame) => frame.label);
-    submitAll(renderer);
-    const at = first.indexOf(CLOUD_VOLUME_PASS);
-    expect([
-      first.slice(at - 1, at + 3),
-      engine.counts.materials - made.materials,
-      engine.counts.kernels - made.kernels,
-    ]).toEqual([
+    // 4 km over the ground, within the deck's reach: the volume, its noises made at the still.
+    const near = await stillOf(6.371e6 + 4_000);
+    const at = near.first.indexOf(CLOUD_VOLUME_PASS);
+    expect([near.first.slice(at - 1, at + 3), near.materials, near.kernels]).toEqual([
       [ATMOSPHERE_COMPOSITE_PASS, CLOUD_VOLUME_PASS, CLOUD_RESOLVE_PASS, CLOUD_LAYER_PASS],
       0,
       0,
     ]);
-    renderer.dispose();
-    view.dispose();
-    tables.dispose();
+    // From 10⁵ km, past the volume's reach: the layer it has flattened into, the volume none.
+    const far = await stillOf(1e8);
+    expect([
+      far.first.includes(CLOUD_LAYER_PASS),
+      far.first.includes(CLOUD_VOLUME_PASS),
+      far.materials,
+      far.kernels,
+    ]).toEqual([true, false, 0, 0]);
   });
 
   it("orders its units as each sample's tiles, sample by sample, then its bloom, then its tone mapping (R11.T10.e.2)", async () => {

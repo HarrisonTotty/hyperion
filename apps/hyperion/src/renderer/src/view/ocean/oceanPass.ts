@@ -26,12 +26,18 @@
  *   `glareLineAir` over the sea-level spheroid (a lean, 2026-11-18: the medium's heights are then
  *   taken from the sea, not the datum, a sea level's shift of the air), formed in the body-fixed
  *   axes and kept while the camera, the source, the cap, the air and the map stand within
- *   {@link GLARE_HOLD} of where it was formed, its direction taken afresh each frame.
+ *   {@link GLARE_HOLD} of where it was formed, its direction taken afresh each frame. Beneath its
+ *   body's clouds the light down is dimmed too by their direct factor at the specular point, the
+ *   layer's CPU tap (`cloudShadow.ts`' `cloudLightAt`, plan R11, R11.T7.c), held to the light's
+ *   5% as it drifts: the volume's shadow map, the GPU's alone, is not read back (a lean,
+ *   2026-11-19), so under the volume the glare follows the layer's mean shadow, not each cell's.
  */
 import type { BodyIdHex } from "@hyperion/protocol";
 
 import { add, norm, normalise, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
 import type { AbsorberCurve } from "../atmosphere/absorbers";
+import type { CloudBodyGpu } from "../clouds/cloudLayer";
+import { type CloudLightInput, cloudLightAt } from "../clouds/cloudShadow";
 import type { AtmosphereCamera, SunState } from "../atmosphere/hillaire";
 import type { AtmosphereMedium } from "../atmosphere/medium";
 import type { DiscLight, DiscOccluder } from "../bodies/discShading";
@@ -61,6 +67,7 @@ import { oceanGlintGlare, specularPoint } from "./glint";
 import { oceanFarOpticsOf, type OceanSea } from "./oceanBody";
 import type { OceanFarOptics } from "./oceanFar";
 import { OCEAN_FAR_WGSL, packOceanFar } from "./oceanFarProbe";
+import { oceanCloudDrawBindings, oceanCloudMaterialSpec } from "./oceanClouds";
 import oceanPassWgsl from "./oceanPass.wgsl?raw";
 import oceanSharedWgsl from "./oceanShared.wgsl?raw";
 
@@ -133,6 +140,16 @@ export const OCEAN_FAR_PASS_MATERIAL: WgslMaterialSpec = {
   colourWrites: true,
   blend: "none",
 };
+
+/**
+ * The far sea's cloudy form (plan R11, R11.T7.c; `oceanClouds.ts`): each source's light at the sea's
+ * hit through its body's clouds, the volume's shadow map where it holds the place.
+ */
+export const OCEAN_FAR_CLOUD_PASS_MATERIAL: WgslMaterialSpec = oceanCloudMaterialSpec(
+  OCEAN_FAR_PASS_MATERIAL,
+  "hit.point",
+  "CLOUDED OCEAN",
+);
 
 /**
  * The share of its brightest source's light above which a sea's pixel is a lit body's in R07's
@@ -329,7 +346,8 @@ export function oceanDrawOptics(view: OceanDrawView): OceanFarOptics {
 
 /**
  * A sea's draw's uniforms, formed in `f64` and narrowed once: its camera and the view's axes in the
- * body-fixed ones, the datum and sea level, its two brightest sources pre-exposed, and its
+ * body-fixed ones, the datum and sea level, its two brightest sources pre-exposed, each light's w
+ * its source's angular radius, rad, the cloudy forms' footprint (`oceanClouds.ts`), and its
  * `OceanFar` with its light and cap pre-exposed too (`oceanPass.wgsl`'s `Draw`).
  *
  * @param basinsOnly - Whether the far sea draws its closed basins alone, the near sea drawing the
@@ -355,7 +373,7 @@ export function oceanPassUniforms(
     const [r, g, b] = sun.illuminanceLx;
     return [
       new Float32Array([d.x, d.y, d.z, sun.curveSlot ?? 0]),
-      new Float32Array([r * e, g * e, b * e, 0]),
+      new Float32Array([r * e, g * e, b * e, sun.angularRadiusRad]),
     ];
   };
   const [source0, sourceLight0] = source(0);
@@ -439,7 +457,8 @@ export function oceanPassDepth(
 
 /**
  * A sea's draw: the full-screen triangle with its uniforms, over its ocean map, its air's tables and
- * its eclipse rows ({@link packOceanEclipse}, written by the caller).
+ * its eclipse rows ({@link packOceanEclipse}, written by the caller), and for the cloudy form
+ * ({@link OCEAN_FAR_CLOUD_PASS_MATERIAL}) its body's `clouds` (`oceanClouds.ts`).
  */
 export function oceanPassDraw(
   triangle: MeshHandle,
@@ -448,14 +467,20 @@ export function oceanPassDraw(
   tables: SurfaceLightingTables,
   eclipseRows: BufferHandle,
   uniforms: Readonly<Record<string, Float32Array>>,
+  clouds: CloudBodyGpu | null = null,
 ): DrawItem {
+  const cloudy = clouds === null ? null : oceanCloudDrawBindings(clouds);
   return {
     mesh: triangle,
     material,
     offsetFromCameraM: new Float32Array(3),
     uniforms,
-    textures: { [OCEAN_MAP_TEXTURE]: oceanMap, ...surfaceLightingDrawTextures(tables) },
-    storageBuffers: { [OCEAN_ECLIPSE_BUFFER]: eclipseRows },
+    textures: {
+      [OCEAN_MAP_TEXTURE]: oceanMap,
+      ...surfaceLightingDrawTextures(tables),
+      ...cloudy?.textures,
+    },
+    storageBuffers: { [OCEAN_ECLIPSE_BUFFER]: eclipseRows, ...cloudy?.storageBuffers },
   };
 }
 
@@ -485,6 +510,10 @@ interface HeldGlare {
   readonly medium: AtmosphereMedium | null;
   readonly curves: ReadonlyArray<AbsorberCurve> | null;
   readonly eclipse: OceanEclipse | null;
+  /** The specular point its clouds' factor was read at, body-fixed, m; `null` for none. */
+  readonly specularM: Vec3 | null;
+  /** Its clouds' direct factor there, 1 without clouds (the module's remarks). */
+  readonly cloudDirect: number;
   /** The source, its direction as the body-fixed point it lies at; `null` for none. */
   readonly glare: {
     readonly pointM: Vec3;
@@ -544,6 +573,22 @@ function ontoSpheroid(
   };
 }
 
+/**
+ * The clouds' direct factor on `sun`'s light at `pointM` (from the body's centre, body-fixed, m):
+ * the layer's CPU tap there, 1 without clouds or a point.
+ */
+function cloudDirectAt(clouds: CloudLightInput | null, pointM: Vec3 | null, sun: SunState): number {
+  if (clouds === null || pointM === null) {
+    return 1;
+  }
+  return cloudLightAt(
+    clouds,
+    scale(pointM, 1 / clouds.datumRadiusM),
+    sun.directionBodyFixed,
+    sun.angularRadiusRad,
+  ).direct;
+}
+
 /** Rgb `a` times `b`, channel by channel. */
 function times(a: Rgb, b: Rgb): Rgb {
   return [a[0] * b[0], a[1] * b[1], a[2] * b[2]];
@@ -562,11 +607,14 @@ export class OceanGlare {
    *
    * @param toBodyFixed - Rotates the scene's axes into the body's body-fixed ones.
    * @param air - The body's air, where the frame draws it; none, the light reaches the sea whole.
+   * @param clouds - The body's clouds' CPU tap where its sea is drawn beneath them
+   *   (`CloudBodyGpu.reference`); none, no cloud dims the light.
    */
   sourceOf(
     view: OceanDrawView,
     toBodyFixed: Quaternion,
     air: OceanGlareAir | null,
+    clouds: CloudLightInput | null = null,
   ): GlareSource | null {
     const sun = view.suns[0];
     if (sun === undefined) {
@@ -587,7 +635,8 @@ export class OceanGlare {
       norm(sub(held.cameraM, cameraM)) > GLARE_HOLD.position * norm(cameraM) ||
       norm(sub(held.sun, sun.directionBodyFixed)) > GLARE_HOLD.directionRad ||
       !near(held.lightLx, lightLx, GLARE_HOLD.light) ||
-      !near(held.capCdM2, capCdM2, GLARE_HOLD.light)
+      !near(held.capCdM2, capCdM2, GLARE_HOLD.light) ||
+      !near(held.cloudDirect, cloudDirectAt(clouds, held.specularM, sun), GLARE_HOLD.light)
     ) {
       held = {
         cameraM,
@@ -598,7 +647,7 @@ export class OceanGlare {
         medium: air?.medium ?? null,
         curves: air?.curves ?? null,
         eclipse: view.eclipse,
-        glare: this.#form(view, air),
+        ...this.#form(view, air, clouds),
       };
       this.#held.set(body, held);
     }
@@ -623,13 +672,21 @@ export class OceanGlare {
     }
   }
 
-  /** The source in the body's axes, its light through the air both ways. */
-  #form(view: OceanDrawView, air: OceanGlareAir | null): HeldGlare["glare"] {
+  /**
+   * The source in the body's axes, its light through the air both ways and beneath its clouds,
+   * with the specular point and the clouds' factor there it was formed at.
+   */
+  #form(
+    view: OceanDrawView,
+    air: OceanGlareAir | null,
+    clouds: CloudLightInput | null,
+  ): Pick<HeldGlare, "glare" | "specularM" | "cloudDirect"> {
     const optics = oceanDrawOptics(view);
     const cameraM = view.camera.positionM;
     const sphere = specularPoint(cameraM, optics.sunDirection, optics.equatorialRadiusM);
-    if (sphere === null) {
-      return null;
+    const sun = view.suns[0];
+    if (sphere === null || sun === undefined) {
+      return { glare: null, specularM: null, cloudDirect: 1 };
     }
     // Taken down onto the sea-level spheroid along its radius, its normal the spheroid's there.
     const specular = ontoSpheroid(sphere.pointM, optics.equatorialRadiusM, optics.polarRadiusM);
@@ -664,21 +721,31 @@ export class OceanGlare {
         distanceM,
       ).transmittance;
     }
-    // The source's eclipse at the specular point, as the pass dims its light there.
-    down = times(down, oceanSourceVisible(view.eclipse, 0, specular.pointM));
+    // The source's eclipse at the specular point, as the pass dims its light there, and its
+    // clouds' direct factor there (R11.T7.c).
+    const cloudDirect = cloudDirectAt(clouds, specular.pointM, sun);
+    down = times(times(down, oceanSourceVisible(view.eclipse, 0, specular.pointM)), [
+      cloudDirect,
+      cloudDirect,
+      cloudDirect,
+    ]);
+    const formed = { specularM: specular.pointM, cloudDirect };
     if (!(Math.max(...down) > 0)) {
-      return null;
+      return { ...formed, glare: null };
     }
     const lit: OceanFarOptics = { ...optics, sunLux: times(optics.sunLux, down) };
     const glare = oceanGlintGlare(lit, view.sea.map.texels, cameraM, (d) => d);
     if (glare === null) {
-      return null;
+      return { ...formed, glare: null };
     }
     return {
-      pointM: specular.pointM,
-      angularRadiusRad: glare.angularRadiusRad,
-      excessLuminance: times(glare.excessLuminance, up),
-      luminance: times(glare.luminance, up),
+      ...formed,
+      glare: {
+        pointM: specular.pointM,
+        angularRadiusRad: glare.angularRadiusRad,
+        excessLuminance: times(glare.excessLuminance, up),
+        luminance: times(glare.luminance, up),
+      },
     };
   }
 }

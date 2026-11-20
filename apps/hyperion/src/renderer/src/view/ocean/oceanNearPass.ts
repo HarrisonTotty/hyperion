@@ -19,6 +19,7 @@
 import type { UniverseTime } from "@hyperion/protocol";
 
 import type { SurfaceLightingTables } from "../atmosphere/surfaceLighting";
+import type { CloudBodyGpu } from "../clouds/cloudLayer";
 import {
   surfaceLightingDrawTextures,
   surfaceLightingTextures,
@@ -32,6 +33,7 @@ import type {
   WgslMaterialSpec,
 } from "../engine/types";
 import frameWgsl from "../shaders/frame.wgsl?raw";
+import { oceanCloudDrawBindings, oceanCloudMaterialSpec } from "./oceanClouds";
 import oceanDepthCopyWgsl from "./oceanDepthCopy.wgsl?raw";
 import type { GerstnerSet } from "./gerstner";
 import oceanNearWgsl from "./oceanNear.wgsl?raw";
@@ -130,6 +132,16 @@ export const OCEAN_NEAR_PASS_MATERIAL: WgslMaterialSpec = {
   colourWrites: true,
   blend: "premultiplied",
 };
+
+/**
+ * The near sea's cloudy form (plan R11, R11.T7.c; `oceanClouds.ts`): each source's light at the
+ * wave's point through its body's clouds, the volume's shadow map where it holds the place.
+ */
+export const OCEAN_NEAR_CLOUD_PASS_MATERIAL: WgslMaterialSpec = oceanCloudMaterialSpec(
+  OCEAN_NEAR_PASS_MATERIAL,
+  "world",
+  "CLOUDED OCEAN NEAR",
+);
 
 const DEPTH_COPY_WGSL = `${frameWgsl}\n${oceanDepthCopyWgsl}`;
 
@@ -238,6 +250,11 @@ export interface OceanNearBindings {
   readonly sceneDepthBits: TextureHandle;
   /** The scene's colour copy, or the one-texel stand-in without refraction. */
   readonly sceneColour: TextureHandle;
+  /**
+   * Its body's clouds this frame, for the cloudy form ({@link OCEAN_NEAR_CLOUD_PASS_MATERIAL});
+   * absent for the plain form.
+   */
+  readonly clouds?: CloudBodyGpu;
 }
 
 /** A near sea's draw: the grid with its uniforms over its bindings. */
@@ -247,6 +264,7 @@ export function oceanNearDraw(
   bindings: OceanNearBindings,
   uniforms: Readonly<Record<string, Float32Array>>,
 ): DrawItem {
+  const cloudy = bindings.clouds === undefined ? null : oceanCloudDrawBindings(bindings.clouds);
   return {
     mesh: grid,
     material,
@@ -257,10 +275,12 @@ export function oceanNearDraw(
       ...surfaceLightingDrawTextures(bindings.tables),
       [OCEAN_NEAR_NAMES.sceneDepth]: bindings.sceneDepthBits,
       [OCEAN_NEAR_NAMES.sceneColour]: bindings.sceneColour,
+      ...cloudy?.textures,
     },
     storageBuffers: {
       [OCEAN_ECLIPSE_BUFFER]: bindings.eclipseRows,
       [OCEAN_NEAR_NAMES.waves]: bindings.waveRows,
+      ...cloudy?.storageBuffers,
     },
   };
 }

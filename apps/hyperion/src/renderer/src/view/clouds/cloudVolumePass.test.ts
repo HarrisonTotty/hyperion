@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { steppingClock } from "../../test/cloudFixtures";
 import { countingRenderEngine } from "../../test/countingRenderEngine";
 import { createAirlessTables } from "../atmosphere/surfaceLighting";
 import { lookAlong } from "../camera/quaternion";
@@ -94,15 +95,6 @@ class InstantNoiseWorker {
   }
 
   terminate(): void {}
-}
-
-/** A clock that moves a second each time it is read. */
-function steppingClock(): () => number {
-  let nowMs = 0;
-  return () => {
-    nowMs += 1_000;
-    return nowMs;
-  };
 }
 
 describe("the volume's correction table, made over frames (R11.T7.c)", () => {

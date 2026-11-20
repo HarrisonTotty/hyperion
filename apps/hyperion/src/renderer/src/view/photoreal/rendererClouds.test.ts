@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { vec3 } from "../../geometry/vec3";
+import { EARTH_CLOUDS, steppingClock } from "../../test/cloudFixtures";
 import { aHostDisc, aLitBody } from "../../test/litFixtures";
 import { countingRenderEngine } from "../../test/countingRenderEngine";
 import { ATMOSPHERE_COMPOSITE_PASS } from "../atmosphere/hillaire";
@@ -46,23 +47,6 @@ class RecordingView implements RenderView {
   }
   dispose(): void {}
 }
-
-/** An Earth-like body's clouds: a liquid water deck from 1 km to 3 km under 67% cover. */
-const EARTH_CLOUDS: BodyClouds = {
-  cloudFraction: 0.67,
-  surfacePressurePa: 101_325,
-  decks: [
-    {
-      condensate: "H2O",
-      phase: "liquid",
-      inCloudOpticalDepth550: 8,
-      coverage: 0.67,
-      baseAltitudeM: 1_000,
-      topAltitudeM: 3_000,
-      optics: null,
-    },
-  ],
-};
 
 function bodyAt(id: string, centreM: ReturnType<typeof vec3>): LitBodyInput {
   const lit = aLitBody();
@@ -115,18 +99,6 @@ function frameOf(
     overlay: null,
     meter: "average",
     atmospheres: [airOf(body, tables, clouds)],
-  };
-}
-
-/**
- * A clock that moves a second each time it is read, so that a frame makes one slice of the noise
- * tile, whatever the machine.
- */
-function steppingClock(): () => number {
-  let nowMs = 0;
-  return () => {
-    nowMs += 1_000;
-    return nowMs;
   };
 }
 

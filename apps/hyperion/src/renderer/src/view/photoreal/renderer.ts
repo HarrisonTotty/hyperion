@@ -140,6 +140,7 @@ import type {
   TexelRect,
   TextureHandle,
   ViewSize,
+  WgslMaterialSpec,
 } from "../engine/types";
 import type { KernelPair } from "../engine/kernels";
 import { lightsAt, type PlacedLight } from "../lighting/hostLights";
@@ -177,6 +178,7 @@ import {
 import {
   OCEAN_COPY_PASS_LABEL,
   OCEAN_DEPTH_COPY_MATERIAL,
+  OCEAN_NEAR_CLOUD_PASS_MATERIAL,
   OCEAN_NEAR_PASS_MATERIAL,
   oceanDepthCopyDraw,
   oceanNearDraw,
@@ -187,6 +189,7 @@ import {
 } from "../ocean/oceanNearPass";
 import {
   OCEAN_ECLIPSE_ROWS,
+  OCEAN_FAR_CLOUD_PASS_MATERIAL,
   OCEAN_FAR_PASS_MATERIAL,
   OCEAN_PASS_LABEL,
   type OceanDrawView,
@@ -710,6 +713,8 @@ interface NearSea {
   readonly ocean: FrameOcean;
   readonly tables: SurfaceLightingTables;
   readonly eclipseRows: BufferHandle;
+  /** Its body's clouds this frame, which its light takes (R11.T7.c); `null`, none. */
+  readonly clouds: CloudBodyGpu | null;
 }
 
 /** The renderer's GPU objects on one device. */
@@ -766,6 +771,13 @@ interface Resources {
    */
   readonly oceanNear: MaterialHandle | null;
   readonly oceanDepthCopy: MaterialHandle | null;
+  /**
+   * Both seas' cloudy forms (plan R11, R11.T7.c; `ocean/oceanClouds.ts`), a sea's beneath its
+   * body's clouds where the setting's `cloudShadows` is on, made with the rest; `null` where its
+   * compiler refused it, when the seas are drawn by their plain forms, without their clouds' light.
+   */
+  readonly oceanClouds: MaterialHandle | null;
+  readonly oceanNearClouds: MaterialHandle | null;
   /**
    * The near sea's copies of the scene (R11.T8.c), under `ocean`: its depth's bits, and with
    * refraction its colour; made at the first near frame, let go at the first with none.
@@ -1218,6 +1230,18 @@ export class PhotorealRenderer {
     let ocean: MaterialHandle | null;
     let oceanNear: MaterialHandle | null;
     let oceanDepthCopy: MaterialHandle | null;
+    let oceanClouds: MaterialHandle | null;
+    let oceanNearClouds: MaterialHandle | null;
+    const cloudyOcean = (spec: WgslMaterialSpec): Promise<MaterialHandle | null> =>
+      engine.createMaterialAsync(spec, ["rgba16float"], [triangle]).catch((error: unknown) => {
+        if (!lostDevice(error)) {
+          console.warn(
+            `the photorealistic view ${this.#name} draws its seas without their clouds:`,
+            error,
+          );
+        }
+        return null;
+      });
     try {
       [
         tonemap,
@@ -1232,6 +1256,8 @@ export class PhotorealRenderer {
         ocean,
         oceanNear,
         oceanDepthCopy,
+        oceanClouds,
+        oceanNearClouds,
       ] = await Promise.all([
         engine.createMaterialAsync(TONEMAP_MATERIAL, ["canvas-in-pass"], [triangle]),
         engine.createMaterialAsync(OVERLAY_SCENE_DEPTH_MATERIAL, ["canvas"], [triangle]),
@@ -1314,6 +1340,10 @@ export class PhotorealRenderer {
             );
             return null;
           }),
+        // A refused cloudy form leaves its seas their plain form's, without their clouds' light
+        // (plan R11, R11.T7.c).
+        cloudyOcean(OCEAN_FAR_CLOUD_PASS_MATERIAL),
+        cloudyOcean(OCEAN_NEAR_CLOUD_PASS_MATERIAL),
         // The rings' slabs' materials, mesh and tables (plan R11, R11.T9.c), made with the rest
         // rather than at a ring's first frame; `RingSlabs` holds them, releases them at a dispose,
         // and lets a making a restore or a dispose abandoned go as it ends. A refusal leaves the
@@ -1350,6 +1380,8 @@ export class PhotorealRenderer {
         ocean,
         oceanNear,
         oceanDepthCopy,
+        oceanClouds,
+        oceanNearClouds,
       ]) {
         if (material !== null) {
           engine.releaseMaterial(material);
@@ -1398,6 +1430,8 @@ export class PhotorealRenderer {
       airless: null,
       oceanNear,
       oceanDepthCopy,
+      oceanClouds,
+      oceanNearClouds,
       oceanCopies: null,
       oceanGrid: null,
       oceanNoColour: null,
@@ -2051,8 +2085,9 @@ export class PhotorealRenderer {
    * Draws each body's sea the frame holds (plan R11, R11.T8.b; `oceanPass.ts`) into the scene target
    * as the `ocean` pass, one draw a sea, over the opaque passes and before the `discs` pass and the
    * composites: a body drawn as a mesh or handed over (`drawnAsMesh`) whose sources the plan holds,
-   * lit through its air's tables where the frame draws them and the airless ones elsewhere; no pass
-   * where none is drawn, or where the material was refused.
+   * lit through its air's tables where the frame draws them and the airless ones elsewhere, and
+   * beneath its body's clouds by the cloudy forms where its ground takes their light (R11.T7.c); no
+   * pass where none is drawn, or where the material was refused.
    *
    * @remarks
    * A throw from a sea's draw, other than a lost device's, is logged and the sea left out of the
@@ -2169,21 +2204,35 @@ export class PhotorealRenderer {
               }
             : null;
           const nearState = nearView === null ? null : oceanNearState(nearView);
+          // Beneath its body's clouds, where the frame gives its ground their light (the setting's
+          // `cloudShadows`), its cloudy form: the volume's shadow map where the frame draws it, the
+          // layer's tap elsewhere (plan R11, R11.T7.c).
+          const clouds = lit.clouds ?? null;
+          const farClouds = clouds === null ? null : resources.oceanClouds;
           draws.push(
             oceanPassDraw(
               resources.triangle,
-              material,
+              farClouds ?? material,
               ocean.sea.map.texture,
               tables,
               rows,
               oceanPassUniforms(view, near),
+              farClouds === null ? null : clouds,
             ),
           );
           if (nearView !== null && nearState !== null) {
-            nearSeas.push({ view: nearView, state: nearState, ocean, tables, eclipseRows: rows });
+            nearSeas.push({
+              view: nearView,
+              state: nearState,
+              ocean,
+              tables,
+              eclipseRows: rows,
+              clouds,
+            });
           }
           kept.add(ocean.id);
           const brightest = suns[0];
+          // Its glint's glare beneath the clouds its cloudy form draws it under (R11.T7.c).
           const glare = this.#oceanGlare.sourceOf(
             view,
             ocean.toBodyFixed,
@@ -2193,6 +2242,7 @@ export class PhotorealRenderer {
                   medium: air.tables.medium,
                   curves: air.tables.curves[brightest.curveSlot ?? 0] ?? NO_CURVES,
                 },
+            farClouds === null ? null : (clouds?.reference ?? null),
           );
           if (glare !== null) {
             glares.push(glare);
@@ -2259,7 +2309,7 @@ export class PhotorealRenderer {
       });
       const grid = this.#oceanGridOf(resources, cellPx);
       const sceneColour = copies.colour?.colour ?? this.#oceanNoColour(resources);
-      for (const { view, state, ocean, tables, eclipseRows } of nearSeas) {
+      for (const { view, state, ocean, tables, eclipseRows, clouds } of nearSeas) {
         try {
           const waveRows = this.#oceanWaveRows(ocean.id);
           this.#engine.writeBuffer(
@@ -2267,10 +2317,12 @@ export class PhotorealRenderer {
             0,
             packOceanWaves(state.waves, state.set, state.peakWavelengthM),
           );
+          // Beneath its body's clouds, its cloudy form, as the far draw's (R11.T7.c).
+          const cloudy = clouds === null ? null : resources.oceanNearClouds;
           draws.push(
             oceanNearDraw(
               grid,
-              nearMaterial,
+              cloudy ?? nearMaterial,
               {
                 oceanMap: ocean.sea.map.texture,
                 tables,
@@ -2278,6 +2330,7 @@ export class PhotorealRenderer {
                 waveRows,
                 sceneDepthBits: copies.depthBits.colour,
                 sceneColour,
+                ...(cloudy === null || clouds === null ? {} : { clouds }),
               },
               oceanNearUniforms(view, state.frame),
             ),
@@ -3109,7 +3162,13 @@ export class PhotorealRenderer {
       this.#oceanEclipses.clear();
       this.#oceanWaves.clear();
       this.#releaseOceanCopies(resources);
-      for (const each of [resources.ocean, resources.oceanNear, resources.oceanDepthCopy]) {
+      for (const each of [
+        resources.ocean,
+        resources.oceanNear,
+        resources.oceanDepthCopy,
+        resources.oceanClouds,
+        resources.oceanNearClouds,
+      ]) {
         if (each !== null) {
           this.#engine.releaseMaterial(each);
         }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { add, norm, normalise, scale, sub, vec3 } from "../../geometry/vec3";
+import { uniformClouds } from "../../test/cloudFixtures";
 import { countingRenderEngine } from "../../test/countingRenderEngine";
 import { waterWorldAnswer, waterWorldHeader } from "../../test/oceanFixtures";
 import { R05_EARTH_REFERENCE } from "../atmosphere/earth";
@@ -138,7 +139,7 @@ describe("a sea's draw (R11.T8.b)", () => {
     expect(optics.equatorialRadiusM).toBe(6_378_137 - 120);
   });
 
-  it("packs its camera, the view's axes, the datum and its sources pre-exposed", async () => {
+  it("packs its camera, the view's axes, the datum and its sources pre-exposed, each with its angular radius", async () => {
     const view = await viewOf(vec3(1, 0, 0));
     const u = oceanPassUniforms(view);
     expect(Array.from(u["camera"] ?? [])).toEqual([0, 0, 3e7, 1]);
@@ -155,8 +156,9 @@ describe("a sea's draw (R11.T8.b)", () => {
       Array.from(new Float32Array([6_378_137, 6_356_752.314245, -120, 1])),
     );
     expect(Array.from(u["source0"] ?? [])).toEqual([1, 0, 0, 0]);
+    // Its light's w its angular radius, which the cloudy forms' tap takes (R11.T7.c).
     expect(Array.from(u["sourceLight0"] ?? [])).toEqual(
-      Array.from(new Float32Array([...SUN_LX.map((x) => x * 1e-4), 0])),
+      Array.from(new Float32Array([...SUN_LX.map((x) => x * 1e-4), 4.65e-3])),
     );
     // No second source: a dark one along +z.
     expect(Array.from(u["sourceLight1"] ?? [])).toEqual([0, 0, 0, 0]);
@@ -444,6 +446,28 @@ describe("a sea's glare source (R11.T8.b)", () => {
     const formed = glare.sourceOf(view, IDENTITY_QUATERNION, null);
     expect(formed).not.toBeNull();
     expect(formed?.luminance).not.toBe(first?.luminance);
+  });
+
+  it("dims its light by its clouds' direct share at the specular point, formed again as they clear (R11.T7.c)", async () => {
+    const view = await viewOf(vec3(1, 0, 1), 1e-2);
+    const [a, c] = [6_378_137, 6_356_752.314245];
+    const bare = new OceanGlare().sourceOf(view, IDENTITY_QUATERNION, null);
+    expect(bare).not.toBeNull();
+    // A clear sky's clouds dim nothing.
+    const glare = new OceanGlare();
+    const clear = glare.sourceOf(view, IDENTITY_QUATERNION, null, uniformClouds(0, a, c));
+    expect(clear?.luminance).toEqual(bare?.luminance);
+    expect(clear?.excessLuminance).toEqual(bare?.excessLuminance);
+    // Held while they stand, though the frame names them afresh.
+    expect(glare.sourceOf(view, IDENTITY_QUATERNION, null, uniformClouds(0, a, c))?.luminance).toBe(
+      clear?.luminance,
+    );
+    // A whole τ̄ 8 deck lets under 10⁻⁴ of the beam through: the glint stays under the cap.
+    expect(glare.sourceOf(view, IDENTITY_QUATERNION, null, uniformClouds(1, a, c))).toBeNull();
+    // Formed again once they clear.
+    expect(
+      glare.sourceOf(view, IDENTITY_QUATERNION, null, uniformClouds(0, a, c))?.luminance,
+    ).toEqual(bare?.luminance);
   });
 
   it("is none where the specular point lies in a moon's umbra", async () => {

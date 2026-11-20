@@ -1,16 +1,20 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { vec3 } from "../../geometry/vec3";
+import { EARTH_CLOUDS, steppingClock } from "../../test/cloudFixtures";
 import { countingRenderEngine } from "../../test/countingRenderEngine";
 import { aHostDisc, aLitBody } from "../../test/litFixtures";
 import { waterWorldAnswer, waterWorldHeader } from "../../test/oceanFixtures";
 import { R05_EARTH_REFERENCE } from "../atmosphere/earth";
 import { AtmosphereTables } from "../atmosphere/tables";
 import type { LitBodyInput } from "../bodies/draw";
+import { CLOUD_TEXTURES } from "../clouds/cloudLayer";
+import { CLOUD_SHADOW_PASS } from "../clouds/cloudShadowMap";
+import type { BodyClouds } from "../clouds/condensates";
 import { sphereFootprint } from "../bodies/regime";
 import { IDENTITY_QUATERNION } from "../camera/quaternion";
 import { IDENTITY_ROTATION } from "../coords/rotation";
-import type { FrameSubmission, RenderView } from "../engine/types";
+import type { DrawItem, FrameSubmission, RenderView } from "../engine/types";
 import { oceanSeaOf } from "../ocean/oceanBody";
 import { oceanMapTextureSpec, packOceanTexels } from "../ocean/oceanMap";
 import { oceanMaskOf } from "../ocean/oceanMask";
@@ -489,5 +493,119 @@ describe("the photorealistic renderer's near sea (R11.T8.c)", () => {
     expect(names(meshes.mock.calls)).toContain("test view ocean grid");
     expect(names(buffers.mock.calls)).toContain(`test view ocean waves ${EARTH}`);
     expect(names(textures.mock.calls)).toContain("test view ocean: no colour");
+  });
+});
+
+describe("the photorealistic renderer's sea beneath its clouds (R11.T7.c)", () => {
+  /** Both seas' cloudy forms' names. */
+  const CLOUDY_SEAS: ReadonlyArray<string> = ["ocean far pass clouds", "ocean near pass clouds"];
+
+  /**
+   * The ocean pass's draws of the planet's sea seen from `heightM` over it on `setting`, under its
+   * air and `clouds`, its clouds' tile and the volume's noises made at once, and the frame's labels.
+   */
+  async function seaBeneath(
+    clouds: BodyClouds | null,
+    setting: "high" | "low",
+    heightM: number,
+    refused = false,
+  ): Promise<{
+    readonly labels: ReadonlyArray<string>;
+    readonly draws: ReadonlyArray<DrawItem>;
+  }> {
+    const engine = await countingRenderEngine();
+    if (refused) {
+      engine.failMaterials((name) => CLOUDY_SEAS.includes(name));
+    }
+    const view = new RecordingView();
+    const renderer = new PhotorealRenderer(engine, "test view", { nowMs: steppingClock() });
+    await renderer.prepare(VIEWPORT, setting, "eye", {
+      orientation: IDENTITY_QUATERNION,
+      fovXRad: Math.PI / 3,
+    });
+    const planet = planetAt(vec3(0, 0, -(6.371e6 - 120 + heightM)));
+    const ocean = seaOf(engine, planet);
+    const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, 6.371e6);
+    const air: FrameAtmosphere = {
+      id: EARTH,
+      tables,
+      camera: ocean.camera,
+      toBodyFixed: IDENTITY_QUATERNION,
+      clouds,
+    };
+    const frame: PhotorealFrame = {
+      ...frameOf(planet, ocean),
+      setting,
+      time: { seconds: 1_000, nanos: 0 },
+      timeRate: 1,
+      atmospheres: [air],
+    };
+    renderer.prepareClouds(frame.atmospheres);
+    renderer.render(view, frame);
+    const labels = labelsOf(engine);
+    const draws = engine.targetFrames[labels.indexOf(OCEAN_PASS_LABEL)]?.draws ?? [];
+    renderer.dispose();
+    tables.dispose();
+    return { labels, draws };
+  }
+
+  it("takes a clouded sea's sun through the volume's shadow map on high, made before the sea, far and near", async () => {
+    const { labels, draws } = await seaBeneath(EARTH_CLOUDS, "high", 4_000);
+    expect(labels.indexOf(CLOUD_SHADOW_PASS)).toBeGreaterThanOrEqual(0);
+    expect(labels.indexOf(CLOUD_SHADOW_PASS)).toBeLessThan(labels.indexOf(OCEAN_PASS_LABEL));
+    expect(draws.map((draw) => draw.material.name)).toEqual([
+      "ocean far pass clouds",
+      "ocean near pass clouds",
+    ]);
+    for (const draw of draws) {
+      // The map the volume's shadow pass draws, and its rows, where the sun's light is read.
+      expect(draw.textures[CLOUD_TEXTURES.shadowMap]?.name).toBe("test view:cloud shadow colour");
+      expect(draw.storageBuffers?.[CLOUD_TEXTURES.shadowRows]?.name).toBe(
+        "test view cloud shadow rows",
+      );
+      expect(draw.textures[CLOUD_TEXTURES.coverage]).toBeDefined();
+      expect(draw.textures[CLOUD_TEXTURES.noise]).toBeDefined();
+      expect(draw.storageBuffers?.[CLOUD_TEXTURES.layer]).toBeDefined();
+      // The Sun's angular radius, the tap's footprint, beside its light.
+      expect(draw.uniforms["sourceLight0"]?.[3]).toBeCloseTo(4.65e-3, 4);
+    }
+  });
+
+  it("takes a clouded sea's sun through the layer's tap where the frame draws no volume: on low", async () => {
+    const { labels, draws } = await seaBeneath(EARTH_CLOUDS, "low", 4_000);
+    expect(labels).not.toContain(CLOUD_SHADOW_PASS);
+    expect(draws[0]?.material.name).toBe("ocean far pass clouds");
+    expect(draws[0]?.textures[CLOUD_TEXTURES.shadowMap]?.name).toBe("test view no cloud shadow");
+  });
+
+  it("draws a sea whose body has no clouds by the plain forms, which bind none", async () => {
+    const { draws } = await seaBeneath(null, "high", 4_000);
+    expect(draws.map((draw) => draw.material.name)).toEqual(["ocean far pass", "ocean near pass"]);
+    for (const draw of draws) {
+      expect(draw.textures[CLOUD_TEXTURES.shadowMap]).toBeUndefined();
+      expect(draw.storageBuffers?.[CLOUD_TEXTURES.layer]).toBeUndefined();
+    }
+  });
+
+  it("draws a clouded sea by the plain forms where its cloudy forms are refused, with a warning", async () => {
+    const warned = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const { draws } = await seaBeneath(EARTH_CLOUDS, "high", 4_000, true);
+    expect(draws.map((draw) => draw.material.name)).toEqual(["ocean far pass", "ocean near pass"]);
+    for (const draw of draws) {
+      expect(draw.textures[CLOUD_TEXTURES.shadowMap]).toBeUndefined();
+      expect(draw.storageBuffers?.[CLOUD_TEXTURES.shadowRows]).toBeUndefined();
+    }
+    expect(
+      warned.mock.calls.filter(([message]) =>
+        String(message).includes("draws its seas without their clouds"),
+      ),
+    ).toHaveLength(2);
+  });
+
+  it("releases both seas' cloudy forms with the view", async () => {
+    const { engine, renderer } = await preparedRenderer();
+    const materials = vi.spyOn(engine, "releaseMaterial");
+    renderer.dispose();
+    expect(names(materials.mock.calls)).toEqual(expect.arrayContaining([...CLOUDY_SEAS]));
   });
 });

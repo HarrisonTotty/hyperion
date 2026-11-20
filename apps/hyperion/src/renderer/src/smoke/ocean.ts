@@ -30,6 +30,17 @@
  */
 import { add, cross, dot, norm, normalise, scale, sub, type Vec3, vec3 } from "../geometry/vec3";
 import { createAirlessTables } from "../view/atmosphere/surfaceLighting";
+import { type CloudBodyGpu, CLOUD_LAYER_ROWS } from "../view/clouds/cloudLayer";
+import { cloudMapFrameOf } from "../view/clouds/cloudMap";
+import { CLEAR_GROUND, type CloudGroundLight } from "../view/clouds/cloudShadow";
+import {
+  type CloudShadowFrame,
+  cloudGroundLightAt,
+  packCloudShadow,
+  type ShadowLevelRead,
+} from "../view/clouds/cloudShadowMap";
+import { oceanCloudedLight } from "../view/ocean/oceanClouds";
+import { toHalfBits } from "../view/sky/half";
 import { DISC_ANNULI_HIGH } from "../view/lighting/annuli";
 import { SUN_RADIUS_M } from "../view/lighting/hostDisc";
 import { hostAnnuli } from "../view/lighting/hostLights";
@@ -97,6 +108,7 @@ import { type OceanMask, oceanMaskOf } from "../view/ocean/oceanMask";
 import { type OceanSea, STANDARD_GRAVITY_MPS2 } from "../view/ocean/oceanBody";
 import {
   OCEAN_ECLIPSE_ROWS,
+  OCEAN_FAR_CLOUD_PASS_MATERIAL,
   OCEAN_FAR_PASS_MATERIAL,
   OCEAN_LIT_SHARE,
   type OceanDrawView,
@@ -709,6 +721,219 @@ export async function checkOceanPass(engine: RenderEngine, checks: Checks): Prom
     engine.releaseMesh(triangle);
     engine.releaseTexture(airless.body);
     engine.releaseTexture(oceanMap);
+  }
+}
+
+/** The cloud check's camera's height over the sea, m: level 1 of the shadow map some 20 px across. */
+const CLOUD_CHECK_HEIGHT_M = 200_000;
+
+/**
+ * The cloud check's shadow: what the volume's map holds wherever it holds the sea, a share of the
+ * beam scattered down among it, which the airless tables' sky of none leaves the sky's alone.
+ */
+const CLOUD_CHECK_SHADOW: CloudGroundLight = { direct: 0.25, sky: 1, diffuse: 0.2 };
+
+/**
+ * R11.T7.c: the far sea's cloudy form dims each source's light by the volume's shadow map where it
+ * holds the sea, and leaves the clear sea's light off it, as its twin does: the sea from 200 km over
+ * +x, its clouds' layer below the sea, so that its tap is the clear sky's, and a shadow map about
+ * the camera's nadir that holds {@link CLOUD_CHECK_SHADOW} on both its levels.
+ */
+export async function checkOceanCloudShadow(engine: RenderEngine, checks: Checks): Promise<void> {
+  const world = oceanWorld();
+  const side = world.texels.faceTexels;
+  const oceanMap = engine.createTexture({
+    name: "smoke ocean clouds map",
+    size: { width: side, height: side, depthOrArrayLayers: 6 },
+    dimension: "2d",
+    format: OCEAN_MAP_FORMAT,
+    mips: 1,
+    usage: TEXTURE_USAGE.TEXTURE_BINDING | TEXTURE_USAGE.COPY_DST,
+    category: "ocean",
+  });
+  engine.writeTexture(
+    oceanMap,
+    { x: 0, y: 0, z: 0 },
+    { width: side, height: side, depthOrArrayLayers: 6 },
+    world.texels.data,
+  );
+  const airless = createAirlessTables(engine, "smoke ocean clouds: no air");
+  const target = engine.createRenderTarget({
+    name: "smoke ocean clouds",
+    size: { widthPx: PASS_SIDE_PX, heightPx: PASS_SIDE_PX },
+    format: "rgba16float",
+    mips: 1,
+    depth: true,
+    category: "render-targets",
+  });
+  const material = engine.createMaterial(OCEAN_FAR_CLOUD_PASS_MATERIAL);
+  const triangle = fullScreenMesh(engine, "smoke ocean clouds triangle");
+  const passed = passView({ ...world, texture: oceanMap });
+  const view: OceanDrawView = {
+    ...passed,
+    camera: { ...passed.camera, positionM: vec3(R + CLOUD_CHECK_HEIGHT_M, 0, 0) },
+    eclipse: null,
+  };
+  const sun = view.suns[0]?.directionBodyFixed ?? PASS_SUN;
+  const shadow: CloudShadowFrame = {
+    map: cloudMapFrameOf(vec3(1, 0, 0), view.camera.positionM, R),
+    sun,
+    datumRadiusM: R,
+    axisRatio: 1,
+    deck: { baseM: 1_000, topM: 3_000 },
+  };
+  const buffer = (name: string, data: Float32Array<ArrayBuffer>): BufferHandle => {
+    const made = engine.createBuffer({
+      name,
+      bytes: data.byteLength,
+      usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST,
+      category: "clouds",
+    });
+    engine.writeBuffer(made, 0, data);
+    return made;
+  };
+  const texture = (
+    name: string,
+    format: "rgba16float" | "r8unorm",
+    dimension: "2d" | "3d",
+    texels: Uint16Array<ArrayBuffer> | Uint8Array<ArrayBuffer>,
+  ): TextureHandle => {
+    const size = { width: 1, height: 1, depthOrArrayLayers: 1 };
+    const made = engine.createTexture({
+      name,
+      size,
+      dimension,
+      format,
+      mips: 1,
+      usage: TEXTURE_USAGE.TEXTURE_BINDING | TEXTURE_USAGE.COPY_DST,
+      category: "clouds",
+    });
+    engine.writeTexture(made, { x: 0, y: 0, z: 0 }, size, texels);
+    return made;
+  };
+  // The layer's shell half the datum's radius, below the sea, so that its tap is (1, 1, 0) and its
+  // field never read; its datum radius R.
+  const layerRows = new Float32Array(4 * CLOUD_LAYER_ROWS);
+  layerRows.set([0.5 * R, 0.5 * R, 0, 0], 0);
+  layerRows.set([0, R, 0, 0], 12);
+  const s = CLOUD_CHECK_SHADOW;
+  const clouds: CloudBodyGpu = {
+    layer: buffer("smoke ocean clouds rows", layerRows),
+    coverage: texture(
+      "smoke ocean clouds coverage",
+      "rgba16float",
+      "2d",
+      Uint16Array.from([0, 0, 0, 0], (v) => toHalfBits(v)),
+    ),
+    noise: texture("smoke ocean clouds noise", "r8unorm", "3d", new Uint8Array(1)),
+    // One texel of the shadow, which every read of the map's two levels samples alike.
+    shadowMap: texture(
+      "smoke ocean clouds shadow map",
+      "rgba16float",
+      "2d",
+      Uint16Array.from([s.direct, s.sky, s.diffuse, 1], (v) => toHalfBits(v)),
+    ),
+    shadowRows: buffer(
+      "smoke ocean clouds shadow rows",
+      Float32Array.from(packCloudShadow(shadow)),
+    ),
+  };
+  const eclipseRows = buffer("smoke ocean clouds eclipse", packOceanEclipse(null));
+  try {
+    target.render(
+      frameOf("smoke ocean clouds", [
+        oceanPassDraw(
+          triangle,
+          material,
+          oceanMap,
+          airless,
+          eclipseRows,
+          oceanPassUniforms(view),
+          clouds,
+        ),
+      ]),
+    );
+    const sea = halfTexels(await engine.readTexture(target.colour));
+    // Each pixel's twin: the plain sea's, its source's light through the cloud's factors at the
+    // hit (`oceanCloudedLight`); through the airless tables the sky's light is the cloud's alone.
+    const e = view.exposureScale;
+    const light = view.suns[0]?.illuminanceLx ?? [0, 0, 0];
+    const optics = onProbeInputs({
+      ...oceanDrawOptics(view),
+      glintCapCdM2: view.thresholdPreExposed,
+      sunLux: [light[0] * e, light[1] * e, light[2] * e],
+      skyLux: [0, 0, 0],
+    });
+    const f = Math.fround;
+    const o = view.camera.positionM;
+    const origin = vec3(f(o.x), f(o.y), f(o.z));
+    const size = { widthPx: PASS_SIDE_PX, heightPx: PASS_SIDE_PX };
+    const read: ShadowLevelRead = () => s;
+    let shaded = 0;
+    let clear = 0;
+    let unlike = 0;
+    let dimmer = 0;
+    let first: string | null = null;
+    for (let p = 0; p < PASS_SIDE_PX * PASS_SIDE_PX; p += 1) {
+      const ray = oceanPassRay(
+        p % PASS_SIDE_PX,
+        Math.floor(p / PASS_SIDE_PX),
+        size,
+        projection(1),
+        view.camera.orientation,
+      );
+      const d = ray.direction;
+      const direction = vec3(f(d.x), f(d.y), f(d.z));
+      const plain = oceanFarSample(optics, view.sea.map.texels, origin, direction);
+      if (plain === null) {
+        continue;
+      }
+      const cloud = cloudGroundLightAt(shadow, plain.hit.point, sun, CLEAR_GROUND, read);
+      const lit = oceanCloudedLight(optics, cloud, dot(plain.hit.normal, sun));
+      const twin = oceanFarSample(
+        { ...optics, sunLux: lit.sunLux, skyLux: lit.skyLux },
+        view.sea.map.texels,
+        origin,
+        direction,
+      );
+      const expected = twin?.light.radiance ?? [0, 0, 0];
+      const brightest = Math.max(1e-30, ...plain.light.radiance);
+      const off = [0, 1, 2].some(
+        (k) =>
+          !(
+            Math.abs((sea[4 * p + k] ?? Number.NaN) - (expected[k] ?? 0)) <=
+            2e-3 * brightest + 2e-3 * (expected[k] ?? 0)
+          ),
+      );
+      if (off) {
+        unlike += 1;
+        first ??= `pixel ${p}: (${[0, 1, 2].map((k) => sea[4 * p + k]).join(", ")}) against (${expected.join(", ")}), the cloud's direct ${cloud.direct}`;
+      }
+      if (cloud.direct <= s.direct + 1e-6) {
+        shaded += 1;
+        dimmer += (sea[4 * p + 1] ?? Number.NaN) < plain.light.radiance[1] ? 1 : 0;
+      } else if (cloud.direct >= 1 - 1e-6) {
+        clear += 1;
+      }
+    }
+    const pixels = PASS_SIDE_PX * PASS_SIDE_PX;
+    checks.check(
+      "R11.T7.c the sea's cloudy form dims its sun's light where the volume's shadow map holds the sea, as its twin does",
+      shaded > 20 && dimmer === shaded && clear > 20 && unlike <= PASS_EDGE_SHARE * pixels,
+      `${shaded} pixels under the map's shadow, ${dimmer} of them dimmer than the plain sea, ${clear} off the map, ${unlike} unlike the twin${first === null ? "" : `; first ${first}`}`,
+    );
+  } finally {
+    target.dispose();
+    engine.releaseMaterial(material);
+    engine.releaseMesh(triangle);
+    engine.releaseTexture(airless.body);
+    engine.releaseTexture(oceanMap);
+    engine.releaseBuffer(eclipseRows);
+    engine.releaseBuffer(clouds.layer);
+    engine.releaseBuffer(clouds.shadowRows);
+    engine.releaseTexture(clouds.coverage);
+    engine.releaseTexture(clouds.noise);
+    engine.releaseTexture(clouds.shadowMap);
   }
 }
 

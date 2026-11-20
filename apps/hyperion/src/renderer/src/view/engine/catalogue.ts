@@ -72,8 +72,12 @@ import { CLOUD_PROBE_MATERIAL } from "../clouds/cloudProbe";
 import { CLOUD_VOLUME_MATERIALS } from "../clouds/cloudVolumePass";
 import { TERRAIN_LIT_CLOUD_MATERIALS } from "../terrain/cloudLight";
 import { OCEAN_FAR_PROBE } from "../ocean/oceanFarProbe";
-import { OCEAN_FAR_PASS_MATERIAL } from "../ocean/oceanPass";
-import { OCEAN_DEPTH_COPY_MATERIAL, OCEAN_NEAR_PASS_MATERIAL } from "../ocean/oceanNearPass";
+import { OCEAN_FAR_CLOUD_PASS_MATERIAL, OCEAN_FAR_PASS_MATERIAL } from "../ocean/oceanPass";
+import {
+  OCEAN_DEPTH_COPY_MATERIAL,
+  OCEAN_NEAR_CLOUD_PASS_MATERIAL,
+  OCEAN_NEAR_PASS_MATERIAL,
+} from "../ocean/oceanNearPass";
 import { RING_PARTICLE_MATERIAL, RING_PARTICLE_PLACE_KERNEL } from "../rings/ringParticles";
 import { RING_SLAB_MATERIALS } from "../rings/ringSlab";
 import {
@@ -689,9 +693,10 @@ export const MARCH_TABLE_ONLY_ENTRIES: ReadonlyArray<CatalogueEntry> = MARCH_TAB
 /**
  * Plan R11's ocean (R11.T8.b to T8.d): `oceanFar.wgsl`, the far ocean's library, inside its probe
  * kernel, as R07's lit-body library is held, the `ocean` pass's far sea (`oceanPass.wgsl`), which
- * draws it, its near sea (`oceanNear.wgsl`, with the shoreline's library, `shoreline.wgsl`) and the
- * scene's depth copy the near sea reads. The smoke page compiles them in part 27 with their checks
- * (`smoke/ocean.ts`), not in part 1, for that part's watchdog.
+ * draws it, its near sea (`oceanNear.wgsl`, with the shoreline's library, `shoreline.wgsl`), the
+ * scene's depth copy the near sea reads, and both seas' cloudy forms (R11.T7.c). The smoke page
+ * compiles them in part 27 with their checks (`smoke/ocean.ts`), not in part 1, for that part's
+ * watchdog.
  */
 export const OCEAN_ENTRIES: ReadonlyArray<CatalogueEntry> = [
   { kind: "compute", spec: OCEAN_FAR_PROBE },
@@ -699,6 +704,9 @@ export const OCEAN_ENTRIES: ReadonlyArray<CatalogueEntry> = [
   // R11.T8.c's near sea and the copy of the scene's depth it reads.
   { kind: "material", spec: OCEAN_NEAR_PASS_MATERIAL },
   { kind: "material", spec: OCEAN_DEPTH_COPY_MATERIAL, targets: ["r32uint"] },
+  // Both seas' cloudy forms, lit beneath their body's clouds (R11.T7.c, `ocean/oceanClouds.ts`).
+  { kind: "material", spec: OCEAN_FAR_CLOUD_PASS_MATERIAL },
+  { kind: "material", spec: OCEAN_NEAR_CLOUD_PASS_MATERIAL },
 ];
 
 /**

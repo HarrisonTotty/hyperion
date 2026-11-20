@@ -202,6 +202,7 @@ import { checkHeightWorker } from "./heightWorker";
 import { checkHistogram } from "./histogram";
 import {
   captureCoast,
+  checkOceanCloudShadow,
   checkOceanFar,
   checkOceanNear,
   checkOceanPass,
@@ -729,6 +730,9 @@ async function run(
   );
   await group(27, "R11.T8.b the far ocean against its twin", () => checkOceanFar(engine, checks));
   await group(27, "R11.T8.b the ocean pass against its twin", () => checkOceanPass(engine, checks));
+  await group(27, "R11.T7.c the sea beneath the clouds' shadow map against its twin", () =>
+    checkOceanCloudShadow(engine, checks),
+  );
   await group(27, "R11.T8.c the near sea against its twin", () => checkOceanNear(engine, checks));
   await group(27, "R11.T8.d the shoreline against its twin", () => checkOceanShore(engine, checks));
   // R08.T15.a.2's deck's marches, in part 14 with its twins, first.

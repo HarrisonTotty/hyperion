@@ -2,8 +2,8 @@
 // volume's shadow map (`cloudShadowMap.wgsl`) where it holds the place, blended to the layer's own
 // tap (`cloudShadow.wgsl`'s `terrain_cloud_light`) at its edge and wherever it holds nothing: a
 // second source, the low setting, a frame that draws no volume. The twin of `clouds/cloudShadowMap.ts`'
-// `cloudGroundLightAt`. Any pass that lights a surface under the clouds composes it, the terrain's
-// cloudy forms (`terrain/cloudLight.ts`) first, the sea's to come.
+// `cloudGroundLightAt`. Any pass that lights a surface under the clouds composes it: the terrain's
+// cloudy forms (`terrain/cloudLight.ts`) and the sea's (`ocean/oceanClouds.ts`).
 //
 // Composed after `cloudShadow.wgsl` (and so `preciseTrig.wgsl`, `cloudField.wgsl` and
 // `cloudOptics.wgsl`, with `cloudField.wgsl`'s bindings); its includer declares besides:

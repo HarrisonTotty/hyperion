@@ -41,7 +41,8 @@ struct Draw {
   datum : vec4f,
   // Each source: xyz its unit direction, body-fixed; w its light slot.
   source0 : vec4f,
-  // Its illuminance face-on per channel times the frame's pre-exposure, lx.
+  // Its illuminance face-on per channel times the frame's pre-exposure, lx; w its angular radius,
+  // rad, which the cloudy form's clouds take (`oceanClouds.ts`).
   sourceLight0 : vec4f,
   source1 : vec4f,
   sourceLight1 : vec4f,
