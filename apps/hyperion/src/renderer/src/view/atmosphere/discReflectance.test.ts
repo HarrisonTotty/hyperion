@@ -199,13 +199,15 @@ function digestOf(source: string): string {
  * disc's edges weighted out by its record's row 46's w, 0 as before for every other record, and the
  * terrain's cells' set unshaped. Every one re-pinned by R08.T15.b.2's route's horizon read beneath a
  * deck (`belowDeck.wgsl`'s belowDeckTravelPlace), which none of them calls: their arithmetic is as
- * before.
+ * before. Every one re-pinned again by R11.T10.e.2's tiled stills: each composes `frame.wgsl`, whose
+ * Frame gains the tile's origin, 0 for every view's frame, and the disc's and the figure's pixels and
+ * rays take M's off-axis terms, 0 for a frame's on-axis projection, so every value is as before.
  */
 const PLAIN_DIGESTS: ReadonlyArray<readonly [string, string, string]> = [
-  ["the disc's interior", BODY_DISC_MATERIALS.interior.fragmentWgsl, "3543964e362732f1"],
-  ["the disc's limb", BODY_DISC_MATERIALS.limb.fragmentWgsl, "3543964e362732f1"],
-  ["the mesh regime's figure", SMOOTH_MESH_MATERIAL.fragmentWgsl, "7ea3c7e32531bb55"],
-  ["the disc cells", BODY_DISC_CELLS_KERNEL.reference, "e439c416fb32b32"],
+  ["the disc's interior", BODY_DISC_MATERIALS.interior.fragmentWgsl, "746d1a9085d5f259"],
+  ["the disc's limb", BODY_DISC_MATERIALS.limb.fragmentWgsl, "746d1a9085d5f259"],
+  ["the mesh regime's figure", SMOOTH_MESH_MATERIAL.fragmentWgsl, "56e6882e61127043"],
+  ["the disc cells", BODY_DISC_CELLS_KERNEL.reference, "1fa9ad9d6f84e62c"],
   // Re-pinned by plan R14's `@invariant` clip position (terrainLit.wgsl's `LitVertexOut`), which
   // holds every pipeline that places a patch's vertex to the same bits; the arithmetic is as before.
   // And by the seamless lane's sub-patches (R10.T16.h): the instance record's `sub` and a
@@ -219,19 +221,19 @@ const PLAIN_DIGESTS: ReadonlyArray<readonly [string, string, string]> = [
   // stands, are the texel's own place, map and normal, bit for bit; the depth and the casters
   // compose the shared module alone.
   ...[
-    ["terrain-lit-baked-offsets", "42bc3a23604f1fd2"],
-    ["terrain-lit-face-differences", "a6a8a8051b2374b3"],
+    ["terrain-lit-baked-offsets", "440180332e3c375a"],
+    ["terrain-lit-face-differences", "3aa4e63ca93ea0ab"],
     // Re-pinned by R10.T16.c's grazing fix, whose depth is pushed by its constant fraction alone.
-    ["terrain-depth-baked-offsets", "9f50aa9ced6b6fbd"],
-    ["terrain-depth-face-differences", "fe4c562a30f5c350"],
-    ["terrain-shadow-baked-offsets", "acc9d7ee0a9392af"],
-    ["terrain-shadow-face-differences", "febaf3ef8a68702a"],
-    ["terrain-lit-baked-offsets-still", "6c50c49916145353"],
-    ["terrain-lit-face-differences-still", "61a9906715bc6d7e"],
-    ["terrain-depth-baked-offsets-still", "dd3499c7e0d20a7a"],
-    ["terrain-depth-face-differences-still", "e64a64bcde683c0b"],
-    ["terrain-shadow-baked-offsets-still", "97e1bfb4426f08aa"],
-    ["terrain-shadow-face-differences-still", "d66f5ff94f9ac8bb"],
+    ["terrain-depth-baked-offsets", "d6c688e52f09cce5"],
+    ["terrain-depth-face-differences", "5cd86c6a616ad448"],
+    ["terrain-shadow-baked-offsets", "7c0896888e8bcd77"],
+    ["terrain-shadow-face-differences", "9f42cf465a0772a2"],
+    ["terrain-lit-baked-offsets-still", "9490e6b7c0f24a9b"],
+    ["terrain-lit-face-differences-still", "6b954d66a79e3a76"],
+    ["terrain-depth-baked-offsets-still", "fd93940c6f7df42"],
+    ["terrain-depth-face-differences-still", "cb8c3b88821afea3"],
+    ["terrain-shadow-baked-offsets-still", "a0be3692b67104d2"],
+    ["terrain-shadow-face-differences-still", "4d13a31f464399b3"],
   ].map(([name = "", digest = ""]): readonly [string, string, string] => {
     const still = name.endsWith("-still");
     const spec = [
