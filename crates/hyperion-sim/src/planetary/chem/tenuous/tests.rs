@@ -226,13 +226,16 @@ fn the_tenuous_air_is_held_only_until_the_35_bump() {
 
 /// P14.T55.e.a's and P14.T55.n's census over P14.T53.c's sets (the 400 whole systems, the golden
 /// systems and LOOK72's triaged systems; a measurement, run by name), each system generated afresh
-/// under the version's rules and under each arm of the 35 hold ([`TenuousAirRules`]):
+/// under the version's rules and under each arm of the 35 hold ([`TenuousAirRules`]), the
+/// published arm with every other 35 hold beside it
+/// ([`with_every_35_hold`](crate::planetary::testing::with_every_35_hold)):
 ///
 /// - asserted, the held arm is the version's, every body's state, pressure, temperature, gases and
 ///   aerosols to the bit (33 bit for bit), and a tenuous record's aerosols not modelled under it;
 /// - stated, the bodies by state under each arm, every body whose state the published arm moves,
-///   and the tenuous airs' methane and haze under it, the least, median and largest of each, the
-///   largest hazes by name;
+///   the tenuous records and airless residues whose pressure it moves (the deck base's runaways
+///   left out), and the tenuous airs' methane and haze under it, the least, median and largest of
+///   each, the largest hazes by name;
 /// - asserted, under the published arm no tenuous air holds a value that is not finite, its
 ///   methane stays minor (x(CH₄) under 0.1, `DOMINANCE_ONSET`), its record's aerosols are
 ///   modelled, its haze's τ(550) finite and at most 0.1, and no body leaves `Tenuous` for
@@ -252,7 +255,7 @@ fn under_every_35_hold_the_tenuous_airs_are_stated() {
     let sets = thin_air_sets();
     let version = thin_air_census(&sets);
     let held = with_tenuous_air(TenuousAirRules::Held, || thin_air_census(&sets));
-    let published = with_tenuous_air(TenuousAirRules::Published, || thin_air_census(&sets));
+    let published = crate::planetary::testing::with_every_35_hold(|| thin_air_census(&sets));
     assert_eq!(version.len(), held.len());
     assert_eq!(version.len(), published.len());
     for (ours, theirs) in version.iter().zip(&held) {
@@ -312,14 +315,15 @@ fn under_every_35_hold_the_tenuous_airs_are_stated() {
     // The ice-held gases held as dominant ones (d = 1, `ColumnInventory::with_held_ice`) and the
     // methane over its terrain move their airs' pressure, a tenuous record's and an airless body's
     // residue under the floor, which its record does not list: stated.
-    for (label, tenuous) in [("TENUOUS RECORDS", true), ("AIRLESS RESIDUES", false)] {
+    for (label, state) in [
+        ("TENUOUS RECORDS", SurfaceState::Tenuous),
+        ("AIRLESS RESIDUES", SurfaceState::Airless),
+    ] {
         let mut movers: Vec<(f64, String)> = held
             .iter()
             .zip(&published)
             .filter(|(was, now)| {
-                (was.state == SurfaceState::Tenuous) == tenuous
-                    && was.air_p > 0.0
-                    && now.air_p.total_cmp(&was.air_p).is_ne()
+                was.state == state && was.air_p > 0.0 && now.air_p.total_cmp(&was.air_p).is_ne()
             })
             .map(|(was, now)| {
                 (

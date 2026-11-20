@@ -1,12 +1,13 @@
 //! P14.T55.b over the record, under its hold at 35 ([`with_every_35_hold`]): every surface holding
 //! melt holds its melt's vapour, every other none, and nothing but the vapour and a volcanic lid's
-//! melt area moves; below 35 (the version's rules) no record holds a vapour. The census of the
-//! ordinary systems is `census_tests`'s.
+//! melt area moves from the other 35 holds' records; with the vapour held no record holds one. The
+//! census of the ordinary systems is `census_tests`'s.
 
 use super::tests::{GOLDEN_SYSTEMS_SEED, SEED, golden_contexts, sample};
 use super::*;
 use crate::planetary::chem::silicate_vapour::{
-    ATOMIC_CRITICAL_JEANS_PARAMETER, DIATOMIC_CRITICAL_JEANS_PARAMETER, VapourEscape,
+    ATOMIC_CRITICAL_JEANS_PARAMETER, DIATOMIC_CRITICAL_JEANS_PARAMETER, SilicateVapourRules,
+    VapourEscape, with_silicate_vapour,
 };
 use crate::planetary::record::BulkProperties;
 use crate::planetary::testing::with_every_35_hold;
@@ -179,16 +180,19 @@ fn crust_but_its_melt(crust: &CrustComposition) -> String {
     )
 }
 
-/// Over the first 60 sample systems and the golden ones: at the version's rules no surface holds a
-/// vapour; under every 35 hold each surface holding melt holds one with no fault
-/// ([`vapour_fault`]) and every other none, a crust's starlit share is the version's melt area to
-/// the bit and moves only by a volcanic lid's active lava, and every other member of every record
-/// keeps its bits; the walk reaches a magma ocean, a pool, a volcanic lid and an outflow, and the
-/// golden systems' records under the hold are the same twice. The counts by kind are printed.
+/// Over the first 60 sample systems and the golden ones: under every other 35 hold, the vapour
+/// held, no surface holds a vapour; under every 35 hold each surface holding melt holds one with
+/// no fault ([`vapour_fault`]) and every other none, a crust's starlit share is the held arm's
+/// melt area to the bit and moves only by a volcanic lid's active lava, and every other member of
+/// every record keeps the held arm's bits (the held arm, not the version's: the tenuous air's
+/// hold moves an icy body's photometry and the deck base's a runaway's air); the walk reaches a
+/// magma ocean, a pool, a volcanic lid and an outflow, and the golden systems' records under the
+/// hold are the same twice. The counts by kind are printed.
 #[test]
 fn under_every_35_hold_a_surface_holds_its_melt_s_vapour_and_none_elsewhere() {
     let sets = fast_sets();
-    let held = records(&sets);
+    let held =
+        with_every_35_hold(|| with_silicate_vapour(SilicateVapourRules::Held, || records(&sets)));
     let modelled = with_every_35_hold(|| records(&sets));
     assert_eq!(held.len(), modelled.len());
     let (mut surfaces, mut molten, mut pools, mut volcanic, mut outflows) = (0, 0, 0, 0, 0);

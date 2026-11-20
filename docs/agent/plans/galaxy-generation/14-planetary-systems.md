@@ -34684,3 +34684,8 @@ ACTIVE HOST · HOST LEAVING MAIN SEQUENCE · EXTRAPOLATED ZONE · FROZEN SURFACE
   - _Accept:_ `cargo test -p hyperion-sim --lib` over `planetary::derive` and
     `planetary::system::deck_base_tests`; the slow census by name,
     `composition_census_under_every_35_hold_keeps_venus_s_deck_only_in_an_oxidised_air_at_its_base`.
+- **The 35 holds' union (lane `land-pod-35-holds`, 2026-11-20).** `testing::with_every_35_hold`
+  sets all three 35 holds (tenuous air, silicate vapour, deck base). The vapour's record test and
+  the deck census now compare against every other 35 hold with their own held, not the version's:
+  the tenuous air's hold moves some 17,000 airless residues of its own. The tenuous census's
+  published arm runs under the union. At the bump, those held halves read the version's rules.

@@ -49,8 +49,8 @@ use crate::planetary::chem::condense::NotFormed;
 use crate::planetary::chem::partition::{CondensateEntry, CondensatePhase};
 use crate::planetary::derive::atmosphere::SNOWBALL_ICE_COVER;
 use crate::planetary::derive::atmosphere::{
-    AIRLESS_PRESSURE, DECK_BASE_PRESSURE, Gas, RunawayDeck, SurfaceState, WATER_MELTING_POINT,
-    reducing,
+    AIRLESS_PRESSURE, DECK_BASE_PRESSURE, DeckBaseRules, Gas, RunawayDeck, SurfaceState,
+    WATER_MELTING_POINT, reducing, with_deck_base,
 };
 use crate::planetary::hooks::aerosols::{AerosolDeck, AerosolMode};
 use crate::planetary::hooks::figures::Subsurface;
@@ -2469,9 +2469,9 @@ fn system_of(label: &str) -> &str {
         .map_or(label, |(system, _)| system)
 }
 
-/// The deck base's census at both rules ([`deck_census`]): the runaways under Venus's deck at the
-/// version's rules in an air thinner than the deck's base or a reducing one, by label, and the
-/// bodies that move under every 35 hold, each at both rules.
+/// The deck base's census at both rules ([`deck_census`]): the runaways under Venus's deck under
+/// every other 35 hold (the deck base held) in an air thinner than the deck's base or a reducing
+/// one, by label, and the bodies that move under every 35 hold, each at both rules.
 struct DeckMoves<'a> {
     decked: usize,
     thin: Vec<&'a String>,
@@ -2480,19 +2480,18 @@ struct DeckMoves<'a> {
 }
 
 impl<'a> DeckMoves<'a> {
-    fn of(at_33: &'a DeckBodies, at_35: &'a DeckBodies) -> Self {
+    fn of(held: &'a DeckBodies, at_35: &'a DeckBodies) -> Self {
         let decked_where = |test: fn(&DeckBody) -> bool| {
-            at_33
-                .iter()
+            held.iter()
                 .filter(|(_, b)| b.decked() && test(b))
                 .map(|(label, _)| label)
                 .collect()
         };
         Self {
-            decked: at_33.values().filter(|b| b.decked()).count(),
+            decked: held.values().filter(|b| b.decked()).count(),
             thin: decked_where(DeckBody::thin),
             reducing: decked_where(|b| b.reducing),
-            moved: at_33
+            moved: held
                 .iter()
                 .filter_map(|(label, before)| {
                     let after = &at_35[label];
@@ -2543,10 +2542,10 @@ impl<'a> DeckMoves<'a> {
         let mut report = String::new();
         writeln!(
             report,
-            "the deck base over {bodies} bodies: at 33, {} runaways under Venus's deck, {} of them \
-             under {:.0} Pa ({over_a_bar} at or above 1 bar), {} in a reducing air; under every \
-             35 hold {} bodies move, {partial} of them deckless at or above {} K; published \
-             states {states:?}:",
+            "the deck base over {bodies} bodies: under the other 35 holds, {} runaways under \
+             Venus's deck, {} of them under {:.0} Pa ({over_a_bar} at or above 1 bar), {} in a \
+             reducing air; under every 35 hold {} bodies move, {partial} of them deckless at or \
+             above {} K; published states {states:?}:",
             self.decked,
             self.thin.len(),
             DECK_BASE_PRESSURE.value(),
@@ -2575,27 +2574,33 @@ impl<'a> DeckMoves<'a> {
 }
 
 /// P14.T53.b part 1 (b)'s follow-up, the deck base (decision-absurd-states-24 R3.2; lane
-/// fix-thin-air-venus-deck), over the ordinary census's systems: at the version's rules it counts
-/// the runaways under Venus's deck in an air thinner than the deck's base
-/// ([`DECK_BASE_PRESSURE`]) or a reducing one; under every 35 hold none is left, every body that
-/// moves shares its system with one of them, and the census's own checks hold (every registry
-/// row reached or listed, none of 25's and 26's fixed findings, no envelope changing section
-/// inside the clock window). The movers are listed, each at both rules, with those whose deckless
-/// `T_s` is at or above the acid's cycling temperature (a partial deck, not modelled).
+/// fix-thin-air-venus-deck), over the ordinary census's systems: under every other 35 hold, the
+/// deck base held, it counts the runaways under Venus's deck in an air thinner than the deck's
+/// base ([`DECK_BASE_PRESSURE`]) or a reducing one; under every 35 hold none is left, every body
+/// that moves from the held arm shares its system with one of them, and the census's own checks
+/// hold (every registry row reached or listed, none of 25's and 26's fixed findings, no envelope
+/// changing section inside the clock window). The held arm is the other holds', not the
+/// version's, since the tenuous air's hold moves some 17,000 airless residues and tenuous airs of
+/// its own. The movers are listed, each at both rules, with those whose deckless `T_s` is at or
+/// above the acid's cycling temperature (a partial deck, not modelled).
 #[test]
-#[ignore = "slow: 10⁵ bodies of 6,800 systems at 33 and under every 35 hold, on sixteen threads"]
+#[ignore = "slow: 10⁵ bodies of 6,800 systems under every 35 hold, with and without the deck \
+            base, on sixteen threads"]
 fn composition_census_under_every_35_hold_keeps_venus_s_deck_only_in_an_oxidised_air_at_its_base() {
     let start = Instant::now();
-    let (_, at_33) = deck_census(|run| run(), DeckWalk::DecksAlone);
+    let (_, held) = deck_census(
+        |run| with_every_35_hold(|| with_deck_base(DeckBaseRules::Held, run)),
+        DeckWalk::DecksAlone,
+    );
     let (census, at_35) = deck_census(|run| with_every_35_hold(run), DeckWalk::WithTheCensus);
     assert!(census.bodies >= ORDINARY_BODIES, "{} bodies", census.bodies);
     assert_eq!(
-        at_33.keys().collect::<Vec<_>>(),
+        held.keys().collect::<Vec<_>>(),
         at_35.keys().collect::<Vec<_>>(),
         "the same bodies at both rules"
     );
-    let moves = DeckMoves::of(&at_33, &at_35);
-    let report = moves.report(at_33.len());
+    let moves = DeckMoves::of(&held, &at_35);
+    let report = moves.report(held.len());
     eprintln!("{report}({:.1} s)", start.elapsed().as_secs_f64());
     let left: Vec<String> = at_35
         .iter()
