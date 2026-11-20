@@ -342,7 +342,7 @@ async fn computed(
     };
     phase("eye", started);
     let asked_query = Arc::new(asked.query(seen, light, state.sky_caps));
-    let edges = state.sky_caps.shell_edges_ly();
+    let edges = state.sky_caps.shells();
     // The query at the ceiling the sky is served at (rendering plan R13, R13.T2.b), which the census,
     // the band and every reply read.
     let (query, plan) =

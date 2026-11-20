@@ -89,9 +89,10 @@ use hyperion_sim::sky::caps::{
 };
 use hyperion_sim::sky::census::{
     CellOffsets, CellSlab, CensusCost, CensusPlan, CensusTallies, MAX_FORCED_CAP_LY, MemberPart,
-    NoSkyCellCache, SHELL_EDGES_LY, Shell, SkyCellCache, SkyCensus, SkyContext, SkyQuery,
-    SkySource, SkyStar, census_cell_with_cost, census_members, census_plan_with_edges,
-    merge_shells, takes_class_hosts, takes_feature_members,
+    NoSkyCellCache, RecordWindow, SHELL_EDGES_LY, Shell, ShellCell, SkyCellCache, SkyCensus,
+    SkyContext, SkyQuery, SkySource, SkyStar, census_cell_with_cost, census_members,
+    census_plan_by_record, census_plan_with_edges, census_window_part, merge_shells,
+    takes_class_hosts, takes_feature_members,
 };
 use hyperion_sim::sky::dgl::{ILLUMINATION_SPEC, Illumination};
 use hyperion_sim::sky::envelope::BrightnessEnvelope;
@@ -198,6 +199,9 @@ pub struct SkyCaps {
     far_first_from_ly: Option<NonZeroU32>,
     /// A test's band, in place of [`BandSpec::STANDARD`].
     band: Option<BandSpec>,
+    /// Whether a test's plan takes every layer's records by window, as a dense place's does,
+    /// whatever its caps (perf-dense-first-shells).
+    by_record: bool,
 }
 
 /// The luminosity tables a sky reads (Design note 7).
@@ -220,6 +224,7 @@ impl SkyCaps {
         c_deferred_beyond_ly: None,
         far_first_from_ly: None,
         band: None,
+        by_record: false,
     };
 
     /// Every layer's cap forced to `radius`, over tables that hold no star.
@@ -254,6 +259,7 @@ impl SkyCaps {
                 c_deferred_beyond_ly: None,
                 far_first_from_ly: None,
                 band: None,
+                by_record: false,
             })
         } else {
             Err(ForceSkyCapsError)
@@ -291,6 +297,28 @@ impl SkyCaps {
     #[must_use]
     pub fn shell_edges_ly(&self) -> &'static [u32] {
         self.shell_edges_ly.unwrap_or(&SHELL_EDGES_LY)
+    }
+
+    /// The same caps with every layer's records taken by window, to exactly the census's shell
+    /// edges ([`shell_edges_ly`](Self::shell_edges_ly)), as a dense place's plan takes them
+    /// (the sim's `census_plan_by_record`; perf-dense-first-shells): for a test, whose census a
+    /// test can afford then runs a dense place's cells and record parts as its jobs. No sky a
+    /// client asks is censused so: its plan takes its records by window exactly where its caps'
+    /// count calls the place dense.
+    #[must_use]
+    pub const fn with_shells_by_record(self) -> Self {
+        Self {
+            by_record: true,
+            ..self
+        }
+    }
+
+    /// The shells the census takes: the edges, ly ([`shell_edges_ly`](Self::shell_edges_ly)), and
+    /// whether a test takes every layer's records by window at them
+    /// ([`with_shells_by_record`](Self::with_shells_by_record)).
+    #[must_use]
+    pub(crate) fn shells(&self) -> (&'static [u32], bool) {
+        (self.shell_edges_ly(), self.by_record)
     }
 
     /// The same caps with layer C's shells whose inner edge is at or beyond `edge_ly` censused a
@@ -848,7 +876,7 @@ pub(crate) async fn plan(
     galaxy: &Arc<Galaxy>,
     tables: &Arc<SkyTables>,
     query: Arc<SkyQuery>,
-    edges_ly: &'static [u32],
+    (edges_ly, by_record): (&'static [u32], bool),
     token: &CancelToken,
 ) -> Result<(Arc<SkyQuery>, CensusPlan), ComputeError> {
     let (ceiling, caps) = match query.forced_caps() {
@@ -864,7 +892,11 @@ pub(crate) async fn plan(
     let query = at(query, ceiling);
     let planned = Arc::clone(&query);
     let plan = bulk(pool, token, move |_: &CancelToken| {
-        census_plan_with_edges(&planned, caps, edges_ly)
+        if by_record {
+            census_plan_by_record(&planned, caps, edges_ly)
+        } else {
+            census_plan_with_edges(&planned, caps, edges_ly)
+        }
     })
     .await?;
     Ok((query, plan))
@@ -1130,8 +1162,9 @@ fn add_tallies(sum: &mut Option<CensusTallies>, tallies: &CensusTallies) {
 ///   brightest distant stars (`decision-r06-census-cost-signoff.md`, condition 3).
 ///
 /// Within a step the shells keep [`CensusPlan::shells`]' order. The first step holds every layer's
-/// first shell, so A, B and the brown dwarfs, one shell each, are final from the first reply, and
-/// every layer states a radius in it. Near the Sun, at the real boundary of 2,000 ly (rendering
+/// first shell, so A, B and the brown dwarfs, one shell each, are final from the first reply, but
+/// in a dense place, whose plan shells every layer from 8, 16, 32 or 64 ly (perf-dense-first-shells),
+/// and every layer states a radius in it. Near the Sun, at the real boundary of 2,000 ly (rendering
 /// plan R13), the steps are 125, 250, 500 and 1,000 ly for every layer, then E's 2,000 ly, then
 /// C's and D's. The order is a function of the plan and `order` alone, never of the pool or its
 /// timing: every machine and worker count censuses the same steps and sends the same replies, only
@@ -1208,28 +1241,22 @@ pub(crate) const FAR_FIRST_FROM_LY: f64 = 1_000.0;
 /// `tests/sky_caps.rs`, which holds the rule; R06's Risks, "Deviations in T11.h, as built").
 pub(crate) const FAR_FIRST_LAYERS: [Layer; 1] = [Layer::E];
 
-/// One census job's share of a shell: some of its cells, or its feature members (R06.T16.a).
+/// One census job's share of a shell: some of its cells, its feature members (R06.T16.a), or some
+/// of one cell's records of the shell's window (perf-dense-first-shells).
 enum Work {
     /// Cells of one of the shell's slabs.
     Cells(CellWork),
     /// One part of the shell's feature members: the plan they are taken in, the shell and the
     /// part.
     Members(Arc<CensusPlan>, Shell, MemberPart),
-}
-
-impl Work {
-    /// The layer of the shell the work is of.
-    #[must_use]
-    fn layer(&self) -> Layer {
-        match self {
-            Self::Cells(cells) => cells.layer,
-            Self::Members(_, shell, _) => shell.layer(),
-        }
-    }
+    /// The records of one cell's window among the cell's candidates whose indices the range holds
+    /// (`census_window_part`): the rest of a cell a job had no time for.
+    Records(CellKey, RecordWindow, Range<u32>),
 }
 
 /// Cells of one of a shell's slabs not yet censused, in order, the slab still to walk or some of
-/// its cells walked already, all of one layer.
+/// its cells walked already, all of one layer, each with the records the shell takes of it
+/// ([`ShellCell`]).
 struct CellWork {
     layer: Layer,
     cells: Cells,
@@ -1238,15 +1265,17 @@ struct CellWork {
 /// The cells of a [`CellWork`].
 enum Cells {
     /// A slab's cells, walked as they are taken.
-    Slab(Peekable<Box<dyn Iterator<Item = CellKey> + Send>>),
+    Slab(Peekable<Box<dyn Iterator<Item = ShellCell> + Send>>),
     /// Cells of a slab walked already, in order.
-    Walked(std::vec::IntoIter<CellKey>),
+    Walked(std::vec::IntoIter<ShellCell>),
 }
 
 impl CellWork {
-    /// The work of `slab`'s cells, not yet walked.
+    /// The work of `slab`'s cells, not yet walked: the cells its shell censuses
+    /// ([`CellSlab::shell_cells`]), in a dense place's plan the windows of its earlier shells'
+    /// cells among them.
     fn of(slab: &CellSlab) -> Self {
-        let cells: Box<dyn Iterator<Item = CellKey> + Send> = Box::new(slab.cells());
+        let cells: Box<dyn Iterator<Item = ShellCell> + Send> = Box::new(slab.shell_cells());
         Self {
             layer: slab.layer(),
             cells: Cells::Slab(cells.peekable()),
@@ -1254,7 +1283,7 @@ impl CellWork {
     }
 
     /// The next cell, walking the slab as far as it.
-    fn next(&mut self) -> Option<CellKey> {
+    fn next(&mut self) -> Option<ShellCell> {
         match &mut self.cells {
             Cells::Slab(cells) => cells.next(),
             Cells::Walked(cells) => cells.next(),
@@ -1274,7 +1303,7 @@ impl CellWork {
     /// the observer in layers D and E do, then spreads over the workers in a few rounds.
     fn split(self) -> impl Iterator<Item = Self> {
         let Self { layer, cells } = self;
-        let mut cells: Vec<CellKey> = match cells {
+        let mut cells: Vec<ShellCell> = match cells {
             Cells::Slab(cells) => cells.collect(),
             Cells::Walked(cells) => cells.collect(),
         };
@@ -1392,12 +1421,12 @@ impl fmt::Display for StepLayers {
 }
 
 /// What one census job did: its cells' stars, their tallies (`None` for no cell) and cost, and the
-/// cells it had no time for.
+/// work it had no time for.
 struct Slice {
     stars: Vec<SkyStar>,
     tallies: Option<CensusTallies>,
     cost: CensusCost,
-    rest: Vec<CellWork>,
+    rest: Vec<Work>,
     /// The layer of its work, and how long the job ran.
     worked: (Layer, Duration),
 }
@@ -1434,6 +1463,14 @@ struct Slice {
 /// that the cells behind them go on; a census whose members read no table is given
 /// [`TablesBuilt::all`]. Should the tables' builder go before it says so, its error ends the
 /// request, and meanwhile the jobs build what they lack themselves, to the same bits.
+///
+/// A dense place's shells take each cell's records by window (the sim's `RecordWindow`;
+/// perf-dense-first-shells): a cell whose window holds more than a slice of work hands back the
+/// rest of its candidates in two halves, ahead of every later step's work, as a slab of dear cells
+/// hands back its cells, so that one cell of 10⁴–10⁵ systems spreads over the workers, and no job
+/// of seconds holds the first reply. Which job took which candidates changes no star: each part
+/// places only its own (`census_window_part`). Such a census reads no cell cache, whose entries
+/// hold whole cells.
 ///
 /// Every later step's work waits until `first` says the sky's first reply is made
 /// (perf-first-sky), so that no later step's job runs before that reply, nor holds a worker while
@@ -1548,8 +1585,8 @@ pub(crate) async fn census_in_steps(
         } = slice;
         worked[step][usize::from(layer.value())] += ran;
         open[step] = open[step] - 1 + rest.len();
-        for cells in rest {
-            queued.insert((step, order), Work::Cells(cells));
+        for work in rest {
+            queued.insert((step, order), work);
             order += 1;
         }
         found[step].absorb(stars, tallies.as_ref(), &cost);
@@ -1828,56 +1865,177 @@ fn census_job(
             .chain(list.iter().map(|source| source as &dyn SkySource))
             .collect();
         let mut ctx = tables.context(CENSUS_NOISE_SLOTS, cache, &sources, &gas);
-        let layer = work.layer();
-        let mut work = match work {
+        let clock = JobClock {
+            started,
+            slice,
+            token,
+            abandoned: &abandoned,
+        };
+        if clock.stopped() {
+            return None;
+        }
+        match work {
             Work::Members(plan, shell, part) => {
-                if token.is_cancelled() || abandoned.is_cancelled() {
-                    return None;
-                }
                 let mut stars = Vec::new();
                 let tallies =
                     census_members(&galaxy, &mut ctx, &plan, (shell, part), &query, &mut stars);
-                return Some(Slice {
-                    stars,
-                    tallies: Some(tallies),
-                    cost: CensusCost::default(),
-                    rest: Vec::new(),
-                    worked: (layer, started.elapsed()),
-                });
+                Some(clock.slice(shell.layer(), (stars, Some(tallies), CensusCost::default())))
             }
-            Work::Cells(work) => work,
-        };
-        let (mut stars, mut tallies, mut cost) = (Vec::new(), None, CensusCost::default());
-        loop {
-            if token.is_cancelled() || abandoned.is_cancelled() {
-                return None;
+            Work::Records(key, window, records) => {
+                census_records(&galaxy, &mut ctx, &query, (key, window, records), clock)
             }
-            // At least one cell a job, so that every job moves the census on.
-            if tallies.is_some() && started.elapsed() >= slice && !work.is_done() {
-                // Out of time: the rest of these cells, split, go back.
-                return Some(Slice {
-                    stars,
-                    tallies,
-                    cost,
-                    rest: work.split().collect(),
-                    worked: (layer, started.elapsed()),
-                });
-            }
-            let Some(cell) = work.next() else {
-                break;
-            };
-            let (cell, spent) = census_cell_with_cost(&galaxy, &mut ctx, cell, &query, &mut stars);
-            add_tallies(&mut tallies, &cell);
-            cost.add(&spent);
+            Work::Cells(work) => census_cells(&galaxy, &mut ctx, &query, work, clock),
         }
-        Some(Slice {
+    }
+}
+
+/// What a census job reads of its time and its tokens: when it started, its slice, its request's
+/// token and its census's, which `abandoned` it.
+#[derive(Clone, Copy)]
+struct JobClock<'a> {
+    started: Instant,
+    slice: Duration,
+    token: &'a CancelToken,
+    abandoned: &'a CancelToken,
+}
+
+impl JobClock<'_> {
+    /// Whether the job is to stop at once: its request is cancelled, or its census gone.
+    fn stopped(&self) -> bool {
+        self.token.is_cancelled() || self.abandoned.is_cancelled()
+    }
+
+    /// Whether the job has time for more of its work: its slice is not yet spent and its request
+    /// not cancelled.
+    fn has_time(&self) -> bool {
+        !self.token.is_cancelled() && self.started.elapsed() < self.slice
+    }
+
+    /// The job's slice of `layer`'s work: its stars, tallies and cost, and nothing left.
+    fn slice(
+        &self,
+        layer: Layer,
+        (stars, tallies, cost): (Vec<SkyStar>, Option<CensusTallies>, CensusCost),
+    ) -> Slice {
+        Slice {
             stars,
             tallies,
             cost,
             rest: Vec::new(),
-            worked: (layer, started.elapsed()),
-        })
+            worked: (layer, self.started.elapsed()),
+        }
     }
+}
+
+/// A census job's share of one windowed cell's candidates, `records` of `key`'s, of a dense
+/// place's shell (perf-dense-first-shells): taken until the job's slice is spent, at least one
+/// record, with the candidates left handed back in two halves. `None` once the job is to stop.
+fn census_records(
+    galaxy: &Galaxy,
+    ctx: &mut SkyContext<'_>,
+    query: &SkyQuery,
+    (key, window, records): (CellKey, RecordWindow, Range<u32>),
+    clock: JobClock<'_>,
+) -> Option<Slice> {
+    let mut stars = Vec::new();
+    let part = census_window_part(
+        galaxy,
+        ctx,
+        (key, window),
+        query,
+        records.clone(),
+        || clock.has_time(),
+        &mut stars,
+    );
+    if clock.stopped() {
+        return None;
+    }
+    let left = part.reached()..records.end.min(part.candidates());
+    Some(Slice {
+        rest: records_left(key, window, left),
+        ..clock.slice(key.layer(), (stars, Some(*part.tallies()), *part.cost()))
+    })
+}
+
+/// A census job's share of a slab's cells, `work`: each censused in order until the job's slice is
+/// spent, and at least one, R06.T8.i's cells whole ([`census_cell_with_cost`]) and a dense place's
+/// by window, whose candidates are taken until the slice is spent; what it had no time for is
+/// handed back, the cells walked and split in two and a cell's candidates left in two halves.
+/// `None` once the job is to stop.
+fn census_cells(
+    galaxy: &Galaxy,
+    ctx: &mut SkyContext<'_>,
+    query: &SkyQuery,
+    mut work: CellWork,
+    clock: JobClock<'_>,
+) -> Option<Slice> {
+    let layer = work.layer;
+    let (mut stars, mut tallies, mut cost) = (Vec::new(), None, CensusCost::default());
+    loop {
+        if clock.stopped() {
+            return None;
+        }
+        // At least one cell a job, so that every job moves the census on.
+        if tallies.is_some() && !clock.has_time() && !work.is_done() {
+            // Out of time: the rest of these cells, split, go back.
+            return Some(Slice {
+                rest: work.split().map(Work::Cells).collect(),
+                ..clock.slice(layer, (stars, tallies, cost))
+            });
+        }
+        let Some(cell) = work.next() else {
+            return Some(clock.slice(layer, (stars, tallies, cost)));
+        };
+        let Some(window) = cell.window() else {
+            let (cell, spent) = census_cell_with_cost(galaxy, ctx, cell.key(), query, &mut stars);
+            add_tallies(&mut tallies, &cell);
+            cost.add(&spent);
+            continue;
+        };
+        // A dense place's cell, whose window may hold more records than a slice: the job takes
+        // them until its slice is spent, at least one, and hands back the rest of the cell's
+        // candidates in two halves beside the rest of its cells, so that one cell spreads over the
+        // workers in a few rounds, as a slab of dear cells does.
+        let part = census_window_part(
+            galaxy,
+            ctx,
+            (cell.key(), window),
+            query,
+            0..u32::MAX,
+            || clock.has_time(),
+            &mut stars,
+        );
+        add_tallies(&mut tallies, part.tallies());
+        cost.add(part.cost());
+        if part.reached() < part.candidates() {
+            if clock.stopped() {
+                return None;
+            }
+            let mut rest = records_left(cell.key(), window, part.reached()..part.candidates());
+            if !work.is_done() {
+                rest.extend(work.split().map(Work::Cells));
+            }
+            return Some(Slice {
+                rest,
+                ..clock.slice(layer, (stars, tallies, cost))
+            });
+        }
+    }
+}
+
+/// The work of the candidates `records` of `key`, whose records of `window` a job had no time for:
+/// two halves, so that another worker may take one, or none for no candidate.
+#[must_use]
+fn records_left(key: CellKey, window: RecordWindow, records: Range<u32>) -> Vec<Work> {
+    if records.is_empty() {
+        return Vec::new();
+    }
+    let middle = records.start + (records.end - records.start).div_ceil(2);
+    [records.start..middle, middle..records.end]
+        .into_iter()
+        .filter(|half| !half.is_empty())
+        .map(|half| Work::Records(key, window, half))
+        .collect()
 }
 
 /// The census of a sky after `step` (R06.T8.i's `merge_shells`), in one bulk job under `token`:
@@ -2254,6 +2412,144 @@ pub(crate) mod tests {
         )
     }
 
+    /// The sim's census of the windows of `shells`, some of `plan`'s, serially, each shell's cells
+    /// taking the records its window holds ([`CellSlab::shell_cells`], the sim's
+    /// `census_shell_cell`), merged to their completeness (perf-dense-first-shells).
+    fn serial_census_by_window(
+        galaxy: &Galaxy,
+        (tables, modifiers): (&SkyTables, &dyn GasModifierSource),
+        query: &SkyQuery,
+        plan: &CensusPlan,
+        shells: &[Shell],
+    ) -> SkyCensus {
+        let mut ctx = tables.context(CENSUS_NOISE_SLOTS, &NoSkyCellCache, &[], modifiers);
+        let mut stars = Vec::new();
+        let mut tallies = None;
+        for &shell in shells {
+            for cell in plan.shell_slabs(shell).flat_map(|slab| slab.shell_cells()) {
+                let (cell, _) = hyperion_sim::sky::census::census_shell_cell(
+                    galaxy, &mut ctx, cell, query, &mut stars,
+                );
+                add_tallies(&mut tallies, &cell);
+            }
+        }
+        merge_shells(
+            tallies.map(|tallies| (stars, tallies)),
+            query.n_max(),
+            plan.completeness(shells.iter().copied()),
+        )
+    }
+
+    /// A dense place's census by record, its cells' windows and their candidates' parts as jobs
+    /// (perf-dense-first-shells): in the fixture's inner disc, every layer by record to 8 and 16 ly
+    /// ([`SkyCaps::with_shells_by_record`]), each step it delivers is the sim's census of its shells'
+    /// windows, serially, star for star and tally for tally, at a slice of nought, which hands back
+    /// the rest of every cell's window after one record in two halves, and at the census's own;
+    /// each lists what the same shells' cells censused whole list; A, B and the brown dwarfs are
+    /// not final at the first step; and the last is the one pass over the plan's cells.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn each_step_of_a_dense_places_census_by_record_is_the_sims_census_of_its_windows() {
+        let galaxy = Arc::new(Galaxy::new(Seed::new(0x4d2)));
+        let radii = [12.0, 20.0, 24.0, 24.0, 24.0, 10.0].map(LightYears::new);
+        let caps = SkyCaps::forced_per_layer(radii)
+            .unwrap()
+            .with_shell_edges(&[8, 16])
+            .with_shells_by_record();
+        let tables = Arc::new(featured_tables(&galaxy, GENERATOR_VERSION));
+        let gas = epoch_gas(&galaxy, GENERATOR_VERSION);
+        // At the centre of a layer-D cell and 32 ly within a layer-E one, so that D's and E's
+        // windows part one cell each.
+        let at = GalacticPosition::from_light_years([96.0, 8_032.0, 96.0]).unwrap();
+        let observer = Observer::new(at, UniverseTime::EPOCH).unwrap();
+        let query = caps.on(SkyQuery::builder(observer, Magnitudes::new(6.5))
+            .build()
+            .unwrap());
+        let pool = pool(3);
+        let token = CancelToken::new();
+        let (query, plan) = timeout(
+            WAIT,
+            plan(
+                &pool,
+                &galaxy,
+                &tables,
+                Arc::new(query),
+                caps.shells(),
+                &token,
+            ),
+        )
+        .await
+        .expect("timed out planning")
+        .unwrap();
+        assert!(plan.takes_records_by_window());
+        let plan = Arc::new(plan);
+        let inputs = CensusInputs {
+            galaxy: Arc::clone(&galaxy),
+            key: GalaxyKey::new(0x4d2, GENERATOR_VERSION),
+            tables: Arc::clone(&tables),
+            cells: Arc::new(SharedSkyCellCache::new(256 << 20)),
+            members: None,
+            query: Arc::clone(&query),
+        };
+        let steps = delivery_steps(&plan, caps.delivery_order());
+        assert_eq!(steps.len(), 3, "to 8 ly, to 16 ly, then to the caps");
+        let first = plan.completeness(steps[0].iter().copied());
+        for layer in [Layer::A, Layer::B, Layer::BrownDwarf, Layer::C] {
+            assert_eq!(first.edge(layer), Some(LightYears::new(8.0)), "{layer:?}");
+        }
+        let windows: usize = plan
+            .slabs()
+            .flat_map(|slab| slab.shell_cells().collect::<Vec<_>>())
+            .count();
+        let before = pool.counters().completed();
+        let cold = steps_censused(&pool, &inputs, &plan, &steps, Duration::ZERO).await;
+        let jobs = pool.counters().completed() - before;
+        let warm = steps_censused(&pool, &inputs, &plan, &steps, CENSUS_JOB_SLICE).await;
+        assert!(
+            jobs > u64::try_from(2 * windows).unwrap(),
+            "a slice of nought splits the windows' candidates: {jobs} jobs for {windows} windows"
+        );
+        let mut done = Vec::new();
+        for (k, shells) in steps.iter().enumerate() {
+            done.extend_from_slice(shells);
+            let serial = serial_census_by_window(&galaxy, (&tables, &gas), &query, &plan, &done);
+            let whole = serial_census(&galaxy, (&tables, &gas), &query, &plan, &done);
+            assert_eq!(
+                serial.listed(),
+                whole.listed(),
+                "step {k}: the cells' listing"
+            );
+            for censused in [&cold, &warm] {
+                let (step, census) = &censused[k];
+                assert_eq!(step.done, done);
+                assert_eq!(census, &serial, "step {k}");
+                assert_eq!(bits(census), bits(&serial), "step {k}");
+            }
+        }
+        // The last step's is the one pass over the plan's cells, merged to its whole completeness.
+        let mut ctx = tables.context(CENSUS_NOISE_SLOTS, &NoSkyCellCache, &[], &gas);
+        let mut stars = Vec::new();
+        let mut tallies = None;
+        for key in plan.cells() {
+            add_tallies(
+                &mut tallies,
+                &census_cell(&galaxy, &mut ctx, key, &query, &mut stars),
+            );
+        }
+        let one_pass = merge_shells(
+            tallies.map(|tallies| (stars, tallies)),
+            query.n_max(),
+            plan.complete(),
+        );
+        let (_, last) = cold.last().expect("a step");
+        assert_ne!(one_pass.listed(), []);
+        assert_eq!(
+            (last.listed(), last.overflow(), last.tallies()),
+            (one_pass.listed(), one_pass.overflow(), one_pass.tallies())
+        );
+        assert_eq!(bits(last), bits(&one_pass));
+        pool.shutdown().await.unwrap();
+    }
+
     /// Runs `plan`'s census in `steps` on `pool`, each job's slice `slice`, and returns the
     /// census of each step as [`merge_step`] makes it.
     async fn steps_censused(
@@ -2339,7 +2635,7 @@ pub(crate) mod tests {
                 &galaxy,
                 &tables,
                 Arc::new(query),
-                &SHELL_EDGES_LY,
+                (&SHELL_EDGES_LY, false),
                 &token,
             ),
         )
@@ -2565,9 +2861,10 @@ pub(crate) mod tests {
             .unwrap());
         let pool = pool(3);
         let token = CancelToken::new();
+        let edges: (&'static [u32], bool) = (&[4, 8], false);
         let (query, plan) = timeout(
             WAIT,
-            plan(&pool, &galaxy, &tables, Arc::new(query), &[4, 8], &token),
+            plan(&pool, &galaxy, &tables, Arc::new(query), edges, &token),
         )
         .await
         .expect("timed out planning")
@@ -2712,7 +3009,14 @@ pub(crate) mod tests {
         let token = CancelToken::new();
         let (query, plan) = timeout(
             WAIT,
-            plan(&pool, &galaxy, &tables, Arc::new(query), &[20], &token),
+            plan(
+                &pool,
+                &galaxy,
+                &tables,
+                Arc::new(query),
+                (&[20], false),
+                &token,
+            ),
         )
         .await
         .expect("timed out planning")
@@ -2783,7 +3087,7 @@ pub(crate) mod tests {
                 &galaxy,
                 &tables,
                 Arc::new(query),
-                &SHELL_EDGES_LY,
+                (&SHELL_EDGES_LY, false),
                 &token,
             ),
         )
@@ -2894,9 +3198,10 @@ pub(crate) mod tests {
             .unwrap());
         let pool = pool(3);
         let token = CancelToken::new();
+        let edges: (&'static [u32], bool) = (&[4, 8], false);
         let (query, plan) = timeout(
             WAIT,
-            plan(&pool, &galaxy, &tables, Arc::new(query), &[4, 8], &token),
+            plan(&pool, &galaxy, &tables, Arc::new(query), edges, &token),
         )
         .await
         .expect("timed out planning")
@@ -3069,7 +3374,14 @@ pub(crate) mod tests {
         let token = CancelToken::new();
         let (query, plan) = timeout(
             WAIT,
-            plan(&pool, &galaxy, &tables, Arc::new(query), &[20], &token),
+            plan(
+                &pool,
+                &galaxy,
+                &tables,
+                Arc::new(query),
+                (&[20], false),
+                &token,
+            ),
         )
         .await
         .expect("timed out planning")
@@ -3172,7 +3484,7 @@ pub(crate) mod tests {
                 &galaxy,
                 &tables,
                 Arc::new(query),
-                &SHELL_EDGES_LY,
+                (&SHELL_EDGES_LY, false),
                 &token,
             ),
         )
@@ -3519,7 +3831,7 @@ pub(crate) mod tests {
                     &galaxy,
                     &tables,
                     Arc::new(query),
-                    &SHELL_EDGES_LY,
+                    (&SHELL_EDGES_LY, false),
                     &token,
                 ),
             )
@@ -3666,7 +3978,7 @@ pub(crate) mod tests {
                     &galaxy,
                     &tables,
                     Arc::clone(&query),
-                    &SHELL_EDGES_LY,
+                    (&SHELL_EDGES_LY, false),
                     &token,
                 ),
             )
@@ -3783,7 +4095,7 @@ pub(crate) mod tests {
                     &galaxy,
                     &tables,
                     Arc::new(asked),
-                    &SHELL_EDGES_LY,
+                    (&SHELL_EDGES_LY, false),
                     &token,
                 ),
             )
