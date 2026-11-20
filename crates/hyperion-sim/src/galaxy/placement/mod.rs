@@ -53,7 +53,10 @@ pub(crate) use candidate::catalogue_claims;
 pub use candidate::{CandidateOutcome, evaluate_candidate};
 pub use cell::{CellKey, candidate_count};
 pub(crate) use generate::visit_cell;
-pub use generate::{cell_heap_bytes, generate_cell, generate_cell_where};
+pub use generate::{
+    CandidatesWalked, cell_heap_bytes, generate_cell, generate_cell_where,
+    generate_cell_where_near, visit_cell_where_near,
+};
 #[cfg(test)]
 pub(crate) use headroom::largest_headroom_mean;
 pub use headroom::{check_index_headroom, rogue_planet_saturation_density};

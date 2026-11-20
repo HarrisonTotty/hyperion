@@ -13,7 +13,8 @@ use crate::galaxy::gas::modifiers::GasModifierSource;
 use crate::galaxy::gas::noise::NoiseCache;
 use crate::galaxy::placement::CellKey;
 use crate::galaxy::query::{
-    QuerySphere, cells_in_shell_slab, count_cells_in_sphere, pad_for, pad_speed, sphere_slabs,
+    QuerySphere, cells_in_shell_slab, cells_in_sphere_slab, count_cells_in_sphere, pad_for,
+    pad_speed, sphere_slabs,
 };
 use crate::id::{Layer, SystemId};
 use crate::math;
@@ -24,7 +25,7 @@ use crate::units::{Degrees, LightYears, Magnitudes, Radians};
 
 use super::super::band::{BandSpec, CompleteTo, CubeFace};
 use super::super::caps::{
-    CAPPED_LAYERS, LayerCap, REAL_BOUNDARY_LAYERS, RayCones, RayRadii, layer_caps,
+    CAPPED_LAYERS, FIRST_EDGES_LY, LayerCap, REAL_BOUNDARY_LAYERS, RayCones, RayRadii, layer_caps,
     layer_caps_by_visibility, real_boundary_of,
 };
 use super::super::dgl::Illumination;
@@ -33,7 +34,7 @@ use super::super::eye::{EyeObserver, MAX_CUT_V};
 use super::super::limits::EyeVisibility;
 use super::super::luminosity::LuminosityTables;
 use super::cache::SkyCellCache;
-use super::cell::{CellOffsets, SkyStar};
+use super::cell::{CellOffsets, SkyStar, box_distances_ly};
 use super::features::SkySource;
 
 /// The largest count of stars a sky lists, 3 × 10⁵ (Design note 11): 7.2 MB of payload.
@@ -76,8 +77,171 @@ pub const SHELL_EDGES_LY: [u32; 11] = [
 /// The layers censused shell by shell (R06.T8.i): C, D and E.
 ///
 /// Layers A and B and the brown dwarfs, whose caps near the Sun are some 11, 68 and 1 ly, are one
-/// shell each.
+/// shell each, but in a dense place, where every layer is shelled ([`DENSE_EDGES_LY`]).
 pub const SHELLED_LAYERS: [Layer; 3] = [Layer::C, Layer::D, Layer::E];
+
+/// The edges a dense place's plan takes before [`SHELL_EDGES_LY`]' first, ly: 8, 16, 32 and 64 ly
+/// (perf-dense-first-shells; research-first-sky-56, Q2).
+///
+/// A place is dense where its caps' count expects more than [`DENSE_FIRST_SYSTEMS`] systems of C,
+/// D and E within 125 ly ([`LayerCap::first_edges_systems`]). Its plan then starts at the largest of
+/// these edges within which they expect at most that many, 8 ly if none, and takes the rest of
+/// these edges and [`SHELL_EDGES_LY`]' from there for every layer, A, B and the brown dwarfs
+/// included. Its shells take each cell's records by their nearest distance ([`RecordWindow`]) rather
+/// than whole cells, since a cell there holds 10⁴–10⁵ systems: in R12's `nuclear-disc-sky` scene
+/// the cells within 10 ly alone hold 1.9 × 10⁶. Elsewhere the plan is R06.T8.i's, bit for bit.
+pub const DENSE_EDGES_LY: [u32; 4] = [8, 16, 32, 64];
+
+/// The most systems of C, D and E a dense place's first shell may expect within its edge, `N_FIRST`
+/// (perf-dense-first-shells): 3 × 10⁴, the systems' count of the caps ([`LayerCap::first_edges_systems`]),
+/// not of the cells' records, so that the plan reads its own deterministic counts and never the
+/// machine.
+///
+/// Measured on the server's galaxy (seed 0x4d2) at V 10.15 and the ceiling V 5.0 (the probe of
+/// perf-dense-first-shells, 2026-11-19): within 125 ly near the Sun 7,609, on the solar circle a
+/// quarter turn round 7,631 and on its far side 4,740, and 2,000 ly above the Sun 657, each kept
+/// at 125 ly by a margin of 3.9 times or more; at R12's `nuclear-disc-sky` system 1,529 within 8
+/// ly, 12,154 within 16 and 96,752 within 32, so its plan starts at 16 ly; 150 ly from the centre
+/// 5,441 within 8 and 42,972 within 16, so at 8 ly. A, B and the brown dwarfs are left out of the
+/// sum: their census costs some microseconds a record against C's to E's milliseconds a system,
+/// and A alone counts 24,896 within 125 ly near the Sun, which no threshold would leave a margin
+/// over.
+pub const DENSE_FIRST_SYSTEMS: f64 = 30_000.0;
+
+/// The first edge of the plan of a place `caps`' count calls dense, ly, or `None` for a place it
+/// does not, or where some layer of [`SHELLED_LAYERS`] has a cap no count drew (a forced one)
+/// ([`DENSE_EDGES_LY`]).
+///
+/// The systems of [`SHELLED_LAYERS`] within each of [`FIRST_EDGES_LY`] are summed in that order of
+/// the layers. The place is dense where the sum within 125 ly passes [`DENSE_FIRST_SYSTEMS`], and
+/// its first edge is then the largest of [`DENSE_EDGES_LY`] whose sum is at most it, 8 ly if none.
+#[must_use]
+pub(crate) fn dense_first_edge(caps: &[LayerCap]) -> Option<u32> {
+    let mut sums = [0.0; FIRST_EDGES_LY.len()];
+    for layer in SHELLED_LAYERS {
+        let systems = caps
+            .iter()
+            .find(|cap| cap.layer() == layer)?
+            .first_edges_systems()?;
+        for (sum, n) in sums.iter_mut().zip(systems) {
+            *sum += n;
+        }
+    }
+    let within_first = sums[DENSE_EDGES_LY.len()];
+    // A sum that is not a number calls no place dense.
+    if within_first.partial_cmp(&DENSE_FIRST_SYSTEMS) != Some(core::cmp::Ordering::Greater) {
+        return None;
+    }
+    let first = (0..DENSE_EDGES_LY.len())
+        .rev()
+        .find(|&k| sums[k] <= DENSE_FIRST_SYSTEMS)
+        .unwrap_or(0);
+    Some(DENSE_EDGES_LY[first])
+}
+
+/// The edges of a dense place's plan whose first is `first`, one of [`DENSE_EDGES_LY`]: those of
+/// [`DENSE_EDGES_LY`] from it, then those of `edges_ly` beyond them.
+#[must_use]
+fn dense_edges(first: u32, edges_ly: &[u32]) -> Vec<u32> {
+    let last_dense = DENSE_EDGES_LY[DENSE_EDGES_LY.len() - 1];
+    DENSE_EDGES_LY
+        .iter()
+        .copied()
+        .filter(|&edge| edge >= first)
+        .chain(edges_ly.iter().copied().filter(|&edge| edge > last_dense))
+        .collect()
+}
+
+/// How a plan's shells take a layer's records (perf-dense-first-shells).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum Shelling {
+    /// R06.T8.i's: layers C, D and E shell by shell, each cell whole in the first shell whose
+    /// padded sphere its box meets; A, B and the brown dwarfs in one shell.
+    ByCell,
+    /// A dense place's: every layer shell by shell, each of its cells opened in the first shell
+    /// [`ByCell`](Self::ByCell) would open it in, and each record censused in one shell, the first
+    /// that holds its nearest distance among those that open its cell ([`RecordWindow`]).
+    ByRecord,
+}
+
+/// The margin, ly, by which a shell of a dense place's plan keeps a cell opened by an earlier shell
+/// whose farthest point lies short of its window (10⁻⁶ ly): far above the rounding of a box's
+/// distance and a record's, so that no cell whose records it takes is passed over.
+const WINDOW_BOX_SLACK_LY: f64 = 1e-6;
+
+/// Which of a cell's records a shell of a dense place's plan censuses (perf-dense-first-shells): those
+/// whose nearest distance lies in the window, at least `from_ly` and under `to_ly`.
+///
+/// A record's nearest distance is the least distance any of its stars can show from the observer:
+/// its epoch distance less its cell's pad for motion and its own offset bound, at least nought
+/// ([`census_window_part`](super::census_window_part)). It is a function of the record and the
+/// query alone, so each record falls in one window of its layer's shells.
+///
+/// A cell is opened in the shell R06.T8.i's plan would open it in, the first whose padded sphere
+/// its box meets: there its window runs from nought, taking every record nearer than the edge,
+/// and the census counts the cell. Every later shell of its layer whose window its box can reach
+/// takes the records of its own window. So the shells to an edge hold every record of their cells
+/// whose nearest distance is under it, every star they list within it among them, and they list
+/// what R06.T8.i's shells to that edge list, star for star; all of them together hold every record
+/// of the plan's cells once, and so the one-shot census, star for star and tally for tally.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RecordWindow {
+    from_ly: f64,
+    to_ly: f64,
+    first: bool,
+}
+
+impl RecordWindow {
+    /// The least nearest distance the window takes, ly: nought in the shell that opens the cell.
+    #[must_use]
+    pub const fn from_ly(&self) -> f64 {
+        self.from_ly
+    }
+
+    /// The nearest distance the window takes records below, ly: its shell's edge, or +∞ for its
+    /// layer's last shell.
+    #[must_use]
+    pub const fn to_ly(&self) -> f64 {
+        self.to_ly
+    }
+
+    /// Whether the window's shell opens the cell, whose census then counts it in the tallies
+    /// ([`LayerTally::cells`](super::LayerTally::cells)): one shell of its layer does.
+    #[must_use]
+    pub const fn opens_the_cell(&self) -> bool {
+        self.first
+    }
+
+    /// Whether the window takes a record whose nearest distance is `nearest_ly`.
+    #[must_use]
+    pub fn holds(&self, nearest_ly: f64) -> bool {
+        self.from_ly <= nearest_ly && nearest_ly < self.to_ly
+    }
+}
+
+/// One cell a shell of a [`CensusPlan`] censuses, and which of its records: all of them, as
+/// R06.T8.i's shells take each cell once, or those of a window, as a dense place's do
+/// ([`RecordWindow`]; perf-dense-first-shells). A census job takes it with
+/// [`census_shell_cell`](super::census_shell_cell).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ShellCell {
+    key: CellKey,
+    window: Option<RecordWindow>,
+}
+
+impl ShellCell {
+    /// The cell.
+    #[must_use]
+    pub const fn key(&self) -> CellKey {
+        self.key
+    }
+
+    /// The window of the cell's records the shell takes, or `None` for all of them.
+    #[must_use]
+    pub const fn window(&self) -> Option<RecordWindow> {
+        self.window
+    }
+}
 
 /// One distance shell of one layer of a [`CensusPlan`] (R06.T8.i).
 ///
@@ -155,7 +319,8 @@ enum Reached {
 /// counted twice (Design note 11). A layer whose last shell is merged lists every star of the cells
 /// it opens, as the one-shot census does, in that census and every later one: beyond its cap
 /// fewer than one star is expected, within its stated count beyond. A, B and the brown dwarfs, one
-/// shell each, are final from the first.
+/// shell each, are final from the first, but in a dense place, whose plan shells every layer
+/// ([`DENSE_EDGES_LY`]; perf-dense-first-shells).
 ///
 /// Where a ray cone's edge crosses a texel, the radius towards the texel's centre can exceed the
 /// radius towards one of its stars, and if that star's cell is unopened its light is in neither
@@ -1145,6 +1310,14 @@ impl fmt::Debug for SkyContext<'_> {
 /// cells the census opens not at all, so the census of every shell is the one-shot census, star
 /// for star.
 ///
+/// In a dense place ([`DENSE_EDGES_LY`]; perf-dense-first-shells) every layer is shelled, its first
+/// shells to 8, 16, 32 and 64 ly from the first its caps' count allows, and each shell takes the
+/// records of its own window from every cell whose box can hold one ([`ShellCell`],
+/// [`RecordWindow`]): each cell is opened, and counted, in the same shell as above, and each record
+/// is censused in one shell, so the census of every shell is still the one-shot census, star for
+/// star and tally for tally, and the shells to an edge list what the cells' shells to that edge
+/// list.
+///
 /// At a synthetic ceiling (rendering plan R13; [`census_plan_of`]) C's, D's and E's walks open
 /// cells by their rays' cones widened by the band texel's largest radius, and their real boundary
 /// held at [`REAL_LIMIT_LY`](super::super::caps::REAL_LIMIT_LY), itself one of the shell edges,
@@ -1162,9 +1335,19 @@ pub struct CensusPlan {
     /// Per layer of [`CAPPED_LAYERS`], whether it lists by the radius towards each star's texel at
     /// every reply: C, D and E at a synthetic ceiling ([`Completeness`]).
     by_texel: [bool; CAPPED_LAYERS.len()],
+    /// How its shells take each layer's records: a dense place's by window.
+    shelling: Shelling,
 }
 
 impl CensusPlan {
+    /// Whether the plan is a dense place's, every layer's shells taking each cell's records by
+    /// their nearest distance ([`RecordWindow`]; perf-dense-first-shells): its slabs' cells then
+    /// stand in several shells, each a window of their records ([`CellSlab::shell_cells`]).
+    #[must_use]
+    pub fn takes_records_by_window(&self) -> bool {
+        self.shelling == Shelling::ByRecord
+    }
+
     /// The caps, one per layer of [`CAPPED_LAYERS`].
     #[must_use]
     pub fn caps(&self) -> &[LayerCap] {
@@ -1473,6 +1656,8 @@ struct LayerWalk {
     /// Each shell's but the last's edge, whole light-years, and its sphere, nearest first: the edge,
     /// padded as a walk to that edge pads. The last shell walks `sphere`.
     edges: Arc<[(u32, QuerySphere)]>,
+    /// How its shells take the layer's records: by window in a dense place's plan.
+    shelling: Shelling,
 }
 
 impl LayerWalk {
@@ -1540,20 +1725,74 @@ impl CellSlab {
         self.x
     }
 
-    /// The slab's cells, in canonical order.
+    /// The slab's cells, in canonical order: those its shell opens, each in one shell of its
+    /// layer, a dense place's plan's too.
     pub fn cells(&self) -> impl Iterator<Item = CellKey> + use<> {
         let slab = self.clone();
         let (outer, inner) = slab.walk.shell_spheres(slab.shell);
         let (outer, inner) = (*outer, inner.copied());
-        cells_in_shell_slab(slab.walk.layer, &outer, inner.as_ref(), slab.x).filter(move |&key| {
-            opens(
-                slab.region.as_ref(),
-                slab.walk.rays.as_ref(),
-                slab.apex,
-                key,
-                slab.walk.pad,
-            )
-        })
+        cells_in_shell_slab(slab.walk.layer, &outer, inner.as_ref(), slab.x)
+            .filter(move |&key| slab.opens(key))
+    }
+
+    /// The cells the slab's shell censuses, each with the window of its records the shell takes
+    /// (perf-dense-first-shells): in R06.T8.i's plan [`cells`](Self::cells), every record of each;
+    /// in a dense place's ([`CensusPlan::takes_records_by_window`]) those cells, each opened here and
+    /// taking every record nearer than the shell's edge, then the cells of the layer's earlier
+    /// shells whose box reaches the shell's window, each taking the records of the window
+    /// ([`RecordWindow`]). Each record of the plan's cells is in one shell's window.
+    pub fn shell_cells(&self) -> impl Iterator<Item = ShellCell> + use<> {
+        let by_record = self.walk.shelling == Shelling::ByRecord;
+        let to_ly = self
+            .walk
+            .edges
+            .get(self.shell)
+            .map_or(f64::INFINITY, |&(edge, _)| f64::from(edge));
+        let opened = self.cells().map(move |key| ShellCell {
+            key,
+            window: by_record.then_some(RecordWindow {
+                from_ly: 0.0,
+                to_ly,
+                first: true,
+            }),
+        });
+        let earlier = self
+            .shell
+            .checked_sub(1)
+            .filter(|_| by_record)
+            .map(|before| {
+                let slab = self.clone();
+                let (edge, sphere) = slab.walk.edges[before];
+                let from_ly = f64::from(edge);
+                cells_in_sphere_slab(slab.walk.layer, &sphere, slab.x)
+                    .filter(move |&key| {
+                        // A record lies in its box, and no star of it shows farther than its epoch
+                        // distance, so a box wholly within the window's start holds none of it.
+                        slab.opens(key)
+                            && box_distances_ly(key, slab.apex).1 >= from_ly - WINDOW_BOX_SLACK_LY
+                    })
+                    .map(move |key| ShellCell {
+                        key,
+                        window: Some(RecordWindow {
+                            from_ly,
+                            to_ly,
+                            first: false,
+                        }),
+                    })
+            });
+        opened.chain(earlier.into_iter().flatten())
+    }
+
+    /// Whether the slab's plan opens `key`, a cell of its layer's sphere ([`opens`]).
+    #[must_use]
+    fn opens(&self, key: CellKey) -> bool {
+        opens(
+            self.region.as_ref(),
+            self.walk.rays.as_ref(),
+            self.apex,
+            key,
+            self.walk.pad,
+        )
     }
 }
 
@@ -1660,6 +1899,11 @@ pub fn census_plan(
 /// radius ρ (fix (i)), each listed by the radius towards its stars' band texel at every reply, the
 /// final one included ([`Completeness`]). With no ceiling every bit is R06's.
 ///
+/// Where the caps' count calls the place dense ([`DENSE_EDGES_LY`], [`DENSE_FIRST_SYSTEMS`];
+/// perf-dense-first-shells), its shells start nearer, at 8, 16, 32 or 64 ly, every layer's, and
+/// take each cell's records by window ([`RecordWindow`]); a forced cap states no count, so a plan
+/// to forced caps is never dense. Its last reply is the one-shot census all the same.
+///
 /// # Panics
 ///
 /// If a cap's sphere cannot be built, which a positive finite cap never fails.
@@ -1693,13 +1937,58 @@ pub fn census_plan_with_edges(
     plan_with_edges(query, caps, edges_ly)
 }
 
+/// [`census_plan_of`] by record to exactly the shells' edges `edges_ly`, ascending, for every layer,
+/// as a dense place's plan takes its records ([`DENSE_EDGES_LY`], [`RecordWindow`]), whatever its
+/// caps' count: a test's seam, so that a census a test can afford takes its records by window, and
+/// the server's tests', through their own (perf-dense-first-shells). No sky a client asks takes it:
+/// a client's plan is by record exactly where its caps' count calls the place dense.
+///
+/// # Panics
+///
+/// As [`census_plan_with_edges`].
+#[doc(hidden)]
+#[must_use]
+pub fn census_plan_by_record(
+    query: &SkyQuery,
+    caps: Vec<LayerCap>,
+    edges_ly: &[u32],
+) -> CensusPlan {
+    assert!(
+        edges_ly.first().is_none_or(|&first| first > 0)
+            && edges_ly.windows(2).all(|pair| pair[0] < pair[1])
+            && edges_ly.len() < usize::from(u8::MAX),
+        "shell edges are above nought and ascend, fewer than 255 of them: {edges_ly:?}"
+    );
+    plan_shelled(query, caps, edges_ly, Shelling::ByRecord)
+}
+
 /// [`census_plan_of`] with the shells' edges `edges_ly`, ascending: [`SHELL_EDGES_LY`], or a test's
-/// nearer ones, so that a test's census can afford shells.
+/// nearer ones, so that a test's census can afford shells. Where the caps' count calls the place
+/// dense ([`dense_first_edge`]), [`DENSE_EDGES_LY`] from its first edge go before them, and every
+/// layer's records are taken by window.
 #[must_use]
 pub(crate) fn plan_with_edges(
     query: &SkyQuery,
     caps: Vec<LayerCap>,
     edges_ly: &[u32],
+) -> CensusPlan {
+    match dense_first_edge(&caps) {
+        Some(first) => {
+            let edges = dense_edges(first, edges_ly);
+            plan_shelled(query, caps, &edges, Shelling::ByRecord)
+        }
+        None => plan_shelled(query, caps, edges_ly, Shelling::ByCell),
+    }
+}
+
+/// The plan of `query` to `caps` with the shells' edges `edges_ly`, ascending, its records taken
+/// by `shelling`.
+#[must_use]
+fn plan_shelled(
+    query: &SkyQuery,
+    caps: Vec<LayerCap>,
+    edges_ly: &[u32],
+    shelling: Shelling,
 ) -> CensusPlan {
     debug_assert!(
         edges_ly.windows(2).all(|pair| pair[0] < pair[1]),
@@ -1708,7 +1997,7 @@ pub(crate) fn plan_with_edges(
     let observer = *query.observer().position();
     let walks = caps
         .iter()
-        .filter_map(|cap| layer_walk(query, cap, edges_ly))
+        .filter_map(|cap| layer_walk(query, cap, edges_ly, shelling))
         .collect();
     let by_texel = CAPPED_LAYERS
         .map(|layer| query.synthetic_ceiling.is_some() && REAL_BOUNDARY_LAYERS.contains(&layer));
@@ -1720,6 +2009,7 @@ pub(crate) fn plan_with_edges(
         observer,
         band_spec: query.band_spec(),
         by_texel,
+        shelling,
     }
 }
 
@@ -1752,21 +2042,30 @@ fn padded_sphere(query: &SkyQuery, layer: Layer, radius: LightYears) -> (QuerySp
 /// The walk of `cap`'s layer for `query`: [`cells_in_sphere`](crate::galaxy::query::cells_in_sphere)
 /// to the cap's farthest radius, padded as the range query pads at the earliest emitted time that
 /// radius allows, with the cap's radius per ray if it has one, and, for a layer of
-/// [`SHELLED_LAYERS`], the spheres of the edges of `edges_ly` below that radius, each padded so;
-/// `None` for a cap of no radius.
+/// [`SHELLED_LAYERS`] or any layer of a plan by record, the spheres of the edges of `edges_ly`
+/// below that radius, each padded so; `None` for a cap of no radius.
 ///
 /// # Panics
 ///
 /// If the cap's sphere cannot be built, which a positive finite cap never fails.
 #[must_use]
-fn layer_walk(query: &SkyQuery, cap: &LayerCap, edges_ly: &[u32]) -> Option<LayerWalk> {
+fn layer_walk(
+    query: &SkyQuery,
+    cap: &LayerCap,
+    edges_ly: &[u32],
+    shelling: Shelling,
+) -> Option<LayerWalk> {
     let layer = cap.layer();
     let radius = cap.radius();
     if radius.value() <= 0.0 {
         return None;
     }
     let (sphere, pad) = padded_sphere(query, layer, radius);
-    let edges: Arc<[(u32, QuerySphere)]> = if SHELLED_LAYERS.contains(&layer) {
+    let shelled = match shelling {
+        Shelling::ByCell => SHELLED_LAYERS.contains(&layer),
+        Shelling::ByRecord => true,
+    };
+    let edges: Arc<[(u32, QuerySphere)]> = if shelled {
         edges_ly
             .iter()
             .take_while(|&&edge| f64::from(edge) < radius.value())
@@ -1794,6 +2093,7 @@ fn layer_walk(query: &SkyQuery, cap: &LayerCap, edges_ly: &[u32]) -> Option<Laye
             .rays()
             .map(|rays| (rays.clone(), rays.cones_widened_by(widening))),
         edges,
+        shelling,
     })
 }
 
@@ -4055,5 +4355,442 @@ mod tests {
             ));
         }
         golden!("sky/census_near_sun", w.as_str());
+    }
+
+    /// Caps of C, D and E forced to 3,000 ly, each stating `systems` within each of
+    /// [`FIRST_EDGES_LY`] as a count's would, and A's, B's and the brown dwarfs' to 200 ly stating
+    /// a hundred times as many: the plan's dense test reads C, D and E alone.
+    fn caps_stating(systems: [f64; FIRST_EDGES_LY.len()]) -> Vec<LayerCap> {
+        CAPPED_LAYERS
+            .iter()
+            .map(|&layer| {
+                if SHELLED_LAYERS.contains(&layer) {
+                    LayerCap::forced(layer, LightYears::new(3_000.0))
+                        .with_first_edges_systems(systems.map(|n| n / 3.0))
+                } else {
+                    LayerCap::forced(layer, LightYears::new(200.0))
+                        .with_first_edges_systems(systems.map(|n| 100.0 * n))
+                }
+            })
+            .collect()
+    }
+
+    /// The dense test of perf-dense-first-shells: a place is dense where C's, D's and E's systems
+    /// expected within 125 ly pass [`DENSE_FIRST_SYSTEMS`], and its plan then starts at the largest
+    /// of [`DENSE_EDGES_LY`] within which they expect at most that many, 8 ly if none, every layer
+    /// shelled to the rest of those edges and [`SHELL_EDGES_LY`]', its records by window. A cap
+    /// that states no count, a forced one, leaves the place as R06.T8.i plans it.
+    #[test]
+    fn a_dense_places_plan_starts_at_the_largest_edge_its_count_allows() {
+        assert_eq!(
+            FIRST_EDGES_LY[..DENSE_EDGES_LY.len()],
+            DENSE_EDGES_LY,
+            "the caps state the dense edges"
+        );
+        assert_eq!(FIRST_EDGES_LY[DENSE_EDGES_LY.len()], SHELL_EDGES_LY[0]);
+        let n = DENSE_FIRST_SYSTEMS;
+        for (systems, first) in [
+            ([1.0, 8.0, 64.0, 512.0, n], None),
+            ([1e3, 8e3, 6.4e4, 5.1e5, 4e6], Some(16)),
+            ([2e3, 1.6e4, n, 1e5, 9e5], Some(32)),
+            ([10.0, 80.0, 640.0, 5_120.0, 2.0 * n], Some(64)),
+            ([4e4, 3.2e5, 2.6e6, 2e7, 1.6e8], Some(8)),
+            ([f64::NAN; 5], None),
+        ] {
+            let caps = caps_stating(systems);
+            assert_eq!(dense_first_edge(&caps), first, "{systems:?}");
+            let query = SkyQuery::builder(observer(), Magnitudes::new(8.0))
+                .build()
+                .expect("a valid query");
+            let plan = census_plan_of(&query, caps.clone());
+            assert_eq!(plan.takes_records_by_window(), first.is_some());
+            let edges = |layer: Layer| -> Vec<Option<LightYears>> {
+                plan.shells()
+                    .filter(|shell| shell.layer() == layer)
+                    .map(|shell| shell.edge())
+                    .collect()
+            };
+            let ly = |e: u32| Some(LightYears::new(f64::from(e)));
+            if let Some(first) = first {
+                let expected: Vec<Option<LightYears>> =
+                    [8, 16, 32, 64, 125, 250, 500, 1_000, 2_000]
+                        .into_iter()
+                        .filter(|&e| e >= first)
+                        .map(ly)
+                        .chain([None])
+                        .collect();
+                assert_eq!(edges(Layer::C), expected);
+                // A, B and the brown dwarfs are shelled too, to the edges below their caps.
+                let a: Vec<Option<LightYears>> = [8, 16, 32, 64, 125]
+                    .into_iter()
+                    .filter(|&e| e >= first)
+                    .map(ly)
+                    .chain([None])
+                    .collect();
+                assert_eq!(edges(Layer::A), a);
+                let first_reply = plan.completeness(plan.shells().filter(|s| s.index() == 0));
+                assert_eq!(first_reply.edge(Layer::A), ly(first));
+                assert_eq!(first_reply.least_edge(), ly(first));
+            } else {
+                assert_eq!(edges(Layer::A), [None]);
+                assert_eq!(edges(Layer::C)[0], ly(125));
+                // Debug's text, since a count that is not a number is not equal to itself.
+                assert_eq!(
+                    format!("{plan:?}"),
+                    format!(
+                        "{:?}",
+                        plan_shelled(&query, caps, &SHELL_EDGES_LY, Shelling::ByCell)
+                    ),
+                    "R06.T8.i's plan, bit for bit"
+                );
+            }
+        }
+        // A forced cap of C states no count: no place is dense.
+        let mut caps = caps_stating([4e4, 3.2e5, 2.6e6, 2e7, 1.6e8]);
+        caps[2] = LayerCap::forced(Layer::C, LightYears::new(3_000.0));
+        assert_eq!(dense_first_edge(&caps), None);
+    }
+
+    /// The census tests' dense place by record (perf-dense-first-shells), ly: the fixture's inner
+    /// disc, 8,000 ly from the centre, where the caps' count calls a place dense, at the centre of a
+    /// layer-D cell and 32 ly inside a layer-E one, so that the windows part one cell of each, and
+    /// at a corner of layer C's, so that they part eight.
+    const DENSE_AT_LY: [f64; 3] = [96.0, 8_032.0, 96.0];
+
+    /// The dense census's cut, V.
+    const DENSE_CUT_V: f64 = 6.5;
+
+    /// Each layer's forced cap of the dense census, ly, in [`CAPPED_LAYERS`]' order.
+    const DENSE_CAPS_LY: [f64; 6] = [12.0, 20.0, 24.0, 24.0, 24.0, 10.0];
+
+    /// The dense census's shells' edges, ly: [`DENSE_EDGES_LY`] below its caps.
+    const DENSE_TEST_EDGES_LY: [u32; 2] = [8, 16];
+
+    /// One shell's census: its stars, in the order its jobs gave them, and its tallies.
+    fn shell_part(parts: impl IntoIterator<Item = Part>) -> Part {
+        let mut tallies = crate::sky::census::CensusTallies::default();
+        let mut stars = Vec::new();
+        for (s, t) in parts {
+            stars.extend(s);
+            tallies.add(&t);
+        }
+        (stars, tallies)
+    }
+
+    /// The census of each of `cells` for `query`, in order, on up to four threads as
+    /// [`census_by_cell`] runs its cells: each the records the cell's shell takes
+    /// ([`census_shell_cell`](super::super::census_shell_cell)).
+    fn census_by_shell_cell(query: &SkyQuery, cells: &[ShellCell]) -> Vec<Part> {
+        let next = std::sync::atomic::AtomicUsize::new(0);
+        let job = || {
+            let mut ctx = SkyContext {
+                tables: milky_way_dark_tables(),
+                envelope: milky_way_envelope(),
+                offsets: milky_way_offsets(),
+                noise: NoiseCache::with_capacity(1 << 16),
+                cells: &NoSkyCellCache,
+                sources: &[],
+                modifiers: &NoModifiers,
+            };
+            let mut parts = Vec::new();
+            loop {
+                let k = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let Some(&cell) = cells.get(k) else {
+                    return parts;
+                };
+                let mut stars = Vec::new();
+                let (tallies, _) = super::super::census_shell_cell(
+                    milky_way_galaxy(),
+                    &mut ctx,
+                    cell,
+                    query,
+                    &mut stars,
+                );
+                parts.push((k, (stars, tallies)));
+            }
+        };
+        let parts: Vec<(usize, Part)> = if cfg!(target_family = "wasm") {
+            job()
+        } else {
+            let held = crate::planetary::testing::HeldRules::on_this_thread();
+            std::thread::scope(|scope| {
+                let threads: Vec<_> = (0..hyperion_testkit::threads::granted(4))
+                    .map(|_| scope.spawn(move || held.install(job)))
+                    .collect();
+                threads
+                    .into_iter()
+                    .flat_map(|thread| thread.join().expect("a census thread completes"))
+                    .collect()
+            })
+        };
+        let by_index: BTreeMap<usize, Part> = parts.into_iter().collect();
+        by_index.into_values().collect()
+    }
+
+    /// The dense census: its query and plan by record, and each shell's census by window and by
+    /// whole cell, in the plan's shell order.
+    struct DenseCensus {
+        query: SkyQuery,
+        plan: CensusPlan,
+        by_window: Vec<(Shell, Part)>,
+        by_cell: Vec<(Shell, Part)>,
+    }
+
+    impl DenseCensus {
+        /// The fixture's dense place to [`DENSE_CUT_V`], each layer's cap forced to
+        /// [`DENSE_CAPS_LY`] and every layer in shells to [`DENSE_TEST_EDGES_LY`] by record, each
+        /// shell censused by window and, if `by_cell`, by whole cell too.
+        fn new(by_cell: bool) -> Self {
+            let at = GalacticPosition::from_light_years(DENSE_AT_LY).expect("in the cube");
+            let observer = Observer::new(at, UniverseTime::EPOCH).expect("a valid observer");
+            let per_layer: Vec<(Layer, LightYears)> = CAPPED_LAYERS
+                .iter()
+                .copied()
+                .zip(DENSE_CAPS_LY.map(LightYears::new))
+                .collect();
+            let query = SkyQuery::builder(observer, Magnitudes::new(DENSE_CUT_V))
+                .build()
+                .expect("a valid query")
+                .with_caps_forced_per_layer(&per_layer)
+                .expect("forced caps");
+            let caps = query.forced_caps().expect("forced caps").to_vec();
+            let plan = census_plan_by_record(&query, caps, &DENSE_TEST_EDGES_LY);
+            let shells: Vec<Shell> = plan.shells().collect();
+            let by_window = shells
+                .iter()
+                .map(|&shell| {
+                    let cells: Vec<ShellCell> = plan
+                        .shell_slabs(shell)
+                        .flat_map(|slab| slab.shell_cells())
+                        .collect();
+                    (shell, shell_part(census_by_shell_cell(&query, &cells)))
+                })
+                .collect();
+            let by_cell = if by_cell {
+                shells
+                    .iter()
+                    .map(|&shell| {
+                        let keys: Vec<CellKey> = plan
+                            .shell_slabs(shell)
+                            .flat_map(|slab| slab.cells())
+                            .collect();
+                        (
+                            shell,
+                            shell_part(census_by_cell(&query, &keys).into_values()),
+                        )
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            Self {
+                query,
+                plan,
+                by_window,
+                by_cell,
+            }
+        }
+
+        /// The parts of `of` whose shells are among `done`.
+        fn parts(of: &[(Shell, Part)], done: &[Shell]) -> Vec<Part> {
+            of.iter()
+                .filter(|(shell, _)| done.contains(shell))
+                .map(|(_, part)| part.clone())
+                .collect()
+        }
+    }
+
+    /// A dense place's census by record (perf-dense-first-shells), in the fixture's inner disc with
+    /// small caps, so that a unit test affords it, every layer in shells to 8 and 16 ly:
+    ///
+    /// - the shells to each edge, merged, list what the same plan's shells list with their cells
+    ///   censused whole, R06.T8.i's way, star for star, and count the same cells;
+    /// - every shell merged is the one-shot census of the plan's cells, star for star and tally for
+    ///   tally, at any `n_max`;
+    /// - no star is censused in two shells: each record is in one window.
+    #[test]
+    fn a_dense_places_shells_by_record_list_what_its_cells_shells_list_and_end_at_the_one_shot_census()
+     {
+        let fixture = DenseCensus::new(true);
+        let unbounded = NonZeroU32::new(MAX_N_MAX).expect("not zero");
+        let ranks = fixture
+            .plan
+            .shells()
+            .map(|shell| usize::from(shell.index()) + 1)
+            .max()
+            .expect("shells");
+        assert_eq!(ranks, DENSE_TEST_EDGES_LY.len() + 1);
+        for rank in 0..ranks {
+            let done: Vec<Shell> = fixture
+                .plan
+                .shells()
+                .filter(|shell| usize::from(shell.index()) <= rank)
+                .collect();
+            let reached = fixture.plan.completeness(done.iter().copied());
+            let by_window = merge_shells(
+                DenseCensus::parts(&fixture.by_window, &done),
+                unbounded,
+                reached.clone(),
+            );
+            let by_cell = merge_shells(
+                DenseCensus::parts(&fixture.by_cell, &done),
+                unbounded,
+                reached.clone(),
+            );
+            assert_eq!(
+                star_bits(by_window.listed()),
+                star_bits(by_cell.listed()),
+                "to rank {rank}"
+            );
+            assert_eq!(by_window.overflow(), []);
+            for layer in CAPPED_LAYERS {
+                assert_eq!(
+                    by_window.tallies().layer(layer).cells(),
+                    by_cell.tallies().layer(layer).cells(),
+                    "{layer:?} to rank {rank}"
+                );
+            }
+            if rank == 0 {
+                assert_eq!(reached.edge(Layer::A), Some(LightYears::new(8.0)));
+                assert_eq!(reached.edge(Layer::B), Some(LightYears::new(8.0)));
+            }
+            eprintln!(
+                "to rank {rank}: {} listed, A {} B {} C {} D {} E {} generated by window, {} by cell",
+                by_window.listed().len(),
+                by_window.tallies().layer(Layer::A).generated(),
+                by_window.tallies().layer(Layer::B).generated(),
+                by_window.tallies().layer(Layer::C).generated(),
+                by_window.tallies().layer(Layer::D).generated(),
+                by_window.tallies().layer(Layer::E).generated(),
+                CAPPED_LAYERS
+                    .iter()
+                    .map(|&l| by_cell.tallies().layer(l).generated())
+                    .sum::<u64>(),
+            );
+        }
+        // The last: every shell, the one-shot census of the plan's cells.
+        let all: Vec<Shell> = fixture.plan.shells().collect();
+        for n_max in [unbounded, NonZeroU32::new(60).expect("not zero")] {
+            let by_window = merge_shells(
+                DenseCensus::parts(&fixture.by_window, &all),
+                n_max,
+                fixture.plan.complete(),
+            );
+            let one_shot = merge_census(DenseCensus::parts(&fixture.by_cell, &all), n_max);
+            assert_eq!(star_bits(by_window.listed()), star_bits(one_shot.listed()));
+            assert_eq!(
+                star_bits(by_window.overflow()),
+                star_bits(one_shot.overflow())
+            );
+            assert_eq!(by_window.tallies(), one_shot.tallies());
+            assert!(by_window.completeness().is_some_and(Completeness::is_final));
+        }
+        // Each record in one window: no star twice among the shells' parts.
+        let mut seen = BTreeSet::new();
+        for (_, (stars, _)) in &fixture.by_window {
+            for star in stars {
+                assert!(seen.insert((star.system(), star.star())), "{star:?} twice");
+            }
+        }
+        let accepted: u64 = CAPPED_LAYERS
+            .iter()
+            .map(|&layer| {
+                merge_census(DenseCensus::parts(&fixture.by_cell, &all), unbounded)
+                    .tallies()
+                    .layer(layer)
+                    .accepted()
+            })
+            .sum();
+        assert_eq!(u64::try_from(seen.len()).expect("few"), accepted);
+        assert!(!fixture.query.cut().value().is_nan());
+    }
+
+    /// A dense place's census by record, pinned for every target (perf-dense-first-shells): the
+    /// census tests' dense place ([`DenseCensus`]), each shell censused by window. The golden holds
+    /// the plan's cells and shells, each layer's tallies, each reply's complete-to radius per layer,
+    /// how many stars each lists, and every star the last lists, its system's ID, its star index,
+    /// its layer, its V and the first reply that lists it. `just test-wasm-fast` compares it on
+    /// wasm32-wasip1; its name holds "pinned" for the reason `the_census_near_the_sun_is_pinned`'s
+    /// does.
+    #[test]
+    fn the_dense_census_by_record_is_pinned() {
+        use hyperion_testkit::golden;
+        use hyperion_testkit::golden::GoldenWriter;
+
+        let fixture = DenseCensus::new(false);
+        let plan = &fixture.plan;
+        let all = NonZeroU32::new(MAX_N_MAX).expect("not zero");
+        let ranks = plan
+            .shells()
+            .map(|shell| usize::from(shell.index()) + 1)
+            .max()
+            .expect("shells");
+        let replies: Vec<(Completeness, SkyCensus)> = (0..ranks)
+            .map(|rank| {
+                let done: Vec<Shell> = plan
+                    .shells()
+                    .filter(|shell| usize::from(shell.index()) <= rank)
+                    .collect();
+                let reached = plan.completeness(done.iter().copied());
+                let census = merge_shells(
+                    DenseCensus::parts(&fixture.by_window, &done),
+                    all,
+                    reached.clone(),
+                );
+                (reached, census)
+            })
+            .collect();
+        let (_, last) = replies.last().expect("a reply");
+        let mut w = GoldenWriter::new();
+        w.header(crate::GENERATOR_VERSION.get());
+        w.line(&format!(
+            "the fixture's inner disc at {DENSE_AT_LY:?} ly at the epoch, cut V {DENSE_CUT_V}, caps \
+             forced to {DENSE_CAPS_LY:?} ly, every layer by record to {DENSE_TEST_EDGES_LY:?} ly"
+        ));
+        w.line(&format!("  cells = {}", plan.cell_count()));
+        w.line(&format!("  shells = {}", plan.shells().count()));
+        w.line("the tallies, each layer's");
+        for &layer in &CAPPED_LAYERS {
+            let t = last.tallies().layer(layer);
+            for (what, n) in [
+                ("cells", t.cells()),
+                ("generated", t.generated()),
+                ("accepted", t.accepted()),
+                ("listed", t.listed()),
+                ("without photometry", t.without_photometry()),
+                ("centre members", t.centre_members()),
+            ] {
+                w.line(&format!("  {layer:?} {what} = {n}"));
+            }
+        }
+        for (rank, (reached, census)) in replies.iter().enumerate() {
+            w.line(&format!("reply {rank}, complete to"));
+            for &layer in &CAPPED_LAYERS {
+                w.f64(
+                    &format!("  {layer:?}"),
+                    reached.complete_to().radius(layer).value(),
+                );
+            }
+            w.line(&format!("  stars listed = {}", census.listed().len()));
+        }
+        w.line(
+            "the last reply's stars, in the census's order: ID/star layer = V's bits, V to 10⁻⁶, \
+             and the first reply that lists it",
+        );
+        for star in last.listed() {
+            let v = star.v().value();
+            let first = replies
+                .iter()
+                .position(|(reached, _)| reached.lists(star))
+                .expect("the last reply lists it");
+            w.line(&format!(
+                "  {:#018x}/{} {:?} = 0x{:016x} V {v:.6} reply {first}",
+                star.system().raw(),
+                star.star().get(),
+                star.layer(),
+                bits(v),
+            ));
+        }
+        golden!("sky/census_dense", w.as_str());
     }
 }

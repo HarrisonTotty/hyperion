@@ -24,9 +24,9 @@ pub use cache::{
 };
 pub use cell::{
     Bound, BoundStar, CellOffsets, CensusCost, CensusTallies, GRID_STAR_BOUND, LayerCost,
-    LayerTally, PairTally, RecordLight, SkyStar, StarBounds, StarLight, cell_floor,
-    cell_offset_bound, census_cell, census_cell_with_cost, census_record, flux_bound,
-    star_offset_bound,
+    LayerTally, PairTally, RecordLight, SkyStar, StarBounds, StarLight, WindowPart, cell_floor,
+    cell_offset_bound, census_cell, census_cell_with_cost, census_record, census_shell_cell,
+    census_window_part, flux_bound, star_offset_bound,
 };
 pub use features::{
     MemberPart, SkyMember, SkySource, census_members, streams_seen, streams_seen_in,
@@ -34,7 +34,8 @@ pub use features::{
 };
 pub use merge::{SkyCensus, merge_census, merge_shells, sky_order};
 pub use query::{
-    BuildSkyQueryError, CellSlab, CensusPlan, Completeness, Cone, ConeRegion, MAX_FORCED_CAP_LY,
-    MAX_N_MAX, SHELL_EDGES_LY, SHELLED_LAYERS, Shell, SkyContext, SkyQuery, SkyQueryBuilder,
-    census_plan, census_plan_of, census_plan_with_edges, plan_cells,
+    BuildSkyQueryError, CellSlab, CensusPlan, Completeness, Cone, ConeRegion, DENSE_EDGES_LY,
+    DENSE_FIRST_SYSTEMS, MAX_FORCED_CAP_LY, MAX_N_MAX, RecordWindow, SHELL_EDGES_LY,
+    SHELLED_LAYERS, Shell, ShellCell, SkyContext, SkyQuery, SkyQueryBuilder, census_plan,
+    census_plan_by_record, census_plan_of, census_plan_with_edges, plan_cells,
 };

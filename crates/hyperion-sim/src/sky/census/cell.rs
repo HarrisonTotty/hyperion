@@ -66,6 +66,7 @@
 //! [`ConeRegion::holds`]: super::ConeRegion::holds
 
 use core::f64::consts::LN_2;
+use std::ops::{ControlFlow, Range};
 
 use crate::coords::{GalacticPosition, SystemPosition};
 use crate::galaxy::consts::LIGHT_YEARS_PER_PARSEC;
@@ -73,7 +74,9 @@ use crate::galaxy::gas::extinction::{NoiseMode, Quality, sightline};
 use crate::galaxy::gas::modifiers::GasModifier;
 use crate::galaxy::imf::MassBand;
 use crate::galaxy::params::GalaxyParams;
-use crate::galaxy::placement::{CellKey, SystemKind, SystemRecord, generate_cell_where};
+use crate::galaxy::placement::{
+    CellKey, SystemKind, SystemRecord, generate_cell_where, visit_cell_where_near,
+};
 use crate::galaxy::query::{pad_for, pad_speed};
 use crate::galaxy::{Galaxy, PointLy};
 use crate::id::{BodyId, Layer, SystemId};
@@ -100,7 +103,7 @@ use super::cache::{
     BlockKey, BlockParams, CACHE_APPROACH_LY, CACHE_CUT_SLACK_MAG, CellNeed, CellOutcome,
     HeldRecord, Lookup, Rebuild, serve_from_block,
 };
-use super::query::{SkyContext, SkyQuery};
+use super::query::{RecordWindow, ShellCell, SkyContext, SkyQuery};
 
 /// The quality of each star's sightline (Design note 10).
 const STAR_SIGHTLINE_QUALITY: Quality =
@@ -1351,7 +1354,7 @@ struct CellReach {
 
 /// The nearest and farthest points of `key`'s box from `apex`, ly.
 #[must_use]
-fn box_distances_ly(key: CellKey, apex: [f64; 3]) -> (f64, f64) {
+pub(super) fn box_distances_ly(key: CellKey, apex: [f64; 3]) -> (f64, f64) {
     let o = key.origin_ly();
     let size = f64::from(key.size_ly());
     let mut near_sq = 0.0;
@@ -2306,8 +2309,212 @@ fn census_served(
     }
 }
 
+/// The margin, ly, by which a window's census widens the epoch distances at which it generates a
+/// cell's records (10⁻⁶ ly): far above the rounding of the distances it compares, so that the
+/// records it generates hold every record of the window ([`census_window_part`]).
+const WINDOW_DISTANCE_SLACK_LY: f64 = 1e-6;
+
+/// The nearest distance any star of `record`, a record of a cell of `reach`, can show from
+/// `query`'s observer, ly, at least nought: the distance the bound before its drift reads
+/// ([`BeforeDrift`]), its epoch distance brought nearer by [`BEFORE_DRIFT_SLACK_SHARE`] less the
+/// cell's pad, less its own offset bound ([`star_offset_bound`]) rather than its cell's, which bounds
+/// it (perf-dense-first-shells; [`RecordWindow`]).
+///
+/// Its stars lie within that offset of its barycentre, which lies within the pad of its epoch
+/// position at every time its light can leave it, so no star of it shows nearer. The cell's offset
+/// is the lesser, should the two ever part, so that the record stays among those its window
+/// generates.
+#[must_use]
+fn nearest_distance(
+    galaxy: &Galaxy,
+    record: &SystemRecord,
+    query: &SkyQuery,
+    reach: &CellReach,
+) -> f64 {
+    let d_epoch = query
+        .observer()
+        .position()
+        .distance_to(record.epoch_position())
+        .value()
+        / METRES_PER_LIGHT_YEAR;
+    let offset = star_offset_bound(galaxy, record).value().min(reach.offset);
+    (d_epoch * (1.0 - BEFORE_DRIFT_SLACK_SHARE) - reach.pad - offset).max(0.0)
+}
+
+/// What a part of one cell's census by window did ([`census_window_part`]): its stars' counts and
+/// cost, and how far through the cell's candidates it came.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct WindowPart {
+    tallies: CensusTallies,
+    cost: CensusCost,
+    reached: u32,
+    candidates: u32,
+}
+
+impl WindowPart {
+    /// The part's tallies, for the caller to add up with [`CensusTallies::add`].
+    #[must_use]
+    pub const fn tallies(&self) -> &CensusTallies {
+        &self.tallies
+    }
+
+    /// The part's cost.
+    #[must_use]
+    pub const fn cost(&self) -> &CensusCost {
+        &self.cost
+    }
+
+    /// The index of the first of the cell's candidates the part did not take: its range's end,
+    /// held within the cell's candidates, or the candidate whose record it stopped before.
+    #[must_use]
+    pub const fn reached(&self) -> u32 {
+        self.reached
+    }
+
+    /// How many candidates the cell has, among which a part's range is read.
+    #[must_use]
+    pub const fn candidates(&self) -> u32 {
+        self.candidates
+    }
+}
+
+/// The stars of the records of `cell`, a cell of one shell of a dense place's plan, that its
+/// window takes ([`RecordWindow`]), of the cell's candidates whose indices `candidates` holds,
+/// appended to `out`, which is not cleared; with their counts and how far it came
+/// (perf-dense-first-shells).
+///
+/// It walks the candidates in index order ([`visit_cell_where_near`]), placing only the records past
+/// the cell's floor whose epoch distance lies where a record of the window can (from the window's
+/// start plus the cell's pad, to its end plus the pad and the cell's offset, each widened by
+/// [`WINDOW_DISTANCE_SLACK_LY`]), and censuses each whose nearest distance the window holds, as
+/// [`census_cell`] censuses a record (R06.T8.g's path; it reads no cell cache, whose entries hold
+/// whole cells). Before each record it would census after its first, `go_on` is asked whether to go
+/// on, and the part stops before that record where it says not to: [`WindowPart::reached`] then
+/// tells the caller the candidate the rest begins at. A part stopped anywhere and its rest, in any
+/// split of the candidates, give the same stars and tallies as one part, since a record's census
+/// reads nothing of another's, and each part places only its own candidates. The cell is counted
+/// in [`LayerTally::cells`] by the part from its first candidate in the shell that opens it.
+///
+/// So the parts of a plan's [`ShellCell`]s of every shell hold every record of its cells once, and
+/// their census is the one-shot census of the plan, star for star and tally for tally.
+///
+/// # Panics
+///
+/// As [`census_cell`].
+pub fn census_window_part(
+    galaxy: &Galaxy,
+    ctx: &mut SkyContext<'_>,
+    (key, window): (CellKey, RecordWindow),
+    query: &SkyQuery,
+    candidates: Range<u32>,
+    mut go_on: impl FnMut() -> bool,
+    out: &mut Vec<SkyStar>,
+) -> WindowPart {
+    debug_assert!(ctx.offsets.is_for(galaxy), "another galaxy's offset bounds");
+    let layer = key.layer();
+    let mut counts = Counts::default();
+    if window.opens_the_cell() && candidates.start == 0 {
+        counts.tallies.layer_mut(layer).cells += 1;
+    }
+    if ctx
+        .sources
+        .iter()
+        .any(|source| source.holds_feature_members())
+    {
+        counts.tallies.note_feature_members();
+    }
+    let reach = CellReach::of(ctx.offsets, key, query);
+    let floor = floor_at(galaxy, ctx.envelope, key, query, &reach);
+    // Where a record of the window can lie: its nearest distance is its epoch distance, brought
+    // nearer by the share, less the pad and an offset of at most the cell's.
+    let share = 1.0 - BEFORE_DRIFT_SLACK_SHARE;
+    let least = if window.from_ly() > 0.0 {
+        (window.from_ly() + reach.pad) / share - WINDOW_DISTANCE_SLACK_LY
+    } else {
+        f64::NEG_INFINITY
+    };
+    let farthest = (window.to_ly() + reach.pad + reach.offset) / share + WINDOW_DISTANCE_SLACK_LY;
+    let observer = *query.observer().position();
+    let mut first = true;
+    let walked = visit_cell_where_near(
+        galaxy,
+        key,
+        candidates,
+        |m| m.value() >= floor.value(),
+        |position| {
+            let d = observer.distance_to(position).value() / METRES_PER_LIGHT_YEAR;
+            least <= d && d <= farthest
+        },
+        |record| {
+            if !window.holds(nearest_distance(galaxy, &record, query, &reach)) {
+                return ControlFlow::Continue(());
+            }
+            if !first && !go_on() {
+                return ControlFlow::Break(());
+            }
+            first = false;
+            counts.cost.layer_mut(layer).candidates += 1;
+            record_stars(
+                galaxy,
+                ctx,
+                &record,
+                query,
+                (Bound::Applied, Some(&reach), &mut Drawn::default()),
+                &mut counts,
+                out,
+            );
+            ControlFlow::Continue(())
+        },
+    );
+    WindowPart {
+        tallies: counts.tallies,
+        cost: counts.cost,
+        reached: walked.reached,
+        candidates: walked.candidates,
+    }
+}
+
+/// The stars of `cell`, a cell of one of a [`CensusPlan`](super::CensusPlan)'s shells, that the
+/// shell takes, appended to `out` (which is not cleared), with their tallies and cost: every record
+/// of the cell ([`census_cell_with_cost`]) for a shell of R06.T8.i's, or every record of its window
+/// for a dense place's ([`census_window_part`] over all of them, perf-dense-first-shells).
+///
+/// The census of every [`ShellCell`] of a plan's every shell ([`CellSlab::shell_cells`]) is the
+/// one-shot census of its cells, star for star and tally for tally.
+///
+/// [`CellSlab::shell_cells`]: super::CellSlab::shell_cells
+///
+/// # Panics
+///
+/// As [`census_cell`].
+pub fn census_shell_cell(
+    galaxy: &Galaxy,
+    ctx: &mut SkyContext<'_>,
+    cell: ShellCell,
+    query: &SkyQuery,
+    out: &mut Vec<SkyStar>,
+) -> (CensusTallies, CensusCost) {
+    match cell.window() {
+        None => census_cell_with_cost(galaxy, ctx, cell.key(), query, out),
+        Some(window) => {
+            let part = census_window_part(
+                galaxy,
+                ctx,
+                (cell.key(), window),
+                query,
+                0..u32::MAX,
+                || true,
+                out,
+            );
+            (part.tallies, part.cost)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use super::super::super::photometry::absolute_v_of_state;
     use super::*;
     use crate::coords::UnitVector;
@@ -4595,5 +4802,160 @@ mod tests {
              others skipped by the pre-filter"
         );
         assert!(pairs > 100 && generated > 100 && prefiltered > 0);
+    }
+
+    /// The plan of the census tests by record (perf-dense-first-shells), `census::query`'s dense
+    /// census's: the fixture's inner disc at (96, 8,032, 96) ly to V 6.5, each layer's cap forced
+    /// to 12, 20, 24, 24, 24 and 10 ly, every layer in shells to 8 and 16 ly, its records by
+    /// window; and its query.
+    fn dense_plan() -> (SkyQuery, crate::sky::census::CensusPlan) {
+        let at = position([96.0, 8_032.0, 96.0]);
+        let observer = Observer::new(at, UniverseTime::EPOCH).expect("a valid observer");
+        let per_layer: Vec<(Layer, LightYears)> = crate::sky::caps::CAPPED_LAYERS
+            .iter()
+            .copied()
+            .zip([12.0, 20.0, 24.0, 24.0, 24.0, 10.0].map(LightYears::new))
+            .collect();
+        let query = SkyQuery::builder(observer, Magnitudes::new(6.5))
+            .build()
+            .expect("a valid query")
+            .with_caps_forced_per_layer(&per_layer)
+            .expect("forced caps");
+        let caps = query.forced_caps().expect("forced caps").to_vec();
+        let plan = crate::sky::census::census_plan_by_record(&query, caps, &[8, 16]);
+        (query, plan)
+    }
+
+    /// Every record past its cell's floor of a dense place's plan's cells lies in one shell's
+    /// window of its cell, and no record of a cell outside the plan in any
+    /// (perf-dense-first-shells): each record's nearest distance falls in one window of its layer's
+    /// shells, and every shell whose window can hold it names its cell. The cell is opened, its
+    /// window from nought, in one shell.
+    #[test]
+    fn each_record_of_a_dense_plans_cells_is_in_one_shells_window() {
+        let galaxy = milky_way_galaxy();
+        let (query, plan) = dense_plan();
+        let ctx = context();
+        let mut held: BTreeMap<SystemId, usize> = BTreeMap::new();
+        let mut opened: BTreeMap<CellKey, usize> = BTreeMap::new();
+        let mut records = Vec::new();
+        let mut later = 0_usize;
+        for shell in plan.shells() {
+            for cell in plan.shell_slabs(shell).flat_map(|slab| slab.shell_cells()) {
+                let window = cell.window().expect("a dense plan's cells take windows");
+                let key = cell.key();
+                *opened.entry(key).or_default() += usize::from(window.opens_the_cell());
+                let reach = CellReach::of(ctx.offsets, key, &query);
+                let floor = floor_at(galaxy, ctx.envelope, key, &query, &reach);
+                generate_cell_where(galaxy, key, |m| m.value() >= floor.value(), &mut records);
+                for record in &records {
+                    if window.holds(nearest_distance(galaxy, record, &query, &reach)) {
+                        *held.entry(record.id()).or_default() += 1;
+                        later += usize::from(!window.opens_the_cell());
+                    }
+                }
+            }
+        }
+        let mut every = 0_usize;
+        for key in plan.cells() {
+            assert_eq!(opened.get(&key), Some(&1), "{key:?} opened once");
+            let reach = CellReach::of(ctx.offsets, key, &query);
+            let floor = floor_at(galaxy, ctx.envelope, key, &query, &reach);
+            generate_cell_where(galaxy, key, |m| m.value() >= floor.value(), &mut records);
+            for record in &records {
+                assert_eq!(held.get(&record.id()), Some(&1), "{record:?} in one window");
+                every += 1;
+            }
+        }
+        assert_eq!(held.len(), every, "no record outside the plan's cells");
+        assert_eq!(opened.len(), plan.cells().count());
+        eprintln!(
+            "{every} records past their floors in {} cells, {later} of them in a later shell's window",
+            opened.len()
+        );
+        assert!(
+            later > 1_000,
+            "the windows part the cells' records: {later}"
+        );
+    }
+
+    /// A cell's census by window stopped anywhere, its rest in two halves, gives one part's stars
+    /// and tallies, the cell counted once (perf-dense-first-shells): a record's census reads
+    /// nothing of another's, so a server's jobs may split a dear cell's window over its workers.
+    #[test]
+    fn a_windows_census_in_parts_is_its_census_whole() {
+        let galaxy = milky_way_galaxy();
+        let (query, plan) = dense_plan();
+        let mut ctx = context();
+        let shell = plan
+            .shells()
+            .find(|shell| shell.layer() == Layer::D && shell.index() == 2)
+            .expect("D's third shell");
+        let cells: Vec<_> = plan
+            .shell_slabs(shell)
+            .flat_map(|slab| slab.shell_cells())
+            .collect();
+        assert!(
+            cells
+                .iter()
+                .any(|cell| !cell.window().expect("a window").opens_the_cell())
+        );
+        let (mut whole_stars, mut parted_stars) = (Vec::new(), Vec::new());
+        let (mut whole, mut parted) = (CensusTallies::default(), CensusTallies::default());
+        let mut split = 0_usize;
+        for cell in cells {
+            let window = cell.window().expect("a window");
+            let one = census_window_part(
+                galaxy,
+                &mut ctx,
+                (cell.key(), window),
+                &query,
+                0..u32::MAX,
+                || true,
+                &mut whole_stars,
+            );
+            assert_eq!(one.reached(), one.candidates());
+            whole.add(one.tallies());
+            // Stopped after three records, then the rest in two halves.
+            let mut asked = 0;
+            let first = census_window_part(
+                galaxy,
+                &mut ctx,
+                (cell.key(), window),
+                &query,
+                0..u32::MAX,
+                || {
+                    asked += 1;
+                    asked < 3
+                },
+                &mut parted_stars,
+            );
+            parted.add(first.tallies());
+            assert_eq!(first.candidates(), one.candidates());
+            let (from, to) = (first.reached(), first.candidates());
+            split += usize::from(from < to);
+            let middle = from + (to - from).div_ceil(2);
+            for half in [from..middle, middle..to] {
+                let part = census_window_part(
+                    galaxy,
+                    &mut ctx,
+                    (cell.key(), window),
+                    &query,
+                    half.clone(),
+                    || true,
+                    &mut parted_stars,
+                );
+                assert_eq!(part.reached(), half.end);
+                parted.add(part.tallies());
+            }
+        }
+        assert!(split > 0, "some window holds more than three records");
+        assert_eq!(parted, whole);
+        let order = |stars: &mut Vec<SkyStar>| {
+            stars.sort_by_key(|a| (a.system(), a.star()));
+        };
+        order(&mut whole_stars);
+        order(&mut parted_stars);
+        assert_eq!(parted_stars, whole_stars);
     }
 }

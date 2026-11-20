@@ -720,6 +720,12 @@ fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 }
 
+/// The edges at which a derived cap states its layer's expected systems, ly
+/// ([`LayerCap::first_edges_systems`]; perf-dense-first-shells): the edges a dense place's plan may
+/// start its shells from ([`DENSE_EDGES_LY`](super::census::DENSE_EDGES_LY)), then the first of
+/// [`SHELL_EDGES_LY`](super::census::SHELL_EDGES_LY), which a test holds.
+pub const FIRST_EDGES_LY: [u32; 5] = [8, 16, 32, 64, 125];
+
 /// One layer's cap (Design note 9): one radius in every direction, or since R06.T7.b one a ray.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LayerCap {
@@ -731,6 +737,9 @@ pub struct LayerCap {
     /// boundary ([`real_boundary`]).
     bright_beyond: Option<f64>,
     rays: Option<RayRadii>,
+    /// The expected systems within each of [`FIRST_EDGES_LY`], held within the radii, for a cap a
+    /// count draws.
+    first_edges_systems: Option<[f64; FIRST_EDGES_LY.len()]>,
 }
 
 impl LayerCap {
@@ -791,6 +800,20 @@ impl LayerCap {
         self.bright_beyond
     }
 
+    /// The layer's expected systems within each of [`FIRST_EDGES_LY`], each edge held within the
+    /// cap's radius towards each of its count's rays ([`CapCount::systems_within_toward`]), and
+    /// `None` for a forced cap, which no count draws (perf-dense-first-shells).
+    ///
+    /// They are the count's systems, whatever their light: the smooth density, not the cells'
+    /// records. A plan reads them to tell a dense place, whose first shells it takes nearer and
+    /// record by record ([`census_plan_of`](super::census::census_plan_of)); near the Sun C's, D's
+    /// and E's sum to some 7,600 within 125 ly on the server's galaxy, against some 5.2 × 10⁶ in the
+    /// nuclear disc.
+    #[must_use]
+    pub const fn first_edges_systems(&self) -> Option<[f64; FIRST_EDGES_LY.len()]> {
+        self.first_edges_systems
+    }
+
     /// A cap of `radius` in every direction for `layer`, with nothing stated beyond it: the brute
     /// force's, which forces every layer to one radius.
     #[must_use]
@@ -802,6 +825,7 @@ impl LayerCap {
             expected_beyond: 0.0,
             bright_beyond: None,
             rays: None,
+            first_edges_systems: None,
         }
     }
 
@@ -821,7 +845,22 @@ impl LayerCap {
             expected_beyond: 0.0,
             bright_beyond: None,
             rays: Some(rays),
+            first_edges_systems: None,
         }
+    }
+}
+
+#[cfg(test)]
+impl LayerCap {
+    /// The cap stating `systems` within each of [`FIRST_EDGES_LY`], as a count's would: for the
+    /// tests of a plan's dense test (perf-dense-first-shells).
+    #[must_use]
+    pub(crate) const fn with_first_edges_systems(
+        mut self,
+        systems: [f64; FIRST_EDGES_LY.len()],
+    ) -> Self {
+        self.first_edges_systems = Some(systems);
+        self
     }
 }
 
@@ -1767,9 +1806,23 @@ impl CapCount {
             expected_beyond: 0.0,
             bright_beyond: None,
             rays: Some(rays),
+            first_edges_systems: None,
         };
         cap.expected_beyond = self.stars_beyond(&cap);
+        cap.first_edges_systems = Some(self.first_edges_systems(&cap));
         cap
+    }
+
+    /// The expected systems of `cap`'s layer within each of [`FIRST_EDGES_LY`], each held within
+    /// the cap's radius towards each ray ([`LayerCap::first_edges_systems`]).
+    #[must_use]
+    fn first_edges_systems(&self, cap: &LayerCap) -> [f64; FIRST_EDGES_LY.len()] {
+        FIRST_EDGES_LY.map(|edge| {
+            let edge = f64::from(edge);
+            self.systems_within_toward(cap.layer(), |u| {
+                LightYears::new(cap.radius_toward(u).value().min(edge))
+            })
+        })
     }
 
     /// Each layer's cap as one sphere, as Design note 9 took it before R06.T7.b, for comparison:
@@ -1816,6 +1869,7 @@ impl CapCount {
                     expected_beyond: stated,
                     bright_beyond: None,
                     rays: None,
+                    first_edges_systems: None,
                 }
             })
             .collect()
@@ -2787,9 +2841,13 @@ pub fn real_boundary(
                 expected_beyond: 0.0,
                 bright_beyond: None,
                 rays: Some(held),
+                first_edges_systems: None,
             };
             real.expected_beyond = at_cut.stars_beyond(&real);
             real.bright_beyond = Some(at_ceiling.stars_beyond(&real));
+            // The cut's count: its rule bounds reach the cut's caps, which hold the real boundary,
+            // where the ceiling's may fall short of an edge.
+            real.first_edges_systems = Some(at_cut.first_edges_systems(&real));
             real
         })
         .collect()
@@ -2929,6 +2987,21 @@ mod tests {
         )
     }
 
+    /// The count at `ly` at cut `v` and the standard resolution.
+    fn count_at_cut(ly: [f64; 3], v: f64) -> CapCount {
+        let (tables, envelope) = (milky_way_tables(), milky_way_envelope());
+        let mut cache = NoiseCache::with_capacity(1 << 16);
+        CapCount::measure(
+            milky_way_galaxy(),
+            tables,
+            envelope,
+            &observer_at(ly),
+            Magnitudes::new(v),
+            CapResolution::STANDARD,
+            &mut cache,
+        )
+    }
+
     fn cap(caps: &[LayerCap], layer: Layer) -> &LayerCap {
         caps.iter().find(|c| c.layer() == layer).expect("capped")
     }
@@ -3026,6 +3099,82 @@ mod tests {
         // The nuclear disc's E, on every ray.
         let e = cap(&nuclear, Layer::E).radius().value();
         assert!(e < 1_500.0, "E's largest ray in the nuclear disc: {e} ly");
+    }
+
+    /// Each cap a count draws states its layer's expected systems within each of
+    /// [`FIRST_EDGES_LY`], held within its rays' radii, bit for bit the count's
+    /// ([`CapCount::systems_within_toward`]), rising with the edge; a forced cap states none; and a
+    /// real boundary's C, D and E state the cut's count's within their own radii, its A, B and
+    /// brown dwarfs the cut's caps' (perf-dense-first-shells). Near the Sun the plan's dense test
+    /// keeps the fixed edges with a margin of three times or more, and 150 ly from the centre it
+    /// starts at 8 or 16 ly. Prints the sums of C, D and E.
+    #[test]
+    fn caps_state_their_systems_within_the_first_edges_and_the_nuclear_disc_alone_is_dense() {
+        use crate::sky::census::query::{DENSE_FIRST_SYSTEMS, dense_first_edge};
+        let sum = |caps: &[LayerCap], k: usize| -> f64 {
+            [Layer::C, Layer::D, Layer::E]
+                .iter()
+                .map(|&layer| {
+                    cap(caps, layer)
+                        .first_edges_systems()
+                        .expect("a count's cap")[k]
+                })
+                .sum()
+        };
+        for (name, at, dense) in [
+            ("near the Sun", [0.0, 26_000.0, 68.0], false),
+            ("150 ly from the centre", [0.0, 150.0, 0.0], true),
+        ] {
+            let count = count_at(at, CapResolution::STANDARD);
+            let caps = count.caps();
+            for cap in &caps {
+                let systems = cap.first_edges_systems().expect("a count's cap");
+                for (k, (&edge, &n)) in FIRST_EDGES_LY.iter().zip(&systems).enumerate() {
+                    let held = count.systems_within_toward(cap.layer(), |u| {
+                        LightYears::new(cap.radius_toward(u).value().min(f64::from(edge)))
+                    });
+                    assert_eq!(
+                        bits(n),
+                        bits(held),
+                        "{name} {:?} within {edge} ly",
+                        cap.layer()
+                    );
+                    assert!(n.is_finite() && n >= 0.0);
+                    assert!(k == 0 || systems[k - 1] <= n, "{name} {:?}", cap.layer());
+                }
+                let forced = LayerCap::forced(cap.layer(), cap.radius());
+                assert_eq!(forced.first_edges_systems(), None);
+            }
+            let sums: Vec<f64> = (0..FIRST_EDGES_LY.len()).map(|k| sum(&caps, k)).collect();
+            eprintln!("{name}: C, D and E expect {sums:?} systems within {FIRST_EDGES_LY:?} ly");
+            let first = dense_first_edge(&caps);
+            if dense {
+                assert!(matches!(first, Some(8 | 16)), "{name}: {first:?}");
+            } else {
+                assert_eq!(first, None, "{name}");
+                assert!(
+                    3.0 * sums[FIRST_EDGES_LY.len() - 1] <= DENSE_FIRST_SYSTEMS,
+                    "{name}: {sums:?}"
+                );
+            }
+            // A real boundary's: the cut's count within its own radii for C, D and E.
+            let at_ceiling = count_at_cut(at, 5.0);
+            let real = real_boundary(&at_ceiling, &count, &caps);
+            for (r, cut) in real.iter().zip(&caps) {
+                let systems = r.first_edges_systems().expect("a real boundary's");
+                if REAL_BOUNDARY_LAYERS.contains(&r.layer()) {
+                    let own = count.first_edges_systems(r);
+                    assert_eq!(systems.map(bits), own.map(bits), "{name} {:?}", r.layer());
+                } else {
+                    assert_eq!(Some(systems), cut.first_edges_systems(), "{name}");
+                }
+            }
+            assert_eq!(
+                dense_first_edge(&real).is_some(),
+                dense,
+                "{name} at the ceiling"
+            );
+        }
     }
 
     /// Near the Sun the caps by ray open at most 87% of the spheres' systems over every layer,

@@ -180,6 +180,45 @@ impl Placed {
     }
 }
 
+/// [`evaluate_candidate_from_bound`] for a candidate whose epoch position `near` accepts, and `None`
+/// for one it refuses, which draws no word past its position: no acceptance mark, no density, no
+/// mark of its own (perf-dense-first-shells).
+///
+/// Its position is the candidate's own stream's first three words ([`candidate_position`]), keyed
+/// by its ID alone, so drawing it first changes no word any later draw reads, and an accepted
+/// candidate's outcome is [`evaluate_candidate_from_bound`]'s, bit for bit.
+#[must_use]
+pub(super) fn evaluate_near_from_bound(
+    galaxy: &Galaxy,
+    key: CellKey,
+    index: u32,
+    bound: &CellBound,
+    near: impl Fn(&GalacticPosition) -> bool,
+) -> Option<CandidateOutcome> {
+    let id = candidate_id(key, index);
+    let position = candidate_position(galaxy.seed(), key, id);
+    if !near(&position) {
+        return None;
+    }
+    let mark = acceptance_mark(galaxy.seed(), id);
+    let Some(picked) = pick_component(galaxy, key, bound, &position, mark) else {
+        return Some(CandidateOutcome::Thinned);
+    };
+    let placed = Placed {
+        id,
+        position,
+        mark,
+        picked,
+    };
+    Some(evaluate_placed(
+        galaxy,
+        key,
+        bound,
+        placed,
+        catalogue_claims,
+    ))
+}
+
 /// Candidate `index` of `key` up to the thinning's pick, or `None` if the pick thins it: the
 /// first steps of [`evaluate_with_hook`].
 #[must_use]

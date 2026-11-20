@@ -1,7 +1,9 @@
 //! Generating a whole cell: every system a generation cell holds, and what one costs to keep (plan
 //! 03, P03.T6).
 
-use super::candidate::{Visited, candidate_id, visit_candidate};
+use std::ops::{ControlFlow, Range};
+
+use super::candidate::{Visited, candidate_id, evaluate_near_from_bound, visit_candidate};
 use super::cell::{CellBound, candidate_count_from_bound};
 use super::record::candidate_mass;
 use super::{CandidateOutcome, CellKey, SystemRecord, evaluate_candidate_from_bound};
@@ -139,6 +141,125 @@ pub fn generate_cell_where(
     }
 }
 
+/// The systems of one generation cell whose initial mass `keep` accepts and whose epoch position
+/// `near` accepts, into `out`, in candidate-index order: [`generate_cell_where`] followed by a filter
+/// on [`SystemRecord::epoch_position`], bit for bit (perf-dense-first-shells, the sky's census of a
+/// dense place by distance windows).
+///
+/// It is cheaper still where `near` refuses most of a cell: each candidate's position is drawn first,
+/// three words of its own stream keyed by its ID, and a candidate whose position `near` refuses is
+/// dropped before its mass, its acceptance mark, the density at it or any mark of its own is drawn,
+/// so it costs no more than its position. In layers D and E of a galaxy that holds plan 08's
+/// displaced classes, whose masses are drawn after the pick, that skips the whole evaluation, some
+/// 27 µs a candidate in the nuclear disc. A candidate `near` accepts is evaluated as
+/// [`generate_cell_where`] evaluates it, so the records kept are [`generate_cell`]'s, in its order,
+/// and nothing here opens a stream the generator does not or draws a word it would not.
+///
+/// `near` sees the epoch position of every candidate of the cell, thinned or not, in index order,
+/// and `keep` the mass of those `near` accepts (all of them in layers D and E under the displaced
+/// classes, of the accepted ones only). What it returns is part of a cell, so it must never be
+/// stored where a whole cell is expected, such as a [`CellCache`](super::CellCache). `out` is
+/// cleared first.
+///
+/// # Panics
+///
+/// As [`generate_cell`].
+///
+/// # Examples
+///
+/// ```
+/// use hyperion_sim::Seed;
+/// use hyperion_sim::coords::GalacticPosition;
+/// use hyperion_sim::galaxy::Galaxy;
+/// use hyperion_sim::galaxy::placement::{CellKey, generate_cell, generate_cell_where_near};
+/// use hyperion_sim::id::Layer;
+/// use hyperion_sim::units::consts::METRES_PER_LIGHT_YEAR;
+///
+/// let galaxy = Galaxy::new(Seed::new(19));
+/// let key = CellKey::new(Layer::E, [0, 203, 0])?;
+/// let at = GalacticPosition::from_light_years([40.0, 26_000.0, 40.0]).ok_or("in the cube")?;
+/// let within = |p: &GalacticPosition| at.distance_to(p).value() / METRES_PER_LIGHT_YEAR < 60.0;
+/// let mut near = Vec::new();
+/// generate_cell_where_near(&galaxy, key, |mass| mass.value() >= 2.0, within, &mut near);
+/// let mut all = Vec::new();
+/// generate_cell(&galaxy, key, &mut all);
+/// all.retain(|system| system.primary_initial_mass().value() >= 2.0 && within(system.epoch_position()));
+/// assert_eq!(near, all);
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+pub fn generate_cell_where_near(
+    galaxy: &Galaxy,
+    key: CellKey,
+    keep: impl Fn(SolarMasses) -> bool,
+    near: impl Fn(&GalacticPosition) -> bool,
+    out: &mut Vec<SystemRecord>,
+) {
+    out.clear();
+    visit_cell_where_near(galaxy, key, 0..u32::MAX, keep, near, |system| {
+        out.push(system);
+        ControlFlow::Continue(())
+    });
+}
+
+/// Where a walk of a cell's candidates stopped ([`visit_cell_where_near`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct CandidatesWalked {
+    /// The index of the first candidate not taken: the range's end, held within the cell's
+    /// candidates, or the candidate `visit` stopped before.
+    pub reached: u32,
+    /// How many candidates the cell has ([`candidate_count`](super::candidate_count)).
+    pub candidates: u32,
+}
+
+/// [`generate_cell_where_near`]'s systems among the candidates whose indices `candidates` holds,
+/// each handed to `visit` as it is placed, in candidate-index order, until `visit` breaks
+/// (perf-dense-first-shells): the walk then stops before that system, whose candidate it reports
+/// as the first not taken, so that a caller can take the rest from there.
+///
+/// A walk of any split of a cell's candidates into ranges hands over [`generate_cell_where_near`]'s
+/// systems, each once: a candidate's draws are its own stream's, keyed by its ID, whichever
+/// candidates come before it. A range past the cell's last candidate is held within it.
+///
+/// # Panics
+///
+/// As [`generate_cell`].
+pub fn visit_cell_where_near(
+    galaxy: &Galaxy,
+    key: CellKey,
+    candidates: Range<u32>,
+    keep: impl Fn(SolarMasses) -> bool,
+    near: impl Fn(&GalacticPosition) -> bool,
+    mut visit: impl FnMut(SystemRecord) -> ControlFlow<()>,
+) -> CandidatesWalked {
+    let bound = CellBound::of(galaxy, key);
+    let count = candidate_count_from_bound(galaxy.seed(), key, bound.total());
+    // As `generate_cell_where`: under plan 08's conditional marks layers D and E draw their masses
+    // after the pick, so there the mass is read from the record.
+    let mass_first =
+        !(galaxy.fields().displaced().is_some() && matches!(key.band(), MassBand::D | MassBand::E));
+    let end = candidates.end.min(count);
+    for index in candidates.start.min(end)..end {
+        let near_and_kept = |position: &GalacticPosition| {
+            near(position)
+                && (!mass_first || keep(candidate_mass(galaxy, key, candidate_id(key, index))))
+        };
+        if let Some(CandidateOutcome::Accepted(system)) =
+            evaluate_near_from_bound(galaxy, key, index, &bound, near_and_kept)
+            && (mass_first || keep(system.primary_initial_mass()))
+            && visit(system).is_break()
+        {
+            return CandidatesWalked {
+                reached: index,
+                candidates: count,
+            };
+        }
+    }
+    CandidatesWalked {
+        reached: end,
+        candidates: count,
+    }
+}
+
 /// Hands `visit` every system of one generation cell, in candidate-index order: whole, as
 /// [`generate_cell`] places it, where `reads` asks for it by its epoch position and what bounds its
 /// speed ([`SpeedCut`]), and otherwise by its ID alone (plan 12's lens walk, ruling 143.3; the
@@ -188,6 +309,7 @@ mod tests {
     use crate::galaxy::displaced::hold::held;
     use crate::galaxy::params::GalaxyParams;
     use crate::id::SystemId;
+    use crate::units::consts::METRES_PER_LIGHT_YEAR;
     use hyperion_testkit::float::assert_same_bits;
 
     use crate::galaxy::placement::{
@@ -340,6 +462,99 @@ mod tests {
         assert_ne!(accepted, []);
         for (index, mass) in accepted {
             assert_same_bits(seen[usize::try_from(index).unwrap()].value(), mass.value());
+        }
+    }
+
+    /// `generate_cell_where_near` is `generate_cell` filtered by mass and epoch position, bit for
+    /// bit, in its order (perf-dense-first-shells): in every layer, over cells spread through the
+    /// cube and those at the Sun-like point and in the bulge, at floors from none to past every
+    /// star and positions from every one to none, in the fixture with plan 08's displaced classes,
+    /// whose layers D and E draw their masses after the pick, and in its field alone.
+    #[test]
+    fn generate_cell_where_near_is_generate_cell_filtered_by_mass_and_position() {
+        let (with_classes, alone) = (galaxy(), field_only());
+        let mut all = Vec::new();
+        let mut kept = Vec::new();
+        let mut parted = 0;
+        for galaxy in [&with_classes, &alone] {
+            for spec in STELLAR_LAYERS.iter().chain(&SUBSTELLAR_LAYERS) {
+                let layer = spec.layer();
+                let mut keys = spread_cells(layer, 40);
+                keys.push(CellKey::containing(layer, &sunlike()).unwrap());
+                keys.push(CellKey::containing(layer, &in_the_bulge()).unwrap());
+                for key in keys {
+                    generate_cell(galaxy, key, &mut all);
+                    let size = f64::from(key.size_ly());
+                    let corner = key.origin_ly().map(f64::from);
+                    let at = GalacticPosition::from_light_years(corner).unwrap();
+                    for (floor, reach) in [
+                        (0.0, f64::INFINITY),
+                        (0.0, 0.7 * size),
+                        (0.5, 1.2 * size),
+                        (2.0, 0.4 * size),
+                        (0.0, 0.0),
+                    ] {
+                        let near = |p: &GalacticPosition| {
+                            at.distance_to(p).value() / METRES_PER_LIGHT_YEAR < reach
+                        };
+                        generate_cell_where_near(
+                            galaxy,
+                            key,
+                            |m| m.value() >= floor,
+                            near,
+                            &mut kept,
+                        );
+                        let filtered: Vec<_> = all
+                            .iter()
+                            .filter(|r| {
+                                r.primary_initial_mass().value() >= floor
+                                    && near(r.epoch_position())
+                            })
+                            .copied()
+                            .collect();
+                        parted += usize::from(!filtered.is_empty() && filtered.len() < all.len());
+                        assert_eq!(kept, filtered, "{key:?} floor {floor} within {reach} ly");
+                    }
+                }
+            }
+        }
+        assert!(parted > 100, "only {parted} cells parted by position");
+    }
+
+    /// `generate_cell_where_near` shows `near` every candidate's position once, in index order, the
+    /// thinned ones too, and the records it keeps are at the positions it showed
+    /// (perf-dense-first-shells).
+    #[test]
+    fn generate_cell_where_near_sees_every_candidate_once_in_index_order() {
+        let galaxy = galaxy();
+        let key = CellKey::containing(Layer::E, &in_the_bulge()).unwrap();
+        let seen = std::cell::RefCell::new(Vec::new());
+        let mut kept = Vec::new();
+        generate_cell_where_near(
+            &galaxy,
+            key,
+            |_| true,
+            |p| {
+                seen.borrow_mut().push(*p);
+                true
+            },
+            &mut kept,
+        );
+        let seen = seen.into_inner();
+        let count = candidate_count(&galaxy, key);
+        assert_eq!(seen.len(), usize::try_from(count).unwrap());
+        let mut all = Vec::new();
+        generate_cell(&galaxy, key, &mut all);
+        assert_eq!(kept, all);
+        assert!(all.len() < seen.len(), "some candidates are thinned");
+        for record in &all {
+            let index = (0..count)
+                .find(|&index| candidate_id(key, index) == record.id())
+                .expect("a record is a candidate's");
+            assert_eq!(
+                &seen[usize::try_from(index).unwrap()],
+                record.epoch_position()
+            );
         }
     }
 
