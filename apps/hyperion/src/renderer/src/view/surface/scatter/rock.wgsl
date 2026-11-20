@@ -95,7 +95,9 @@ fn rock_fragment(in : RockVertexOut, geometric : vec3f) -> vec4f {
   let rotation = mat3x3f(draw.bodyRotation[0].xyz, draw.bodyRotation[1].xyz, draw.bodyRotation[2].xyz);
   let sun = terrain_row(FIRST_TERRAIN_LIGHT_ROW).xyz;
   let cascade_lit = cascade_lit_fraction(rotation * in.fromCameraBf, rotation * geometric, rotation * sun);
-  let shaded = shade_terrain(lit, normal, false, cascade_lit, own_shade_place(lit));
+  // No patch quad (`quad_st` 0): the rock's classes are its axis's, unshaped, as its lit input's
+  // edge weight (`cells.w`'s high half) of 0 holds them out (lane fix-jagged-biome-edges).
+  let shaded = shade_terrain(lit, normal, false, cascade_lit, own_shade_place(lit), 0.0);
   var meter = METER_OTHER;
   if (u32(terrain_row(0u).x) > 0u) {
     meter = select(METER_UNLIT_BODY, METER_LIT_BODY, shaded.lit);
