@@ -90,7 +90,27 @@ describe("the spike report's check", () => {
       "a pass of an unknown row",
       (r) => ({
         ...r,
-        frames: { ...r.frames, passes: [{ label: "t", row: "x", gpuMs: [1, 1, 1] }] },
+        frames: {
+          ...r.frames,
+          passes: [{ label: "t", row: "x", gpuMs: [1, 1, 1], ownMs: [1, 1, 1] }],
+        },
+      }),
+    ],
+    [
+      "a pass without its own times",
+      (r) => ({
+        ...r,
+        frames: { ...r.frames, passes: [{ label: "t", row: "terrain", gpuMs: [1, 1, 1] }] },
+      }),
+    ],
+    [
+      "a pass's own times of another length",
+      (r) => ({
+        ...r,
+        frames: {
+          ...r.frames,
+          passes: [{ label: "t", row: "terrain", gpuMs: [1, 1, 1], ownMs: [1, 1] }],
+        },
       }),
     ],
     [

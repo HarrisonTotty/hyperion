@@ -3,7 +3,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import { foldSpikeResult } from "./fold.ts";
-import { PerfRecordError, validatePerfRecord } from "./record.ts";
+import { PerfRecordError, type PerfRunRecord, validatePerfRecord } from "./record.ts";
 
 /**
  * R05's results file of 2026-10-07 at the low setting (`docs/measurements/descent-spike/`, version
@@ -21,6 +21,11 @@ function runOf(file: Record<string, unknown>): Record<string, unknown> {
   const run = file["run"];
   if (typeof run !== "object" || run === null || Array.isArray(run)) throw new Error("no run");
   return { ...run };
+}
+
+/** Each pass's own times in a record's first repetition, ms. */
+function ownTimesOf(record: PerfRunRecord): ReadonlyArray<ReadonlyArray<number | null>> {
+  return (record.runs[0]?.passes ?? []).map((p) => [p.ownP50Ms, p.ownP95Ms, p.ownP99Ms]);
 }
 
 describe("foldSpikeResult", () => {
@@ -80,6 +85,31 @@ describe("foldSpikeResult", () => {
     });
     expect(record.harness.vsyncPeriodMs).toBe(16.68);
     expect(record.harness.display).toBe("virtual");
+  });
+
+  it("carries each pass's own times from a results file that keeps them, and none from one before (lane fix-floor-calm)", () => {
+    const file = fixture();
+    const gpu = file["gpu"];
+    if (typeof gpu !== "object" || gpu === null || Array.isArray(gpu)) throw new Error("no gpu");
+    const passes: unknown = Reflect.get(gpu, "passes");
+    const listed: unknown =
+      typeof passes === "object" && passes !== null ? Reflect.get(passes, "value") : null;
+    if (!Array.isArray(listed)) throw new Error("no passes");
+    const kept = listed.map((pass: unknown) =>
+      Object.assign({}, typeof pass === "object" && pass !== null ? pass : {}, {
+        ownP50Ms: 0.5,
+        ownP95Ms: 0.75,
+        ownP99Ms: 1,
+      }),
+    );
+    const own = foldSpikeResult({
+      ...file,
+      gpu: { ...gpu, passes: { value: kept, reason: null } },
+    });
+    expect([ownTimesOf(own), ownTimesOf(foldSpikeResult(fixture()))]).toEqual([
+      kept.map(() => [0.5, 0.75, 1]),
+      kept.map(() => [null, null, null]),
+    ]);
   });
 
   it("keys the wireframe second view's pass to the instrument", () => {
