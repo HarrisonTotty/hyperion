@@ -2386,7 +2386,7 @@ impl WindowPart {
 /// It walks the candidates in index order ([`visit_cell_where_near`]), placing only the records past
 /// the cell's floor whose epoch distance lies where a record of the window can (from the window's
 /// start plus the cell's pad, to its end plus the pad and the cell's offset, each widened by
-/// [`WINDOW_DISTANCE_SLACK_LY`]), and censuses each whose nearest distance the window holds, as
+/// 10⁻⁶ ly), and censuses each whose nearest distance the window holds, as
 /// [`census_cell`] censuses a record (R06.T8.g's path; it reads no cell cache, whose entries hold
 /// whole cells). Before each record it would census after its first, `go_on` is asked whether to go
 /// on, and the part stops before that record where it says not to: [`WindowPart::reached`] then
