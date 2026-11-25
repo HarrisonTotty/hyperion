@@ -514,6 +514,9 @@ export function placePebblesCpu(inputs: PebbleTwinInputs): PebbleTwinInstance[] 
       continue;
     }
     const slot = inputs.slot(patch.slot);
+    const abundances = Array.from({ length: SCATTER_PATCH_SLOTS }, (_, k) =>
+      f(patch.abundances[k] ?? 0),
+    );
     const side = 2 ** entry.cellLevels;
     const blocks = Math.max(side / PEBBLE_BLOCK_SIDE, 1);
     const corner = [
@@ -546,7 +549,7 @@ export function placePebblesCpu(inputs: PebbleTwinInputs): PebbleTwinInstance[] 
         const share =
           pebbleAcceptance(
             terrainShares(texelWeights(slot.weights, at[0] / 64, at[1] / 64), slot.named),
-            Array.from({ length: SCATTER_PATCH_SLOTS }, (_, k) => f(patch.abundances[k] ?? 0)),
+            abundances,
             p.diameterM,
           ) * density;
         if (!(p.keep < share)) {

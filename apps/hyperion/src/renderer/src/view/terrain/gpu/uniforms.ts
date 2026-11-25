@@ -481,8 +481,13 @@ function viewOf(views: Map<number, Uint8Array>, buffer: ArrayBuffer, bytes: numb
  * to 1, in its high half as a u16 unorm, its flags kept (lane fix-jagged-biome-edges, part 2;
  * {@link InstanceRecords.setEdgeWeight}'s): for a record of the instance's terms another pass
  * carries, as the decorative scatter's patch records do (plan R11, R11.T6.a).
+ *
+ * @throws RangeError for a weight out of 0 to 1, which the u16 would wrap.
  */
 export function withEdgeWeight(word: number, weight: number): number {
+  if (!(weight >= 0 && weight <= 1)) {
+    throw new RangeError(`class edge weight ${weight} is not 0 to 1`);
+  }
   return ((word & 0xffff) | (Math.round(weight * 0xffff) << 16)) >>> 0;
 }
 
@@ -724,9 +729,6 @@ export class InstanceRecords {
   setEdgeWeight(weight: number): void {
     if (this.#count === 0) {
       throw new RangeError("no record to set the classes' edges' weight of");
-    }
-    if (!(weight >= 0 && weight <= 1)) {
-      throw new RangeError(`class edge weight ${weight} is not 0 to 1`);
     }
     const base = (this.#count - 1) * F32_WORDS_PER_INSTANCE;
     this.#u32[base + 19] = withEdgeWeight(this.#u32[base + 19] ?? 0, weight);

@@ -32,6 +32,7 @@ import { vertexDir } from "./cube";
 import { finestPatchSizeM } from "./grounded";
 import {
   INSTANCE_RECORD_BYTES,
+  INSTANCE_SLOT_WORD,
   MIX_STEPS,
   mixStep,
   NO_PARENT_SLOT,
@@ -1894,24 +1895,58 @@ describe("the lit terrain of a body (R10.T10.b)", () => {
     scatter.dispose();
   });
 
-  it("carries each bake's slots' rock abundances in its scatter's patch records, not in the class laws, whose last word is the edge key, and the classes' edges' weight in their class sets (R11.T6.a)", async () => {
+  it("carries each bake's slots' rock abundances in its scatter's patch records, after their sixteen words of terms (R11.T6.a)", async () => {
     const abundances = Float32Array.of(0.2, 0, 0.05, 0, 0, 0, 0.3, 0);
     const { pass, engine, scatter, frameOf } = await scatteringPass(abundances);
     const before = engine.writes.length;
-    expect(frameOf({ edgeWeight: 0.5 }).decorated).toBe(true);
+    expect(frameOf().decorated).toBe(true);
     const written = engine.writes.slice(before).find((w) => w.buffer.endsWith("pebble patches"));
-    const bytes = written?.data.slice().buffer ?? new ArrayBuffer(0);
-    const records = new Float32Array(bytes);
+    const records = new Float32Array(written?.data.slice().buffer ?? new ArrayBuffer(0));
     const words = SCATTER_PATCH_BYTES / 4;
     const count = records.length / words;
     expect(count).toBeGreaterThan(0);
     for (let n = 0; n < count; n += 1) {
-      // After each record's sixteen words of terms.
       expect(Array.from(records.subarray(n * words + 16, (n + 1) * words))).toEqual(
         Array.from(abundances),
       );
-      // Its class sets' last word's high half, as the terrain's instance has it.
-      expect((new Uint32Array(bytes)[n * words + 15] ?? 0) >>> 16).toBe(Math.round(0.5 * 0xffff));
+    }
+    pass.dispose();
+    scatter.dispose();
+  });
+
+  it("gives its scatter's patch records their instances' class sets, the classes' edges' weight among them (R11.T6.a; fix-jagged-biome-edges)", async () => {
+    const { pass, engine, scatter, frameOf } = await scatteringPass(
+      Float32Array.of(0.2, 0, 0, 0, 0, 0, 0, 0),
+    );
+    const before = engine.writes.length;
+    expect(frameOf({ edgeWeight: 0.5 }).decorated).toBe(true);
+    const writes = engine.writes.slice(before);
+    const records = new Uint32Array(
+      writes.findLast((w) => w.buffer.endsWith("pebble patches"))?.data.slice().buffer ??
+        new ArrayBuffer(0),
+    );
+    // The view's instance records, its interior patches' and its edge patches'.
+    const instances = writes
+      .filter((w) => w.buffer.endsWith("instances (scatter view)"))
+      .map((w) => new Uint32Array(w.data.slice().buffer));
+    const per = SCATTER_PATCH_BYTES / 4;
+    const perInstance = INSTANCE_RECORD_BYTES / 4;
+    const count = records.length / per;
+    expect(count).toBeGreaterThan(0);
+    for (let n = 0; n < count; n += 1) {
+      const slot = records[n * per + 3];
+      const instance = instances
+        .flatMap((u) =>
+          Array.from({ length: u.length / perInstance }, (_, k) =>
+            u.subarray(k * perInstance, (k + 1) * perInstance),
+          ),
+        )
+        .find((u) => u[INSTANCE_SLOT_WORD] === slot);
+      // The scatter record's class sets, words 12 to 15, are the instance's, words 16 to 19.
+      expect(Array.from(records.subarray(n * per + 12, n * per + 16))).toEqual(
+        Array.from(instance?.subarray(16, 20) ?? []),
+      );
+      expect((records[n * per + 15] ?? 0) >>> 16).toBe(Math.round(0.5 * 0xffff));
     }
     pass.dispose();
     scatter.dispose();

@@ -35,6 +35,20 @@ import {
   type ScatterPatchPlace,
 } from "./pebblePlace";
 import type { ScatterBox } from "./scatterCull";
+import pebbleDrawWgsl from "./pebbleDraw.wgsl?raw";
+import pebblesWgsl from "./pebbles.wgsl?raw";
+
+/** The fields of the WGSL struct `name` of `source`, a line each, comments and blanks dropped. */
+function structFields(source: string, name: string): string[] {
+  const body = new RegExp(`struct ${name} \\{([^}]*)\\}`, "u").exec(source)?.[1];
+  if (body === undefined) {
+    throw new Error(`no struct ${name}`);
+  }
+  return body
+    .split("\n")
+    .map((line) => line.replace(/\/\/.*$/u, "").trim())
+    .filter((line) => line.length > 0);
+}
 
 /** A sphere of 1,000 km and its finest level's patch near the +x face's centre. */
 const FIGURE = { equatorialRadiusM: 1e6, polarRadiusM: 1e6 } as const;
@@ -226,6 +240,19 @@ describe("the pebbles' placement", () => {
     expect(pebbleFadeByte(0.5 / 255 - 1e-6)).toBe(0);
     expect(pebbleTag(1023, 255)).toBe(1023 + 255 * 2 ** PEBBLE_TAG_PATCH_BITS);
     expect(pebbleTag(7, 0)).toBe(7);
+  });
+
+  it("lays its patch records out alike in the placement and the draw, at the records' size", () => {
+    const placed = structFields(pebblesWgsl, "ScatterPatch");
+    expect(structFields(pebbleDrawWgsl, "PebblePatch")).toEqual(placed);
+    // Sixteen words of terms, then two vec4f of abundances.
+    expect(placed.at(-1)).toBe("abundances : array<vec4f, 2>,");
+    expect(SCATTER_PATCH_BYTES).toBe(16 * 4 + 2 * 16);
+  });
+
+  it("shades a pebble's ground on its patch's quad, 2^-l / 64 at level l, as the lit terrain's fragment forms it", () => {
+    expect(pebbleDrawWgsl).toContain("out.quadSt = exp2(-f32(tile.key.y)) / 64.0;");
+    expect(pebbleDrawWgsl).toContain("own_shade_place(ground), in.quadSt)");
   });
 
   it("packs its records at the kernel's sizes", () => {

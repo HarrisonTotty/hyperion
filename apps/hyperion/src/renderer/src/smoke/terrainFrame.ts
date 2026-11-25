@@ -3147,6 +3147,9 @@ export async function checkScatterThroughPass(engine: RenderEngine, checks: Chec
           sunIlluminanceLx: [1.3e5, 1.3e5, 1.3e5],
           exposureScale: EXPOSURE,
           nowMs: performance.now(),
+          // The classes' edges shaped, so that the pebbles' ground takes them on the device as the
+          // terrain's does (lane fix-jagged-biome-edges).
+          edgeWeight: 1,
         });
         const drawSet = pass.lastStep?.drawSet;
         const material = kernels.kernels?.material;
