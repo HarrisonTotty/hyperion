@@ -41,6 +41,7 @@ function frameOn(engine: RenderEngine, base: BucketDrawBase): ScatterFrameInput 
         parentQuadrant: 0,
         key: { face: 0, level: 18, i: 5, j: 6 },
         cells: [NO_PARENT_SLOT, 0, 0, 0],
+        abundances: [0.2, 0, 0, 0, 0, 0, 0, 0],
       },
     ],
     reach: [{ nearestM: 1, areaM2: 1024, abundance: 0.2 }],

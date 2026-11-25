@@ -23,7 +23,8 @@ struct PebbleRecord {
   tag : u32,
 }
 
-// `pebbles.wgsl`'s `ScatterPatch`.
+// `pebbles.wgsl`'s `ScatterPatch`; its slots' rock abundances, which the draw does not read, keep
+// its stride.
 struct PebblePatch {
   originM : vec3f,
   slot : u32,
@@ -33,6 +34,7 @@ struct PebblePatch {
   parentQuadrant : u32,
   key : vec4u,
   cells : vec4u,
+  abundances : array<vec4f, 2>,
 }
 
 @group(2) @binding(25) var<storage, read> pebble_instances : array<PebbleRecord>;
@@ -67,6 +69,10 @@ struct PebbleVertexOut {
   @location(11) @interpolate(flat) tint : f32,
   // Its fade, 1 wholly drawn and 0 at its end.
   @location(12) @interpolate(flat) fade : f32,
+  // Its patch's quad on its face in cell coordinates, 2⁻ˡ ÷ 64 at level l, on which its ground's
+  // classes' edges are shaped: the lit terrain's fragment's `quad_st` (`terrainLitShade.wgsl`),
+  // which forms it from its varyings' rates.
+  @location(13) @interpolate(flat) quadSt : f32,
 }
 
 // `v` turned by the unit quaternion `q` (x, y, z, w), as `particleInstance.wgsl`'s.
@@ -113,6 +119,7 @@ fn vertexMain(@location(0) local : vec3f, @builtin(instance_index) entry : u32) 
   out.normalBf = transpose(rotation) * pebble_rotate(q, normalize(local / PEBBLE_AXES));
   out.tint = mix(1.0, pebble_tint(pebble.colour >> 24u), fade);
   out.fade = fade;
+  out.quadSt = exp2(-f32(tile.key.y)) / 64.0;
   return out;
 }
 
@@ -149,7 +156,7 @@ fn fragmentMain(in : PebbleVertexOut) -> @location(0) vec4f {
     let sun = terrain_row(FIRST_TERRAIN_LIGHT_ROW).xyz;
     cascade_lit = cascade_lit_fraction(rotation * in.fromCameraBf, rotation * normal, rotation * sun);
   }
-  let shaded = shade_terrain(ground, normal, false, cascade_lit, own_shade_place(ground));
+  let shaded = shade_terrain(ground, normal, false, cascade_lit, own_shade_place(ground), in.quadSt);
   var meter = METER_OTHER;
   if (u32(terrain_row(0u).x) > 0u) {
     meter = select(METER_UNLIT_BODY, METER_LIT_BODY, shaded.lit);

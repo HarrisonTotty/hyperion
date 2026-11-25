@@ -41,8 +41,8 @@ const FIGURE = { equatorialRadiusM: 1e6, polarRadiusM: 1e6 } as const;
 const LEVEL = 17;
 const KEY: PatchKey = { face: 0, level: LEVEL, i: 2 ** (LEVEL - 1), j: 2 ** (LEVEL - 1) };
 
-/** The patch's twin slot: its datum's own terms, flat at height 0, one slot of `k` named whole. */
-function flatSlot(k: number): PebbleTwinSlot {
+/** The patch's twin slot: its datum's own terms, flat at height 0, its first slot named whole. */
+function flatSlot(): PebbleTwinSlot {
   const t = patchTerms(KEY, FIGURE, 0);
   const f = Math.fround;
   const v = (a: Vec3): Vec3 => ({ x: f(a.x), y: f(a.y), z: f(a.z) });
@@ -72,12 +72,14 @@ function flatSlot(k: number): PebbleTwinSlot {
     morphOffset: (x, y) => faceDifferencePositionF32(terms, x, y, 0),
     weights,
     named: [true, false, false, false, false, false, false, false],
-    abundances: [k, 0, 0, 0, 0, 0, 0, 0],
   };
 }
 
-/** The patch's record, its origin `originM` from the camera, the body's axes the passes'. */
-function record(originM: Vec3) {
+/**
+ * The patch's record, its origin `originM` from the camera, the body's axes the passes', its first
+ * slot's rock abundance `k`.
+ */
+function record(originM: Vec3, k = 0.2) {
   return {
     originM,
     slot: 0,
@@ -87,6 +89,7 @@ function record(originM: Vec3) {
     parentQuadrant: 0,
     key: KEY,
     cells: [NO_PARENT_SLOT, 0, 0, 0] as const,
+    abundances: [k, 0, 0, 0, 0, 0, 0, 0],
   };
 }
 
@@ -106,7 +109,7 @@ function placeAt(nearestM: number): ScatterPatchPlace {
 
 /** The twin's pebbles over the flat patch seen from 1.5 m above its origin. */
 function place(k: number, density: number, bodies: ReadonlyArray<ScatterBox> = []) {
-  const patches = [record({ x: -1.5, y: 0, z: 0 })];
+  const patches = [record({ x: -1.5, y: 0, z: 0 }, k)];
   const patchM = (64 * 2 * Math.PI * 1e6) / 4 / 2 ** LEVEL;
   const levels = pebbleLatticeLevels(LEVEL, patchM);
   const pxPerRad = 1000;
@@ -124,7 +127,7 @@ function place(k: number, density: number, bodies: ReadonlyArray<ScatterBox> = [
     entries,
     patches,
     bodies,
-    slot: () => flatSlot(k),
+    slot: () => flatSlot(),
   });
 }
 
@@ -227,7 +230,7 @@ describe("the pebbles' placement", () => {
 
   it("packs its records at the kernel's sizes", () => {
     const patches = new ArrayBuffer(2 * SCATTER_PATCH_BYTES);
-    packScatterPatches([record({ x: 1, y: 2, z: 3 }), record({ x: 4, y: 5, z: 6 })], patches);
+    packScatterPatches([record({ x: 1, y: 2, z: 3 }, 0.25), record({ x: 4, y: 5, z: 6 })], patches);
     const f = new Float32Array(patches);
     const u = new Uint32Array(patches);
     expect([f[0], f[1], f[2], u[3]]).toEqual([1, 2, 3, 0]);
@@ -239,7 +242,9 @@ describe("the pebbles' placement", () => {
       KEY.j,
       NO_PARENT_SLOT,
     ]);
-    expect(f[16]).toBe(4);
+    // Its slots' rock abundances after its sixteen words of terms, two `vec4f`.
+    expect(Array.from(f.subarray(16, 24))).toEqual([0.25, 0, 0, 0, 0, 0, 0, 0]);
+    expect([f[24], f[40]]).toEqual([4, Math.fround(0.2)]);
     const entries = new Uint32Array(8);
     packPebbleEntries(
       [
@@ -290,7 +295,7 @@ describe("the pebbles' placement", () => {
   });
 
   it("measures a quad's area on the datum", () => {
-    const { terms } = flatSlot(0.1);
+    const { terms } = flatSlot();
     const side = (2 * Math.PI * 1e6) / 4 / 2 ** (LEVEL + 6);
     // Near the face's centre a quad is about (π a ÷ 2) ÷ 2^(n+6) across, the warp's rate there 4/3
     // of u's (`st_to_uv`) against the arc's 1.
@@ -322,7 +327,7 @@ describe("the pebbles' placement", () => {
     // The twin keeps fewer than its bound on average over the patch, at every octave together, its
     // area its 64² quads, alike near the face's centre: some 4 % fewer, the finest octave's least
     // diameters, which the bound takes, holding most of its pebbles.
-    const areaM2 = 64 * 64 * quadAreaM2(flatSlot(0.2).terms, [32, 32]);
+    const areaM2 = 64 * 64 * quadAreaM2(flatSlot().terms, [32, 32]);
     const bound = PEBBLE_OCTAVES.reduce(
       (sum, _, octave) =>
         sum + expectedPebblesBound({ nearestM: 1.5, areaM2, abundance: 0.2 }, octave, 1),

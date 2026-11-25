@@ -219,6 +219,7 @@ import {
   clusterSubPatchOf,
   subPatchOf,
   WirePhaseRecords,
+  withEdgeWeight,
 } from "./gpu/uniforms";
 import { MAX_LEVEL, type PatchKey, parentKey, patchKeyString } from "./patchKey";
 import { type StrideEdgePatch, StrideEdges } from "./strideEdges";
@@ -1166,6 +1167,12 @@ interface Resident {
    * scatter's budget bounds its pebbles by it (`expectedPebblesBound`).
    */
   readonly largestRockAbundance: number;
+  /**
+   * Each of its bake's palette slots' rock abundance k (`TerrainLayers.rockAbundances`; plan R11,
+   * R11.T6.a), none where its bake has none: the scatter's patch record carries them to its laws
+   * (`ScatterPatchRecord.abundances`).
+   */
+  readonly rockAbundances: ArrayLike<number>;
   /**
    * Its bake's clusters' measured errors (`BakedPatch.clusterErrors`, plan R14, R14.T3.b), which its
    * strides' shared bands take (T3.c), and their largest e₂, e₄ and e₈, m, which an edge beside a
@@ -4778,6 +4785,7 @@ export class TerrainPass {
       opaqueBlocks: upload.opaqueBlocks,
       sizes,
       largestRockAbundance: Math.max(0, ...(layers?.rockAbundances ?? [])),
+      rockAbundances: layers?.rockAbundances ?? [],
       strideErrors:
         bake.clusterErrors === undefined
           ? null
@@ -5901,7 +5909,13 @@ export class TerrainPass {
               parentSlot,
               parentQuadrant: parentQuadrant(patch.key),
               key: patch.key,
-              cells,
+              // With the classes' edges' weight `setEdgeWeight` gives the instance below, so that
+              // a pebble's ground is shaded as the terrain's (lane fix-jagged-biome-edges).
+              cells:
+                edgeWeight > 0
+                  ? [cells[0], cells[1], cells[2], withEdgeWeight(cells[3], edgeWeight)]
+                  : cells,
+              abundances: resident.rockAbundances,
             });
             this.#scatterReach.push({
               nearestM,

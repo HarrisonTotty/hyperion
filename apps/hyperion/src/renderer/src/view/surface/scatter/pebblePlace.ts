@@ -20,7 +20,10 @@
  *   morph bands, parent and class sets, and its key, so that a pebble stands on the triangle of the
  *   patch's mesh that holds it, its morph by its distance as the terrain's is (but the holds at a
  *   coarse–fine edge, which move it by a centimetre or two at most), and its draw shades it as that
- *   ground (`pebbleDraw.wgsl`, which reads the record by the instance's tag).
+ *   ground (`pebbleDraw.wgsl`, which reads the record by the instance's tag); and its palette slots'
+ *   rock abundances k, which its laws take. They ride the record, not the slot's class laws, whose
+ *   last word is the slot's edge key (lane fix-jagged-biome-edges; `terrainMaterial.ts`'
+ *   `packClassLaws`), so that the lit terrain's layers stay as they are.
  * - **The instance** is the particle path's record (`clusters/particles.ts`): its centre, its
  *   radius D ÷ 2, its rotation, its colour word (its place in the patch, two 12-bit fractions, and
  *   its tint's byte above them) and its tag ({@link pebbleTag}): the patch record's index, and its
@@ -81,8 +84,20 @@ export const PEBBLE_OCTAVES_BYTES = 16 * PEBBLE_OCTAVES.length;
 /** Bytes of one `PebbleEntry`: the patch, the octave, its cells' levels and its block. */
 export const PEBBLE_ENTRY_BYTES = 16;
 
-/** Bytes of one `ScatterPatch` (`pebbles.wgsl`, `pebbleDraw.wgsl`). */
-export const SCATTER_PATCH_BYTES = 64;
+/**
+ * Bytes of one `ScatterPatch` (`pebbles.wgsl`, `pebbleDraw.wgsl`): sixteen words of the patch's
+ * terms, then its eight palette slots' rock abundances.
+ */
+export const SCATTER_PATCH_BYTES = 96;
+
+/** The byte of a `ScatterPatch` at which its slots' rock abundances start, two `vec4f`. */
+const SCATTER_PATCH_ABUNDANCE_BYTE = 64;
+
+/**
+ * The palette slots whose rock abundances a `ScatterPatch` holds (`hyperion_surface`'s
+ * `MAX_CLASSES`).
+ */
+const SCATTER_PATCH_SLOTS = 8;
 
 /** The placement's pass label, R12's `scatter` row's (Design note 18). */
 export const SCATTER_PASS_LABEL = "scatter";
@@ -188,6 +203,11 @@ export interface ScatterPatchRecord {
   readonly key: PatchKey;
   /** The terrain instance's class sets (`InstanceRecords.setCells`'s four words). */
   readonly cells: readonly [number, number, number, number];
+  /**
+   * Each of its palette's eight slots' rock abundance k (`TerrainLayers.rockAbundances`), 0 past
+   * those given: the placement's laws read them here (see the module's remarks).
+   */
+  readonly abundances: ArrayLike<number>;
 }
 
 /** Packs `patches` into `out` ({@link SCATTER_PATCH_BYTES} each), narrowing each value once. */
@@ -209,6 +229,9 @@ export function packScatterPatches(
     [p.key.face, p.key.level, p.key.i, p.key.j, ...p.cells].forEach((word, k) => {
       view.setUint32(at + 32 + 4 * k, word >>> 0, true);
     });
+    for (let k = 0; k < SCATTER_PATCH_SLOTS; k += 1) {
+      view.setFloat32(at + SCATTER_PATCH_ABUNDANCE_BYTE + 4 * k, p.abundances[k] ?? 0, true);
+    }
   });
 }
 
@@ -388,7 +411,10 @@ export function pebbleRotation(up: Vec3, yawRad: number): Quaternion {
   };
 }
 
-/** A slot's patch as the twin reads it: its terms, its vertices' offsets and its class layers. */
+/**
+ * A slot's patch as the twin reads it: its terms, its vertices' offsets and its class layers (its
+ * slots' rock abundances are its record's, {@link ScatterPatchRecord.abundances}).
+ */
 export interface PebbleTwinSlot {
   readonly terms: SlotTermsF32;
   /** Vertex (x, y)'s own offset from the patch's origin, body-fixed m. */
@@ -399,8 +425,6 @@ export interface PebbleTwinSlot {
   readonly weights: Uint8Array;
   /** Whether each palette slot has a law. */
   readonly named: ReadonlyArray<boolean>;
-  /** Each palette slot's rock abundance k (`TerrainLayers.rockAbundances`). */
-  readonly abundances: ReadonlyArray<number>;
 }
 
 /** What the CPU twin places from: the frame's records and its slots. */
@@ -522,7 +546,7 @@ export function placePebblesCpu(inputs: PebbleTwinInputs): PebbleTwinInstance[] 
         const share =
           pebbleAcceptance(
             terrainShares(texelWeights(slot.weights, at[0] / 64, at[1] / 64), slot.named),
-            slot.abundances,
+            Array.from({ length: SCATTER_PATCH_SLOTS }, (_, k) => f(patch.abundances[k] ?? 0)),
             p.diameterM,
           ) * density;
         if (!(p.keep < share)) {

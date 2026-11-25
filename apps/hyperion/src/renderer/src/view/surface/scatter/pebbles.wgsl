@@ -46,7 +46,8 @@ struct PebbleEntry {
 // reads by an instance's tag (`pebbleDraw.wgsl`): its origin less the camera, m, in the passes'
 // frame, and its slot; its morph's start and end, m; its parent's slot and its quadrant there (the
 // terrain's instance's); its key (face, level, i, j); its class sets (the terrain instance's
-// `cells`).
+// `cells`); and its eight palette slots' rock abundances k, slots 0 to 3 then 4 to 7, which its
+// laws take here rather than from the slot's class laws, whose last word is the slot's edge key.
 struct ScatterPatch {
   originM : vec3f,
   slot : u32,
@@ -56,6 +57,7 @@ struct ScatterPatch {
   parentQuadrant : u32,
   key : vec4u,
   cells : vec4u,
+  abundances : array<vec4f, 2>,
 }
 
 const PEBBLE_GROUP : u32 = 64u;
@@ -79,8 +81,6 @@ const MAX_ROCK_ABUNDANCE : f32 = 0.4;
 const PEBBLE_CLASSES : u32 = 8u;
 const PEBBLE_LAW_WORD : u32 = 8450u;
 const PEBBLE_LAYER_WORDS : u32 = 13507u;
-// A slot law's word that holds its rock abundance k (`terrainMaterial.ts`' `packClassLaws`).
-const PEBBLE_ABUNDANCE_WORD : u32 = 7u;
 const PEBBLE_TAU : f32 = 6.283185307179586;
 const PEBBLE_QUANT : f32 = 4095.0;
 
@@ -135,11 +135,12 @@ fn pebble_weights(slot : u32, x : u32, y : u32, high : bool) -> vec4f {
   return unpack4x8unorm(class_layers[at]);
 }
 
-// The share of a proposal of diameter `d` kept at the place `at` (quads) of `slot`
-// (`pebbleAcceptance` of `terrainShares`): each named slot's weight, interpolated bilinearly as
-// `terrain_shares` takes it and scaled down where they sum past 1, times its law's
-// (1.79 k + 0.152) e^(−q(k) d) over the proposals' (1.79 k_max + 0.152).
-fn pebble_acceptance(slot : u32, at : vec2f, d : f32) -> f32 {
+// The share of a proposal of diameter `d` kept at the place `at` (quads) of the patch of record
+// `patch_index`, in its slot `slot` (`pebbleAcceptance` of `terrainShares`): each named slot's
+// weight, interpolated bilinearly as `terrain_shares` takes it and scaled down where they sum past
+// 1, times its law's (1.79 k + 0.152) e^(−q(k) d) over the proposals' (1.79 k_max + 0.152), k the
+// record's.
+fn pebble_acceptance(patch_index : u32, slot : u32, at : vec2f, d : f32) -> f32 {
   let base = min(vec2u(floor(max(at, vec2f(0.0)))), vec2u(63u));
   let f = clamp(at - vec2f(base), vec2f(0.0), vec2f(1.0));
   var total = 0.0;
@@ -157,7 +158,7 @@ fn pebble_acceptance(slot : u32, at : vec2f, d : f32) -> f32 {
         continue;
       }
       total = total + w[c];
-      let k = min(bitcast<f32>(class_layers[law + PEBBLE_ABUNDANCE_WORD]), MAX_ROCK_ABUNDANCE);
+      let k = min(patches[patch_index].abundances[half][c], MAX_ROCK_ABUNDANCE);
       if (k > 0.0 && w[c] > 0.0) {
         let q = Q_CONSTANT_PER_M + Q_INVERSE_PER_M / k;
         keep = keep + w[c] * (Q_CONSTANT_PER_M * k + Q_INVERSE_PER_M) * exp(-q * d);
@@ -229,7 +230,7 @@ fn main(@builtin(workgroup_id) group : vec3u, @builtin(num_workgroups) groups : 
       let d = pebble_diameter(range, pebble_unit(pebble_word(hash, w0 + 2u)));
       let keep = pebble_unit(pebble_word(hash, w0 + 3u));
       // The ground's share first, the cheapest refusal.
-      let share = pebble_acceptance(tile.slot, at, d) * params.view.y;
+      let share = pebble_acceptance(entry.patchIndex, tile.slot, at, d) * params.view.y;
       if (!(keep < share)) {
         continue;
       }

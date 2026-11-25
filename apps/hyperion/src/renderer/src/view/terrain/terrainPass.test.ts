@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { countingRenderEngine, type CountingRenderEngine } from "../../test/countingRenderEngine";
 import { viewId } from "../camera/state";
+import { SCATTER_PATCH_BYTES } from "../surface/scatter/pebblePlace";
 import type { ScatterBox } from "../surface/scatter/scatterCull";
 import { ScatterKernelSet } from "../surface/scatter/scatterKernels";
 import { bindingStages } from "../../test/wgslStages";
@@ -1889,6 +1890,29 @@ describe("the lit terrain of a body (R10.T10.b)", () => {
     engine.restore();
     expect(pass.scatter).not.toBeNull();
     expect(pass.scatter).not.toBe(first);
+    pass.dispose();
+    scatter.dispose();
+  });
+
+  it("carries each bake's slots' rock abundances in its scatter's patch records, not in the class laws, whose last word is the edge key, and the classes' edges' weight in their class sets (R11.T6.a)", async () => {
+    const abundances = Float32Array.of(0.2, 0, 0.05, 0, 0, 0, 0.3, 0);
+    const { pass, engine, scatter, frameOf } = await scatteringPass(abundances);
+    const before = engine.writes.length;
+    expect(frameOf({ edgeWeight: 0.5 }).decorated).toBe(true);
+    const written = engine.writes.slice(before).find((w) => w.buffer.endsWith("pebble patches"));
+    const bytes = written?.data.slice().buffer ?? new ArrayBuffer(0);
+    const records = new Float32Array(bytes);
+    const words = SCATTER_PATCH_BYTES / 4;
+    const count = records.length / words;
+    expect(count).toBeGreaterThan(0);
+    for (let n = 0; n < count; n += 1) {
+      // After each record's sixteen words of terms.
+      expect(Array.from(records.subarray(n * words + 16, (n + 1) * words))).toEqual(
+        Array.from(abundances),
+      );
+      // Its class sets' last word's high half, as the terrain's instance has it.
+      expect((new Uint32Array(bytes)[n * words + 15] ?? 0) >>> 16).toBe(Math.round(0.5 * 0xffff));
+    }
     pass.dispose();
     scatter.dispose();
   });

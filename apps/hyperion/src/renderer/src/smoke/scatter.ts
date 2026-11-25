@@ -169,7 +169,6 @@ function twinSlotOf(bake: BakedPatch, path: TerrainVertexPath): PebbleTwinSlot {
       { length: TERRAIN_CLASSES },
       (_, k) => classPhotometryOf(layers.photometry, k) !== null,
     ),
-    abundances: Array.from(layers.rockAbundances ?? new Float32Array(8)),
   };
 }
 
@@ -480,6 +479,7 @@ async function pebblesOn(
       parentQuadrant: parentQuadrant(bake.key),
       key: bake.key,
       cells: [NO_PARENT_SLOT, 0, 0, 0],
+      abundances: bake.layers?.rockAbundances ?? [],
     }));
     const nearestM = records.map((r, n) =>
       Math.max(
