@@ -112,6 +112,9 @@ LADDER = [
     "apps/hyperion/src/renderer/src/view/atmosphere/settings.ts",
     "apps/hyperion/src/renderer/src/view/surface/decoration/decorationSetting.ts",
 ]
+# The airless twins' engine (plan R07, perf-bodies-pass), which runs test-render's twins part alone: the
+# validate skill's `test_select_checks.py` holds the same list.
+TWINS = ["apps/hyperion/src/renderer/src/view/atmosphere/sourceTableEngine.ts"]
 # The files of the small workspace, with the contents the scans read.
 FILES: Dict[str, str] = {
     "Cargo.toml": "",
@@ -226,6 +229,7 @@ FILES: Dict[str, str] = {
     "apps/hyperion/src/renderer/src/view/wireframe/lines.ts": "",
     "apps/hyperion/src/renderer/src/view/shaders/sky.wgsl": "",
     **{path: "" for path in LADDER},
+    **{path: "" for path in TWINS},
 }
 
 
@@ -507,6 +511,36 @@ class TheRules(unittest.TestCase):
         self.assertIn("--part=ladder", smart_ci.describe(full, [("Cargo.toml", False)], "test", False, env={}))
         # A terrain file that chooses nothing per setting runs no harness.
         self.assertFalse(plan("apps/hyperion/src/renderer/src/view/terrain/cube.ts").ladder)
+
+    def test_the_airless_twins_engine_runs_test_renders_twins_part_alone(self) -> None:
+        # Plan R07 (perf-bodies-pass): the engine that draws an airless body by its lit modules' twins
+        # runs the client's build and the harness's twins part alone, both variants, in the suites' hold.
+        p = plan(TWINS[0])
+        self.assertEqual((p.twins, p.ladder, p.render), ({TWINS[0]}, set(), set()))
+        self.assertEqual([s.recipe for s in p.steps if s.recipe[0].startswith("_test-render")],
+                         [["_test-render-build"], ["_test-render-run", "--part=twins"]])
+        self.assertEqual([s.phase for s in p.steps if s.recipe[0].startswith("_test-render")],
+                         ["side", "locked"])
+        self.assertIn("just test-render --part=twins: the lit modules' airless twins", p.why[TWINS[0]])
+        runner = FakeRunner()
+        self.assertEqual(smart_ci.execute(p, ROOT, "just", env={}, runner=runner), 0)
+        self.assertEqual(runner.calls[-1], ("run", ["_locked", "just", "_test-render-run", "--part=twins"]))
+        # With a ladder file, both named parts in one run, the twins' first, as the harness orders them.
+        both = plan(TWINS[0], LADDER[0])
+        self.assertEqual([s.recipe for s in both.steps if s.recipe[0] == "_test-render-run"],
+                         [["_test-render-run", "--part=twins", "--part=ladder"]])
+        self.assertEqual(both.steps[-1].every_cause, sorted([LADDER[0], TWINS[0]]))
+        # With a shader, the whole of test-render runs once, the twins' part in it.
+        p = plan(TWINS[0], "apps/hyperion/src/renderer/src/view/shaders/sky.wgsl")
+        self.assertEqual([s.recipe for s in p.steps if s.recipe[0] == "_test-render-run"], [["_test-render-run"]])
+        self.assertIn(TWINS[0], p.steps[-1].every_cause)
+        # A full plan: `ci`'s phases, with the client's build beside them and the twins part's run last.
+        full = plan("Cargo.toml", TWINS[0])
+        self.assertEqual(smart_ci.phases_of(full)["locked"][-1], ["_test-render-run", "--part=twins"])
+        self.assertEqual(full.recipes(), ["ci", "_test-render-build", "_test-render-run"])
+        self.assertIn("--part=twins", smart_ci.describe(full, [("Cargo.toml", False)], "test", False, env={}))
+        # The engine's other atmosphere files run no harness of their own.
+        self.assertFalse(plan("apps/hyperion/src/renderer/src/view/atmosphere/settings.ts").twins)
 
     def test_the_whole_workspaces_inputs_run_the_full_ci(self) -> None:
         for path in ("Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "justfile", "pnpm-lock.yaml",
@@ -2468,6 +2502,17 @@ class RealWorkspace(unittest.TestCase):
         select_checks = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(select_checks)
         self.assertEqual(select_checks.LADDER_PATHS.pattern, smart_ci.LADDER_PATHS.pattern)
+
+    def test_the_twins_files_exist_and_the_validate_skill_routes_them_alike(self) -> None:
+        # Plan R07 (perf-bodies-pass): the table names real files, those of the list above, and the
+        # validate skill's `select_checks.py` holds the same table.
+        self.assertEqual(sorted(f for f in self.ws.files if smart_ci.TWINS_PATHS.search(f)), sorted(TWINS))
+        spec = importlib.util.spec_from_file_location(
+            "select_checks", ROOT / ".claude/skills/validate/scripts/select_checks.py")
+        assert spec is not None and spec.loader is not None
+        select_checks = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(select_checks)
+        self.assertEqual(select_checks.TWINS_PATHS.pattern, smart_ci.TWINS_PATHS.pattern)
 
     def test_the_named_crates_and_files_exist(self) -> None:
         crates = set(self.ws.crates)

@@ -5,11 +5,11 @@
 # It exits with the code of the first run, in part and then variant order, that does not exit 0: 1
 # a property failed or a request went out, 2 a setup error (no adapter), 3 the watchdog.
 #
-#   testRender.sh [--variant=NAME]... [--part=N|ladder|casters]... [--setting=high|low]...
+#   testRender.sh [--variant=NAME]... [--part=N|twins|ladder|casters]... [--setting=high|low]...
 #                 [--fixture=broken-wgsl|external-fetch] [--drop-adapter-switches] [--captures=DIR]
 #                 [--geometry=FIELD=VALUE[,...]]
 #
-# The page's groups are in thirty-five parts, 1 to 35 (`src/renderer/src/smoke/page.ts`), each a run
+# The page's groups are in thirty-four parts, 1 to 34 (`src/renderer/src/smoke/page.ts`), each a run
 # of its own under its own watchdog, the harness's hang detector (perf-smoke, 2026-10-13): parts 2
 # to 6, 8 to 14 and 30 hold the atmosphere's CPU-twin groups (2 R08.T6.b but its four absorbers, 3
 # R08.T6.g and R08.T14.c's thick read on a Saturn-class figure, 4 R08.T8.b's far limb, 5 R08.T6.f's
@@ -79,10 +79,11 @@
 # before and 110 s after, and part 30 197 s, (T)'s row 124 s of it (95 s beside part 12's shared
 # read).
 # Plan R07's airless twins (perf-bodies-pass: their catalogue and the checks that the bodies and
-# the lit terrain drawn by them draw their modules' bytes) took part 35, 150 s on a pod; with the
-# twins compiled beside its groups part 10 went past its watchdog (346 s of 360 at BASE alone, at a
-# pod's load of 36 to 49), so R10.T16.g's datum group moved to part 24, after plan R07's packed
-# cells: part 10 then held 251 s, part 24 218 s and part 35 143 s (2026-11-19).
+# the lit terrain drawn by them draw their modules' bytes) took a part of their own, 150 s on a pod;
+# with the twins compiled beside its groups part 10 went past its watchdog (346 s of 360 at BASE
+# alone, at a pod's load of 36 to 49), so R10.T16.g's datum group moved to part 24, after plan R07's
+# packed cells: part 10 then held 251 s, part 24 218 s and the twins' part 143 s (2026-11-19). Their
+# part is the named part `twins` below, as the ladder's is, not a number.
 # Plan R11's still mount, its job's small still of flat colours and its PNG round trip through the
 # harness's main process took part 28, alone, some 2 s on a pod (2026-11-14; parts 25 to 27 are
 # other lanes').
@@ -98,6 +99,11 @@
 # about a grounded craft; it is named rather than numbered so that the lanes landing beside it,
 # which add numbered parts, take none of the same number. It runs after the numbered parts when no
 # part is asked for (2026-11-25).
+#
+# --part=twins runs plan R07's airless twins (perf-bodies-pass; `src/renderer/src/smoke/cellPass.ts`
+# and `litTerrain.ts`): their catalogue, and the checks that the lit modules drawn by them draw their
+# modules' bytes on an airless body, a run per variant as a numbered part's. It runs after the
+# numbered parts, before the ladder, when no part is asked for.
 #
 # --part=ladder runs plan R12's ladder (R12.T7.a; `src/renderer/src/smoke/ladder.ts`): once per
 # quality setting and variant, side by side, each run making and drawing what its setting makes, so
@@ -151,6 +157,7 @@ gpu_watchdog_switches=(--disable-gpu-watchdog)
 
 variants=()
 parts=()
+twins=0
 ladder=0
 settings=()
 fixture=none
@@ -159,7 +166,8 @@ geometry=()
 for arg in "$@"; do
     case "$arg" in
         --variant=*) variants+=("${arg#--variant=}") ;;
-        --part=[1-9] | --part=1[0-9] | --part=2[0-9] | --part=3[0-5]) parts+=("${arg#--part=}") ;;
+        --part=[1-9] | --part=1[0-9] | --part=2[0-9] | --part=3[0-4]) parts+=("${arg#--part=}") ;;
+        --part=twins) twins=1 ;;
         --part=ladder) ladder=1 ;;
         --part=casters) parts+=(casters) ;;
         --setting=high | --setting=low) settings+=("${arg#--setting=}") ;;
@@ -173,17 +181,21 @@ done
 if [[ ${#variants[@]} -eq 0 ]]; then
     variants=(default no-subgroups)
 fi
-if [[ ${#parts[@]} -eq 0 && $ladder -eq 0 ]]; then
-    parts=(1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35)
+if [[ ${#parts[@]} -eq 0 && $twins -eq 0 && $ladder -eq 0 ]]; then
+    parts=(1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34)
+    twins=1
     ladder=1
     parts+=(casters)
 fi
 if [[ ${#settings[@]} -eq 0 ]]; then
     settings=(high low)
 fi
-# The units run one after the other: each part's variants side by side, then the ladder's settings
-# and variants side by side.
+# The units run one after the other: each part's variants side by side, the twins' as a part's, then
+# the ladder's settings and variants side by side.
 units=(${parts[@]+"${parts[@]}"})
+if [[ $twins -eq 1 ]]; then
+    units+=(twins)
+fi
 if [[ $ladder -eq 1 ]]; then
     units+=(ladder)
 fi

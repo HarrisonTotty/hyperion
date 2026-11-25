@@ -140,8 +140,14 @@ describe("readSmokeImages", () => {
 /** `scripts/testRender.sh`, which sets each run's outer limit. */
 const script = (): string => readFileSync(join(__dirname, "../../scripts/testRender.sh"), "utf8");
 
-/** The parts after the first, 2 to 35, which take neither part 1's captures nor its timings. */
-const LATER_PARTS = Array.from({ length: 34 }, (_, k) => String(k + 2));
+/**
+ * The parts after the first, 2 to 34, which take neither part 1's captures nor its timings; nor do
+ * the named parts ({@link NAMED_PARTS}).
+ */
+const LATER_PARTS = Array.from({ length: 33 }, (_, k) => String(k + 2));
+
+/** The named parts, by name: plan R07's airless twins (perf-bodies-pass) and plan R12's ladder. */
+const NAMED_PARTS = ["twins", "ladder"];
 
 describe("smokeWatchdogMs", () => {
   const plain = {
@@ -171,7 +177,7 @@ describe("smokeWatchdogMs", () => {
   });
 
   it("adds nothing for the captures to the later parts, which take none", () => {
-    for (const part of LATER_PARTS) {
+    for (const part of [...LATER_PARTS, ...NAMED_PARTS]) {
       expect(smokeWatchdogMs({ ...plain, part, captures: true })).toBe(180_000);
     }
   });
@@ -188,7 +194,7 @@ describe("smokeWatchdogMs", () => {
   });
 
   it("adds nothing for the GPU timings to the later parts, which take none", () => {
-    for (const part of LATER_PARTS) {
+    for (const part of [...LATER_PARTS, ...NAMED_PARTS]) {
       expect(smokeWatchdogMs({ ...plain, part, gpuTiming: true })).toBe(180_000);
     }
   });
@@ -321,25 +327,27 @@ describe.runIf(process.platform !== "win32")("testRender.sh's scale", () => {
 });
 
 describe.runIf(process.platform !== "win32")("testRender.sh's parts", () => {
-  it("takes every part from 1 to 35 as --part= and refuses 0 and 36, before any run", () => {
-    for (const part of ["1", ...LATER_PARTS]) {
+  it("takes every part from 1 to 34 and each named part as --part=, and refuses others, before any run", () => {
+    for (const part of ["1", ...LATER_PARTS, ...NAMED_PARTS]) {
       expect(runScriptAtScale("1", [`--part=${part}`]).stderr).not.toContain("unknown argument");
     }
-    for (const part of ["0", "36"]) {
+    for (const part of ["0", "35", "twin", "Twins"]) {
       const refused = runScriptAtScale("1", [`--part=${part}`]);
       expect(refused.status).toBe(2);
       expect(refused.stderr).toContain(`unknown argument --part=${part}`);
     }
   });
 
-  it("runs every part from 1 to 35 when none is asked for", () => {
+  it("runs every part from 1 to 34 when none is asked for", () => {
     const parts = /^ {4}parts=\(([\d ]+)\)$/mu.exec(script())?.[1];
     expect(parts).toBe(["1", ...LATER_PARTS].join(" "));
   });
 
   it("takes the named part casters, and runs it after the numbered parts when none is asked for (plan R14, R14.T6.c)", () => {
     expect(runScriptAtScale("1", ["--part=casters"]).stderr).not.toContain("unknown argument");
-    expect(script()).toMatch(/^ {4}parts=\([\d ]+\)\n {4}ladder=1\n {4}parts\+=\(casters\)$/mu);
+    expect(script()).toMatch(
+      /^ {4}parts=\([\d ]+\)\n {4}twins=1\n {4}ladder=1\n {4}parts\+=\(casters\)$/mu,
+    );
     const refused = runScriptAtScale("1", ["--part=caster"]);
     expect([refused.status, refused.stderr]).toEqual([
       2,
@@ -347,10 +355,11 @@ describe.runIf(process.platform !== "win32")("testRender.sh's parts", () => {
     ]);
   });
 
-  it("runs the ladder after the parts when none is asked for (plan R12, R12.T7.a)", () => {
-    expect(script()).toMatch(/^ {4}parts=\([\d ]+\)\n {4}ladder=1$/mu);
+  it("runs the airless twins and then the ladder after the parts when none is asked for", () => {
+    // Plan R07's airless twins (perf-bodies-pass) and plan R12's ladder (R12.T7.a).
+    expect(script()).toMatch(/^ {4}parts=\([\d ]+\)\n {4}twins=1\n {4}ladder=1$/mu);
     expect(scriptArray("units")).toEqual(['${parts[@]+"${parts[@]}"}']);
-    expect(script()).toMatch(/^ {4}units\+=\(ladder\)$/mu);
+    expect(script()).toMatch(/^ {4}units\+=\(twins\)\nfi\nif .*\n {4}units\+=\(ladder\)$/mu);
   });
 
   it("takes --part=ladder and --setting=high or low", () => {
@@ -471,6 +480,17 @@ describe.runIf(process.platform === "linux")("testRender.sh's launch", () => {
 
   it("launches a part's runs at no setting, whatever --setting says", () => {
     expect(asked(["--part=2", "--setting=low"])).toEqual(["2 none default", "2 none no-subgroups"]);
+  });
+
+  it("launches the airless twins once per variant, at no setting (plan R07, perf-bodies-pass)", () => {
+    expect(asked(["--part=twins", "--setting=low"])).toEqual([
+      "twins none default",
+      "twins none no-subgroups",
+    ]);
+    expect(asked(["--part=twins", "--part=3", "--variant=default"])).toEqual([
+      "3 none default",
+      "twins none default",
+    ]);
   });
 
   it("keeps Chromium's GPU watchdog off when the adapter's switches are dropped", () => {

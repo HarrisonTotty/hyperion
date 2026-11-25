@@ -45,19 +45,32 @@ LADDER = [
     "apps/hyperion/src/renderer/src/view/surface/decoration/decorationSetting.ts",
 ]
 
+# The airless twins' engine (plan R07, perf-bodies-pass): `tools/smart-ci/test_smart_ci.py` holds the
+# same list.
+TWINS = ["apps/hyperion/src/renderer/src/view/atmosphere/sourceTableEngine.ts"]
+
 
 class TheHarness(unittest.TestCase):
     def test_what_a_setting_makes_runs_the_ladder_part_alone(self) -> None:
         for path in LADDER:
             with self.subTest(path=path):
-                self.assertEqual(sc.harness_runs([path], set()), ([], [path]))
+                self.assertEqual(sc.harness_runs([path], set()), ([], [path], []))
         # With a shader, or where the catalogue imports it, the whole of test-render runs, the ladder in it.
         shader = "apps/hyperion/src/renderer/src/view/shaders/sky.wgsl"
-        self.assertEqual(sc.harness_runs([shader, LADDER[0]], set()), ([shader], [LADDER[0]]))
-        self.assertEqual(sc.harness_runs([LADDER[3]], {LADDER[3]}), ([LADDER[3]], []))
+        self.assertEqual(sc.harness_runs([shader, LADDER[0]], set()), ([shader], [LADDER[0]], []))
+        self.assertEqual(sc.harness_runs([LADDER[3]], {LADDER[3]}), ([LADDER[3]], [], []))
         for path in ("apps/hyperion/src/renderer/src/view/terrain/cube.ts",
                      "apps/hyperion/src/renderer/src/view/photoreal/renderer.test.ts"):
-            self.assertEqual(sc.harness_runs([path], set()), ([], []), path)
+            self.assertEqual(sc.harness_runs([path], set()), ([], [], []), path)
+
+    def test_the_airless_twins_engine_runs_the_twins_part_alone(self) -> None:
+        self.assertEqual(sc.harness_runs(TWINS, set()), ([], [], TWINS))
+        self.assertEqual(sc.harness_runs([*TWINS, LADDER[0]], set()), ([], [LADDER[0]], TWINS))
+        # Where the catalogue imports it, the whole of test-render runs, the twins' part in it.
+        self.assertEqual(sc.harness_runs(TWINS, set(TWINS)), (TWINS, [], []))
+        for path in ("apps/hyperion/src/renderer/src/view/atmosphere/sourceTableEngine.test.ts",
+                     "apps/hyperion/src/renderer/src/view/atmosphere/surfaceLighting.ts"):
+            self.assertEqual(sc.harness_runs([path], set()), ([], [], []), path)
 
 
 if __name__ == "__main__":

@@ -14,7 +14,7 @@ and files concerned, in `ci`'s order and phases: the checks that need no build d
 (which takes no lock), beside the cargo steps, then every Rust suite in one hold of the heavy-test
 lock, with `just test-render`'s run of the smoke harness in the same hold when a shader, the engine
 or the harness changed, or its ladder part alone when a file that chooses what a quality setting
-makes did. Suites small by the timings recorded from earlier runs (`weigh`) run without the lock
+makes did, and its twins part alone when the airless twins' engine did. Suites small by the timings recorded from earlier runs (`weigh`) run without the lock
 instead, capped. A path that no rule knows, and an input of the whole workspace (the justfile, the
 root manifest, the lock files, the toolchain, `.cargo/`), runs the full `just ci` instead. A plan
 that runs vitest or tsc first runs the Node floor's preflight (`tools/node-floor/check.cjs`), and
@@ -182,6 +182,14 @@ LADDER_PATHS = re.compile(
 )
 # test-render's argument for the ladder part alone, both settings and both variants.
 LADDER_PART = "--part=ladder"
+# The engine that draws a lit body without an atmosphere by its lit modules' airless twins (plan R07,
+# perf-bodies-pass), which the shader catalogue does not import. A change to it runs `just
+# test-render`'s twins part alone (`TWINS_PART`, `scripts/testRender.sh`), whose checks draw the lit
+# modules by their twins against their bytes as written; a change that runs the whole of test-render
+# runs the twins' part in it. The validate skill's `select_checks.py` holds the same table.
+TWINS_PATHS = re.compile(r"^apps/hyperion/src/renderer/src/view/atmosphere/sourceTableEngine\.ts$")
+# test-render's argument for the twins part alone, both variants.
+TWINS_PART = "--part=twins"
 
 # The Node floor's preflight (`tools/node-floor/check.cjs`), which the packages' `test` and
 # `typecheck` scripts run before vitest and tsc. smart-ci runs it once before a plan that runs either
@@ -281,10 +289,16 @@ RENDER_PHASES: Dict[str, List[List[str]]] = {
 }
 
 
-def render_recipes(phase: str, whole: bool) -> List[List[str]]:
-    """`RENDER_PHASES[phase]`'s recipes, with the harness's run of the ladder part alone
-    (`LADDER_PART`) unless `whole`."""
-    return [list(recipe) + ([] if whole or recipe[0] != "_test-render-run" else [LADDER_PART])
+def named_parts(twins: bool, ladder: bool) -> List[str]:
+    """test-render's arguments for its named parts alone: the twins' (`TWINS_PART`) and the
+    ladder's (`LADDER_PART`), in the order the harness runs them."""
+    return ([TWINS_PART] if twins else []) + ([LADDER_PART] if ladder else [])
+
+
+def render_recipes(phase: str, whole: bool, parts: Sequence[str]) -> List[List[str]]:
+    """`RENDER_PHASES[phase]`'s recipes, with the harness's run of the named parts `parts` alone
+    (`named_parts`) unless `whole`."""
+    return [list(recipe) + ([] if whole or recipe[0] != "_test-render-run" else list(parts))
             for recipe in RENDER_PHASES[phase]]
 
 
@@ -1012,6 +1026,9 @@ class Plan:
     # The paths that run `just test-render`'s steps with its ladder part alone (`LADDER_PATHS`); with
     # any path of `render`, the whole of test-render runs instead, the ladder in it.
     ladder: Set[str] = field(default_factory=set)
+    # The paths that run them with its twins part alone (`TWINS_PATHS`), beside the ladder's where
+    # both changed; with any path of `render`, the whole of test-render, the twins' part in it.
+    twins: Set[str] = field(default_factory=set)
 
     @property
     def is_full(self) -> bool:
@@ -1022,7 +1039,7 @@ class Plan:
         if not self.is_full:
             return [step.recipe[0] for step in self.steps]
         return ["ci"] + ([recipe[0] for phase in ("side", "locked") for recipe in RENDER_PHASES[phase]]
-                         if self.render or self.ladder else [])
+                         if self.render or self.ladder or self.twins else [])
 
 
 class Needs:
@@ -1060,6 +1077,7 @@ class Needs:
         self.smart_ci_tests: Set[str] = set()
         self.render: Set[str] = set()
         self.ladder: Set[str] = set()  # the paths that run test-render's ladder part alone
+        self.twins: Set[str] = set()  # the paths that run test-render's twins part alone
         self.why: Dict[str, List[str]] = {}
         self.notes: List[str] = []
 
@@ -1113,6 +1131,9 @@ def classify(path: str, deleted: bool, ws: Workspace, needs: Needs) -> None:
     elif LADDER_PATHS.search(path):
         needs.ladder.add(path)
         needs.say(path, f"just test-render {LADDER_PART}: what each setting makes")
+    elif TWINS_PATHS.search(path):
+        needs.twins.add(path)
+        needs.say(path, f"just test-render {TWINS_PART}: the lit modules' airless twins")
 
     for regex, reader, kinds, why in RUST_READERS:
         if re.search(regex, path) and reader in ws.crates:
@@ -1846,7 +1867,8 @@ def make_plan(changes: Sequence[Tuple[str, bool]], ws: Workspace, dependents: bo
     for path, deleted in changes:
         classify(path, deleted, ws, needs)
     if needs.full:
-        return Plan(needs.full, [], needs.render, needs.why, needs.notes, ladder=needs.ladder)
+        return Plan(needs.full, [], needs.render, needs.why, needs.notes, ladder=needs.ladder,
+                    twins=needs.twins)
 
     # The tests of the changed code: those the code's graph finds reach it, in any crate, or with
     # --all-tests (or no graph) every test of the changed crates, as before the graph. With the graph,
@@ -1925,8 +1947,9 @@ def make_plan(changes: Sequence[Tuple[str, bool]], ws: Workspace, dependents: bo
         steps.append(Step(phase, title, recipe, list(first) + short(set(every) - set(first)), every))
 
     vitest_any = bool(needs.vitest_all or needs.vitest_package or needs.vitest_files)
-    # The paths that run the smoke harness: the whole of test-render, or its ladder part alone.
-    harness = needs.render | needs.ladder
+    # The paths that run the smoke harness: the whole of test-render, or its named parts alone.
+    harness = needs.render | needs.ladder | needs.twins
+    parts = named_parts(bool(needs.twins), bool(needs.ladder))
     clippy = sorted(needs.clippy)
     whole = set(needs.tests)  # every test of these crates
     native = sorted(whole | set(needs.native) | graph_crates | source_crates)
@@ -2026,7 +2049,7 @@ def make_plan(changes: Sequence[Tuple[str, bool]], ws: Workspace, dependents: bo
     if needs.smart_ci_tests:
         step("side", "smart-ci's own tests", ["_smart-ci-test"], needs.smart_ci_tests)
     if harness:
-        for recipe in render_recipes("side", bool(needs.render)):
+        for recipe in render_recipes("side", bool(needs.render), parts):
             step("side", "build the client for the smoke harness (just test-render)", recipe, harness)
 
     # vitest, beside the builds and outside the heavy-test lock (decision-test-coverage.md R1).
@@ -2115,10 +2138,11 @@ def make_plan(changes: Sequence[Tuple[str, bool]], ws: Workspace, dependents: bo
              ["_wasm-run", wasip1_args if wasip1_tests else "", wasip1_filter if wasip1_tests else "",
               " ".join(browser_tests)], wasm_causes | browser_causes)
     if harness:
+        named = " and ".join((["its twins part, both variants"] if needs.twins else [])
+                             + (["its ladder part, both settings and variants"] if needs.ladder else []))
         title = ("the smoke harness on SwiftShader, both variants (just test-render)" if needs.render else
-                 f"the smoke harness's ladder part on SwiftShader, both settings and variants (just test-render "
-                 f"{LADDER_PART})")
-        for recipe in render_recipes("locked", bool(needs.render)):
+                 f"the smoke harness on SwiftShader, {named} (just test-render {' '.join(parts)})")
+        for recipe in render_recipes("locked", bool(needs.render), parts):
             step("locked", title, recipe, harness)
 
     notes = list(needs.notes)
@@ -2143,7 +2167,8 @@ def make_plan(changes: Sequence[Tuple[str, bool]], ws: Workspace, dependents: bo
             + ", which this plan's do not cover (a `-p` selection is not the workspace's build, nor does it reach "
             "the crates that depend on the change): `--hook-checks` runs the workspace's in their place, inside the "
             "gate's build slot, and the hooks then skip them (`tools/smart-ci/stamp.py`).")
-    plan = Plan({}, steps, needs.render, needs.why, notes, suites=weighed, ladder=needs.ladder)
+    plan = Plan({}, steps, needs.render, needs.why, notes, suites=weighed, ladder=needs.ladder,
+                twins=needs.twins)
     if chosen is not None and (graph_mode or source_crates):
         plan.details = chosen.describe(graph_crates | source_crates, whole, explain, needs.native)
     return plan
@@ -2375,10 +2400,11 @@ def describe(plan: Plan, changes: Sequence[Tuple[str, bool]], what: str, depende
     lines += plan.details
     if plan.render and plan.is_full:
         lines.append("With `just test-render`'s steps, its run in the same hold of the heavy-test lock, because of "
-                     + ", ".join(short(plan.render | plan.ladder)))
-    elif plan.ladder and plan.is_full:
-        lines.append(f"With `just test-render`'s steps, its run of the ladder part alone ({LADDER_PART}) in the same "
-                     "hold of the heavy-test lock, because of " + ", ".join(short(plan.ladder)))
+                     + ", ".join(short(plan.render | plan.ladder | plan.twins)))
+    elif (plan.ladder or plan.twins) and plan.is_full:
+        parts = named_parts(bool(plan.twins), bool(plan.ladder))
+        lines.append(f"With `just test-render`'s steps, its run of its named parts alone ({' '.join(parts)}) in the "
+                     "same hold of the heavy-test lock, because of " + ", ".join(short(plan.ladder | plan.twins)))
     for note in plan.notes:
         lines.append(f"Note: {note}")
     if plan.is_full or plan.steps:
@@ -2429,9 +2455,10 @@ def phases_of(plan: Plan) -> Phases:
     full plan, with `just test-render`'s build and run where it needs them (setup has `gen-surface`)."""
     if plan.is_full:
         phases = {phase: [list(recipe) for recipe in CI_PHASES[phase]] for phase in PHASES}
-        if plan.render or plan.ladder:
+        if plan.render or plan.ladder or plan.twins:
             for phase in ("side", "locked"):
-                phases[phase] += render_recipes(phase, bool(plan.render))
+                phases[phase] += render_recipes(phase, bool(plan.render),
+                                                named_parts(bool(plan.twins), bool(plan.ladder)))
         return phases
     phases: Phases = {phase: [] for phase in PHASES}
     for step in plan.steps:
@@ -3111,6 +3138,8 @@ concerned (`--plan` shows each step and the paths that caused it):
   what a setting makes          just test-render's build and its ladder part's run (--part=ladder):
                                 the photorealistic view, the terrain's materials and pass, the
                                 settings' tables (LADDER_PATHS)
+  the airless twins' engine     just test-render's build and its twins part's run (--part=twins):
+                                sourceTableEngine.ts (TWINS_PATHS)
   the whole workspace's inputs  the full `just ci`: justfile, Cargo.toml, Cargo.lock, pnpm-lock.yaml,
                                 rust-toolchain.toml, .cargo/, tools/portable/, and any path no rule knows
 

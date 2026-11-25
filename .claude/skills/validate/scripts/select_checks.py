@@ -52,6 +52,11 @@ LADDER_PATHS = re.compile(
     r"^apps/hyperion/src/renderer/src/view/(photoreal/renderer|terrain/(materialSet|terrainPass)|"
     r"quality/qualitySetting|atmosphere/settings|surface/decoration/decorationSetting)\.ts$"
 )
+# The engine that draws a lit body without an atmosphere by its lit modules' airless twins (plan R07,
+# perf-bodies-pass): a change to it runs `just test-render`'s twins part alone (`--part=twins`), and a
+# change that runs the whole of test-render runs the twins' part in it. `tools/smart-ci/smart_ci.py`'s
+# `TWINS_PATHS` is the same table, and its tests hold the two equal.
+TWINS_PATHS = re.compile(r"^apps/hyperion/src/renderer/src/view/atmosphere/sourceTableEngine\.ts$")
 # A test marked slow runs only under `just test-slow`, so a change that touches one runs those slow
 # tests by name beside the gate (never the whole slow suite, which is integration's `just ci-slow`).
 SLOW_MARK = re.compile(r'#\[ignore\s*=\s*"slow')
@@ -91,12 +96,14 @@ def catalogue_sources(root: Path) -> set[str]:
     return sources
 
 
-def harness_runs(changed: list[str], catalogued: set[str]) -> tuple[list[str], list[str]]:
-    """The changed files that run the whole of `just test-render`, and those that run its ladder part
-    alone (`LADDER_PATHS`), as `just smart-ci` routes them."""
+def harness_runs(changed: list[str], catalogued: set[str]) -> tuple[list[str], list[str], list[str]]:
+    """The changed files that run the whole of `just test-render`, those that run its ladder part
+    alone (`LADDER_PATHS`), and those that run its twins part alone (`TWINS_PATHS`), as `just
+    smart-ci` routes them."""
     render = [f for f in changed if RENDER_PATHS.search(f) or f in catalogued]
     ladder = [f for f in changed if f not in render and LADDER_PATHS.search(f)]
-    return render, ladder
+    twins = [f for f in changed if f not in render and TWINS_PATHS.search(f)]
+    return render, ladder, twins
 
 
 def git(root: Path, *args: str) -> list[str]:
@@ -319,7 +326,8 @@ def main() -> None:
     # A lane's gate is `just smart-ci`: the steps of `just ci` that the branch's change reaches, against
     # its merge-base with the integration branch, uncommitted and untracked files included, with
     # `just test-render` when a shader, the engine or the smoke harness changed (R01.T9.e), and its
-    # ladder part alone when a file that chooses what a setting makes did (R12.T7.a). The
+    # ladder part alone when a file that chooses what a setting makes did (R12.T7.a), and its twins
+    # part alone when the airless twins' engine did (plan R07, perf-bodies-pass). The
     # orchestrator's integration runs the full `just ci`, and `just ci-slow` stays the full gate. The
     # slow tests run only under `just test-slow`, so a changed file that marks one runs those tests by
     # name beside the gate.
@@ -367,7 +375,7 @@ def main() -> None:
     if infra:
         notes.append("The justfile or a hook config changed: the gate above is the minimum, and a recipe it "
                      "calls may itself have moved, so read the diff before trusting a pass.")
-    render, ladder = harness_runs(changed, catalogue_sources(root))
+    render, ladder, twins = harness_runs(changed, catalogue_sources(root))
     if render:
         notes.append(f"{render[0]} touches the engine, the harness or a shader: `just smart-ci` builds "
                      "the client beside its other steps and runs `just test-render`'s harness last, in the "
@@ -376,6 +384,10 @@ def main() -> None:
         notes.append(f"{ladder[0]} chooses what a quality setting makes: `just smart-ci` builds the client "
                      "beside its other steps and runs `just test-render --part=ladder`, the harness's ladder "
                      "part alone, last, in the same hold of the heavy-test lock as its suites.")
+    if twins and not render:
+        notes.append(f"{twins[0]} draws airless bodies by their lit modules' airless twins: `just smart-ci` "
+                     "builds the client beside its other steps and runs `just test-render --part=twins`, the "
+                     "harness's twins part alone, last, in the same hold of the heavy-test lock as its suites.")
     if determinism:
         notes.append("A determinism crate changed: its slow tests run at integration (`just ci-slow`). "
                      "`just smart-ci` runs the tests of the crates that depend on it that reach the change; "

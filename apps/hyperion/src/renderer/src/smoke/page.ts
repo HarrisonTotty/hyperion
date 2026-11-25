@@ -19,9 +19,8 @@
  * R08.T18.b's thermal forms and R08.T11's (T) row, part 32 R11.T9.c's ring slab (its materials'
  * catalogue and its frames against their twin; its captures stay with part 1's) and R11.T9.d's
  * particles (their field's placement against its twin and their frames), parts 33 and 34 R11.T4's
- * rocks (with R14.T5.c, and by the visibility buffer, R14.T5.e), part 35 plan R07's airless twins and
- * their check (perf-bodies-pass), and part 1 every other; with no part given the page runs them all,
- * in its order.
+ * rocks (with R14.T5.c, and by the visibility buffer, R14.T5.e), and part 1 every other; with no
+ * part given the page runs them all, in its order.
  * Each part checks its path (T9.c) itself. R08.T6.f's slices and bands run in two groups: the
  * Saturn-class figure's in part 5, with R08.T6.i's layer edges, and Earth's, which took R08.T6.g's
  * Earth, in part 8, with R07.T8.e–f's cell pass for every record (`cellPass.ts`) after it;
@@ -60,6 +59,10 @@
  * captures and fix-view-light's of the view's light, with the other captures, and R02.T19.b's datum
  * captures after them; a plain
  * `just test-render` runs none of them.
+ *
+ * The `twins` part (plan R07, perf-bodies-pass) holds the airless twins' catalogue and the checks
+ * that the lit modules drawn by them draw their modules' bytes on an airless body (`cellPass.ts`,
+ * `litTerrain.ts`): named, as the ladder is, not numbered.
  *
  * The `ladder` part (plan R12, R12.T7.a; `ladder.ts`) runs at the setting its query names, `high` or
  * `low`: what that setting's own code makes, made and drawn at it, and found in the catalogue, so
@@ -354,7 +357,7 @@ const VARIANTS: Readonly<Record<string, CapabilityOverrides | undefined>> = {
  * Saturn-class figure's twins, the smallest, went to part 3 (67 to 126 s) (2026-10-27). The datum
  * group moved again, to part 24 (49 s) after plan R07's packed cells, when the airless twins'
  * compiles beside part 10 took it past its watchdog (346 s of 360 at BASE alone at a pod's load of
- * 36 to 49; 2026-11-19): part 10 then held 251 s and part 24 218 s (in part 35 beside the twins'
+ * 36 to 49; 2026-11-19): part 10 then held 251 s and part 24 218 s (in the twins' part beside their
  * checks it took that part to 320 s).
  * R08.T15.a.2's deck brought its marches' catalogue and its twins on Earth and on a Saturn-class
  * figure, which part 13 (156 s on a pod at R08.T14.d.1's gate) and part 9 (112 s) could not take
@@ -437,7 +440,8 @@ type PagePart =
   | 32
   | 33
   | 34
-  | 35
+  // Plan R07's airless twins (perf-bodies-pass), a part of their own by name.
+  | "twins"
   // Plan R12's ladder (R12.T7.a): a run per setting, which its query names (`ladder.ts`).
   | "ladder"
   // Plan R14's rocks cast into the cascades (R14.T6.c).
@@ -517,8 +521,8 @@ function partOf(value: string | null): PagePart | "all" | null {
       return 33;
     case "34":
       return 34;
-    case "35":
-      return 35;
+    case "twins":
+      return "twins";
     case "ladder":
       return "ladder";
     case "casters":
@@ -585,7 +589,7 @@ async function run(
     setupError,
   });
   if (part === null) {
-    return failed("the part asked for is not 1 to 35, ladder, casters or all");
+    return failed("the part asked for is not 1 to 34, twins, ladder, casters or all");
   }
   if (part === "ladder" && ladderSetting === null) {
     return failed("the ladder's part runs at a setting, high or low, and none was given");
@@ -692,14 +696,14 @@ async function run(
   await group(16, "T9.b catalogue: the table-only twins", () =>
     checkCatalogue(engine, status, TABLE_ONLY_ENTRIES, checks),
   );
-  // Plan R07's airless twins, in part 35, alone, beside their check (perf-bodies-pass).
-  await group(35, "T9.b catalogue: the airless twins", () =>
+  // Plan R07's airless twins, in their own part, beside their checks (perf-bodies-pass).
+  await group("twins", "T9.b catalogue: the airless twins", () =>
     checkCatalogue(engine, status, AIRLESS_ENTRIES, checks),
   );
-  await group(35, "plan R07: airless bodies drawn by their airless twins", () =>
+  await group("twins", "plan R07: airless bodies drawn by their airless twins", () =>
     checkAirlessTwins(engine, checks),
   );
-  await group(35, "plan R07: the lit terrain drawn by its airless twins", () =>
+  await group("twins", "plan R07: the lit terrain drawn by its airless twins", () =>
     checkLitTerrainAirlessTwins(engine, checks),
   );
   // R08.T8.e's table's march twins, in part 16 after R08.T9.b's.

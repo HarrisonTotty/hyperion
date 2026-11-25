@@ -10280,7 +10280,7 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     the air, skipped at run time for an airless body, their code alone 62% of TEST MOON's figure.
   - The cut, bit for bit: `SourceTableEngine` draws an airless body by its modules' airless twins
     (`AIRLESS_ONLY`, `airlessMaterial`, `airlessKernel`, `isAirlessTable`; `AIRLESS_ENTRIES`, 36,
-    and their bytes' check in test-render's part 31). Whole descent, three pairs: bodies p50
+    and their bytes' check in test-render's named part `twins`). Whole descent, three pairs: bodies p50
     1,505–2,628 → 571–579 ms (descent arc 1,285–1,326 → 542–556), p95 9.4–9.9 → 6.0–6.6 s; discs
     and disc cells −59%. Spike results version 10 add `gpu.deviceLosses`.
   - Pending: the owner's UHD 620 and Mac re-runs (the lane's outbox has the commands).
