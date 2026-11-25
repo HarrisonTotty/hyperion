@@ -1976,8 +1976,8 @@ mod tests {
     static GOLDEN_RECORDS: LazyLock<Vec<(BodyRecord, BodyRecordDto)>> =
         LazyLock::new(golden_records);
 
-    /// The golden systems' records at the epoch, each with its wire form, under the rules in force
-    /// on this thread: [`GOLDEN_RECORDS`]'s, the version's.
+    /// The golden systems' records at the epoch, each with its wire form, under the version's
+    /// rules: [`GOLDEN_RECORDS`]'s.
     fn golden_records() -> Vec<(BodyRecord, BodyRecordDto)> {
         let galaxy = &*GOLDEN_GALAXY;
         GOLDEN_SYSTEMS
@@ -2156,12 +2156,12 @@ mod tests {
         assert!(surfaces > 50, "{surfaces} surfaces");
     }
 
-    /// P14.T35.e: the members of later tasks are absent, as the record holds them, with
-    /// P14.T35.f's `silicate_vapour`, which the record does not hold, and a subsurface ocean is
-    /// computed for a regular moon alone, an object or `null`, until P14.T51.g.b's bump, and for
-    /// every solid surface from it. From P14.T51.g.a's bump (23 → 24) a regular moon's is absent
-    /// where its record's is not computed, its shell's base lying at or beyond ice V's melting
-    /// pressure (liquid under high-pressure ice, P14.T55.k's), and none is below it; from
+    /// P14.T35.e: the members of later tasks are absent, as the record holds them, with P14.T35.f's
+    /// `silicate_vapour` (P14.T55.b's on the record from generator version 35), and a subsurface
+    /// ocean is computed for a regular moon alone, an object or `null`, until P14.T51.g.b's bump,
+    /// and for every solid surface from it. From P14.T51.g.a's bump (23 → 24) a regular moon's is
+    /// absent where its record's is not computed, its shell's base lying at or beyond ice V's
+    /// melting pressure (liquid under high-pressure ice, P14.T55.k's), and none is below it; from
     /// P14.T51.g.b's, any body's is absent where its column keeps liquid only under high-pressure
     /// ice or its base lies in ice II. An ocean rests on rock or, from those bumps, on ice III or
     /// ice V, never on ice VI or VII while it is at most 273.16 K. The condensates
@@ -2174,8 +2174,8 @@ mod tests {
     /// `an_aerosol_inventory_is_sent_as_the_record_holds_it` test their conversions); so are the
     /// modifiers (P14.T54.b.c; `a_surface_s_modifiers_are_sent_as_the_record_holds_them`) and the
     /// taxonomic class (P14.T51.e, wired by P14.T54.b.j;
-    /// `a_surface_s_taxonomic_class_is_sent_as_its_name_in_lower_case`). The biosphere and the
-    /// silicate vapour are absent on every surface.
+    /// `a_surface_s_taxonomic_class_is_sent_as_its_name_in_lower_case`), and the silicate vapour
+    /// (`a_surface_sends_its_melt_s_vapour_or_null`). The biosphere is absent on every surface.
     #[test]
     fn the_members_of_later_tasks_are_absent_and_a_moon_s_ocean_is_computed() {
         let (mut moons, mut absent) = (0, Vec::new());
@@ -2196,7 +2196,7 @@ mod tests {
                     sim.modifiers() == RecordModelled::NotModelled,
                     sim.taxonomic_class() == RecordModelled::NotModelled,
                     true,
-                    true,
+                    matches!(sim.silicate_vapour(), RecordModelled::NotModelled),
                 ],
                 "{}: the structure, aerosols, modifiers, taxonomic class, biosphere and silicate \
                  vapour",
@@ -3463,8 +3463,8 @@ mod tests {
     ///
     /// A body of another state may hold no volatile air either: the close binary's dwarf planet
     /// `e101`, a magma ocean at 1,684 K whose volatiles escape has taken, sends 0 Pa and no gas.
-    /// That zero is the volatiles'; the melt's own vapour is not modelled, and `silicate_vapour` is
-    /// absent (P14.T35.f).
+    /// That zero is the volatiles'; the melt's own vapour is not among them but its
+    /// `silicate_vapour` (P14.T35.f, P14.T55.b).
     #[test]
     fn the_surface_s_mixture_and_fractions_are_in_range() {
         let mut airless = 0;
@@ -3513,21 +3513,17 @@ mod tests {
         assert!(airless > 0, "no airless body was checked");
     }
 
-    /// P14.T55.b (decision-backlog-2 §2.3), under its hold at 35: every surface sends its melt's
-    /// own vapour with its key, `null` on a surface holding no melt and a value over melt (the
-    /// state `magma_ocean` or a crust's melt area above 0), its figures the record's to the bit.
-    /// So every surface holding melt sends a value: a console since P14.T43.e reads it as not none
-    /// wherever it reads the surface as holding melt, and one before it ignores the key as before,
-    /// so that the first send leaves no console reading the volatiles' zero as `NONE` where it did
-    /// not already (decision-backlog-2 §2.3).
+    /// P14.T55.b (decision-backlog-2 §2.3), from generator version 35: every surface sends its
+    /// melt's own vapour with its key, `null` on a surface holding no melt and a value over melt
+    /// (the state `magma_ocean` or a crust's melt area above 0), its figures the record's to the
+    /// bit. So every surface holding melt sends a value: a console since P14.T43.e reads it as not
+    /// none wherever it reads the surface as holding melt, and one before it ignores the key as
+    /// before, so that the first send leaves no console reading the volatiles' zero as `NONE` where
+    /// it did not already (decision-backlog-2 §2.3).
     #[test]
-    fn under_the_35_hold_a_surface_sends_its_melt_s_vapour_or_null() {
-        use hyperion_sim::planetary::chem::silicate_vapour::{
-            SilicateVapourRules, with_silicate_vapour,
-        };
-        let records = with_silicate_vapour(SilicateVapourRules::Modelled, golden_records);
+    fn a_surface_sends_its_melt_s_vapour_or_null() {
         let (mut values, mut nulls, mut outflows) = (0, 0, 0);
-        for (sim, wire) in &records {
+        for (sim, wire) in GOLDEN_RECORDS.iter() {
             let (Section::Ok(sim), SectionDto::Ok(dto)) = (sim.surface(), &wire.surface) else {
                 continue;
             };
@@ -3573,21 +3569,26 @@ mod tests {
         );
     }
 
-    /// P14.T35.f (decision-backlog-2 §2): below generator version 35 every surface sends the melt's
-    /// own vapour absent, with no key, the golden systems' magma oceans among them, each of rock. The close binary's dwarf
-    /// planets `e101` to `e103`, magma oceans at some 1,684 K below generator version 28, whose
-    /// volatiles' zero this test pinned, have evaporated from 28 (P14.T55.b.a): each is sent
-    /// destroyed by its evaporation, with no surface.
+    /// P14.T35.f (decision-backlog-2 §2): from generator version 35 every surface sends the melt's
+    /// own vapour with its key (P14.T55.b), the golden systems' magma oceans among them, each of
+    /// rock and each sending a value. The close binary's dwarf planets `e101` to `e103`, magma
+    /// oceans at some 1,684 K below generator version 28, whose volatiles' zero this test pinned,
+    /// have evaporated from 28 (P14.T55.b.a): each is sent destroyed by its evaporation, with no
+    /// surface.
     #[test]
-    fn every_surface_sends_the_melt_s_vapour_absent_and_e101_the_volatiles_zero() {
+    fn every_surface_sends_the_melt_s_vapour_and_e101_is_evaporated() {
         let close_binary = 0x4200_2cb2_0000_0009;
         let mut magma_oceans = Vec::new();
         for (_, dto, wire) in ok_surfaces() {
             let id = wire.id.as_str();
-            assert_eq!(dto.silicate_vapour, Modelled::NotModelled, "{id}");
+            assert!(!dto.silicate_vapour.is_not_modelled(), "{id}");
             let sent = serde_json::to_value(dto).expect("a surface section serializes");
-            assert!(sent.get("silicate_vapour").is_none(), "{id}: {sent}");
+            assert!(sent.get("silicate_vapour").is_some(), "{id}: {sent}");
             if dto.state == SurfaceStateDto::MagmaOcean {
+                assert!(
+                    matches!(dto.silicate_vapour, Modelled::Value(_)),
+                    "{id}: a magma ocean sends its vapour"
+                );
                 assert_eq!(dto.material, SurfaceMaterialDto::Rock, "{id}");
                 magma_oceans.push(wire.id.clone());
             }

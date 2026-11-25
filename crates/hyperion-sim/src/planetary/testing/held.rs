@@ -14,9 +14,6 @@
 
 use crate::planetary::chem::envelope_abundances::{FormationDrawRules, with_formation_draws};
 use crate::planetary::chem::outgassing::{OutgassingRules, with_outgassing_speciation};
-use crate::planetary::chem::silicate_vapour::{SilicateVapourRules, with_silicate_vapour};
-use crate::planetary::chem::tenuous::{TenuousAirRules, with_tenuous_air};
-use crate::planetary::derive::atmosphere::{DeckBaseRules, with_deck_base};
 use crate::planetary::derive::atmosphere::{
     LineSwitchRules, MeltOxygenRules, with_line_switch, with_melt_oxygen,
 };
@@ -84,10 +81,6 @@ held_rules! {
     rayleigh_adding: RayleighAddingRules = RayleighAddingRules::in_force => with_rayleigh_adding,
     haze_layer: HazeLayerRules = HazeLayerRules::in_force => with_haze_layer,
     locked_climate: LockedClimateRules = LockedClimateRules::in_force => with_locked_climate,
-    tenuous_air: TenuousAirRules = TenuousAirRules::in_force => with_tenuous_air,
-    silicate_vapour: SilicateVapourRules =
-        SilicateVapourRules::in_force => with_silicate_vapour,
-    deck_base: DeckBaseRules = DeckBaseRules::in_force => with_deck_base,
     outgassing: OutgassingRules = OutgassingRules::in_force => with_outgassing_speciation,
 }
 

@@ -1,4 +1,4 @@
-# generator_version = 34
+# generator_version = 35
 red_giant 0x4200ecd200000003: OldThinDisc, 1 stars
 fe_h = 0x3fb0536aeeff0199  # 0.0637728532301537
 age_at_epoch_yr = 0x4200e53a3fea5d43  # 9070659581.295538
@@ -127,6 +127,19 @@ heat_flow_w_m2 = 0x3fa6333730a76819  # 0.04335949391288824
 surface_age_yr = 0x41c158f8b88092eb  # 582087025.0044836
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x0000000000000000  # 0.0
+vapour_melt_temperature_k = 0x40aa0d947bbfa567  # 3334.7900066270263
+vapour_pressure_pa = 0x40f6810172e2a835  # 92176.09054818827
+vapour_mole_fraction SiO = 0x3fd82874488e0d88  # 0.37746913037718643
+vapour_mole_fraction O2 = 0x3fca958e174459a0  # 0.20768905769427892
+vapour_mole_fraction Na = 0x3fc68e24d0806276  # 0.17621288471925184
+vapour_mole_fraction O = 0x3fc3ce3de218f92e  # 0.1547314981452898
+vapour_mole_fraction Mg = 0x3fa685eb26c658ac  # 0.043990467532397076
+vapour_mole_fraction Fe = 0x3f953d8c7483f5f6  # 0.02074260197786334
+vapour_mole_fraction SiO2 = 0x3f938489418a6589  # 0.019060272813111765
+vapour_mole_fraction K = 0x3f1b492496709533  # 0.0001040867406208637
+vapour_mean_molar_mass_g_per_mol = 0x40409841566e087c  # 33.1894939458152
+vapour_jeans_parameter = 0x4056dd20de94f140  # 91.45513119263796
+vapour_escape: Bound
 crust: lid Secondary; primary ultramafic, secondary basalt_fe, tertiary none, bulk none; provinces basalt_fe; Intermediate, RockMelted(MagmaOcean)
 melt_area_fraction = 0x3ff0000000000000  # 1.0
 peak_central_temperature_k: none
@@ -218,6 +231,19 @@ heat_flow_w_m2 = 0x3fa4eae0800cf7ae  # 0.04085446894758547
 surface_age_yr = 0x41c49fe8512a68ae  # 692048034.3313196
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x0000000000000000  # 0.0
+vapour_melt_temperature_k = 0x40a7b18653257fa4  # 3032.7623531072913
+vapour_pressure_pa = 0x40d4f2ad81f7c0c4  # 21450.711057604072
+vapour_mole_fraction Na = 0x3fd5393c99b51493  # 0.33161845217211655
+vapour_mole_fraction SiO = 0x3fd14711e4b9667d  # 0.26996276222562426
+vapour_mole_fraction O2 = 0x3fc84d8c48cf01d2  # 0.18986657672031854
+vapour_mole_fraction O = 0x3fc09a75031a5a67  # 0.12971365596304738
+vapour_mole_fraction Mg = 0x3fa5319419fa4b5a  # 0.041393879099948364
+vapour_mole_fraction Fe = 0x3f99eb5c3bce88d4  # 0.025311890745464208
+vapour_mole_fraction SiO2 = 0x3f8883f37ad20ed2  # 0.011970426736531623
+vapour_mole_fraction K = 0x3f2547c650a33441  # 0.00016235633694919492
+vapour_mean_molar_mass_g_per_mol = 0x403ed21e3c48e0a7  # 30.820773856918688
+vapour_jeans_parameter = 0x405ab4bcc8618b50  # 106.82402238393593
+vapour_escape: Bound
 crust: lid Secondary; primary ultramafic, secondary basalt, tertiary none, bulk none; provinces basalt; Intermediate, RockMelted(MagmaOcean)
 melt_area_fraction = 0x3ff0000000000000  # 1.0
 peak_central_temperature_k: none
@@ -1954,6 +1980,19 @@ heat_flow_w_m2 = 0x3fa633370b78425c  # 0.04335948958408117
 surface_age_yr = 0x41c158f90cfd4bfe  # 582087193.9788816
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x0000000000000000  # 0.0
+vapour_melt_temperature_k = 0x40aa0dbc800ef99a  # 3334.86816450879
+vapour_pressure_pa = 0x40f6830abc4f94e8  # 92208.67097433249
+vapour_mole_fraction SiO = 0x3fd828d7b0558e91  # 0.37749283046853416
+vapour_mole_fraction O2 = 0x3fca9596d3855e7e  # 0.20769009903118624
+vapour_mole_fraction Na = 0x3fc68d3114e1e317  # 0.17618382949492492
+vapour_mole_fraction O = 0x3fc3ce5edb6aec43  # 0.1547354289412813
+vapour_mole_fraction Mg = 0x3fa685e88525ccf5  # 0.04399038911187773
+vapour_mole_fraction Fe = 0x3f953d34d3fad4dd  # 0.020741296232434137
+vapour_mole_fraction SiO2 = 0x3f938500b115c2d5  # 0.019062052544032
+vapour_mole_fraction K = 0x3f1b484cb9769343  # 0.00010407417572950738
+vapour_mean_molar_mass_g_per_mol = 0x40409851dfa778cc  # 33.18999858548486
+vapour_jeans_parameter = 0x4056dd1488d09179  # 91.45437832229608
+vapour_escape: Bound
 crust: lid Secondary; primary ultramafic, secondary basalt_fe, tertiary none, bulk none; provinces basalt_fe; Intermediate, RockMelted(MagmaOcean)
 melt_area_fraction = 0x3ff0000000000000  # 1.0
 peak_central_temperature_k: none
@@ -2045,6 +2084,19 @@ heat_flow_w_m2 = 0x3fa4eae05d03c605  # 0.04085446486886827
 surface_age_yr = 0x41c49fe8b59cf98d  # 692048235.2263657
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x0000000000000000  # 0.0
+vapour_melt_temperature_k = 0x40a7b1aab7a475aa  # 3032.833432330478
+vapour_pressure_pa = 0x40d4f4a4f66534aa  # 21458.57753877776
+vapour_mole_fraction Na = 0x3fd538747d91bec8  # 0.3315707422507157
+vapour_mole_fraction SiO = 0x3fd1478a77c666fd  # 0.26999150940683575
+vapour_mole_fraction O2 = 0x3fc84dd0b3c821c4  # 0.1898747327652598
+vapour_mole_fraction O = 0x3fc09abc26bccbc4  # 0.12972213641623231
+vapour_mole_fraction Mg = 0x3fa531c562afd8f6  # 0.04139534787820935
+vapour_mole_fraction Fe = 0x3f99eb2640ee14d5  # 0.025311086380970977
+vapour_mole_fraction SiO2 = 0x3f8884d49a6e0c06  # 0.01197210403711858
+vapour_mole_fraction K = 0x3f25474168b540f5  # 0.00016234086465739093
+vapour_mean_molar_mass_g_per_mol = 0x403ed2495c7a4290  # 30.82143190369476
+vapour_jeans_parameter = 0x405ab4b92199c387  # 106.82379951492304
+vapour_escape: Bound
 crust: lid Secondary; primary ultramafic, secondary basalt, tertiary none, bulk none; provinces basalt; Intermediate, RockMelted(MagmaOcean)
 melt_area_fraction = 0x3ff0000000000000  # 1.0
 peak_central_temperature_k: none

@@ -1,4 +1,4 @@
-# generator_version = 34
+# generator_version = 35
 site 0 20 393216 524293 k 0x0000000000000000
 site 0 20 0 0 k 0x3fb249c3b8eb812b
 rock 0 0 23 2 1 0 dir 0x3fe279a7c67ff81e 0xbfe279a6e023036b 0xbfe279a72a0d9ae0 ground 0x40838a96eff0005b diameter 0x3fdf7ad4d19c5597 ratio 0x3fde38d5b8b7aa8c aspect 0x3fe39c565bff5f71 yaw 0x4016ec79fd5832bc exponent 0x400126dc3d565c4b

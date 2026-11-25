@@ -1,7 +1,8 @@
-//! The silicate vapour's tests: its hold, the pressure against its sources, the species, the
-//! escape and the composition classes, and its golden.
+//! The silicate vapour's tests: the pressure against its sources, the species, the escape and the
+//! composition classes, and its golden.
 
 use super::*;
+use crate::GENERATOR_VERSION;
 use crate::planetary::hooks::crust::CrustLithology;
 use crate::units::consts::EARTH_RADIUS_M;
 
@@ -37,41 +38,6 @@ fn share(vapour: &SilicateVapour, key: &str) -> f64 {
 /// The key of the species `vapour` holds most of.
 fn leader(vapour: &SilicateVapour) -> String {
     vapour.species()[0].0.substance().key().as_str().to_owned()
-}
-
-/// P14.T55.b's hold: 35's bump deletes it, and until then the version holds the vapour and the
-/// active lava and only the tests' switch models them.
-#[test]
-fn the_silicate_vapour_is_held_only_until_the_35_bump() {
-    use SilicateVapourRules::{Held, Modelled};
-    assert!(
-        GENERATOR_VERSION < SILICATE_VAPOUR_VERSION,
-        "the 34 → 35 bump models the silicate vapour and the active lava (P14.T55.b): delete \
-         `SILICATE_VAPOUR_VERSION`, `SilicateVapourRules` with its `Held` arm, \
-         `with_silicate_vapour`, its line in `planetary/testing/held.rs` and in \
-         `with_every_35_hold`, and this test; the `Held` paths of `record_silicate_vapour` and the \
-         crust's `melt_area`, and `NOT_MODELLED`'s eruption temperature; unwrap the tests' \
-         switches (the record test's held half and the census's name lose the hold); restate the \
-         server's `every_surface_sends_the_melt_s_vapour_absent_and_e101_the_volatiles_zero`, the \
-         fixtures' `silicate_vapour` (`planetary.json` gains `null` on its temperate world, its \
-         client's `e101Earth` guard and `@hyperion/protocol`'s \"no key\" checks with it) and R09's \
-         `surface_pressure` docs (`field/header.rs`, `surface/inputs.rs`); and bless by name the \
-         goldens whose records hold a melt or a volcanic lid's active lava, R09's coarse inputs and \
-         palettes of those lids among them, the melt area moving with the lava"
-    );
-    assert_eq!(SilicateVapourRules::in_force(), Held);
-    assert_eq!(
-        with_silicate_vapour(Modelled, SilicateVapourRules::in_force),
-        Modelled
-    );
-    assert_eq!(
-        with_silicate_vapour(Modelled, || with_silicate_vapour(
-            Held,
-            SilicateVapourRules::in_force
-        )),
-        Held
-    );
-    assert_eq!(SilicateVapourRules::in_force(), Held);
 }
 
 /// The BSE's pressure is Fegley and Schaefer's Eq. 13 (−3.769 log₁₀ bar at 2,000 K, +1.117 at

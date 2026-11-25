@@ -1,4 +1,4 @@
-# generator_version = 34
+# generator_version = 35
 subgiant 0x42006c9a00000004: OldThinDisc, 1 stars
 fe_h = 0x3fde49a88219f430  # 0.47324574189389335
 age_at_epoch_yr = 0x41fb050328933278  # 7253013129.199821
@@ -536,9 +536,25 @@ heat_flow_w_m2 = 0x3fb3565d779da5bd  # 0.0755365769415652
 surface_age_yr = 0x419ba0f47dbbadaf  # 115883295.43327974
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x0000000000000000  # 0.0
+vapour_melt_temperature_k = 0x409704999999999a  # 1473.15
+vapour_pressure_pa = 0x3fa0a6b28a51930b  # 0.03252180040798266
+vapour_mole_fraction Na = 0x3fe928325d0d858e  # 0.7861568276822923
+vapour_mole_fraction O2 = 0x3fc82395163de0b4  # 0.18858588777562135
+vapour_mole_fraction O = 0x3f962c1680c7f408  # 0.021652557001278466
+vapour_mole_fraction Fe = 0x3f5cd5ea7abdd4e0  # 0.0017599859083621758
+vapour_mole_fraction SiO = 0x3f50facb5b5e4ee6  # 0.001036356535654309
+vapour_mole_fraction Mg = 0x3f438aa35de7cbf8  # 0.0005963609399358685
+vapour_mole_fraction SiO2 = 0x3f1feb42cb0153f1  # 0.00012176127597858501
+vapour_mole_fraction K = 0x3f17a9707c52870d  # 9.02628808767925e-5
+vapour_mean_molar_mass_g_per_mol = 0x40389fb489eccaff  # 24.62384855300024
+vapour_jeans_parameter = 0x3f6491eab0d4fd02  # 0.002510984783526405
+vapour_escape: Outflow
 crust: lid Secondary; primary none, secondary basalt_reduced, tertiary none, bulk none; provinces basalt_reduced; Reduced, RockMelted(Tides)
-melt_area_fraction = 0x0000000000000000  # 0.0
+melt_area_fraction = 0x3e84801717bfa78a  # 1.5273952758072537e-7
 peak_central_temperature_k: none
+starlit_melt_fraction = 0x0000000000000000  # 0.0
+active_lava_share = 0x3e84801717bfa78a  # 1.5273952758072537e-7
+eruption_temperature_k = 0x409704999999999a  # 1473.15
 envelope: NotApplicable
 body 0204 A c IV: Moon(Captured) about Some(Body(BodyIndex(512))), Present
 mass_mearth = 0x3e5741885beb0ee6  # 2.1658825617343118e-8
@@ -1340,9 +1356,25 @@ condensate: CO2, Solid, seasonal false
 reservoir_kg_m2 = 0x40e4e7de03edf126  # 42814.93797967052
 reservoir_gel_m = 0x4039fd3e07878f58  # 25.989227743716896
 area_fraction = 0x3f8b9405563fbb64  # 0.013465921110734143
+vapour_melt_temperature_k = 0x409934999999999a  # 1613.15
+vapour_pressure_pa = 0x3fcdd44acb94b662  # 0.23304114284967442
+vapour_mole_fraction Na = 0x3fe928325d0d858e  # 0.7861568276822923
+vapour_mole_fraction O2 = 0x3fc82395163de0b4  # 0.18858588777562135
+vapour_mole_fraction O = 0x3f962c1680c7f408  # 0.021652557001278466
+vapour_mole_fraction Fe = 0x3f5cd5ea7abdd4e0  # 0.0017599859083621758
+vapour_mole_fraction SiO = 0x3f50facb5b5e4ee6  # 0.001036356535654309
+vapour_mole_fraction Mg = 0x3f438aa35de7cbf8  # 0.0005963609399358685
+vapour_mole_fraction SiO2 = 0x3f1feb42cb0153f1  # 0.00012176127597858501
+vapour_mole_fraction K = 0x3f17a9707c52870d  # 9.02628808767925e-5
+vapour_mean_molar_mass_g_per_mol = 0x40389fb489eccaff  # 24.62384855300024
+vapour_jeans_parameter = 0x4026ddb51f09cc79  # 11.433022470422872
+vapour_escape: Bound
 crust: lid Secondary; primary none, secondary komatiite, tertiary none, bulk none; provinces komatiite; Intermediate, RockMelted(Tides)
-melt_area_fraction = 0x0000000000000000  # 0.0
+melt_area_fraction = 0x3e62ea7745a2f844  # 3.5233576682514115e-8
 peak_central_temperature_k: none
+starlit_melt_fraction = 0x0000000000000000  # 0.0
+active_lava_share = 0x3e62ea7745a2f844  # 3.5233576682514115e-8
+eruption_temperature_k = 0x409934999999999a  # 1613.15
 envelope: NotApplicable
 body 0403 A e VI: Moon(Captured) about Some(Body(BodyIndex(1024))), Present
 mass_mearth = 0x3ed019d1a0f16eb4  # 3.838742954700016e-6
@@ -2079,9 +2111,25 @@ heat_flow_w_m2 = 0x3fa05e36e3031fbc  # 0.031968798839045104
 surface_age_yr = 0x41d50a78c34cfc87  # 1412031245.202913
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x0000000000000000  # 0.0
+vapour_melt_temperature_k = 0x409704999999999a  # 1473.15
+vapour_pressure_pa = 0x3fa0a6b28a51930b  # 0.03252180040798266
+vapour_mole_fraction Na = 0x3fe928325d0d858e  # 0.7861568276822923
+vapour_mole_fraction O2 = 0x3fc82395163de0b4  # 0.18858588777562135
+vapour_mole_fraction O = 0x3f962c1680c7f408  # 0.021652557001278466
+vapour_mole_fraction Fe = 0x3f5cd5ea7abdd4e0  # 0.0017599859083621758
+vapour_mole_fraction SiO = 0x3f50facb5b5e4ee6  # 0.001036356535654309
+vapour_mole_fraction Mg = 0x3f438aa35de7cbf8  # 0.0005963609399358685
+vapour_mole_fraction SiO2 = 0x3f1feb42cb0153f1  # 0.00012176127597858501
+vapour_mole_fraction K = 0x3f17a9707c52870d  # 9.02628808767925e-5
+vapour_mean_molar_mass_g_per_mol = 0x40389fb489eccaff  # 24.62384855300024
+vapour_jeans_parameter = 0x402b87c2200ab08a  # 13.765152932457813
+vapour_escape: Bound
 crust: lid Secondary; primary none, secondary basalt_reduced, tertiary none, bulk none; provinces basalt_reduced; Reduced, RockMelted(Tides)
-melt_area_fraction = 0x0000000000000000  # 0.0
+melt_area_fraction = 0x3e715a38f478aedc  # 6.464284495942122e-8
 peak_central_temperature_k: none
+starlit_melt_fraction = 0x0000000000000000  # 0.0
+active_lava_share = 0x3e715a38f478aedc  # 6.464284495942122e-8
+eruption_temperature_k = 0x409704999999999a  # 1473.15
 envelope: NotApplicable
 body 0504 A f IV: Moon(Regular) about Some(Body(BodyIndex(1280))), Present
 mass_mearth = 0x3fe1703024eb1bf9  # 0.5449448319494642
@@ -2179,9 +2227,25 @@ condensate: N2, Solid, seasonal true
 reservoir_kg_m2 = 0x40e16b21e8defb5a  # 35673.05967663853
 reservoir_gel_m = 0x404272cc31937569  # 36.896856495858465
 area_fraction = 0x3f93938c8a8f35c2  # 0.019117542225833402
+vapour_melt_temperature_k = 0x409934999999999a  # 1613.15
+vapour_pressure_pa = 0x3fcdd44acb94b662  # 0.23304114284967442
+vapour_mole_fraction Na = 0x3fe928325d0d858e  # 0.7861568276822923
+vapour_mole_fraction O2 = 0x3fc82395163de0b4  # 0.18858588777562135
+vapour_mole_fraction O = 0x3f962c1680c7f408  # 0.021652557001278466
+vapour_mole_fraction Fe = 0x3f5cd5ea7abdd4e0  # 0.0017599859083621758
+vapour_mole_fraction SiO = 0x3f50facb5b5e4ee6  # 0.001036356535654309
+vapour_mole_fraction Mg = 0x3f438aa35de7cbf8  # 0.0005963609399358685
+vapour_mole_fraction SiO2 = 0x3f1feb42cb0153f1  # 0.00012176127597858501
+vapour_mole_fraction K = 0x3f17a9707c52870d  # 9.02628808767925e-5
+vapour_mean_molar_mass_g_per_mol = 0x40389fb489eccaff  # 24.62384855300024
+vapour_jeans_parameter = 0x4050b9566819d8d8  # 66.89589884304166
+vapour_escape: Bound
 crust: lid Secondary; primary none, secondary komatiite, tertiary none, bulk none; provinces komatiite; Intermediate, RockMelted(Tides)
-melt_area_fraction = 0x0000000000000000  # 0.0
+melt_area_fraction = 0x3e7f7500f98bdf98  # 1.1718662874446573e-7
 peak_central_temperature_k: none
+starlit_melt_fraction = 0x0000000000000000  # 0.0
+active_lava_share = 0x3e7f7500f98bdf98  # 1.1718662874446573e-7
+eruption_temperature_k = 0x409934999999999a  # 1613.15
 envelope: NotApplicable
 body 0505 A f VII: Moon(Captured) about Some(Body(BodyIndex(1280))), Present
 mass_mearth = 0x3eb68c7a92176861  # 1.3440099525447964e-6
@@ -4802,9 +4866,25 @@ heat_flow_w_m2 = 0x3fb3565d776e043f  # 0.07553657689824521
 surface_age_yr = 0x419ba0f47e818ed0  # 115883295.62652135
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x0000000000000000  # 0.0
+vapour_melt_temperature_k = 0x409704999999999a  # 1473.15
+vapour_pressure_pa = 0x3fa0a6b28a51930b  # 0.03252180040798266
+vapour_mole_fraction Na = 0x3fe928325d0d858e  # 0.7861568276822923
+vapour_mole_fraction O2 = 0x3fc82395163de0b4  # 0.18858588777562135
+vapour_mole_fraction O = 0x3f962c1680c7f408  # 0.021652557001278466
+vapour_mole_fraction Fe = 0x3f5cd5ea7abdd4e0  # 0.0017599859083621758
+vapour_mole_fraction SiO = 0x3f50facb5b5e4ee6  # 0.001036356535654309
+vapour_mole_fraction Mg = 0x3f438aa35de7cbf8  # 0.0005963609399358685
+vapour_mole_fraction SiO2 = 0x3f1feb42cb0153f1  # 0.00012176127597858501
+vapour_mole_fraction K = 0x3f17a9707c52870d  # 9.02628808767925e-5
+vapour_mean_molar_mass_g_per_mol = 0x40389fb489eccaff  # 24.62384855300024
+vapour_jeans_parameter = 0x3f6491eab0d4fd02  # 0.002510984783526405
+vapour_escape: Outflow
 crust: lid Secondary; primary none, secondary basalt_reduced, tertiary none, bulk none; provinces basalt_reduced; Reduced, RockMelted(Tides)
-melt_area_fraction = 0x0000000000000000  # 0.0
+melt_area_fraction = 0x3e848017178d28b5  # 1.5273952749312975e-7
 peak_central_temperature_k: none
+starlit_melt_fraction = 0x0000000000000000  # 0.0
+active_lava_share = 0x3e848017178d28b5  # 1.5273952749312975e-7
+eruption_temperature_k = 0x409704999999999a  # 1473.15
 envelope: NotApplicable
 body 0204 A c IV: Moon(Captured) about Some(Body(BodyIndex(512))), Present
 mass_mearth = 0x3e5741885beb0ee6  # 2.1658825617343118e-8
@@ -5606,9 +5686,25 @@ condensate: CO2, Solid, seasonal false
 reservoir_kg_m2 = 0x40e4e7de04cdad32  # 42814.93808635547
 reservoir_gel_m = 0x4039fd3e06191df0  # 25.989227658397738
 area_fraction = 0x3f8b940554bae27d  # 0.013465921066527326
+vapour_melt_temperature_k = 0x409934999999999a  # 1613.15
+vapour_pressure_pa = 0x3fcdd44acb94b662  # 0.23304114284967442
+vapour_mole_fraction Na = 0x3fe928325d0d858e  # 0.7861568276822923
+vapour_mole_fraction O2 = 0x3fc82395163de0b4  # 0.18858588777562135
+vapour_mole_fraction O = 0x3f962c1680c7f408  # 0.021652557001278466
+vapour_mole_fraction Fe = 0x3f5cd5ea7abdd4e0  # 0.0017599859083621758
+vapour_mole_fraction SiO = 0x3f50facb5b5e4ee6  # 0.001036356535654309
+vapour_mole_fraction Mg = 0x3f438aa35de7cbf8  # 0.0005963609399358685
+vapour_mole_fraction SiO2 = 0x3f1feb42cb0153f1  # 0.00012176127597858501
+vapour_mole_fraction K = 0x3f17a9707c52870d  # 9.02628808767925e-5
+vapour_mean_molar_mass_g_per_mol = 0x40389fb489eccaff  # 24.62384855300024
+vapour_jeans_parameter = 0x4026ddb51f09cc79  # 11.433022470422872
+vapour_escape: Bound
 crust: lid Secondary; primary none, secondary komatiite, tertiary none, bulk none; provinces komatiite; Intermediate, RockMelted(Tides)
-melt_area_fraction = 0x0000000000000000  # 0.0
+melt_area_fraction = 0x3e62ea771f69b0b6  # 3.5233572438825594e-8
 peak_central_temperature_k: none
+starlit_melt_fraction = 0x0000000000000000  # 0.0
+active_lava_share = 0x3e62ea771f69b0b6  # 3.5233572438825594e-8
+eruption_temperature_k = 0x409934999999999a  # 1613.15
 envelope: NotApplicable
 body 0403 A e VI: Moon(Captured) about Some(Body(BodyIndex(1024))), Present
 mass_mearth = 0x3ed019d1a0f16eb4  # 3.838742954700016e-6
@@ -6345,9 +6441,25 @@ heat_flow_w_m2 = 0x3fa05e36c1efdd1d  # 0.03196879498858094
 surface_age_yr = 0x41d50a793eedfd34  # 1412031739.7185793
 ocean_fraction = 0x0000000000000000  # 0.0
 ice_fraction = 0x0000000000000000  # 0.0
+vapour_melt_temperature_k = 0x409704999999999a  # 1473.15
+vapour_pressure_pa = 0x3fa0a6b28a51930b  # 0.03252180040798266
+vapour_mole_fraction Na = 0x3fe928325d0d858e  # 0.7861568276822923
+vapour_mole_fraction O2 = 0x3fc82395163de0b4  # 0.18858588777562135
+vapour_mole_fraction O = 0x3f962c1680c7f408  # 0.021652557001278466
+vapour_mole_fraction Fe = 0x3f5cd5ea7abdd4e0  # 0.0017599859083621758
+vapour_mole_fraction SiO = 0x3f50facb5b5e4ee6  # 0.001036356535654309
+vapour_mole_fraction Mg = 0x3f438aa35de7cbf8  # 0.0005963609399358685
+vapour_mole_fraction SiO2 = 0x3f1feb42cb0153f1  # 0.00012176127597858501
+vapour_mole_fraction K = 0x3f17a9707c52870d  # 9.02628808767925e-5
+vapour_mean_molar_mass_g_per_mol = 0x40389fb489eccaff  # 24.62384855300024
+vapour_jeans_parameter = 0x402b87c2200ab08a  # 13.765152932457813
+vapour_escape: Bound
 crust: lid Secondary; primary none, secondary basalt_reduced, tertiary none, bulk none; provinces basalt_reduced; Reduced, RockMelted(Tides)
-melt_area_fraction = 0x0000000000000000  # 0.0
+melt_area_fraction = 0x3e715a38d1682f37  # 6.464283717354978e-8
 peak_central_temperature_k: none
+starlit_melt_fraction = 0x0000000000000000  # 0.0
+active_lava_share = 0x3e715a38d1682f37  # 6.464283717354978e-8
+eruption_temperature_k = 0x409704999999999a  # 1473.15
 envelope: NotApplicable
 body 0504 A f IV: Moon(Regular) about Some(Body(BodyIndex(1280))), Present
 mass_mearth = 0x3fe1703024eb1bf9  # 0.5449448319494642
@@ -6445,9 +6557,25 @@ condensate: N2, Solid, seasonal true
 reservoir_kg_m2 = 0x40e16b21e07c11fd  # 35673.05865291131
 reservoir_gel_m = 0x404272cc2cd4ddd9  # 36.89685593026997
 area_fraction = 0x3f93938c85865ba1  # 0.01911754193278237
+vapour_melt_temperature_k = 0x409934999999999a  # 1613.15
+vapour_pressure_pa = 0x3fcdd44acb94b662  # 0.23304114284967442
+vapour_mole_fraction Na = 0x3fe928325d0d858e  # 0.7861568276822923
+vapour_mole_fraction O2 = 0x3fc82395163de0b4  # 0.18858588777562135
+vapour_mole_fraction O = 0x3f962c1680c7f408  # 0.021652557001278466
+vapour_mole_fraction Fe = 0x3f5cd5ea7abdd4e0  # 0.0017599859083621758
+vapour_mole_fraction SiO = 0x3f50facb5b5e4ee6  # 0.001036356535654309
+vapour_mole_fraction Mg = 0x3f438aa35de7cbf8  # 0.0005963609399358685
+vapour_mole_fraction SiO2 = 0x3f1feb42cb0153f1  # 0.00012176127597858501
+vapour_mole_fraction K = 0x3f17a9707c52870d  # 9.02628808767925e-5
+vapour_mean_molar_mass_g_per_mol = 0x40389fb489eccaff  # 24.62384855300024
+vapour_jeans_parameter = 0x4050b9566819d8d8  # 66.89589884304166
+vapour_escape: Bound
 crust: lid Secondary; primary none, secondary komatiite, tertiary none, bulk none; provinces komatiite; Intermediate, RockMelted(Tides)
-melt_area_fraction = 0x0000000000000000  # 0.0
+melt_area_fraction = 0x3e7f7500b9fafce9  # 1.171866146299875e-7
 peak_central_temperature_k: none
+starlit_melt_fraction = 0x0000000000000000  # 0.0
+active_lava_share = 0x3e7f7500b9fafce9  # 1.171866146299875e-7
+eruption_temperature_k = 0x409934999999999a  # 1613.15
 envelope: NotApplicable
 body 0505 A f VII: Moon(Captured) about Some(Body(BodyIndex(1280))), Present
 mass_mearth = 0x3eb68c7a92176861  # 1.3440099525447964e-6

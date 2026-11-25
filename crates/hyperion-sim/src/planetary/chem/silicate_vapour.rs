@@ -3,9 +3,9 @@
 //! O₂, O and `SiO` over a melt with no volatiles (Schaefer and Fegley 2009, Astrophys. J. 703,
 //! L113, here SF09), with whether the body holds them or they stream off it.
 //!
-//! Every piece is a closed form of plain quantities, held off the record below generator version
-//! 35 ([`SILICATE_VAPOUR_VERSION`]). It is not part of the volatile air the surface's conditions
-//! hold: the melt's temperature sets it where melt lies, not a volatile inventory's weight.
+//! Every piece is a closed form of plain quantities, on the record from generator version 35. It
+//! is not part of the volatile air the surface's conditions hold: the melt's temperature sets it
+//! where melt lies, not a volatile inventory's weight.
 //!
 //! # The pressure
 //!
@@ -66,67 +66,9 @@ use crate::substance::liquid::Oxide;
 use crate::substance::{SubstanceId, by_key};
 use crate::units::consts::BOLTZMANN_CONSTANT;
 use crate::units::{Kelvin, Metres, MetresPerSecondSquared, Pascals};
-use crate::{GENERATOR_VERSION, GeneratorVersion};
 
 #[cfg(test)]
 mod tests;
-
-/// The generator version from which a record's surface holds its melt's vapour, and a volcanic
-/// lid its active lava (P14.T55.b): 35, a planetary hold (main, 2026-11-19). Below it the vapour is
-/// not modelled and the melt area reads starlight alone, so that no output moves at 33 or 34.
-pub const SILICATE_VAPOUR_VERSION: GeneratorVersion = GeneratorVersion::new(35);
-
-/// Whether a record's surface holds its melt's vapour and a volcanic lid its active lava (their
-/// hold, [`SILICATE_VAPOUR_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum SilicateVapourRules {
-    /// Version 34's and before: the vapour not modelled, the melt area starlight's alone.
-    Held,
-    /// Version 35's: the vapour over melt, and a volcanic lid's active lava in its melt area.
-    Modelled,
-}
-
-impl SilicateVapourRules {
-    /// The rules this generator version gives: modelled from [`SILICATE_VAPOUR_VERSION`], held
-    /// below it; in the tests, the rules a test's switch sets on its thread
-    /// ([`with_silicate_vapour`]).
-    #[must_use]
-    pub fn in_force() -> Self {
-        #[cfg(any(test, feature = "testing"))]
-        if let Some(rules) = SILICATE_VAPOUR_RULES.with(core::cell::Cell::get) {
-            return rules;
-        }
-        if GENERATOR_VERSION >= SILICATE_VAPOUR_VERSION {
-            Self::Modelled
-        } else {
-            Self::Held
-        }
-    }
-}
-
-#[cfg(any(test, feature = "testing"))]
-thread_local! {
-    /// The silicate vapour's rules a test sets on its thread, `None` for the version's.
-    static SILICATE_VAPOUR_RULES: core::cell::Cell<Option<SilicateVapourRules>> =
-        const { core::cell::Cell::new(None) };
-}
-
-/// `run`'s result with the silicate vapour's rules `rules` on this thread, for the tests to reach
-/// version 35's ahead of its bump (the `testing` feature's, for other crates' tests); the version's
-/// rules are set back after, a panic in `run` included. A record derives lazily, so a test reads it
-/// inside the switch. 35's bump deletes it with the hold.
-#[cfg(any(test, feature = "testing"))]
-pub fn with_silicate_vapour<R>(rules: SilicateVapourRules, run: impl FnOnce() -> R) -> R {
-    /// Sets the thread's rules back as it drops.
-    struct Restore(Option<SilicateVapourRules>);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            SILICATE_VAPOUR_RULES.with(|cell| cell.set(self.0));
-        }
-    }
-    let _restore = Restore(SILICATE_VAPOUR_RULES.with(|cell| cell.replace(Some(rules))));
-    run()
-}
 
 /// Fegley and Schaefer's BSE vapour pressure's constant, log₁₀ bar: −30.6757, of log₁₀ P =
 /// −30.6757 − 8,228.146 ÷ T + 9.3974 log₁₀ T, P in bar and T in K, the total pressure of the

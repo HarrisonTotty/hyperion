@@ -6414,62 +6414,49 @@ mod tests {
         assert!(methane > 0.0, "{air:?}");
     }
 
-    /// P14.T55.e.a's check on Triton: under the 35 hold's published rules the table's Triton holds
-    /// its methane over terrain warmer than its nitrogen ice, stated against its measured 9.8 ±
-    /// 3.7 nbar (Lellouch et al. 2010, A&A 512, L8, §2, in 2009, as the partition's tests read it),
-    /// an x(CH₄) of about 7 × 10⁻⁴ over its 14 µbar of N₂ (a few × 10⁻⁴; Lellouch et al.'s own
-    /// 2.4 × 10⁻⁴ took a 40 µbar air). Triton's terrain lies some 2–3 K over its ice, not Pluto's
-    /// 6.5 K ([`METHANE_TERRAIN_WARMING_K`]), so its methane's partial pressure, x p, stands above
-    /// the measured, 7.6 times over its 36.8 K ice as built: asserted within a factor of 10, the
-    /// miss recorded. Under the held rules it is 33's, the minor branch's
-    /// at the mean, below 10⁻³ of the measured.
+    /// P14.T55.e.a's check on Triton: the table's Triton holds its methane over terrain warmer than
+    /// its nitrogen ice, stated against its measured 9.8 ± 3.7 nbar (Lellouch et al. 2010, A&A 512,
+    /// L8, §2, in 2009, as the partition's tests read it), an x(CH₄) of about 7 × 10⁻⁴ over its
+    /// 14 µbar of N₂ (a few × 10⁻⁴; Lellouch et al.'s own 2.4 × 10⁻⁴ took a 40 µbar air). Triton's
+    /// terrain lies some 2–3 K over its ice, not Pluto's 6.5 K ([`METHANE_TERRAIN_WARMING_K`]), so
+    /// its methane's partial pressure, x p, stands above the measured: 9.0 times over its 37.05 K
+    /// ice once train 35's rider takes its snapshot haze to P14.T55.n's law (7.6 times over 36.8 K
+    /// as built), asserted within a factor of 10, the miss recorded.
     ///
     /// [`METHANE_TERRAIN_WARMING_K`]: crate::planetary::chem::tenuous::METHANE_TERRAIN_WARMING_K
     #[test]
-    fn under_the_35_hold_the_table_s_triton_s_methane_lies_over_its_terrain() {
-        use crate::planetary::chem::tenuous::{TenuousAirRules, with_tenuous_air};
+    fn the_table_s_triton_s_methane_lies_over_its_terrain() {
         use crate::planetary::derive::atmosphere::{Gas, SurfaceState};
         /// Triton's measured CH₄, Pa (Lellouch et al. 2010): 9.8 nbar.
         const MEASURED: f64 = 9.8e-4;
-        let triton = || {
-            let volatiles = MoonVolatiles {
-                draws: VolatileDraws::MEDIAN,
-                site: VolatileSite::ParentZone,
-            };
-            let neptune = table_giant("Neptune", 8, None);
-            let ((kg, rank), orbit) = table_moon(TRITON, &neptune);
-            let (own, _) = captured_bulk(kg, TRITON.1);
-            *own_moon((kg, rank), &orbit, &neptune, &volatiles, own).atmosphere()
+        let volatiles = MoonVolatiles {
+            draws: VolatileDraws::MEDIAN,
+            site: VolatileSite::ParentZone,
         };
-        for (label, rules) in [
-            ("held", TenuousAirRules::Held),
-            ("published", TenuousAirRules::Published),
-        ] {
-            let air = with_tenuous_air(rules, triton);
-            let partials = air.partial_pressures();
-            let moles = |gas: Gas| partials.of(gas).value() / gas.molar_mass_g_per_mol();
-            let all = Gas::ALL.iter().fold(0.0, |sum, &gas| sum + moles(gas));
-            let methane = moles(Gas::Methane) / all * partials.total().value();
-            eprintln!(
-                "the table's Triton, {label}: {:?} at {:.4} Pa, N2 {:.4} Pa, CH4 {methane:.4e} Pa \
-                 ({:.3} times its measured 9.8 nbar), x(CH4) {:.4e}, its N2 ice {:?}",
-                air.state(),
-                air.surface_pressure()
-                    .map_or(f64::NAN, crate::units::Pascals::value),
-                partials.of(Gas::Nitrogen).value(),
-                methane / MEASURED,
-                moles(Gas::Methane) / all,
-                air.held_ice_temperature(Gas::Nitrogen),
-            );
-            assert_eq!(air.state(), SurfaceState::Tenuous, "{label}");
-            match rules {
-                TenuousAirRules::Held => assert!(methane < 1e-3 * MEASURED, "{methane:e}"),
-                TenuousAirRules::Published => assert!(
-                    (MEASURED / 10.0..=MEASURED * 10.0).contains(&methane),
-                    "{methane:e}"
-                ),
-            }
-        }
+        let neptune = table_giant("Neptune", 8, None);
+        let ((kg, rank), orbit) = table_moon(TRITON, &neptune);
+        let (own, _) = captured_bulk(kg, TRITON.1);
+        let air = *own_moon((kg, rank), &orbit, &neptune, &volatiles, own).atmosphere();
+        let partials = air.partial_pressures();
+        let moles = |gas: Gas| partials.of(gas).value() / gas.molar_mass_g_per_mol();
+        let all = Gas::ALL.iter().fold(0.0, |sum, &gas| sum + moles(gas));
+        let methane = moles(Gas::Methane) / all * partials.total().value();
+        eprintln!(
+            "the table's Triton: {:?} at {:.4} Pa, N2 {:.4} Pa, CH4 {methane:.4e} Pa ({:.3} times \
+             its measured 9.8 nbar), x(CH4) {:.4e}, its N2 ice {:?}",
+            air.state(),
+            air.surface_pressure()
+                .map_or(f64::NAN, crate::units::Pascals::value),
+            partials.of(Gas::Nitrogen).value(),
+            methane / MEASURED,
+            moles(Gas::Methane) / all,
+            air.held_ice_temperature(Gas::Nitrogen),
+        );
+        assert_eq!(air.state(), SurfaceState::Tenuous);
+        assert!(
+            (MEASURED / 10.0..=MEASURED * 10.0).contains(&methane),
+            "{methane:e}"
+        );
     }
 
     fn parts(p: &MoonParent) -> MoonParentParts {

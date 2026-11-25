@@ -74,7 +74,7 @@ mod surface_mix;
 mod vented;
 
 #[cfg(test)]
-pub(crate) use deck_base::{DECK_BASE_PRESSURE, DeckBaseRules, reducing, with_deck_base};
+pub(crate) use deck_base::{DECK_BASE_PRESSURE, reducing};
 use escaping::climate_class;
 pub(crate) use escaping::helium_left;
 #[cfg(test)]
@@ -117,7 +117,7 @@ use crate::planetary::chem::partition::{
 };
 use crate::planetary::chem::redox::SNOW_LINE_TEMPERATURE;
 use crate::planetary::chem::tenuous::{
-    TenuousAirRules, ice_held_loss, ice_temperature, methane_terrain_temperature,
+    ice_held_loss, ice_temperature, methane_terrain_temperature,
 };
 use crate::planetary::context::XuvHistory;
 use crate::planetary::derive::PlanetClass;
@@ -3192,31 +3192,25 @@ impl HeldIce {
         }
     }
 
-    /// `inventory` with each held gas's controlling temperature its ice's own, and from generator
-    /// version 35 (P14.T55.e.a, under [`TenuousAirRules`]) each held as a dominant condensable is,
-    /// whatever its share ([`ColumnInventory::with_held_ice`]), with the methane beside held
-    /// nitrogen over its own terrain, warmer than that ice ([`methane_terrain_temperature`]).
+    /// `inventory` with each held gas's controlling temperature its ice's own, each held as a
+    /// dominant condensable is, whatever its share ([`ColumnInventory::with_held_ice`];
+    /// P14.T55.e.a, from generator version 35), with the methane beside held nitrogen over its own
+    /// terrain, warmer than that ice ([`methane_terrain_temperature`]).
     #[must_use]
     fn on(self, inventory: ColumnInventory) -> ColumnInventory {
-        let rules = TenuousAirRules::in_force();
         let inventory =
             [Gas::Nitrogen, Gas::Argon]
                 .into_iter()
-                .fold(inventory, |inventory, gas| match (self.of(gas), rules) {
-                    (Some(ice), TenuousAirRules::Held) => {
-                        inventory.with_ice_temperature(gas.substance(), ice)
-                    }
-                    (Some(ice), TenuousAirRules::Published) => {
-                        inventory.with_held_ice(gas.substance(), ice)
-                    }
-                    (None, _) => inventory,
+                .fold(inventory, |inventory, gas| match self.of(gas) {
+                    Some(ice) => inventory.with_held_ice(gas.substance(), ice),
+                    None => inventory,
                 });
-        match (rules, self.nitrogen) {
-            (TenuousAirRules::Published, Some(ice)) => inventory.with_terrain_temperature(
+        match self.nitrogen {
+            Some(ice) => inventory.with_terrain_temperature(
                 Gas::Methane.substance(),
                 methane_terrain_temperature(ice),
             ),
-            (TenuousAirRules::Held, _) | (TenuousAirRules::Published, None) => inventory,
+            None => inventory,
         }
     }
 }

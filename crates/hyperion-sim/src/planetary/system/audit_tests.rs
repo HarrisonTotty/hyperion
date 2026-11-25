@@ -22,7 +22,8 @@
 //!   (main's rulings on T51.g.a's MUST-FIX and on k-1's audit, 2026-10-27);
 //! - **M9**, P14.T54.b.e's young lava: no airless silicate lid younger than a regolith publishes a
 //!   regolith above 0.11;
-//! - **M10**, decision-p14-t53c-tenuous-aerosols: every `Tenuous` record's aerosols not modelled;
+//! - **M10**, decision-p14-t53c-tenuous-aerosols: every `Tenuous` record's aerosols its own
+//!   inventory from generator version 35 (P14.T55.n), with no deck and no absorber;
 //! - **M11**, the V3.8 valve's precondition (decision-p14-t54b-open §1.2.5): every new member
 //!   finite and in its range.
 //!
@@ -878,8 +879,9 @@ impl AuditBody {
         self.state(Item::M9, "young lava on the stand-in's arm", &line);
     }
 
-    /// M10, decision-p14-t53c-tenuous-aerosols §2.3: a `Tenuous` record's aerosols are not
-    /// modelled, never the empty inventory.
+    /// M10, decision-p14-t53c-tenuous-aerosols §2.3: none of T24.c's rules is applied to a
+    /// `Tenuous` record's air, which from generator version 35 takes its own inventory
+    /// (P14.T55.n): modelled, with no deck and no absorber.
     fn tenuous(&mut self, case: &AuditCase<'_>) {
         let Some(surface) = case.surface() else {
             return;
@@ -888,14 +890,22 @@ impl AuditBody {
             return;
         }
         match surface.aerosols() {
-            Modelled::NotModelled => self.state(Item::M10, "tenuous", ""),
+            Modelled::Ok(inventory)
+                if inventory.decks().is_empty() && inventory.absorbers().is_empty() =>
+            {
+                self.state(Item::M10, "tenuous", "");
+            }
             Modelled::Ok(inventory) => self.fault(
                 Item::M10,
                 &format!(
-                    "a tenuous record's aerosols modelled, {} modes",
-                    inventory.modes().len()
+                    "a tenuous record's aerosols hold {} decks and {} absorbers",
+                    inventory.decks().len(),
+                    inventory.absorbers().len()
                 ),
             ),
+            Modelled::NotModelled => {
+                self.fault(Item::M10, "a tenuous record's aerosols not modelled");
+            }
         }
     }
 

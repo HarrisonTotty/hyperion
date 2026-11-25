@@ -109,7 +109,6 @@ use crate::planetary::chem::condense::{
     ResolveOpticalDepthError, Sedimentation, SizeModeError,
 };
 use crate::planetary::chem::quench::{EddyDiffusion, MixingColumn};
-use crate::planetary::chem::tenuous::TenuousAirRules;
 use crate::planetary::derive::atmosphere::{Gas, SurfaceState};
 use crate::planetary::hooks::structure::RadiativeConvective;
 use crate::planetary::hooks::sulphur::{
@@ -1729,10 +1728,10 @@ impl AerosolInventory {
         Ok(inventory)
     }
 
-    /// The inventory of a tenuous air (P14.T55.n, from generator version 35 under
-    /// `TenuousAirRules`): its methane haze by its own law ([`tenuous_haze`]), and its bulk
-    /// condensable labelled ([`NotFormed::BulkGas`]), its condensation its profile's, as the loop
-    /// labels a Triton's N₂ in a bulk air; no deck, no dust and no absorber.
+    /// The inventory of a tenuous air (P14.T55.n, from generator version 35): its methane haze by
+    /// its own law ([`tenuous_haze`]), and its bulk condensable labelled ([`NotFormed::BulkGas`]),
+    /// its condensation its profile's, as the loop labels a Triton's N₂ in a bulk air; no deck, no
+    /// dust and no absorber.
     ///
     /// - **No deck.** The loop's decks are fitted to bulk airs' columns: such an air's minor
     ///   condensables (its methane, under 1%) are held over their warmest terrain and its upper
@@ -2267,9 +2266,8 @@ enum HeldAir {
 /// T24.c's rules are not applied to a tenuous air (P14.T53.c; decision-p14-t53c-tenuous-aerosols):
 /// its methane haze's τ would read its index alone, with no column or ultraviolet supply (a 1.4 Pa
 /// N₂ air at x(CH₄) 10⁻³ would take τ 4.3, against Pluto's measured 0.013), and its dust, decks and
-/// ozone are withheld with it, none of their rules fitted to so thin a column. Under the 35 hold's
-/// held rules (`TenuousAirRules`), the version's to 34, it takes none, and the record sends its
-/// aerosols not modelled.
+/// ozone are withheld with it, none of their rules fitted to so thin a column. To generator version
+/// 34 it took none, and the record sent its aerosols not modelled.
 #[must_use]
 fn holds_air(inputs: &AerosolInputs<'_>) -> HeldAir {
     let p = inputs.surface_pressure.value();
@@ -2278,10 +2276,7 @@ fn holds_air(inputs: &AerosolInputs<'_>) -> HeldAir {
         | SurfaceState::Desert
         | SurfaceState::Snowball
         | SurfaceState::RunawayGreenhouse => HeldAir::Bulk,
-        SurfaceState::Tenuous => match TenuousAirRules::in_force() {
-            TenuousAirRules::Held => HeldAir::None,
-            TenuousAirRules::Published => HeldAir::Tenuous,
-        },
+        SurfaceState::Tenuous => HeldAir::Tenuous,
         // A steam envelope's air is its envelope section's, not a surface's (P14.T53.b part 3).
         SurfaceState::Airless
         | SurfaceState::MagmaOcean

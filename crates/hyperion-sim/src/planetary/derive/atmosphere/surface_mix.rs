@@ -82,14 +82,15 @@ use crate::planetary::hooks::modifiers::{
     SurfaceModifiers, SurfaceWeathering, WaterHistory, oxidisable, surface_weathering,
 };
 use crate::planetary::hooks::surface::{
-    ColdProfile, OceanWeight, SurfaceConditions, SurfaceInputs, night_floor,
-    published_surface_pressure, rotates,
+    ColdProfile, OceanWeight, SurfaceConditions, SurfaceInputs, atmosphere_mole_fractions,
+    night_floor, published_surface_pressure, rotates,
 };
 use crate::planetary::moons::tides::radiating_surface_temperature;
-use crate::substance::{SubstanceId, ice_ih_density};
+use crate::substance::{SubstanceId, ice_ih_density, mean_molar_mass_g_per_mol};
 use crate::units::consts::GRAVITATIONAL_CONSTANT;
 use crate::units::{
-    Kelvin, Kilograms, KilogramsPerSquareMetre, MetresPerSecondSquared, WattsPerSquareMetre,
+    Kelvin, Kilograms, KilogramsPerSquareMetre, MetresPerSecondSquared, Pascals,
+    WattsPerSquareMetre,
 };
 
 #[cfg(doc)]
@@ -1143,21 +1144,68 @@ impl DiscBands {
     }
 }
 
-/// The snapshot haze's τ(550) of the pass of the atmosphere `air` of the body `inputs` describes
-/// ([`area_mix::snapshot_haze_optical_depth`]), which its sediment and its haze layer read
-/// (P14.T24.h.b), once a pass; 0, unread, under both their holds and for a body of no mass or
-/// radius.
+/// The snapshot haze's τ(550) of the pass of the atmosphere `air` of the body `inputs` describes,
+/// which its sediment and its haze layer read (P14.T24.h.b), once a pass: a `Tenuous` air's its
+/// own law's from generator version 35 ([`tenuous_pass_haze`], P14.T55.n), every other air's
+/// T24.c's over its column ([`area_mix::snapshot_haze_optical_depth`]); 0, unread, under both
+/// their holds and for a body of no mass or radius.
 #[must_use]
 fn pass_haze(air: &Atmosphere, inputs: &AtmosphereInputs) -> f64 {
     let read = area_mix::OrganicSedimentRules::in_force()
         == area_mix::OrganicSedimentRules::Sediment
         || area_mix::HazeLayerRules::in_force() == area_mix::HazeLayerRules::Absorbing;
     match surface_gravity(inputs) {
+        Some(gravity) if read && air.state == SurfaceState::Tenuous => {
+            tenuous_pass_haze(air, inputs, gravity)
+        }
         Some(gravity) if read => {
             area_mix::snapshot_haze_optical_depth(&air.partials, gravity, inputs.hottest_host)
         }
         Some(_) | None => 0.0,
     }
+}
+
+/// The snapshot haze's τ(550) of the `Tenuous` air `air` of the body `inputs` describes, under the
+/// surface gravity `gravity` (P14.T55.n, from generator version 35; train 35's rider, main's lean
+/// taken, 2026-11-19): the tenuous haze law
+/// ([`tenuous_haze_optical_depth`](crate::planetary::hooks::aerosols::tenuous_haze_optical_depth))
+/// at what the record's inventory reads of the air, its conditions' (the hosts' orbit-averaged
+/// flux, the air's own surface pressure, and its gases by number at the ground with their mean
+/// molar mass, [`atmosphere_mole_fractions`]'s, as `SurfaceConditions` lists a tenuous air's), so
+/// that the albedo's haze is the record's. T24.c's over its column
+/// ([`area_mix::snapshot_haze_optical_depth`]), which it replaces, gave Pluto some 10⁻⁴, a lower
+/// bound, where the law gives about 10⁻² (Pluto's measured 0.013, Gladstone et al. 2016). None
+/// with no luminous host, whose ultraviolet makes it, as the snapshot's other haze; the record's
+/// photochemistry also takes none about a brown dwarf, whose light this reads (recorded).
+///
+/// The gravity is the pass's, G M ÷ R² of the inputs, which may differ from the record's bulk
+/// section's in its last bits.
+#[must_use]
+fn tenuous_pass_haze(
+    air: &Atmosphere,
+    inputs: &AtmosphereInputs,
+    gravity: MetresPerSecondSquared,
+) -> f64 {
+    use crate::planetary::hooks::aerosols::tenuous_haze_optical_depth;
+    if inputs.hottest_host.value() <= 0.0 {
+        return 0.0;
+    }
+    let gases = atmosphere_mole_fractions(&air.partials);
+    let Some(molar_mass) = mean_molar_mass_g_per_mol(&gases) else {
+        return 0.0;
+    };
+    let methane = Gas::Methane.substance();
+    let methane = gases
+        .iter()
+        .find(|&&(id, _)| id == methane)
+        .map_or(0.0, |&(_, x)| x);
+    tenuous_haze_optical_depth(
+        WattsPerSquareMetre::from(inputs.flux),
+        methane,
+        air.surface_pressure.unwrap_or(Pascals::ZERO),
+        gravity,
+        molar_mass,
+    )
 }
 
 /// The mean surface temperature of an airless body of equilibrium temperature `equilibrium` over

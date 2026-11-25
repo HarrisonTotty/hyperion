@@ -188,3 +188,66 @@ fn each_band_s_disc_lies_under_its_own_layer() {
         assert_same_bits(x, 0.1);
     }
 }
+
+/// Train 35's rider (P14.T55.n, main's lean taken): on the snapshot path a `Tenuous` air's haze is
+/// its record's, the tenuous law ([`tenuous_haze_optical_depth`]) at what the record's inventory
+/// reads of the air. A Pluto at its inventory, at its measured 0.72 Bond albedo by hand, takes it
+/// to the bit at the pass's own gravity and within 10⁻¹² at its derivation's, the record's bulk
+/// section's; it lies within a factor of 2 of Pluto's measured 0.013 (Gladstone et al. 2016),
+/// about 10⁻², where T24.c's over its column, which it replaces, gives some 10⁻⁴; and it is the
+/// same twice.
+///
+/// [`tenuous_haze_optical_depth`]: crate::planetary::hooks::aerosols::tenuous_haze_optical_depth
+#[test]
+fn a_tenuous_air_s_snapshot_haze_is_its_record_s_law() {
+    use super::super::tests::{on_pluto_s_orbit, on_pluto_s_orbit_at};
+    use super::super::{Gas, SurfaceState, atmosphere};
+    use crate::planetary::derive::photometry::area_mix::snapshot_haze_optical_depth;
+    use crate::planetary::hooks::aerosols::{PLUTO_HAZE_OPTICAL_DEPTH, tenuous_haze_optical_depth};
+    use crate::planetary::hooks::surface::atmosphere_mole_fractions;
+    use crate::substance::mean_molar_mass_g_per_mol;
+    use crate::units::{MetresPerSecondSquared, WattsPerSquareMetre};
+    let pluto = on_pluto_s_orbit(1.303e22, 1_188.3);
+    let inputs = on_pluto_s_orbit_at(&pluto, 0.72);
+    let air = atmosphere(&inputs);
+    assert_eq!(air.state(), SurfaceState::Tenuous, "{air:?}");
+    let haze = super::pass_haze(&air, &inputs);
+    let gases = atmosphere_mole_fractions(air.partial_pressures());
+    let methane = gases
+        .iter()
+        .find(|&&(id, _)| id == Gas::Methane.substance())
+        .map_or(0.0, |&(_, x)| x);
+    let mu = mean_molar_mass_g_per_mol(&gases).expect("a tenuous air lists its gases");
+    let law = |gravity: MetresPerSecondSquared| {
+        tenuous_haze_optical_depth(
+            WattsPerSquareMetre::from(inputs.flux),
+            methane,
+            air.surface_pressure()
+                .expect("a tenuous air has a pressure"),
+            gravity,
+            mu,
+        )
+    };
+    let pass_gravity = super::surface_gravity(&inputs).expect("Pluto has a mass and a radius");
+    assert_same_bits(haze, law(pass_gravity));
+    let record = law(pluto.surface_gravity());
+    let column =
+        snapshot_haze_optical_depth(air.partial_pressures(), pass_gravity, inputs.hottest_host);
+    eprintln!(
+        "Pluto at its measured 0.72: x(CH4) {methane:.4e}, its snapshot haze's τ(550) {haze:.5} \
+         (the record's law {record:.5}; T24.c's over its column {column:.3e}; measured 0.013)"
+    );
+    assert!(
+        (haze / record - 1.0).abs() < 1e-12,
+        "{haze} against {record}"
+    );
+    assert!(
+        (PLUTO_HAZE_OPTICAL_DEPTH / 2.0..=PLUTO_HAZE_OPTICAL_DEPTH * 2.0).contains(&haze),
+        "Pluto's snapshot haze {haze}"
+    );
+    assert!(
+        column < 1e-3 && haze > 10.0 * column,
+        "{haze} against {column}"
+    );
+    assert_same_bits(super::pass_haze(&air, &inputs), haze);
+}

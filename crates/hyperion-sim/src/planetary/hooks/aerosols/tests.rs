@@ -307,74 +307,43 @@ fn an_unsaturated_or_airless_body_holds_no_aerosols() {
     );
 }
 
-/// P14.T53.c (decision-p14-t53c-tenuous-aerosols §3), under the 35 hold's held rules, the
-/// version's to 34: the inventory's rules are not applied to a `Tenuous` air, which the record
-/// sends not modelled (P14.T55.n's law takes it from 35). A Triton-like 1.4 Pa of N₂
-/// over 0.78 m s⁻² with x(CH₄) 10⁻³ about a G star takes the empty inventory, where the methane
-/// rule would give it τ(550) 4.3 by its index alone (Pluto's measured haze is about 0.013 at 607.6
-/// nm, Gladstone et al. 2016), as the same air under a bulk air's state shows.
+/// P14.T53.c (decision-p14-t53c-tenuous-aerosols §3): the inventory's rules are not applied to a
+/// `Tenuous` air, which takes P14.T55.n's own from generator version 35. A Triton-like 1.4 Pa of N₂
+/// over 0.78 m s⁻² with x(CH₄) 10⁻³ at Neptune's 30.07 au, where the methane rule would give it
+/// τ(550) 4.3 by its index alone (Pluto's measured haze is about 0.013 at 607.6 nm, Gladstone et
+/// al. 2016), as the same air under a bulk air's state shows, takes none of that rule's haze: its
+/// one haze is the tenuous law's ([`tenuous_haze_optical_depth`]), under a hundredth of it, with no
+/// deck and no absorber.
 #[test]
 fn a_tenuous_air_takes_no_rule_of_the_inventory() {
     let mut triton = HandAir::new(&[("N2", 1.0 - 1e-3), ("CH4", 1e-3)], None, 38.0, 1.4, 38.0);
     triton.g = 0.78;
+    triton.flux = sunlight_at(30.07);
     let tau = haze_optical_depth(haze_index(1e-3, 0.0));
     let bulk = triton.inventory(SurfaceState::Snowball);
+    let tenuous = triton.inventory(SurfaceState::Tenuous);
+    let law = tenuous_haze_optical_depth(
+        WattsPerSquareMetre::new(triton.flux),
+        1e-3,
+        Pascals::new(1.4),
+        MetresPerSecondSquared::new(0.78),
+        triton.mu,
+    );
     eprintln!(
         "a Triton-like 1.4 Pa N2 air at x(CH4) 1e-3: the rule's τ {tau:.4}; under a bulk air's \
-         state {} modes",
+         state {} modes; as a tenuous air, the law's τ {law:.4e}: {tenuous:?}",
         bulk.modes().len()
     );
     assert!((tau - 4.3).abs() < 0.05, "{tau}");
     assert!(!bulk.modes().is_empty(), "{bulk:?}");
-    assert_eq!(
-        triton.inventory(SurfaceState::Tenuous),
-        AerosolInventory::empty()
-    );
-}
-
-/// P14.T53.c's Pluto (decision-p14-t53c-tenuous-aerosols §3) under the 35 hold's held rules, the
-/// version's to 34 (`TenuousAirRules`): `Tenuous` through its passes and at its measured 0.72 Bond
-/// albedo by hand, its haze not modelled, the inventory's rules not applied to its air, which takes
-/// the empty inventory (the record sends it not modelled, `system::air`'s tests). Stated, not
-/// asserted: its x(CH₄), T24.c's haze index and the τ(550) that rule would give it; its CH₄, on
-/// the minor branch at its mean, some 3 × 10⁻⁷ Pa against a measured x of 0.006–0.0084 (Gladstone
-/// et al. 2016), is P14.T55.e.a's figure, which its published rules close.
-#[test]
-fn under_the_held_rules_pluto_s_haze_is_not_modelled() {
-    use crate::planetary::chem::tenuous::{TenuousAirRules, with_tenuous_air};
-    use crate::planetary::derive::atmosphere::tests::{on_pluto_s_orbit, on_pluto_s_orbit_at};
-    use crate::planetary::derive::atmosphere::{Gas, atmosphere, mole_fraction_of};
-    with_tenuous_air(TenuousAirRules::Held, || {
-        let pluto = on_pluto_s_orbit(1.303e22, 1_188.3);
-        for (label, air) in [
-            ("through its passes", *pluto.atmosphere()),
-            (
-                "at its measured 0.72",
-                atmosphere(&on_pluto_s_orbit_at(&pluto, 0.72)),
-            ),
-        ] {
-            let partials = air.partial_pressures();
-            let (methane, carbon_dioxide) = (
-                mole_fraction_of(partials, Gas::Methane),
-                mole_fraction_of(partials, Gas::CarbonDioxide),
-            );
-            let index = haze_index(methane, carbon_dioxide);
-            eprintln!(
-                "Pluto {label}, held: {:?} at {:.4e} Pa, x(CH4) {methane:.4e}, T24.c's haze index \
-                 {index:.4e}, its rule's τ(550) {:.4}; its haze not modelled",
-                air.state(),
-                air.surface_pressure().map_or(f64::NAN, Pascals::value),
-                haze_optical_depth(index),
-            );
-            assert_eq!(air.state(), SurfaceState::Tenuous, "{label}: {air:?}");
-        }
-        let mut hand = HandAir::new(&[("N2", 1.0 - 4e-7), ("CH4", 4e-7)], None, 32.5, 1.29, 32.5);
-        hand.g = PLUTO_SURFACE_GRAVITY.value();
-        assert_eq!(
-            hand.inventory(SurfaceState::Tenuous),
-            AerosolInventory::empty()
-        );
-    });
+    assert_eq!(tenuous.decks(), []);
+    assert_eq!(tenuous.absorbers(), []);
+    let [haze] = tenuous.modes() else {
+        panic!("one haze: {tenuous:?}");
+    };
+    let depth = haze.optical_depth().expect("the law's τ");
+    assert_same_bits(depth.value, law);
+    assert!(law < 0.01 * tau, "{law}");
 }
 
 /// The hosts' light at `au` astronomical units from the Sun, W m⁻².
@@ -461,14 +430,12 @@ fn the_tenuous_haze_law_gives_pluto_s_titan_s_and_triton_s_hazes() {
     }
 }
 
-/// P14.T55.n under the 35 hold's published rules (`TenuousAirRules`): a Triton-like 1.4 Pa of N₂
-/// over 0.78 m s⁻² with x(CH₄) 10⁻³ at Neptune's 30.07 au takes its own inventory, no longer the
-/// empty one: one haze of tholin aggregates of Pluto's monomers at the law's τ(550), well mixed to
-/// four decades above its ground, its nitrogen labelled as its bulk gas, and no deck, dust or
-/// absorber; with no star it takes no haze, and with no methane none.
+/// P14.T55.n: a Triton-like 1.4 Pa of N₂ over 0.78 m s⁻² with x(CH₄) 10⁻³ at Neptune's 30.07 au
+/// takes its own inventory, not the empty one: one haze of tholin aggregates of Pluto's monomers at
+/// the law's τ(550), well mixed to four decades above its ground, its nitrogen labelled as its bulk
+/// gas, and no deck, dust or absorber; with no star it takes no haze, and with no methane none.
 #[test]
-fn under_the_35_hold_a_tenuous_air_takes_its_own_haze() {
-    use crate::planetary::chem::tenuous::{TenuousAirRules, with_tenuous_air};
+fn a_tenuous_air_takes_its_own_haze() {
     let mut triton = HandAir::new(&[("N2", 1.0 - 1e-3), ("CH4", 1e-3)], None, 38.0, 1.4, 38.0);
     triton.g = 0.78;
     triton.flux = sunlight_at(30.07);
@@ -479,82 +446,75 @@ fn under_the_35_hold_a_tenuous_air_takes_its_own_haze() {
         MetresPerSecondSquared::new(0.78),
         triton.mu,
     );
-    with_tenuous_air(TenuousAirRules::Published, || {
-        let inventory = triton.inventory(SurfaceState::Tenuous);
-        eprintln!("a Triton-like 1.4 Pa N2 air at x(CH4) 1e-3, published: {inventory:?}");
-        assert_eq!(inventory.decks(), []);
-        assert_eq!(inventory.absorbers(), []);
-        let [haze] = inventory.modes() else {
-            panic!("one haze: {inventory:?}");
-        };
-        assert_eq!(haze.material(), row("tholin"));
-        assert_eq!(haze.shape(), ShapeClass::Aggregate);
-        let depth = haze.optical_depth().expect("the rule's τ");
-        assert_same_bits(depth.value, law);
-        assert!((0.005..0.05).contains(&law), "{law}");
-        assert_same_bits(haze.profile().base().value(), 1.4);
-        assert_same_bits(haze.profile().top().value(), 1.4 * HAZE_TOP_RATIO);
-        assert_same_bits(haze.profile().exponent(), 0.0);
-        assert_eq!(inventory.not_formed(), [(row("N2"), NotFormed::BulkGas)]);
-        let dark = AerosolInventory::derive(&AerosolInputs {
-            star_temperature: None,
-            ..triton.inputs(SurfaceState::Tenuous)
-        })
-        .expect("an inventory");
-        assert_eq!(dark.modes(), []);
-        let mut dry = HandAir::new(&[("N2", 1.0)], None, 38.0, 1.4, 38.0);
-        dry.g = 0.78;
-        dry.flux = triton.flux;
-        assert_eq!(dry.inventory(SurfaceState::Tenuous).modes(), []);
-    });
+    let inventory = triton.inventory(SurfaceState::Tenuous);
+    eprintln!("a Triton-like 1.4 Pa N2 air at x(CH4) 1e-3: {inventory:?}");
+    assert_eq!(inventory.decks(), []);
+    assert_eq!(inventory.absorbers(), []);
+    let [haze] = inventory.modes() else {
+        panic!("one haze: {inventory:?}");
+    };
+    assert_eq!(haze.material(), row("tholin"));
+    assert_eq!(haze.shape(), ShapeClass::Aggregate);
+    let depth = haze.optical_depth().expect("the rule's τ");
+    assert_same_bits(depth.value, law);
+    assert!((0.005..0.05).contains(&law), "{law}");
+    assert_same_bits(haze.profile().base().value(), 1.4);
+    assert_same_bits(haze.profile().top().value(), 1.4 * HAZE_TOP_RATIO);
+    assert_same_bits(haze.profile().exponent(), 0.0);
+    assert_eq!(inventory.not_formed(), [(row("N2"), NotFormed::BulkGas)]);
+    let dark = AerosolInventory::derive(&AerosolInputs {
+        star_temperature: None,
+        ..triton.inputs(SurfaceState::Tenuous)
+    })
+    .expect("an inventory");
+    assert_eq!(dark.modes(), []);
+    let mut dry = HandAir::new(&[("N2", 1.0)], None, 38.0, 1.4, 38.0);
+    dry.g = 0.78;
+    dry.flux = triton.flux;
+    assert_eq!(dry.inventory(SurfaceState::Tenuous).modes(), []);
 }
 
-/// P14.T55.n's acceptance under the 35 hold's published rules (`TenuousAirRules`): a Pluto at its
-/// inventory, its methane over its terrain (P14.T55.e.a), takes its haze by the law within a factor
-/// of 2 of its measured 0.013 (Gladstone et al. 2016) at its measured 0.72 Bond albedo by hand. Its
-/// light is its orbit's mean, 0.72 of the flyby's, which the haze's 90-day residence (Gladstone
-/// et al.) follows, so it sits some 28% low by construction; through its own passes (its T51.b
-/// albedo 0.84, a recorded miss) stated.
+/// P14.T55.n's acceptance: a Pluto at its inventory, its methane over its terrain (P14.T55.e.a),
+/// takes its haze by the law within a factor of 2 of its measured 0.013 (Gladstone et al. 2016) at
+/// its measured 0.72 Bond albedo by hand. Its light is its orbit's mean, 0.72 of the flyby's, which
+/// the haze's 90-day residence (Gladstone et al.) follows, so it sits some 28% low by construction;
+/// through its own passes (its T51.b albedo 0.84, a recorded miss) stated.
 #[test]
-fn under_the_35_hold_pluto_s_haze_is_its_measured_one() {
-    use crate::planetary::chem::tenuous::{TenuousAirRules, with_tenuous_air};
+fn pluto_s_haze_is_its_measured_one() {
     use crate::planetary::derive::atmosphere::tests::{on_pluto_s_orbit, on_pluto_s_orbit_at};
     use crate::planetary::derive::atmosphere::{Gas, atmosphere, mole_fraction_of};
-    with_tenuous_air(TenuousAirRules::Published, || {
-        let pluto = on_pluto_s_orbit(1.303e22, 1_188.3);
-        let flux = WattsPerSquareMetre::from(pluto.flux());
-        let mut measured = 0.0;
-        for (label, air) in [
-            ("through its passes", *pluto.atmosphere()),
-            (
-                "at its measured 0.72",
-                atmosphere(&on_pluto_s_orbit_at(&pluto, 0.72)),
-            ),
-        ] {
-            let partials = air.partial_pressures();
-            let methane = mole_fraction_of(partials, Gas::Methane);
-            let pressure = partials.total();
-            let mu = Gas::ALL.iter().fold(0.0, |sum, &gas| {
-                sum + mole_fraction_of(partials, gas) * gas.molar_mass_g_per_mol()
-            });
-            let tau =
-                tenuous_haze_optical_depth(flux, methane, pressure, pluto.surface_gravity(), mu);
-            eprintln!(
-                "Pluto {label}, published: {:?} at {:.4e} Pa, x(CH4) {methane:.4e}, its light \
-                 {:.4} W m⁻² (the flyby's {:.4}), its haze's τ(550) {tau:.5} (measured 0.013)",
-                air.state(),
-                pressure.value(),
-                flux.value(),
-                sunlight_at(PLUTO_HAZE_DISTANCE_AU),
-            );
-            assert_eq!(air.state(), SurfaceState::Tenuous, "{label}: {air:?}");
-            measured = tau;
-        }
-        assert!(
-            (PLUTO_HAZE_OPTICAL_DEPTH / 2.0..=PLUTO_HAZE_OPTICAL_DEPTH * 2.0).contains(&measured),
-            "Pluto's τ {measured}"
+    let pluto = on_pluto_s_orbit(1.303e22, 1_188.3);
+    let flux = WattsPerSquareMetre::from(pluto.flux());
+    let mut measured = 0.0;
+    for (label, air) in [
+        ("through its passes", *pluto.atmosphere()),
+        (
+            "at its measured 0.72",
+            atmosphere(&on_pluto_s_orbit_at(&pluto, 0.72)),
+        ),
+    ] {
+        let partials = air.partial_pressures();
+        let methane = mole_fraction_of(partials, Gas::Methane);
+        let pressure = partials.total();
+        let mu = Gas::ALL.iter().fold(0.0, |sum, &gas| {
+            sum + mole_fraction_of(partials, gas) * gas.molar_mass_g_per_mol()
+        });
+        let tau = tenuous_haze_optical_depth(flux, methane, pressure, pluto.surface_gravity(), mu);
+        eprintln!(
+            "Pluto {label}: {:?} at {:.4e} Pa, x(CH4) {methane:.4e}, its light \
+             {:.4} W m⁻² (the flyby's {:.4}), its haze's τ(550) {tau:.5} (measured 0.013)",
+            air.state(),
+            pressure.value(),
+            flux.value(),
+            sunlight_at(PLUTO_HAZE_DISTANCE_AU),
         );
-    });
+        assert_eq!(air.state(), SurfaceState::Tenuous, "{label}: {air:?}");
+        measured = tau;
+    }
+    assert!(
+        (PLUTO_HAZE_OPTICAL_DEPTH / 2.0..=PLUTO_HAZE_OPTICAL_DEPTH * 2.0).contains(&measured),
+        "Pluto's τ {measured}"
+    );
 }
 
 /// The inventory refuses bad inputs by their variants: its cloud fraction, gravity and molar mass.
@@ -1520,11 +1480,10 @@ fn measured_mars_inventory() -> AerosolInventory {
 }
 
 /// The same inputs give the same bits twice, over every rule (the golden's cases: decks, the acid
-/// deck and the sulphate layer, the haze, ozone and the dust), and under the 35 hold's published
-/// rules a tenuous air's own inventory (P14.T55.n: a Triton-like and a Pluto-like air by hand).
+/// deck and the sulphate layer, the haze, ozone and the dust), and a tenuous air's own inventory
+/// (P14.T55.n: a Triton-like and a Pluto-like air by hand).
 #[test]
 fn the_inventory_is_the_same_bits_twice() {
-    use crate::planetary::chem::tenuous::{TenuousAirRules, with_tenuous_air};
     for ((name, a), (_, b)) in golden_cases().into_iter().zip(golden_cases()) {
         assert_eq!(format!("{a:?}"), format!("{b:?}"), "{name}");
     }
@@ -1538,11 +1497,7 @@ fn the_inventory_is_the_same_bits_twice() {
         );
         air.g = g;
         air.flux = sunlight_at(au);
-        let inventory = || {
-            with_tenuous_air(TenuousAirRules::Published, || {
-                format!("{:?}", air.inventory(SurfaceState::Tenuous))
-            })
-        };
+        let inventory = || format!("{:?}", air.inventory(SurfaceState::Tenuous));
         assert_eq!(inventory(), inventory(), "x(CH4) {methane}");
     }
 }
@@ -1755,9 +1710,9 @@ fn a_mars_like_world_carries_dust_and_an_ocean_world_none() {
 /// - every `Tenuous` record, with count (xiv)'s figures (decision-p14-t53c-tenuous-aerosols §5):
 ///   its `p_s`, p ÷ g, x(CH₄), T24.c's haze index and the τ(550) its rule would give, and the dust's
 ///   τ by rule, the largest stated for P14.T55.n; asserted, under the record's air batch
-///   (P14.T54.b), every `Tenuous` record's aerosols not modelled, never the empty inventory, and
-///   its structure never computed as no air (decision-p14-t53c-tenuous-aerosols §2: its gases
-///   are listed and its structure published);
+///   (P14.T54.b), every `Tenuous` record's aerosols modelled from generator version 35, its own
+///   inventory (P14.T55.n), and its structure never computed as no air
+///   (decision-p14-t53c-tenuous-aerosols §2: its gases are listed and its structure published);
 /// - asserted, the record says `Tenuous`, not `Airless`, where a gas is held above the floor, and
 ///   every `Airless` record lists no gas;
 /// - asserted, no air's dominant condensable lies at or above 10 times its saturation pressure
@@ -1924,8 +1879,8 @@ fn under_every_24_hold_t53c_s_thin_airs_are_stated() {
                     at()
                 );
                 assert!(
-                    !body.aerosols_modelled,
-                    "a tenuous record's aerosols: {}",
+                    body.aerosols_modelled,
+                    "a tenuous record's aerosols not modelled: {}",
                     at()
                 );
                 assert_ne!(

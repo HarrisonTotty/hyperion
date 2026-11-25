@@ -1,6 +1,5 @@
 //! Venus's deck only where the air reaches its base and is oxidised (plan 14, P14.T53.b part 1
-//! (b)'s follow-up; decision-absurd-states-24 R3.2), from generator version 35
-//! ([`DECK_BASE_VERSION`]).
+//! (b)'s follow-up; decision-absurd-states-24 R3.2), from generator version 35.
 //!
 //! A published [`SurfaceState::RunawayGreenhouse`] is solved under Venus's sulphuric-acid deck,
 //! cloud cover 1 at Venus's Bond albedo 0.76, and P14.T24.g's cycling sulphur. Arm (b) solves it
@@ -22,18 +21,10 @@
 //! their own would form (a partial deck, not modelled, as arm (b) records). The test reads
 //! the first solve alone, as arm (b)'s does: nothing returns to the decked branch, and the
 //! re-solve runs at most once.
-//!
-//! The hold: below [`DECK_BASE_VERSION`] the rules are [`DeckBaseRules::Held`], under which no
-//! body moves, and the tests reach the base's arm through their switch ([`with_deck_base`]).
 
 use super::{Atmosphere, PartialPressures, SurfaceState};
-use crate::GeneratorVersion;
 use crate::planetary::hooks::modifiers::oxidising;
 use crate::units::Pascals;
-
-/// The generator version from which Venus's deck needs the air it hangs in
-/// ([`DeckBaseRules::Base`]): 35 (main, 2026-11-19, every new planetary hold at 35).
-pub(crate) const DECK_BASE_VERSION: GeneratorVersion = GeneratorVersion::new(35);
 
 /// The pressure at the base of Venus's sulphuric-acid deck, the least surface pressure under which
 /// a runaway keeps it, Pa: 1.375 × 10⁵, the Venus International Reference Atmosphere's at 48 km,
@@ -51,64 +42,6 @@ pub(crate) const DECK_BASE_VERSION: GeneratorVersion = GeneratorVersion::new(35)
 /// the column above it (Δp ÷ g, so that a column test would read gravity too): recorded, not
 /// modelled.
 pub(crate) const DECK_BASE_PRESSURE: Pascals = Pascals::new(1.375e5);
-
-/// Whether Venus's deck needs the air it hangs in: from generator version 35
-/// ([`DECK_BASE_VERSION`]), and in the tests the held arm, their oracle, or the base's through
-/// their switch ([`with_deck_base`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum DeckBaseRules {
-    /// Version 34's and before: arm (b) reads the climate under the deck alone.
-    Held,
-    /// Version 35's: a runaway also drops the deck in an air thinner than its base, or a
-    /// reducing one ([`drops_the_deck`]).
-    Base,
-}
-
-impl DeckBaseRules {
-    /// The rules in force: the version's ([`of_version`](Self::of_version)); in the tests, the
-    /// rules a test's switch sets on its thread ([`with_deck_base`]).
-    #[must_use]
-    pub(crate) fn in_force() -> Self {
-        #[cfg(test)]
-        if let Some(rules) = DECK_BASE_RULES.with(core::cell::Cell::get) {
-            return rules;
-        }
-        Self::of_version(crate::GENERATOR_VERSION)
-    }
-
-    /// The rules of the generator version `version`: the base's from [`DECK_BASE_VERSION`], the
-    /// held arm below it.
-    #[must_use]
-    pub(crate) const fn of_version(version: GeneratorVersion) -> Self {
-        if version.get() >= DECK_BASE_VERSION.get() {
-            Self::Base
-        } else {
-            Self::Held
-        }
-    }
-}
-
-#[cfg(test)]
-thread_local! {
-    /// The deck base's rules a test sets on its thread, `None` for the version's.
-    static DECK_BASE_RULES: core::cell::Cell<Option<DeckBaseRules>> =
-        const { core::cell::Cell::new(None) };
-}
-
-/// `run`'s result with the deck base's rules `rules` on this thread; the version's are set back
-/// after, a panic in `run` included.
-#[cfg(test)]
-pub(crate) fn with_deck_base<R>(rules: DeckBaseRules, run: impl FnOnce() -> R) -> R {
-    /// Sets the thread's rules back as it drops.
-    struct Restore(Option<DeckBaseRules>);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            DECK_BASE_RULES.with(|cell| cell.set(self.0));
-        }
-    }
-    let _restore = Restore(DECK_BASE_RULES.with(|cell| cell.replace(Some(rules))));
-    run()
-}
 
 /// Whether the air of partial pressures `partials` is reducing for its sulphur: it is not
 /// oxidising by P14.T51.j's test ([`oxidising`]: it holds no carbon dioxide, water or oxygen, or
@@ -128,16 +61,13 @@ pub(crate) fn reducing(partials: &PartialPressures) -> bool {
     !oxidising(partials)
 }
 
-/// Whether the deck base's rules in force drop Venus's deck from the published runaway `air`
-/// solved under it ([the module](self)): under [`DeckBaseRules::Base`], a
-/// [`SurfaceState::RunawayGreenhouse`] whose surface pressure is below [`DECK_BASE_PRESSURE`],
-/// or whose air is [`reducing`]. An air whose surface pressure is not a number, or none, is not
-/// judged; under [`DeckBaseRules::Held`], none is dropped.
+/// Whether the deck base drops Venus's deck from the published runaway `air` solved under it
+/// ([the module](self)): a [`SurfaceState::RunawayGreenhouse`] whose surface pressure is below
+/// [`DECK_BASE_PRESSURE`], or whose air is [`reducing`]. An air whose surface pressure is not a
+/// number, or none, is not judged.
 #[must_use]
 pub(crate) fn drops_the_deck(air: &Atmosphere) -> bool {
-    if DeckBaseRules::in_force() == DeckBaseRules::Held
-        || air.state != SurfaceState::RunawayGreenhouse
-    {
+    if air.state != SurfaceState::RunawayGreenhouse {
         return false;
     }
     air.surface_pressure
@@ -148,7 +78,6 @@ pub(crate) fn drops_the_deck(air: &Atmosphere) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::GENERATOR_VERSION;
     use crate::planetary::derive::atmosphere::Gas;
 
     /// The air of `pressure` by gas, in Pa.
@@ -161,26 +90,6 @@ mod tests {
                     .map_or(0.0, |&(_, p)| p),
             )
         })
-    }
-
-    /// The tripwire: below 35 the version's rules are the held arm's, so that no body moves; at
-    /// 35 the bump deletes the hold, its switch, its line in `HeldRules` and this test.
-    #[test]
-    fn the_deck_base_is_held_below_35() {
-        assert!(
-            GENERATOR_VERSION < DECK_BASE_VERSION,
-            "the bump to {DECK_BASE_VERSION} folds the deck base's hold"
-        );
-        assert_eq!(DeckBaseRules::in_force(), DeckBaseRules::Held);
-        assert_eq!(
-            DeckBaseRules::of_version(DECK_BASE_VERSION),
-            DeckBaseRules::Base
-        );
-        assert_eq!(
-            with_deck_base(DeckBaseRules::Base, DeckBaseRules::in_force),
-            DeckBaseRules::Base
-        );
-        assert_eq!(DeckBaseRules::in_force(), DeckBaseRules::Held);
     }
 
     /// An air led by hydrogen by number is reducing, however much water lies beside it; one led by
@@ -200,9 +109,9 @@ mod tests {
     }
 
     /// The rule on hand-built atmospheres (a runaway under Venus's deck from T13.c's Earth at
-    /// 255 K, the deck base's arm in force): kept at the base and above in an oxidising air,
-    /// dropped just below it and in a reducing air, an air whose pressure is none or not a number
-    /// not judged, nor any other state; and under the held arm none is dropped.
+    /// 255 K): kept at the base and above in an oxidising air, dropped just below it and in a
+    /// reducing air, an air whose pressure is none or not a number not judged, nor any other
+    /// state.
     #[test]
     fn the_deck_is_dropped_below_its_base_and_in_a_reducing_air_alone() {
         use crate::planetary::derive::atmosphere::tests::earth_inputs;
@@ -228,9 +137,12 @@ mod tests {
             (at(Some(f64::NAN), hydrogen), false),
         ];
         for (atmosphere, drops) in cases {
-            let at_35 = with_deck_base(DeckBaseRules::Base, || drops_the_deck(&atmosphere));
-            assert_eq!(at_35, drops, "{:?}", atmosphere.surface_pressure);
-            assert!(!drops_the_deck(&atmosphere), "held");
+            assert_eq!(
+                drops_the_deck(&atmosphere),
+                drops,
+                "{:?}",
+                atmosphere.surface_pressure
+            );
         }
         for state in [
             SurfaceState::Temperate,
@@ -242,10 +154,7 @@ mod tests {
                 state,
                 ..at(Some(1.2e2), hydrogen)
             };
-            assert!(
-                !with_deck_base(DeckBaseRules::Base, || drops_the_deck(&thin)),
-                "{state:?}"
-            );
+            assert!(!drops_the_deck(&thin), "{state:?}");
         }
     }
 

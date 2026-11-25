@@ -32,10 +32,10 @@
 //!   alone, and a narrower rule for supersaturated thin airs left its one case on its own
 //!   threshold.
 //!
-//! - **The methane's terrain** ([`methane_terrain_temperature`], from generator version 35 under
-//!   `TenuousAirRules`; P14.T55.e.a). Where its ice holds the nitrogen, the methane beside it is
-//!   held saturated over methane-rich terrain [`METHANE_TERRAIN_WARMING_K`] warmer than that ice,
-//!   in place of the minor branch's humidity at the mean (science-p14-t24f §1, finding 4).
+//! - **The methane's terrain** ([`methane_terrain_temperature`], from generator version 35;
+//!   P14.T55.e.a). Where its ice holds the nitrogen, the methane beside it is held saturated over
+//!   methane-rich terrain [`METHANE_TERRAIN_WARMING_K`] warmer than that ice, in place of the minor
+//!   branch's humidity at the mean (science-p14-t24f §1, finding 4).
 //!
 //! Exospheres are P14.T55.c's, and seasonal transport and frost by month P14.T55.e's.
 
@@ -50,7 +50,6 @@ use crate::units::{
     Kelvin, Kilograms, KilogramsPerSquareMetre, Metres, MetresPerSecondSquared, Pascals,
     WattsPerSquareMetre, Years,
 };
-use crate::{GENERATOR_VERSION, GeneratorVersion};
 
 #[cfg(test)]
 mod tests;
@@ -408,69 +407,4 @@ pub const TENUOUS_FLOOR_COLUMN: KilogramsPerSquareMetre = KilogramsPerSquareMetr
 pub fn holds_tenuous_air(pressure: Pascals, gravity: MetresPerSecondSquared) -> bool {
     let (p, g) = (pressure.value(), gravity.value());
     p.is_finite() && p > 0.0 && g.is_finite() && g > 0.0 && p / g >= TENUOUS_FLOOR_COLUMN.value()
-}
-
-/// The generator version from which a tenuous air's methane lies over its own terrain (P14.T55.e.a)
-/// and its haze is modelled (P14.T55.n): 35 (main, 2026-11-19: the three holds then opened at 35).
-pub const TENUOUS_AIR_VERSION: GeneratorVersion = GeneratorVersion::new(35);
-
-/// Whether P14.T55.e.a's methane terrain and P14.T55.n's haze are in force: from
-/// [`TENUOUS_AIR_VERSION`], a hold (its bump folds it).
-///
-/// It switches three things. Below it a `Tenuous` air's methane is the minor branch's at the mean,
-/// its ice-held nitrogen and argon are judged on their minor branch's share, and its record's
-/// aerosols are not modelled (decision-p14-t53c-tenuous-aerosols), so no output moves at 33 or 34.
-/// From it the methane lies over its terrain, every ice-held gas is held as a dominant one is
-/// (`ColumnInventory::with_held_ice`), and the air takes its own haze (P14.T55.n, `holds_air`
-/// and `record_aerosols`). The
-/// tests reach version 35's rules through `with_tenuous_air`. The 35 bump deletes the `Held` arm,
-/// `with_tenuous_air`, this enum's reads and the tripwire
-/// (`the_tenuous_air_is_held_only_until_the_35_bump`), with its line in `testing::held`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum TenuousAirRules {
-    /// Version 33's and 34's: the methane at the mean on the minor branch, an ice-held gas judged
-    /// on its share, the aerosols not modelled.
-    Held,
-    /// Version 35's: the methane over its terrain ([`methane_terrain_temperature`]), an ice-held
-    /// gas held as a dominant one is, and the tenuous air's own haze.
-    Published,
-}
-
-impl TenuousAirRules {
-    /// The rules this generator version gives: published from [`TENUOUS_AIR_VERSION`], held below
-    /// it; in the tests, the rules a test's switch sets on its thread (`with_tenuous_air`).
-    #[must_use]
-    pub(crate) fn in_force() -> Self {
-        #[cfg(test)]
-        if let Some(rules) = TENUOUS_AIR_RULES.with(core::cell::Cell::get) {
-            return rules;
-        }
-        if GENERATOR_VERSION >= TENUOUS_AIR_VERSION {
-            Self::Published
-        } else {
-            Self::Held
-        }
-    }
-}
-
-#[cfg(test)]
-thread_local! {
-    /// The tenuous air's rules a test sets on its thread, `None` for the version's.
-    static TENUOUS_AIR_RULES: core::cell::Cell<Option<TenuousAirRules>> =
-        const { core::cell::Cell::new(None) };
-}
-
-/// `run`'s result with the tenuous air's rules `rules` on this thread, for the tests to reach
-/// version 35's ahead of its bump; the version's are set back after, a panic in `run` included.
-#[cfg(test)]
-pub(crate) fn with_tenuous_air<R>(rules: TenuousAirRules, run: impl FnOnce() -> R) -> R {
-    /// Sets the thread's rules back as it drops.
-    struct Restore(Option<TenuousAirRules>);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            TENUOUS_AIR_RULES.with(|cell| cell.set(self.0));
-        }
-    }
-    let _restore = Restore(TENUOUS_AIR_RULES.with(|cell| cell.replace(Some(rules))));
-    run()
 }

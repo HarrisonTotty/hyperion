@@ -11,7 +11,6 @@ use hyperion_testkit::order::assert_order_independent;
 use super::*;
 use crate::math;
 use crate::planetary::chem::condense::{NotFormed, ResolveOpticalDepthError, SizeModeError};
-use crate::planetary::chem::tenuous::{TenuousAirRules, with_tenuous_air};
 use crate::planetary::derive::atmosphere::{Gas, SurfaceState};
 use crate::planetary::hooks::aerosols::{
     Absorber, AerosolDeck, AerosolMode, MARS_DUST_OPTICAL_DEPTH, NEAR_CRITICAL_LIQUID_SHARE,
@@ -537,16 +536,14 @@ fn batch_inventories() -> impl Iterator<
 }
 
 /// The record's inventory of the tenuous air `tenuous`, of the body `name` whose structure is
-/// `structure`, under the 35 hold's published rules (P14.T55.n): its own over a profile, with no
-/// deck or absorber; the empty one with no air; not modelled with no structure.
-fn assert_tenuous_published(
+/// `structure` (P14.T55.n): its own over a profile, with no deck or absorber; the empty one with no
+/// air; not modelled with no structure.
+fn assert_tenuous(
     name: &str,
     tenuous: &AirSurface<'_>,
     structure: &Modelled<Option<VerticalStructure>>,
 ) {
-    let published = with_tenuous_air(TenuousAirRules::Published, || {
-        record_aerosols(tenuous, structure)
-    });
+    let published = record_aerosols(tenuous, structure);
     match structure {
         Modelled::Ok(Some(VerticalStructure::RadiativeConvective(_))) => {
             let Modelled::Ok(inventory) = &published else {
@@ -570,10 +567,9 @@ fn assert_tenuous_published(
 /// structure, the figures' cloud fraction, liquids' cover and outgassing, and the photochemistry's
 /// star), for each body with an air, and the empty inventory for each without (the Moon among
 /// them); a magma ocean's is not modelled while it holds an air (R08's S5) and empty once its
-/// volatiles are gone; a tenuous air's (P14.T53.c: the table's Ganymede at 24) is not modelled to
-/// 34, and from 35 (P14.T55.n, under `TenuousAirRules`' published rules) it is the derivation's
-/// over its own members, as a bulk air's is, wherever its structure is a profile; with no
-/// structure, it is not modelled.
+/// volatiles are gone; a tenuous air's (P14.T53.c: the table's Ganymede at 24) is, from 35
+/// (P14.T55.n), the derivation's over its own members, as a bulk air's is, wherever its structure
+/// is a profile; with no structure, it is not modelled.
 #[test]
 fn the_record_s_inventory_is_the_derivation_s_or_empty_without_air() {
     let (mut airs, mut airless, mut tenuous) = (Vec::new(), Vec::new(), Vec::new());
@@ -582,12 +578,11 @@ fn the_record_s_inventory_is_the_derivation_s_or_empty_without_air() {
         let surface = air.surface();
         match &air.structure {
             _ if air.state == SurfaceState::Tenuous => {
-                assert_eq!(air.inventory(), Modelled::NotModelled, "{name}");
-                let published = with_tenuous_air(TenuousAirRules::Published, || air.inventory());
-                eprintln!("{name}, tenuous, published: {published:?}");
+                let inventory = air.inventory();
+                eprintln!("{name}, tenuous: {inventory:?}");
                 assert!(
-                    matches!(published, Modelled::Ok(_)),
-                    "{name}: {published:?}"
+                    matches!(inventory, Modelled::Ok(_)),
+                    "{name}: {inventory:?}"
                 );
                 tenuous.push(name);
             }
@@ -638,18 +633,12 @@ fn the_record_s_inventory_is_the_derivation_s_or_empty_without_air() {
             Modelled::NotModelled
         };
         assert_eq!(record_aerosols(&melt, &air.structure), melt_s, "{name}");
-        // P14.T53.c's tenuous air: not modelled to 34, whatever its structure, and from 35 its
-        // own inventory over a profile (P14.T55.n).
+        // P14.T53.c's tenuous air: its own inventory over a profile (P14.T55.n).
         let tenuous = AirSurface {
             state: SurfaceState::Tenuous,
             ..surface
         };
-        assert_eq!(
-            record_aerosols(&tenuous, &air.structure),
-            Modelled::NotModelled,
-            "{name}"
-        );
-        assert_tenuous_published(name, &tenuous, &air.structure);
+        assert_tenuous(name, &tenuous, &air.structure);
         assert_eq!(
             record_aerosols(&surface, &Modelled::NotModelled),
             Modelled::NotModelled,
@@ -795,11 +784,10 @@ fn the_table_s_mars_carries_no_dust_and_titan_its_haze_beside_its_disc_mean_clou
 }
 
 /// Under the batch's rules, over the first [`AIR_SAMPLE`] whole systems at the epoch, every
-/// surface with a structure carries its inventory, none refused, but a magma ocean's air, which is
-/// not modelled (R08's S5; counted), and from 24 to 34 a tenuous air's (P14.T53.c, P14.T55.n;
-/// counted),
-/// and every surface with no air the empty inventory; and each
-/// air's is the derivation's over its record's own
+/// surface with a structure carries its inventory, none refused, a tenuous air's among them from
+/// 35 (P14.T53.c, P14.T55.n; counted), but a magma ocean's air, which is not modelled (R08's S5;
+/// counted), and every surface with no air the empty inventory; and each air's is the derivation's
+/// over its record's own
 /// members (its state, conditions, figures and bulk section's gravity) with one of its system's
 /// stars' effective temperatures, or none, and either runaway deck (from 24 a runaway may be
 /// re-solved without its deck, P14.T53.b part 1 (b)), which the record does not hold.
@@ -834,11 +822,9 @@ fn under_the_batch_every_air_carries_its_inventory_and_every_airless_surface_the
                 ));
                 continue;
             }
-            // P14.T53.c's tenuous air: not modelled to 34 (P14.T55.n's, from 35).
+            // P14.T53.c's tenuous air takes its own inventory (P14.T55.n's, from 35).
             if surface.state() == SurfaceState::Tenuous {
-                assert_eq!(surface.aerosols(), Modelled::NotModelled, "{id}");
                 tenuous += 1;
-                continue;
             }
             let Modelled::Ok(inventory) = surface.aerosols() else {
                 refused.push(format!(
@@ -880,7 +866,7 @@ fn under_the_batch_every_air_carries_its_inventory_and_every_airless_surface_the
     eprintln!(
         "{airs} airs: {decks} decks, {modes} modes, {absorbers} absorbers, {not_formed} not \
          formed; {empty} empty; {} magma oceans' airs not modelled: {melts_with_air:?}; \
-         {tenuous} tenuous airs not modelled; {} refused: {refused:?}",
+         {tenuous} tenuous airs; {} refused: {refused:?}",
         melts_with_air.len(),
         refused.len()
     );

@@ -114,20 +114,18 @@
 //! with the wire's `silicate_vapour` rule. Rendering plan R09.T13.c applies each cell's own
 //! entry's solidus.
 //!
-//! From generator version 35 (P14.T55.b, behind its hold,
-//! [`SILICATE_VAPOUR_VERSION`](crate::planetary::chem::silicate_vapour::SILICATE_VAPOUR_VERSION))
-//! a tidally volcanic lid of a silicate melt adds its active lava ([`ActiveLava`]): the share its
-//! volcanic
-//! power keeps at its eruption temperature, `f_v` F ÷ (σ `T_e`⁴), the lava radiating as a black
-//! body (ε = 1, as Davies et al. 2024 fit Io's hot spots, Planet. Sci. J. 5, 121, Eq. 1), F the
-//! surface heat flow, `f_v` the share of it the volcanoes radiate ([`VOLCANIC_POWER_SHARE`]) and
-//! `T_e` the lid's eruption temperature ([`CrustLithology::eruption_temperature`]). It is an upper
-//! bound on the area at `T_e`, since that area radiates no more than the power. It joins the
-//! starlit share as an area apart from it, f = `f_s` + (1 − `f_s`) `f_a`. Io's comes out 3.5 ×
-//! 10⁻⁶ at 2.5 W m⁻²: decision-pre-23-review item 10's 2 × 10⁻⁵ to 2 × 10⁻⁴ is Io's volcanic power
-//! over σT⁴ at 600–1,070 K, its cooling crust's, below the solidus (plan 14's records, P14.T55.b).
-//! The eruption temperatures are leans (2026-11-19): Keszthelyi et al.'s 1,340 °C is a lower limit
-//! on Io's, and a felsic lava, `granite`'s, erupts cooler than the basaltic figure it takes.
+//! From generator version 35 (P14.T55.b) a tidally volcanic lid of a silicate melt adds its active
+//! lava ([`ActiveLava`]): the share its volcanic power keeps at its eruption temperature, `f_v` F ÷
+//! (σ `T_e`⁴), the lava radiating as a black body (ε = 1, as Davies et al. 2024 fit Io's hot spots,
+//! Planet. Sci. J. 5, 121, Eq. 1), F the surface heat flow, `f_v` the share of it the volcanoes
+//! radiate ([`VOLCANIC_POWER_SHARE`]) and `T_e` the lid's eruption temperature
+//! ([`CrustLithology::eruption_temperature`]). It is an upper bound on the area at `T_e`, since
+//! that area radiates no more than the power. It joins the starlit share as an area apart from it,
+//! f = `f_s` + (1 − `f_s`) `f_a`. Io's comes out 3.5 × 10⁻⁶ at 2.5 W m⁻²: decision-pre-23-review
+//! item 10's 2 × 10⁻⁵ to 2 × 10⁻⁴ is Io's volcanic power over σT⁴ at 600–1,070 K, its cooling
+//! crust's, below the solidus (plan 14's records, P14.T55.b). The eruption temperatures are leans
+//! (2026-11-19): Keszthelyi et al.'s 1,340 °C is a lower limit on Io's, and a felsic lava,
+//! `granite`'s, erupts cooler than the basaltic figure it takes.
 //!
 //! # In stages
 //!
@@ -158,10 +156,7 @@
 //! - **a silica-rich secondary crust**: a quartz-normative mantle's basaltic andesite or boninite
 //!   has no registry row, so such a mantle keeps its unshifted row;
 //! - **minor crust substances**: salts, NH₃ hydrate and clathrate, which the crust's members carry
-//!   no list for;
-//! - **an eruption temperature**: no rule states one, and the melt area reads starlight alone, so
-//!   Io's internally heated lava gives it none; below generator version 35 alone, whose
-//!   [`ActiveLava`] states one (above).
+//!   no list for.
 //!
 //! # On the record
 //!
@@ -202,7 +197,6 @@ use crate::id::BodyId;
 use crate::math;
 use crate::planetary::chem::envelope_abundances::ALPHA_ELEMENTS;
 use crate::planetary::chem::redox::{RedoxClass, fmq_above_iw};
-use crate::planetary::chem::silicate_vapour::SilicateVapourRules;
 use crate::planetary::chem::solar_magnesium_to_silicon;
 use crate::planetary::derive::atmosphere::{Gas, SurfaceState};
 use crate::planetary::derive::rocky::CoreShareShift;
@@ -446,13 +440,8 @@ impl CrustLithology {
 }
 
 /// What the crust does not model, a closed set ([module](self)'s "Not modelled"), each with its
-/// reason there; its third below generator version 35 alone, whose bump deletes it (P14.T55.b's
-/// hold, [`SILICATE_VAPOUR_VERSION`](crate::planetary::chem::silicate_vapour::SILICATE_VAPOUR_VERSION)).
-pub const NOT_MODELLED: [&str; 3] = [
-    "a silica-rich secondary crust",
-    "minor crust substances",
-    "an eruption temperature",
-];
+/// reason there.
+pub const NOT_MODELLED: [&str; 2] = ["a silica-rich secondary crust", "minor crust substances"];
 
 /// The share of a volcanic lid's heat flow its volcanoes radiate: 0.54, Io's (Veeder et al. 2015,
 /// Icarus 245, 379, abstract, read: its known hot spots, undetected dark paterae and outbursts
@@ -2373,11 +2362,9 @@ fn lid_of(
 #[must_use]
 fn melt_area(lid: &CrustLid, record: &CrustRecord<'_>) -> MeltArea {
     let starlit = starlit_melt_area(lid.state, record, lid.lithology);
-    let active = (SilicateVapourRules::in_force() == SilicateVapourRules::Modelled
-        && lid.tidal == TidalVolcanism::Volcanic
-        && lid.lithology.holds_a_silicate_melt())
-    .then(|| ActiveLava::of(lid.lithology, record.heat_flow))
-    .flatten();
+    let active = (lid.tidal == TidalVolcanism::Volcanic && lid.lithology.holds_a_silicate_melt())
+        .then(|| ActiveLava::of(lid.lithology, record.heat_flow))
+        .flatten();
     let total = active.map_or(starlit, |lava| starlit + (1.0 - starlit) * lava.share());
     MeltArea {
         // The union of two shares is at most 1 but for a rounding, held by comparison.

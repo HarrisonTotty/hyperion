@@ -4,7 +4,7 @@ task = "type_ia_yield"
 
 [params]
 seed = 0x0b17_15a0_0000_0001
-generator_version = 34
+generator_version = 35
 records = 2_000
 parts = 4
 part_count = 8

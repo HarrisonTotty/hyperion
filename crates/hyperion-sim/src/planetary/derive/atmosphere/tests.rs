@@ -6437,10 +6437,9 @@ pub(crate) fn on_pluto_s_orbit_at(body: &DerivedBody, albedo: f64) -> Atmosphere
 ///   et al. 2017, Icarus 287, 207: 0.72 ± 0.07) by hand. Through its own passes its albedo is
 ///   T51.b's 0.84, above that range (a recorded miss: fresh frost over its whole surface, none of
 ///   its dark tholin terrain), so its ice sits near 32.4 K and its N₂ near 0.04 Pa: stated, not
-///   asserted. Its haze is not modelled to 34 (decision-p14-t53c-tenuous-aerosols): T24.c's rules
-///   are not applied to a tenuous air, and its CH₄ by T24.c's rule is stated with the aerosols'
-///   tests (`under_the_held_rules_pluto_s_haze_is_not_modelled`); from 35 its haze is P14.T55.n's
-///   (`under_the_35_hold_pluto_s_haze_is_its_measured_one`).
+///   asserted. T24.c's rules are not applied to a tenuous air (decision-p14-t53c-tenuous-aerosols),
+///   and its haze is P14.T55.n's from 35, tested with the aerosols' tests
+///   (`pluto_s_haze_is_its_measured_one`).
 /// - **a Charon on Pluto's orbit** (1.586 × 10²¹ kg, 606 km) keeps no N₂: its vapour air has no
 ///   exobase, so its ice holds none, and T13.b's verdict, lost, stands.
 #[test]
@@ -6489,59 +6488,39 @@ fn under_every_24_hold_a_pluto_keeps_its_nitrogen_ice_and_a_charon_none() {
     assert!(charon.inventory().nitrogen().value() > 0.0);
 }
 
-/// P14.T55.e.a's acceptance: under the 35 hold's published rules ([`TenuousAirRules`]) a Pluto at
-/// its inventory, at its measured 0.72 Bond albedo, holds its methane over terrain
-/// [`METHANE_TERRAIN_WARMING_K`] warmer than its nitrogen ice, saturated there, its x(CH₄) within a
-/// factor of 2 of the measured 0.006–0.0084 (Gladstone et al. 2016); through its own passes (its
-/// T51.b albedo 0.84, a recorded miss) stated, not asserted. Under the held rules, the version's,
-/// both are the minor branch's at the mean (some 4 × 10⁻⁷), to the bit.
+/// P14.T55.e.a's acceptance: a Pluto at its inventory, at its measured 0.72 Bond albedo, holds its
+/// methane over terrain [`METHANE_TERRAIN_WARMING_K`] warmer than its nitrogen ice, saturated
+/// there, its x(CH₄) within a factor of 2 of the measured 0.006–0.0084 (Gladstone et al. 2016),
+/// and its N₂ within a factor of 10 of 1.1 Pa; through its own passes (its T51.b albedo 0.84, a
+/// recorded miss) stated, not asserted.
 ///
 /// [`METHANE_TERRAIN_WARMING_K`]: crate::planetary::chem::tenuous::METHANE_TERRAIN_WARMING_K
 #[test]
-fn under_the_35_hold_pluto_s_methane_lies_over_its_warmer_terrain() {
-    use crate::planetary::chem::tenuous::{
-        TenuousAirRules, methane_terrain_temperature, with_tenuous_air,
-    };
-    let airs = || {
-        let pluto = on_pluto_s_orbit(1.303e22, 1_188.3);
-        let measured = atmosphere(&on_pluto_s_orbit_at(&pluto, 0.72));
-        (*pluto.atmosphere(), measured)
-    };
-    let version = airs();
-    let held = with_tenuous_air(TenuousAirRules::Held, airs);
-    let published = with_tenuous_air(TenuousAirRules::Published, airs);
-    for (label, (passes, measured)) in [("held", held), ("published", published)] {
-        for (at, air) in [
-            ("through its passes", passes),
-            ("at its measured 0.72", measured),
-        ] {
-            let ice = air.held_ice_temperature(Gas::Nitrogen);
-            eprintln!(
-                "Pluto {at}, {label}: {}; CH4's weight {:.4e} Pa, x(CH4) {:.4e}, its N2 ice {ice:?}, its \
-                 methane's terrain {:?}",
-                air_line("", &air),
-                air.partial_pressures().of(Gas::Methane).value(),
-                mole_fraction(&air, Gas::Methane),
-                ice.map(methane_terrain_temperature),
-            );
-            assert_eq!(air.state(), SurfaceState::Tenuous, "{label} {at}: {air:?}");
-        }
+fn pluto_s_methane_lies_over_its_warmer_terrain() {
+    use crate::planetary::chem::tenuous::methane_terrain_temperature;
+    let pluto = on_pluto_s_orbit(1.303e22, 1_188.3);
+    let measured = atmosphere(&on_pluto_s_orbit_at(&pluto, 0.72));
+    for (at, air) in [
+        ("through its passes", *pluto.atmosphere()),
+        ("at its measured 0.72", measured),
+    ] {
+        let ice = air.held_ice_temperature(Gas::Nitrogen);
+        eprintln!(
+            "Pluto {at}: {}; CH4's weight {:.4e} Pa, x(CH4) {:.4e}, its N2 ice {ice:?}, its \
+             methane's terrain {:?}",
+            air_line("", &air),
+            air.partial_pressures().of(Gas::Methane).value(),
+            mole_fraction(&air, Gas::Methane),
+            ice.map(methane_terrain_temperature),
+        );
+        assert_eq!(air.state(), SurfaceState::Tenuous, "{at}: {air:?}");
     }
-    for (version, held) in [(version.0, held.0), (version.1, held.1)] {
-        for gas in Gas::ALL {
-            assert_same_bits(
-                held.partial_pressures().of(gas).value(),
-                version.partial_pressures().of(gas).value(),
-            );
-        }
-    }
-    assert!(mole_fraction(&held.1, Gas::Methane) < 1e-6);
-    let x = mole_fraction(&published.1, Gas::Methane);
+    let x = mole_fraction(&measured, Gas::Methane);
     assert!(
         (0.006 / 2.0..=0.0084 * 2.0).contains(&x),
         "Pluto's x(CH4) at {x:e}"
     );
-    let nitrogen = published.1.partial_pressures().of(Gas::Nitrogen).value();
+    let nitrogen = measured.partial_pressures().of(Gas::Nitrogen).value();
     assert!(
         (1.1 / 10.0..=1.1 * 10.0).contains(&nitrogen),
         "Pluto's N2 at {nitrogen} Pa"

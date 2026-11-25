@@ -34800,3 +34800,8 @@ ACTIVE HOST · HOST LEAVING MAIN SEQUENCE · EXTRAPOLATED ZONE · FROZEN SURFACE
     air's own p_s by ZM14's eq. 14.
   - _Deviation:_ the debit checks are relative to the kept water (the debit is a difference of
     water masses); the young super-Earth's H₂ test moved beyond the maximum greenhouse (share 1).
+- **The three 35 holds folded (train 35).** `TENUOUS_AIR_VERSION`, `SILICATE_VAPOUR_VERSION`,
+  `DECK_BASE_VERSION`, their rules, switches, `HeldRules` lines, `with_every_35_hold` and tripwires
+  deleted; the 35 tests drop their `under_every_35_hold_`/`under_the_35_hold_` prefixes.
+  - _Rider (main's lean, taken):_ a `Tenuous` air's snapshot haze is P14.T55.n's law
+    (`surface_mix::tenuous_pass_haze`): 0.0099 at a Pluto, against 1.1 × 10⁻⁴ before.

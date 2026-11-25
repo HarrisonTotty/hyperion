@@ -709,35 +709,25 @@ fn io(surface: &SurfaceConditions, heat_flow: f64) -> CrustCompositionInputs<'_>
     }
 }
 
-/// P14.T55.b's active lava, held at 35: Io's `komatiite` lid at 2.5 W m⁻² takes `f_v` F ÷ (σ
-/// `T_e`⁴) = 0.54 × 2.5 ÷ (σ 1,613.15⁴), 3.5 × 10⁻⁶ of its surface, its whole melt area, as its
-/// starlight melts none; below 35 it takes none. decision-pre-23-review item 10's 2 × 10⁻⁵ to
+/// P14.T55.b's active lava, from generator version 35: Io's `komatiite` lid at 2.5 W m⁻² takes
+/// `f_v` F ÷ (σ `T_e`⁴) = 0.54 × 2.5 ÷ (σ 1,613.15⁴), 3.5 × 10⁻⁶ of its surface, its whole melt
+/// area, as its starlight melts none. decision-pre-23-review item 10's 2 × 10⁻⁵ to
 /// 2 × 10⁻⁴ is Io's volcanic power over σT⁴ at 600–1,070 K, its cooling crust's: at the eruption
 /// temperature the rule's area is an upper bound on the lava that hot, under Keszthelyi et al.
 /// 2007's "less than 1%" of Io's ~1% of active lavas near it (§2), and the miss is recorded.
 #[test]
-fn under_the_35_hold_io_s_volcanic_lid_takes_its_active_lava() {
-    use crate::planetary::chem::silicate_vapour::{SilicateVapourRules, with_silicate_vapour};
+fn io_s_volcanic_lid_takes_its_active_lava() {
     let surface = table_conditions("Ganymede");
     let inputs = io(&surface, 2.5);
-    let held = CrustComposition::derive(&inputs).unwrap();
-    assert_eq!(held.active_lava(), None);
-    assert!(held.melt_area_fraction() < 1e-12);
-    let crust = with_silicate_vapour(SilicateVapourRules::Modelled, || {
-        CrustComposition::derive(&inputs)
-    })
-    .unwrap();
+    let crust = CrustComposition::derive(&inputs).unwrap();
     let lava = crust.active_lava().expect("a volcanic lid erupts");
     assert_same_bits(lava.eruption_temperature().value(), 1_613.15);
     let share = VOLCANIC_POWER_SHARE * 2.5 / (STEFAN_BOLTZMANN * math::powi(1_613.15, 4));
     assert_same_bits(lava.share(), share);
     assert!((3.4e-6..3.6e-6).contains(&share), "{share}");
-    assert_same_bits(crust.starlit_melt_fraction(), held.melt_area_fraction());
+    assert!(crust.starlit_melt_fraction() < 1e-12);
     assert_same_bits(crust.melt_area_fraction(), share);
     eprintln!("Io's active lava at 2.5 W m⁻²: {share:.3e} of its surface at 1,613.15 K");
-    // Nothing else of the crust moves.
-    assert_eq!(keys(&crust), keys(&held));
-    assert_eq!(crust.lid(), held.lid());
     // A quiet lid at the same heat flow, and a volcanic one with none, take none.
     for quiet in [
         CrustCompositionInputs {
@@ -746,10 +736,7 @@ fn under_the_35_hold_io_s_volcanic_lid_takes_its_active_lava() {
         },
         io(&surface, 0.0),
     ] {
-        let crust = with_silicate_vapour(SilicateVapourRules::Modelled, || {
-            CrustComposition::derive(&quiet)
-        })
-        .unwrap();
+        let crust = CrustComposition::derive(&quiet).unwrap();
         assert_eq!(crust.active_lava(), None);
     }
 }
@@ -760,7 +747,6 @@ fn under_the_35_hold_io_s_volcanic_lid_takes_its_active_lava() {
 /// lava's temperature.
 #[test]
 fn a_volcanic_lid_s_lava_joins_its_starlit_pool() {
-    use crate::planetary::chem::silicate_vapour::{SilicateVapourRules, with_silicate_vapour};
     let surface = locked_mercury_at(0.05);
     let lava = CrustCompositionInputs {
         surface_age: Years::new(1e8),
@@ -769,10 +755,7 @@ fn a_volcanic_lid_s_lava_joins_its_starlit_pool() {
         heat_flow: WattsPerSquareMetre::new(400.0),
         ..mercury(&surface)
     };
-    let crust = with_silicate_vapour(SilicateVapourRules::Modelled, || {
-        CrustComposition::derive(&lava)
-    })
-    .unwrap();
+    let crust = CrustComposition::derive(&lava).unwrap();
     let starlit = crust.starlit_melt_fraction();
     let active = crust.active_lava().expect("a volcanic lid erupts");
     let row = CrustLithology::of_key(key(Some(crust.lid_lithology()))).unwrap();
@@ -789,8 +772,6 @@ fn a_volcanic_lid_s_lava_joins_its_starlit_pool() {
         crust.melt_area_fraction(),
         starlit + (1.0 - starlit) * active.share(),
     );
-    let held = CrustComposition::derive(&lava).unwrap();
-    assert_same_bits(held.melt_area_fraction(), starlit);
 }
 
 /// The eruption temperatures: an ultramafic lava's Io's 1,613.15 K, a basaltic's 1,473.15 K, a lid

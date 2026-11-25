@@ -128,7 +128,7 @@ use crate::planetary::chem::escape::{EnvelopeHelium, host_helium_per_hydrogen};
 use crate::planetary::chem::inventory::{ElementInventory, Reservoir};
 use crate::planetary::chem::partition::{CondensatePhase, Condensates, CrustWater, Partition};
 use crate::planetary::chem::silicate_vapour::{
-    MeltComposition, SilicateVapour, SilicateVapourInputs, SilicateVapourRules,
+    MeltComposition, SilicateVapour, SilicateVapourInputs,
 };
 use crate::planetary::chem::{AbundanceDraws, HostAbundances};
 use crate::planetary::context::{
@@ -6602,21 +6602,18 @@ fn with_held_members(
 }
 
 /// The melt's own vapour over the published surface `surface` of a body of bulk section `bulk`
-/// (P14.T55.b, [`SilicateVapour`]): not modelled below generator version 35
-/// ([`SilicateVapourRules`]); `Ok(None)` on a surface holding no melt, neither in the `MagmaOcean`
-/// state nor with a crust whose melt area is above 0; otherwise the vapour at the melt's warmest
-/// temperature, the surface's peak where its starlight melts it (the `MagmaOcean` state, or a
-/// starlit share above 0) and its active lava's eruption temperature where that is warmer, of the
-/// bulk silicate's composition in the `MagmaOcean` state or with no crust and of its lid's
-/// otherwise ([`MeltComposition::of_row`]), on the bulk section's gravity and radius.
+/// (P14.T55.b, [`SilicateVapour`], from generator version 35): `Ok(None)` on a surface holding no
+/// melt, neither in the `MagmaOcean` state nor with a crust whose melt area is above 0; otherwise
+/// the vapour at the melt's warmest temperature, the surface's peak where its starlight melts it
+/// (the `MagmaOcean` state, or a starlit share above 0) and its active lava's eruption temperature
+/// where that is warmer, of the bulk silicate's composition in the `MagmaOcean` state or with no
+/// crust and of its lid's otherwise ([`MeltComposition::of_row`]), on the bulk section's gravity
+/// and radius.
 #[must_use]
 fn record_silicate_vapour(
     surface: &Surface,
     bulk: &BulkProperties,
 ) -> Modelled<Option<SilicateVapour>> {
-    if SilicateVapourRules::in_force() == SilicateVapourRules::Held {
-        return Modelled::NotModelled;
-    }
     let molten = surface.state() == SurfaceState::MagmaOcean;
     let crust = match surface.crust() {
         Modelled::Ok(crust) => Some(crust),

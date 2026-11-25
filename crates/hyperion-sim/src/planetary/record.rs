@@ -796,9 +796,8 @@ impl Surface {
         }
     }
 
-    /// The surface with its melt's own vapour `vapour` (P14.T55.b): `Ok(None)` for a surface
-    /// holding no melt, and not modelled below generator version 35
-    /// ([`SILICATE_VAPOUR_VERSION`](crate::planetary::chem::silicate_vapour::SILICATE_VAPOUR_VERSION)).
+    /// The surface with its melt's own vapour `vapour` (P14.T55.b, from generator version 35):
+    /// `Ok(None)` for a surface holding no melt.
     #[must_use]
     pub(crate) fn with_silicate_vapour(self, vapour: Modelled<Option<SilicateVapour>>) -> Self {
         Self {
@@ -981,9 +980,8 @@ impl Surface {
     /// with whether the body holds them or they stream off it. It is not part of the volatile air
     /// the conditions hold.
     ///
-    /// - Not modelled below generator version 35
-    ///   ([`SILICATE_VAPOUR_VERSION`](crate::planetary::chem::silicate_vapour::SILICATE_VAPOUR_VERSION)),
-    ///   never to be read as none.
+    /// - Not modelled where the record does not compute it (below generator version 35, or a
+    ///   vapour refused), never to be read as none.
     /// - `Ok(None)`, computed as none, on a surface holding no melt: neither in the `MagmaOcean`
     ///   state nor with a crust whose melt area is above 0.
     /// - `Ok(Some(vapour))` over melt.

@@ -11,7 +11,6 @@
 //! gravity and the photochemistry's star ([`record_aerosols`]). Every reach of the record into
 //! `hooks::aerosols` (and through it `hooks::sulphur` and `chem::condense`) is in this file.
 
-use crate::planetary::chem::tenuous::TenuousAirRules;
 use crate::planetary::derive::atmosphere::SurfaceState;
 use crate::planetary::hooks::aerosols::{AerosolInputs, AerosolInventory};
 use crate::planetary::hooks::figures::GlobalFigures;
@@ -116,10 +115,10 @@ pub(crate) struct AirSurface<'a> {
 ///   clouds at its top, so the empty inventory would claim a cloud-free air computed as such
 ///   (R08's review of P14.T54.b.b, S5; the wire's "absent means not modelled, `null` or empty
 ///   means computed none", decision-p14-t54b-open §2.1);
-/// - a tenuous air (P14.T53.c's [`SurfaceState::Tenuous`]) is not modelled to generator version
-///   34: T24.c's rules are not applied to it (`holds_air`), and the empty inventory would claim an
-///   air computed clear (decision-p14-t53c-tenuous-aerosols); from 35 it takes its own inventory,
-///   P14.T55.n's haze law (under `TenuousAirRules`);
+/// - a tenuous air (P14.T53.c's [`SurfaceState::Tenuous`]) takes its own inventory, P14.T55.n's
+///   haze law, from generator version 35: T24.c's rules are not applied to it (`holds_air`), and
+///   to 34 it was not modelled, since the empty inventory would claim an air computed clear
+///   (decision-p14-t53c-tenuous-aerosols);
 /// - a structure not modelled leaves the inventory not modelled;
 /// - an air the inventory refuses is not modelled: its error carries nothing a reader could act
 ///   on, and the generated sample gives none (this module's tests, which re-derive and print any).
@@ -132,15 +131,12 @@ pub(crate) fn record_aerosols(
         // A steam envelope's air is its envelope section's, whose surface never holds it
         // (P14.T53.b part 3).
         SurfaceState::SteamEnvelope => return Modelled::NotModelled,
-        SurfaceState::Tenuous => match TenuousAirRules::in_force() {
-            TenuousAirRules::Held => return Modelled::NotModelled,
-            TenuousAirRules::Published => {}
-        },
         SurfaceState::MagmaOcean if !surface.conditions.gases().is_empty() => {
             return Modelled::NotModelled;
         }
         SurfaceState::GasEnvelope
         | SurfaceState::MagmaOcean
+        | SurfaceState::Tenuous
         | SurfaceState::Airless
         | SurfaceState::RunawayGreenhouse
         | SurfaceState::Temperate

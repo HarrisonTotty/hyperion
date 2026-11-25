@@ -128,7 +128,7 @@ const FINGERPRINT_SEED: u64 = 0x0b17_15a0_0000_0001;
 
 /// The generator version the fingerprints' galaxy is built at: the refit's, the manifests'
 /// (a test holds the four manifests to it).
-const FINGERPRINT_VERSION: GeneratorVersion = GeneratorVersion::new(34);
+const FINGERPRINT_VERSION: GeneratorVersion = GeneratorVersion::new(35);
 
 /// The fingerprints' galaxy: the Milky Way fixture of [`FINGERPRINT_SEED`] at
 /// [`FINGERPRINT_VERSION`], with the binary classes' scratch share rows, as a census galaxy is
@@ -1209,9 +1209,9 @@ mod tests {
             let error = AwdParams::of(&manifest(|t| t.replacen(from, to, 1))).unwrap_err();
             assert!(error.to_string().contains(key), "{from} → {to}: {error}");
         };
-        assert_eq!(params.census.version, GeneratorVersion::new(34));
+        assert_eq!(params.census.version, GeneratorVersion::new(35));
         refused(
-            "generator_version = 34",
+            "generator_version = 35",
             "generator_version = 23",
             "generator_version",
         );

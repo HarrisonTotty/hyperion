@@ -1231,8 +1231,8 @@ impl CoarseInputs {
 
     /// The mean surface pressure (P14.T24.a), zero on an airless body.
     ///
-    /// 0 also on a surface holding melt whose volatiles are gone, whose own vapour is not modelled
-    /// (P14.T55.b; decision-backlog-2 §2.5).
+    /// 0 also on a surface holding melt whose volatiles are gone: the melt's own vapour, the
+    /// record's silicate vapour (P14.T55.b), is not part of it (decision-backlog-2 §2.5).
     #[must_use]
     pub const fn surface_pressure(&self) -> Pascals {
         self.surface_pressure

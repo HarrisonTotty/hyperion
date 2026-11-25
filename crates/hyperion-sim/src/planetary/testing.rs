@@ -51,36 +51,11 @@ mod held;
 #[cfg(test)]
 pub(crate) use held::{HeldRules, in_shares};
 
-/// `run`'s result with every planetary hold of generator version 35 in force on this thread (train
-/// 35), each switch set back as it returns, a panic in `run` included: P14.T55.e.a's and
-/// P14.T55.n's tenuous air, its methane over its terrain and its haze ([`with_tenuous_air`],
-/// `TenuousAirRules::Published`); P14.T55.b's silicate vapour and active lava
-/// ([`with_silicate_vapour`], `SilicateVapourRules::Modelled`); and Venus's deck only in the air it
-/// hangs in (P14.T53.b part 1 (b)'s follow-up, [`with_deck_base`], `DeckBaseRules::Base`). A test's
-/// own pool of shares reads them through [`in_shares`]. 35's bump deletes it with the holds; a hold
-/// of 35 added later adds its switch here.
-///
-/// [`with_tenuous_air`]: super::chem::tenuous::with_tenuous_air
-/// [`with_silicate_vapour`]: super::chem::silicate_vapour::with_silicate_vapour
-/// [`with_deck_base`]: super::derive::atmosphere::with_deck_base
-#[cfg(test)]
-pub(crate) fn with_every_35_hold<R>(run: impl FnOnce() -> R) -> R {
-    use super::chem::silicate_vapour::{SilicateVapourRules, with_silicate_vapour};
-    use super::chem::tenuous::{TenuousAirRules, with_tenuous_air};
-    use super::derive::atmosphere::{DeckBaseRules, with_deck_base};
-    with_tenuous_air(TenuousAirRules::Published, || {
-        with_silicate_vapour(SilicateVapourRules::Modelled, || {
-            with_deck_base(DeckBaseRules::Base, run)
-        })
-    })
-}
-
 /// `run`'s result with every planetary hold of generator version 36 in force on this thread (train
 /// 36), each switch set back as it returns, a panic in `run` included: P14.T55.a.c's carriers, a
-/// secondary air's vent gas ([`with_outgassing_speciation`], `OutgassingRules::Speciated`). It is
-/// apart from [`with_every_35_hold`]: under it the other rules are the version's. A test's own pool
-/// of shares reads it through [`in_shares`]. 36's bump deletes it with the hold; a hold of 36 added
-/// later adds its switch here.
+/// secondary air's vent gas ([`with_outgassing_speciation`], `OutgassingRules::Speciated`). Under it
+/// the other rules are the version's. A test's own pool of shares reads it through [`in_shares`].
+/// 36's bump deletes it with the hold; a hold of 36 added later adds its switch here.
 ///
 /// [`with_outgassing_speciation`]: super::chem::outgassing::with_outgassing_speciation
 #[cfg(test)]

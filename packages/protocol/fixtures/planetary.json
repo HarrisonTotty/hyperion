@@ -3476,7 +3476,8 @@
               "volcanic_deposits": [],
               "weathering_deposits": []
             },
-            "taxonomic_class": null
+            "taxonomic_class": null,
+            "silicate_vapour": null
           }
         },
         "envelope": {

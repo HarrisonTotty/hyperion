@@ -744,6 +744,13 @@ fn a_surface_holds_a_solid_state_and_its_conditions_regime() {
                     Modelled::Ok(modifiers) => Modelled::Ok(modifiers.clone()),
                     Modelled::NotModelled => Modelled::NotModelled,
                 })
+            })
+            // And its melt's own vapour (P14.T55.b), on the record from 35.
+            .map(|rebuilt| {
+                rebuilt.with_silicate_vapour(match surface.silicate_vapour() {
+                    Modelled::Ok(vapour) => Modelled::Ok(vapour.cloned()),
+                    Modelled::NotModelled => Modelled::NotModelled,
+                })
             });
             assert_eq!(rebuilt.as_ref(), Some(surface));
             for refused in [SurfaceState::GasEnvelope, SurfaceState::SteamEnvelope] {
