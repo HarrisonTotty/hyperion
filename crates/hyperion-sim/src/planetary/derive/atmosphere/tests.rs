@@ -44,7 +44,7 @@ fn derive(placed: &PlacedBody, disc: &DiscProfile, age: Years) -> DerivedBody {
 }
 
 /// Every body of the table: the eight planets and the four small bodies.
-fn table() -> Vec<(&'static str, DerivedBody)> {
+pub(crate) fn table() -> Vec<(&'static str, DerivedBody)> {
     let disc = solar_disc();
     table_bodies()
         .map(|&(name, kg, km, a, e)| (name, about_the_sun(&disc, (kg, km, a, e), SOLAR_AGE)))

@@ -14648,3 +14648,88 @@ fn under_every_27_hold_no_moon_at_the_sun_s_age_publishes_a_surface_below_its_he
         "no moon warmed"
     );
 }
+
+/// P14.T55.a.c's cost probe, decision-24-cost D5's (the planetary bench's (vii) `cost_20_generate`
+/// and (viii) `cost_20_snapshot_at`): `generate`, then `snapshot_at` at the epoch of the systems
+/// generated beforehand, over the first 20 field systems of the system tests' universe, under
+/// every other 36 hold, this one held, and under every 36 hold, alternately, the best and the
+/// median of seven rounds each, and their ratios against D5's 1.8× and 2.0×. A record derives
+/// lazily, so each snapshot runs under its rules. Run it in release on one test thread.
+#[test]
+#[ignore = "slow: timing"]
+fn the_carriers_cost_is_stated_against_their_hold() {
+    use std::time::{Duration, Instant};
+
+    use crate::planetary::chem::outgassing::{OutgassingRules, with_outgassing_speciation};
+    use crate::planetary::testing::with_every_36_hold;
+
+    /// `run` under every other 36 hold with this one held (`k` 0), or under every 36 hold.
+    fn under<R>(k: usize, run: impl FnOnce() -> R) -> R {
+        if k == 0 {
+            with_every_36_hold(|| with_outgassing_speciation(OutgassingRules::Held, run))
+        } else {
+            with_every_36_hold(run)
+        }
+    }
+
+    const ROUNDS: usize = 7;
+    let contexts = sample_contexts(20, SEED, SampleFilter::ALL).expect("twenty systems");
+    let systems: [Vec<PlanetarySystem>; 2] = [0, 1].map(|k| {
+        under(k, || {
+            contexts
+                .iter()
+                .map(|context| generate(SEED, context))
+                .collect()
+        })
+    });
+    let mut times: [[Vec<Duration>; 2]; 2] = Default::default();
+    for _ in 0..ROUNDS {
+        for (k, (times, systems)) in times.iter_mut().zip(&systems).enumerate() {
+            let start = Instant::now();
+            core::hint::black_box(under(k, || {
+                contexts
+                    .iter()
+                    .map(|context| generate(SEED, context).bodies().len())
+                    .sum::<usize>()
+            }));
+            times[0].push(start.elapsed());
+            let start = Instant::now();
+            core::hint::black_box(under(k, || {
+                contexts
+                    .iter()
+                    .zip(systems)
+                    .map(|(context, system)| {
+                        system
+                            .snapshot_at(context, UniverseTime::EPOCH)
+                            .bodies()
+                            .len()
+                    })
+                    .sum::<usize>()
+            }));
+            times[1].push(start.elapsed());
+        }
+    }
+    let stat = |mut v: Vec<Duration>| {
+        v.sort_unstable();
+        (v[0], v[v.len() / 2])
+    };
+    let [[gen_held, snap_held], [gen_36, snap_36]] = times.map(|pair| pair.map(stat));
+    let ratio = |a: Duration, b: Duration| b.as_secs_f64() / a.as_secs_f64();
+    eprintln!(
+        "cost (20 systems, best/median of {ROUNDS}): generate held {:?}/{:?}, at 36 {:?}/{:?}, \
+         {:.3}× ({:.3}× median), against D5's 1.8×; snapshot_at held {:?}/{:?}, at 36 {:?}/{:?}, \
+         {:.3}× ({:.3}× median), against 2.0×",
+        gen_held.0,
+        gen_held.1,
+        gen_36.0,
+        gen_36.1,
+        ratio(gen_held.0, gen_36.0),
+        ratio(gen_held.1, gen_36.1),
+        snap_held.0,
+        snap_held.1,
+        snap_36.0,
+        snap_36.1,
+        ratio(snap_held.0, snap_36.0),
+        ratio(snap_held.1, snap_36.1),
+    );
+}

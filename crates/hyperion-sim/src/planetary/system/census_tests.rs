@@ -46,18 +46,22 @@ use crate::galaxy::params::GalaxyParams;
 use crate::galaxy::placement::SystemRecord;
 use crate::galaxy::rules::GalaxyRules;
 use crate::planetary::chem::condense::NotFormed;
+use crate::planetary::chem::outgassing::{OutgassingRules, with_outgassing_speciation};
 use crate::planetary::chem::partition::{CondensateEntry, CondensatePhase};
+use crate::planetary::chem::secondary::{AirElements, BuildAirElementsError, WoitkeType};
 use crate::planetary::derive::atmosphere::SNOWBALL_ICE_COVER;
 use crate::planetary::derive::atmosphere::{
     AIRLESS_PRESSURE, DECK_BASE_PRESSURE, DeckBaseRules, Gas, RunawayDeck, SurfaceState,
     WATER_MELTING_POINT, reducing, with_deck_base,
 };
+use crate::planetary::derive::atmosphere::{Outgassed, VentRoute};
 use crate::planetary::hooks::aerosols::{AerosolDeck, AerosolMode};
 use crate::planetary::hooks::figures::Subsurface;
 use crate::planetary::hooks::surface::Forcing;
 use crate::planetary::record::{Modelled, RecordSection, SectionState};
 use crate::planetary::testing::{SampleFilter, sample_records};
-use crate::planetary::testing::{in_shares, with_every_35_hold};
+use crate::planetary::testing::{in_shares, with_every_35_hold, with_every_36_hold};
+use crate::substance::Element;
 use crate::substance::{self, CondensedOptics, SubstanceId, by_key};
 use crate::time::{ClockWindow, Span, UniverseTime};
 use crate::units::{Kelvin, KilogramsPerCubicMetre, Pascals};
@@ -2620,4 +2624,601 @@ fn composition_census_under_every_35_hold_keeps_venus_s_deck_only_in_an_oxidised
     census.assert_reached();
     census.assert_fixed_under_26();
     census.assert_no_envelope_changes();
+}
+
+/// The reason the census gives for Woitke et al.'s (2021) types, which it classifies and does
+/// not reach (P14.T55.a.c; P14.T33.c's listed reason, reworded from 36).
+const WOITKE_TYPES_CLASSIFIED: &str = "the published air is the vent's quenched gas; the \
+     low-temperature equilibrium is a reference (research-leans-58 ruling 1)";
+
+/// What one body of the census publishes of its carriers (P14.T55.a.c;
+/// [`composition_census_under_every_36_hold_speciates_every_secondary_air`]).
+#[derive(Debug, Clone)]
+struct CarrierBody {
+    /// Its state and its published state.
+    states: (SurfaceState, SurfaceState),
+    /// Its mean surface temperature and its surface pressure (none for none).
+    t_s: Kelvin,
+    p_s: Option<Pascals>,
+    /// Its partial pressures, Pa, in [`Gas::ALL`]'s order.
+    partials: [f64; 9],
+    /// Its Bond albedo.
+    albedo: f64,
+    /// Why its carriers are, or are not, its vent's.
+    vent: Option<VentRoute>,
+    /// Its air's Woitke type by its element budget (`chem::secondary`), none with no air.
+    woitke: Option<WoitkeType>,
+    /// The largest miss of its carbon's, oxygen's and (where it formed with no envelope) its
+    /// hydrogen's outcome against its inventory, relative to the largest of them; 0 with no escape
+    /// recorded.
+    balance: f64,
+    /// Its record's hazes (the census's table column).
+    haze: String,
+}
+
+impl CarrierBody {
+    fn of(case: &AuditCase<'_>) -> Self {
+        let air = case.derived.atmosphere();
+        let partials = air.partial_pressures();
+        let moles = |gas: Gas| partials.of(gas).value() / gas.molar_mass_g_per_mol();
+        let [h2, _, h2o, ch4, nh3, n2, o2, co2, _] = Gas::ALL.map(moles);
+        let woitke = AirElements::new([
+            (Element::H, 2.0 * h2 + 2.0 * h2o + 4.0 * ch4 + 3.0 * nh3),
+            (Element::C, ch4 + co2),
+            (Element::N, 2.0 * n2 + nh3),
+            (Element::O, h2o + 2.0 * o2 + 2.0 * co2),
+        ])
+        .map_or_else(
+            |error| match error {
+                BuildAirElementsError::Empty => None,
+                BuildAirElementsError::NotCarried(_)
+                | BuildAirElementsError::Repeated(_)
+                | BuildAirElementsError::Moles { .. } => {
+                    panic!("an air's budget is of H, C, N and O once each, finite: {error}")
+                }
+            },
+            |budget| Some(budget.woitke_type()),
+        );
+        Self {
+            states: (air.state(), air.published_state()),
+            t_s: air.surface_temperature(),
+            p_s: air.surface_pressure(),
+            partials: Gas::ALL.map(|gas| partials.of(gas).value()),
+            albedo: air.albedo().value(),
+            vent: air.vent(),
+            woitke,
+            balance: balance_miss(case.derived),
+            haze: air_columns(case.record)[2].clone(),
+        }
+    }
+
+    /// Whether it publishes the same as `other`, to the bit.
+    fn same(&self, other: &Self) -> bool {
+        let bits = |a: f64, b: f64| a.total_cmp(&b).is_eq();
+        self.states == other.states
+            && bits(self.t_s.value(), other.t_s.value())
+            && match (self.p_s, other.p_s) {
+                (Some(p), Some(q)) => bits(p.value(), q.value()),
+                (None, None) => true,
+                (Some(_), None) | (None, Some(_)) => false,
+            }
+            && self
+                .partials
+                .iter()
+                .zip(&other.partials)
+                .all(|(&a, &b)| bits(a, b))
+            && bits(self.albedo, other.albedo)
+    }
+
+    /// Whether every figure is finite: its temperature, pressure and partial pressures.
+    fn finite(&self) -> bool {
+        self.t_s.value().is_finite()
+            && self.p_s.is_none_or(|p| p.value().is_finite())
+            && self.partials.iter().all(|p| p.is_finite())
+    }
+
+    /// The vent's record, where it took the route.
+    fn outgassed(&self) -> Option<Outgassed> {
+        match self.vent {
+            Some(VentRoute::Vented(out)) => Some(out),
+            Some(
+                VentRoute::MethaneArm
+                | VentRoute::Hot
+                | VentRoute::IceShell
+                | VentRoute::NoCarbon
+                | VentRoute::Refused(_),
+            )
+            | None => None,
+        }
+    }
+
+    /// The route's name in the counts.
+    fn route(&self) -> String {
+        match self.vent {
+            Some(VentRoute::Refused(error)) => format!("refused: {error}"),
+            Some(VentRoute::Vented(_)) => "vented".to_owned(),
+            Some(route) => format!("{route:?}"),
+            None => "none".to_owned(),
+        }
+    }
+
+    fn line(&self) -> String {
+        format!(
+            "{:?} (published {:?}), T_s {:.2} K, p_s {:.4e} bar, CO2 {:.3e} CH4 {:.3e} H2O {:.3e} \
+             H2 {:.3e} Pa, {}",
+            self.states.0,
+            self.states.1,
+            self.t_s.value(),
+            self.p_s.map_or(f64::NAN, Pascals::value) / 1e5,
+            self.partials[7],
+            self.partials[3],
+            self.partials[2],
+            self.partials[0],
+            self.route(),
+        )
+    }
+}
+
+/// The largest miss of the carbon's, oxygen's and, where the body formed with no envelope, the
+/// hydrogen's outcome of `derived` against what its carriers and envelope hold, relative to the
+/// largest element's inventory: 0 where no escape is recorded.
+fn balance_miss(derived: &DerivedBody) -> f64 {
+    let Some(escape) = derived.atmosphere().escape() else {
+        return 0.0;
+    };
+    let share = |gas: Gas, element: Element| {
+        let count = gas
+            .substance()
+            .substance()
+            .elements()
+            .iter()
+            .find(|(e, _)| *e == element)
+            .map_or(0, |&(_, n)| n);
+        f64::from(count) * element.standard_atomic_weight_g_per_mol() / gas.molar_mass_g_per_mol()
+    };
+    let inventory = derived.inventory();
+    let (water, co2) = (
+        inventory.water().value(),
+        inventory.carbon_dioxide().value(),
+    );
+    let carbon = co2 * share(Gas::CarbonDioxide, Element::C);
+    let oxygen =
+        water * share(Gas::Water, Element::O) + co2 * share(Gas::CarbonDioxide, Element::O);
+    let hydrogen = water * share(Gas::Water, Element::H);
+    let formed_bare = derived.fractions().envelope() <= 0.0
+        && crate::units::Kilograms::from(derived.envelope_lost()).value() <= 0.0;
+    let largest = oxygen.max(carbon).max(hydrogen);
+    let mut miss = 0.0_f64;
+    for (element, expected) in [
+        (Element::C, Some(carbon)),
+        (Element::O, Some(oxygen)),
+        (Element::H, formed_bare.then_some(hydrogen)),
+    ] {
+        let (Some(expected), Some(outcome)) = (expected, escape.element(element)) else {
+            continue;
+        };
+        if largest > 0.0 {
+            miss = miss.max((outcome.inventory().value() - expected).abs() / largest);
+        }
+    }
+    miss
+}
+
+/// Every body of the carriers' census under one set of rules, by "#{rank} {id} {kind}".
+type CarrierBodies = BTreeMap<String, CarrierBody>;
+
+/// The census's [`CarrierBody`]s under `rules`, which wraps each share's generation on its own
+/// thread, and as `walk` says its [`Census`] too.
+fn carrier_census(
+    rules: impl Fn(&dyn Fn() -> (Census, CarrierBodies)) -> (Census, CarrierBodies) + Sync,
+    walk: DeckWalk,
+) -> (Census, CarrierBodies) {
+    let whole = walk == DeckWalk::WithTheCensus;
+    let galaxy = Galaxy::from_params(SEED, GalaxyParams::milky_way_like())
+        .expect("the Milky Way's parameters build a galaxy");
+    let records = sample_records(&galaxy, ORDINARY_SYSTEMS, SampleFilter::ALL)
+        .expect("the solar circle holds the census's systems");
+    let shares = records.len().div_ceil(SYSTEMS_PER_SHARE);
+    let mut census = Census::default();
+    let mut all = CarrierBodies::new();
+    for (share, bodies) in in_shares(shares, ORDINARY_THREADS, |k| {
+        let first = k * SYSTEMS_PER_SHARE;
+        let end = records.len().min(first + SYSTEMS_PER_SHARE);
+        rules(&|| {
+            let mut census = Census::default();
+            let mut bodies = CarrierBodies::new();
+            for (rank, record) in (first..).zip(&records[first..end]) {
+                let ctx = SystemContext::from_record(&galaxy, record);
+                let class = HostClass::of(&ctx);
+                let system = generate(SEED, &ctx);
+                if whole {
+                    census.systems += 1;
+                    census.classes.entry(class).or_default().0 += 1;
+                }
+                audit_walk_system("census", &ctx, &system, &mut |case| {
+                    if whole {
+                        census.add(class, rank, (&ctx, &system), case);
+                    }
+                    bodies.insert(named(rank, case), CarrierBody::of(case));
+                });
+            }
+            (census, bodies)
+        })
+    }) {
+        census.merge(share);
+        all.extend(bodies);
+    }
+    (census, all)
+}
+
+/// The carriers' census at both rules: the counts by route, the vented airs' shift, dry CO,
+/// graphite and methane, their Woitke types, and the bodies that move, each at both rules.
+struct CarrierMoves<'a> {
+    held: &'a CarrierBodies,
+    at_36: &'a CarrierBodies,
+    moved: Vec<(&'a String, &'a CarrierBody, &'a CarrierBody)>,
+}
+
+impl<'a> CarrierMoves<'a> {
+    fn of(held: &'a CarrierBodies, at_36: &'a CarrierBodies) -> Self {
+        Self {
+            held,
+            at_36,
+            moved: held
+                .iter()
+                .filter_map(|(label, before)| {
+                    let after = &at_36[label];
+                    (!before.same(after)).then_some((label, before, after))
+                })
+                .collect(),
+        }
+    }
+
+    /// The vented bodies, each with its record.
+    fn vented(&self) -> impl Iterator<Item = (&'a String, &'a CarrierBody, Outgassed)> + '_ {
+        self.at_36
+            .iter()
+            .filter_map(|(label, body)| body.outgassed().map(|out| (label, body, out)))
+    }
+
+    /// The bodies that move with no vented body in their system.
+    fn strays(&self) -> Vec<&'a String> {
+        let systems: std::collections::BTreeSet<&str> =
+            self.vented().map(|(label, ..)| system_of(label)).collect();
+        self.moved
+            .iter()
+            .map(|(label, ..)| *label)
+            .filter(|label| !systems.contains(system_of(label)))
+            .collect()
+    }
+
+    /// The vented airs whose published state is hot by P14.T53.e's rules or their own figures (a
+    /// runaway, a magma ocean or a steam envelope), which the route's hot test, reading the
+    /// division and the class alone, lets vent (`escaping`'s `Body::hot`, a lean), each with its line.
+    fn vented_but_hot(&self) -> Vec<String> {
+        self.vented()
+            .filter(|(_, body, _)| {
+                matches!(
+                    body.states.1,
+                    SurfaceState::RunawayGreenhouse
+                        | SurfaceState::MagmaOcean
+                        | SurfaceState::SteamEnvelope
+                )
+            })
+            .map(|(label, body, _)| format!("{label}: {}", body.line()))
+            .collect()
+    }
+
+    /// The bodies that move, by their route and their published states, each state moved by
+    /// name, and the largest move in `T_s`, into `report`.
+    fn moved_lines(&self, report: &mut String) {
+        let line = "a string takes a line";
+        let mut by_route = BTreeMap::<String, usize>::new();
+        for (_, _, after) in &self.moved {
+            *by_route.entry(after.route()).or_default() += 1;
+        }
+        writeln!(
+            report,
+            "the bodies that move, by their route at 36: {by_route:?}"
+        )
+        .expect(line);
+        let mut states = BTreeMap::<String, usize>::new();
+        for (_, before, after) in &self.moved {
+            *states
+                .entry(format!("{:?} → {:?}", before.states.1, after.states.1))
+                .or_default() += 1;
+        }
+        writeln!(
+            report,
+            "{} bodies move; published states {states:?}:",
+            self.moved.len()
+        )
+        .expect(line);
+        for (label, before, after) in &self.moved {
+            if before.states != after.states {
+                writeln!(
+                    report,
+                    "  STATE {label}: {} → {}",
+                    before.line(),
+                    after.line()
+                )
+                .expect(line);
+            }
+        }
+        let largest = self
+            .moved
+            .iter()
+            .map(|(label, before, after)| ((after.t_s.value() - before.t_s.value()).abs(), *label))
+            .fold((0.0_f64, None), |(most, at), (dt, label)| {
+                if dt > most {
+                    (dt, Some(label))
+                } else {
+                    (most, at)
+                }
+            });
+        writeln!(
+            report,
+            "the largest move in T_s: {:.3} K, {:?}",
+            largest.0, largest.1
+        )
+        .expect(line);
+    }
+
+    /// The counts by route and the airs' Woitke types at both rules, into `report`.
+    fn route_lines(&self, report: &mut String) {
+        let line = "a string takes a line";
+        let mut routes = BTreeMap::<String, usize>::new();
+        for body in self.at_36.values() {
+            *routes.entry(body.route()).or_default() += 1;
+        }
+        let air = |body: &CarrierBody| body.p_s.is_some_and(|p| p.value() > 0.0);
+        let types = |bodies: &CarrierBodies| {
+            let mut types = BTreeMap::<String, usize>::new();
+            for body in bodies.values().filter(|b| air(b)) {
+                *types.entry(format!("{:?}", body.woitke)).or_default() += 1;
+            }
+            types
+        };
+        writeln!(
+            report,
+            "the carriers over {} bodies: routes {routes:?}",
+            self.at_36.len()
+        )
+        .expect(line);
+        writeln!(
+            report,
+            "Woitke's types, classified not reached ({WOITKE_TYPES_CLASSIFIED}): airs held {:?}, \
+             at 36 {:?}",
+            types(self.held),
+            types(self.at_36)
+        )
+        .expect(line);
+    }
+
+    fn report(&self) -> String {
+        let line = "a string takes a line";
+        let mut report = String::new();
+        self.route_lines(&mut report);
+        let hot = self.vented_but_hot();
+        writeln!(
+            report,
+            "{} vented airs published hot (a runaway by rule 6, a surface its greenhouse holds \
+             molten, a steam envelope): {hot:#?}",
+            hot.len()
+        )
+        .expect(line);
+        let (mut shifted, mut debit, mut dried) = (0_usize, 0.0_f64, Vec::new());
+        let (mut dry, mut dry_mass) = (0_usize, 0.0_f64);
+        let (mut capped, mut crust) = (0_usize, 0.0_f64);
+        let (mut kept_hydrogen, mut methane_airs) = (0_usize, Vec::new());
+        for (label, body, out) in self.vented() {
+            if out.shifted.value() > 0.0 {
+                shifted += 1;
+            }
+            if out.dried {
+                dried.push(label);
+            }
+            debit += out.water_debit.value();
+            if out.dry_monoxide.value() > 0.0 {
+                dry += 1;
+                dry_mass += out.dry_monoxide.value();
+            }
+            if out.graphite.value() > 0.0 {
+                capped += 1;
+                crust += out.graphite.value();
+            }
+            if out.hydrogen_kept.value() > 0.0 {
+                kept_hydrogen += 1;
+            }
+            if out.methane_share > 0.0 {
+                methane_airs.push((label, out.methane_share, body));
+            }
+        }
+        writeln!(
+            report,
+            "{} airs the shift dried, their water all taken: {dried:?}",
+            dried.len()
+        )
+        .expect(line);
+        methane_airs.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(b.0)));
+        let over = |x: f64| methane_airs.iter().filter(|(_, s, _)| *s > x).count();
+        let bulk = |body: &CarrierBody| {
+            !matches!(body.states.0, SurfaceState::Airless | SurfaceState::Tenuous)
+        };
+        let bulk_over = |x: f64| {
+            methane_airs
+                .iter()
+                .filter(|(_, s, body)| *s > x && bulk(body))
+                .count()
+        };
+        writeln!(
+            report,
+            "vented: {shifted} airs shifted, the vented airs' water debit {debit:.4e} kg in all; {dry} dry CO \
+             airs on the CO2 stand-in, {dry_mass:.4e} kg as CO2; {capped} graphite-capped, \
+             {crust:.4e} kg of carbon left in their crusts; {kept_hydrogen} keep some H2; {} \
+             vent-CH4 airs held on the carbon, the vent's CH4 over 1% of their gas's carbon in {}, \
+             over 10% in {}, over 50% in {}; of bulk airs (not airless or tenuous) {}, {} and {}",
+            methane_airs.len(),
+            over(0.01),
+            over(0.1),
+            over(0.5),
+            bulk_over(0.01),
+            bulk_over(0.1),
+            bulk_over(0.5),
+        )
+        .expect(line);
+        let listed = methane_airs
+            .iter()
+            .filter(|(_, s, body)| *s > 0.01 && bulk(body))
+            .chain(
+                methane_airs
+                    .iter()
+                    .filter(|(_, s, body)| *s > 0.01 && !bulk(body))
+                    .take(10),
+            );
+        for (label, share, body) in listed {
+            writeln!(
+                report,
+                "  CH4 {share:.4} {label}: {}, haze {}",
+                body.line(),
+                body.haze
+            )
+            .expect(line);
+        }
+        self.moved_lines(&mut report);
+        report
+    }
+}
+
+/// P14.T55.a.c over the ordinary census's systems (research-leans-58): under every other 36 hold,
+/// this one held, and under every 36 hold, every body's carriers by their route, with:
+///
+/// - **Woitke's types classified, not reached**: each air's type by its element budget
+///   (`chem::secondary`), [`WOITKE_TYPES_CLASSIFIED`];
+/// - **finiteness and balance**: every partial pressure finite, and each element's outcome summing
+///   to its inventory within 10⁻⁹, the crust's graphite and the water debit counted;
+/// - **the counts, by name**: the shifted airs and their water debit, the dry CO airs on the
+///   stand-in, the graphite-capped bodies and their crusts' carbon, the vent-CH₄ airs held on the
+///   carbon with their CH₄ shares, and the hot airs held;
+/// - **the states**: every body that moves shares its system with a vented body (a moon reads its
+///   planet), every body on P14.T24.f's methane arm publishes the same to the bit, the states moved
+///   are listed by name, and the vented airs published hot, and the census's own checks hold (every registry row reached or listed, none of 25's and 26's fixed
+///   findings, no envelope changing section inside the clock window);
+/// - **the anchors** (the table's): Earth, Venus and Mars carry their carbon as CO₂, Earth's
+///   measured state stays within 288 ± 2 K and its hydrogen is lost, and Titan's methane is
+///   P14.T24.f's to the bit, within its bounds; Pluto's and Triton's kind, every methane-arm body
+///   of the census, publishes the same air to the bit.
+#[test]
+#[ignore = "slow: 10⁵ bodies of 6,800 systems with the vent's carriers held and in force, on \
+            sixteen threads"]
+fn composition_census_under_every_36_hold_speciates_every_secondary_air() {
+    let start = Instant::now();
+    let (_, held) = carrier_census(
+        |run| with_every_36_hold(|| with_outgassing_speciation(OutgassingRules::Held, run)),
+        DeckWalk::DecksAlone,
+    );
+    let (census, at_36) = carrier_census(|run| with_every_36_hold(run), DeckWalk::WithTheCensus);
+    assert!(census.bodies >= ORDINARY_BODIES, "{} bodies", census.bodies);
+    assert_eq!(
+        held.keys().collect::<Vec<_>>(),
+        at_36.keys().collect::<Vec<_>>(),
+        "the same bodies at both rules"
+    );
+    let moves = CarrierMoves::of(&held, &at_36);
+    let report = moves.report();
+    eprintln!("{report}({:.1} s)", start.elapsed().as_secs_f64());
+    for (label, body) in &held {
+        assert_eq!(body.vent, None, "{label}: no route below 36");
+    }
+    let unfinished: Vec<String> = at_36
+        .iter()
+        .filter(|(_, b)| !b.finite())
+        .map(|(label, b)| format!("{label}: {}", b.line()))
+        .collect();
+    assert_eq!(
+        unfinished,
+        Vec::<String>::new(),
+        "a figure that is not finite"
+    );
+    let unbalanced: Vec<String> = at_36
+        .iter()
+        .filter(|(_, b)| b.outgassed().is_some() && (b.balance.is_nan() || b.balance > 1e-9))
+        .map(|(label, b)| format!("{label}: {:.3e}, {}", b.balance, b.line()))
+        .collect();
+    assert_eq!(
+        unbalanced,
+        Vec::<String>::new(),
+        "an element's outcome off its inventory"
+    );
+    assert_eq!(
+        moves.strays(),
+        Vec::<&String>::new(),
+        "a body moved in a system with no vented body\n{report}"
+    );
+    for (label, body) in &at_36 {
+        if matches!(body.vent, Some(VentRoute::MethaneArm)) {
+            assert!(
+                body.same(&held[label]),
+                "{label}: on the methane arm, moved"
+            );
+        }
+    }
+    census.assert_reached();
+    census.assert_fixed_under_26();
+    census.assert_no_envelope_changes();
+    assert_the_carriers_anchors();
+}
+
+/// The carriers' anchors on the Solar System's table (P14.T55.a.c's census): Earth, Venus and Mars
+/// carry their carbon as CO₂, 99% of it by moles; Earth's surface moves under 0.01 K and keeps no
+/// H₂ (its measured state's 288 ± 2 K is
+/// `earth_s_carbon_is_unchanged_its_co_shifted_by_its_water_and_its_hydrogen_lost`'s); Titan is
+/// P14.T24.f's to the bit, its CH₄ 4.09% by number to 10% (`titan_carries_methane_at_its_measured_share`).
+fn assert_the_carriers_anchors() {
+    use crate::planetary::derive::atmosphere::tests::table;
+    use crate::planetary::derive::solar::found;
+    let held = with_every_36_hold(|| with_outgassing_speciation(OutgassingRules::Held, table));
+    let at_36 = with_every_36_hold(table);
+    let moles = |body: &DerivedBody, gas: Gas| {
+        body.atmosphere().partial_pressures().of(gas).value() / gas.molar_mass_g_per_mol()
+    };
+    for name in ["Earth", "Venus", "Mars"] {
+        let body = found(&at_36, name);
+        let (co2, ch4) = (moles(body, Gas::CarbonDioxide), moles(body, Gas::Methane));
+        eprintln!("{name} at 36: CO2 {co2:.4e}, CH4 {ch4:.4e} by weight over molar mass");
+        assert!(
+            co2 > 0.0 && co2 >= 0.99 * (co2 + ch4),
+            "{name}: {co2} against {ch4}"
+        );
+        if let Some(VentRoute::Vented(out)) = body.atmosphere().vent() {
+            assert_eq!(out.dry_monoxide.value(), 0.0, "{name}: dry CO {out:?}");
+        }
+    }
+    let (earth, earth_held) = (found(&at_36, "Earth"), found(&held, "Earth"));
+    let dt = earth.atmosphere().surface_temperature().value()
+        - earth_held.atmosphere().surface_temperature().value();
+    assert!(dt.abs() < 0.01, "Earth moves {dt} K");
+    assert_eq!(
+        earth.atmosphere().partial_pressures().of(Gas::Hydrogen),
+        Pascals::ZERO
+    );
+    let (titan, titan_held) = (found(&at_36, "Titan"), found(&held, "Titan"));
+    let (air, before) = (titan.atmosphere(), titan_held.atmosphere());
+    assert_eq!(air.vent(), Some(VentRoute::MethaneArm));
+    let bits = |a: f64, b: f64| a.total_cmp(&b).is_eq();
+    assert!(bits(
+        air.surface_temperature().value(),
+        before.surface_temperature().value()
+    ));
+    for gas in Gas::ALL {
+        assert!(bits(
+            air.partial_pressures().of(gas).value(),
+            before.partial_pressures().of(gas).value()
+        ));
+    }
+    let total = Gas::ALL
+        .iter()
+        .fold(0.0, |sum, &gas| sum + moles(titan, gas));
+    let x = moles(titan, Gas::Methane) / total;
+    assert!(((x - 0.0409) / 0.0409).abs() < 0.10, "Titan's CH4 at {x}");
 }

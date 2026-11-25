@@ -8851,7 +8851,8 @@ Each is labelled "not yet modelled" where a console could show it:
   carriers (science-p14-t24f §5);
   - _Split_ in three (lean, 2026-11-25): a, the heavy-secondary equilibrium; b, the vent's gas by
     ΔIW; c, the carriers on the snapshot path, held. _Built_ b, 2026-11-25, with no hold: Risks,
-    "P14.T55.a.b's vent gas, as built".
+    "P14.T55.a.b's vent gas, as built". _Built_ c, 2026-11-25, held at 36: Risks, "P14.T55.a.c's
+    carriers, as built".
   - **P14.T55.a.a The heavy-secondary equilibrium** (split off with b, the vent's redox, and c,
     the carriers, held; lean, 2026-11-25): `chem::secondary`, Woitke's types A–C on one bracketed
     root in the oxygen potential, with the hydrogen's inner root (Risks). _Built_ 2026-11-25, read
@@ -13015,7 +13016,9 @@ ResolveBodyError>` in `planetary/system.rs`: `position_at`'s position bit for bi
 
   Recorded limitations, each with its task:
   - the heavy-secondary equilibrium and redox-set outgassing wait for T55.a, so a reduced warm
-    world has no CH₄–H₂ air and Woitke's types are not reached;
+    world has no CH₄–H₂ air and Woitke's types are not reached; from 36 (P14.T55.a.c) they are
+    classified, not reached: the published air is the vent's quenched gas; the low-temperature
+    equilibrium is a reference (research-leans-58 ruling 1);
   - the H₂ below `THIN_ENVELOPE_FRACTION` is dropped until T53.a;
   - a runaway world loses all its water until T53.b;
   - Pluto and Triton are `Airless`, and keep none of their N₂, CH₄ or CO, until T53.c: T13.b's
@@ -34751,3 +34754,27 @@ ACTIVE HOST · HOST LEAVING MAIN SEQUENCE · EXTRAPOLATED ZONE · FROZEN SURFACE
     paper); the onset is checked on the registry's own records.
   - _Cost:_ 2.7 µs a solve (pod, 16 vCPU, release, one thread); no table (lean, research-leans-58:
     nothing calls it per body at 36).
+- **P14.T55.a.c's carriers, as built (lane `p14-t55ac-carriers`, 2026-11-25).** Held at 36
+  (`OUTGASSING_SPECIATION_VERSION`, `OutgassingRules::{Held, Speciated}`, `with_outgassing_speciation`,
+  its `HeldRules` line, `testing::with_every_36_hold`, apart from 35's); 33 bit for bit, no golden moved.
+  - _New items:_ `derive::atmosphere::VentConditions` (`basaltic`), `AtmosphereInputs::vent`;
+    crate-private `derive::atmosphere::vented` (`VentRoute`, `Outgassed`, `outgassed`, `carbon_view`)
+    and `Atmosphere::vent`, the route each air took, for the census and P14.T55.d's crust graphite.
+  - _Ruled (research-leans-58):_ 1, the vent's quenched gas, T24.f's methane arm first, the water
+    staying water, the shift's H₂ to Hunten's diffusion limit; 2, the shift where the air holds water,
+    debiting it, a dry air's CO on the CO₂ stand-in; 3, the vent's CH₄ in CO₂'s τ term mole for mole;
+    4, no CO row, hot airs on T24.f's carriers; 5, graphite's cap at K_f(CO) f(O₂)^½.
+  - _Deviation:_ `derive/mod.rs` builds ΔIW and a vent temperature only. The vent's pressure is the
+    air's own, solved inside the atmosphere with the cap: its kept N₂, Ar and carbon at the division's
+    least airborne share, times the shoreline's (Earth 0.77 bar).
+  - _Lean (2026-11-25):_ every vent is basaltic (1,473.15 K): a lid's eruption temperature is its
+    pass's output; `vent_elements` reads the drawn carriers, as `of_exchangeable` would.
+  - _Lean (2026-11-25):_ the cap reads the airborne carbon's CO weight (the division's share), so a
+    temperate thermostat's thin air reaches no cap; ice bulks keep T24.f's carriers (a seafloor vent).
+  - _Lean (2026-11-25):_ "hot" is the division's state or the class (a hothouse re-solve), not
+    P14.T53.e's carried state, which made 2-cycles; the census lists the vented airs published hot.
+  - _Lean (2026-11-25):_ the vent's CH₄ is the vent's supply, outside `methane_outcome`; its hydrogen
+    is two H₂O; the thermostat stores it with the CO₂. The water debit reaches the surface's water.
+  - _Accept:_ `cargo test -p hyperion-sim --lib` over `planetary::derive::atmosphere` and
+    `planetary::chem::outgassing`; the slow census by name,
+    `composition_census_under_every_36_hold_speciates_every_secondary_air`.
