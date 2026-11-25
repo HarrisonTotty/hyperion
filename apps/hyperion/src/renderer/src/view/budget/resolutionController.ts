@@ -10,7 +10,10 @@
  * - **From GPU time** the frame's cost is taken to grow as the square of the scale, all of it
  *   pixels. The scale drops once two of the last four frames are over the budget, to where the
  *   worst of them would take {@link CONTROLLER_TUNING}'s `aim` of it. It rises once a run of frames
- *   has stayed under `raiseBelow` of the budget, to where the worst of the run would take `aim`.
+ *   has stayed under `raiseBelow` of the budget, to where the worst of the run would take `aim`. As
+ *   a drop needs two frames over the budget in four, a frame at or over `raiseBelow` breaks the run
+ *   only with another in the last four (lane fix-floor-calm): an isolated one stays in the run, out
+ *   of its worst, so that the M5's orbit, whose every tenth frame stood over the line, still rises.
  *   Fixed costs make a frame cheaper than the square predicts after a rise and dearer after a
  *   drop, so a rise never overshoots (it may land short of the top) and a drop may take a second
  *   step. Between `raiseBelow` and the budget the scale holds: that band, about 25% wide, is far
@@ -122,8 +125,11 @@ export class ResolutionController {
   #target: ResolutionTarget;
   #scale: number;
   #source: Source | null = null;
-  /** Whether each of the last few frames was over the budget or missed, and its GPU time, ms. */
-  #recent: Array<{ readonly over: boolean; readonly ms: number }> = [];
+  /**
+   * Whether each of the last few frames was over the budget or missed, whether it stood at or over
+   * `raiseBelow` of it (`high`), and its GPU time, ms.
+   */
+  #recent: Array<{ readonly over: boolean; readonly high: boolean; readonly ms: number }> = [];
   /** Frames in the current run under `raiseBelow` (GPU) or without a miss (interval). */
   #run = 0;
   /** The worst GPU time of the run, ms. */
@@ -134,6 +140,7 @@ export class ResolutionController {
   /** Updates since the last rise, while it is watched; `null` when no rise is. */
   #sinceRaise: number | null = null;
   #beforeRaise = 0;
+  #wantedBelowMin = false;
 
   /**
    * @param bounds - `ViewSettings.internalScaleBounds` or a narrower pair: 0 < min ≤ max.
@@ -159,6 +166,15 @@ export class ResolutionController {
   }
 
   /**
+   * Whether the last update's drop aimed below the bounds' min (lane fix-floor-calm): its frames are
+   * over the budget at its lowest scale, or would be at the scale it aimed for, so that only more
+   * than its scale can bring them back (a frame-rate floor's air, `BudgetedScale.airStepped`).
+   */
+  get wantedBelowMin(): boolean {
+    return this.#wantedBelowMin;
+  }
+
+  /**
    * Gives the controller a new budget (an instrument opened or closed, the setting changed, a
    * measured vsync period): it keeps the scale and starts its windows and its waits again, since
    * the frames it holds and the rises that failed were judged against the old budget. A target
@@ -176,6 +192,15 @@ export class ResolutionController {
       return;
     }
     this.#target = target;
+    this.restart();
+  }
+
+  /**
+   * Starts its windows and its waits again, keeping its scale, as a new budget does: for a change
+   * to its frames' cost it does not make (lane fix-floor-calm; a floor's air stepped or returned),
+   * after which the frames it holds and the rises that failed say nothing of the frames to come.
+   */
+  restart(): void {
     this.#doublings = 0;
     this.#sinceRaise = null;
     this.#restartWindows();
@@ -195,6 +220,7 @@ export class ResolutionController {
    */
   update(gpuFramesMs: ReadonlyArray<number> | undefined, intervalMs: number): number {
     const source: Source = gpuFramesMs === undefined ? "interval" : "gpu";
+    this.#wantedBelowMin = false;
     if (source !== this.#source) {
       this.#source = source;
       this.#doublings = 0;
@@ -226,20 +252,25 @@ export class ResolutionController {
   #fromGpu(ms: number): boolean {
     const t = CONTROLLER_TUNING;
     const budget = this.#target.gpuBudgetMs;
-    if (this.#push(ms > t.dropAbove * budget, ms)) {
+    const high = ms >= t.raiseBelow * budget;
+    if (this.#push(ms > t.dropAbove * budget, ms, high)) {
       const worst = Math.max(...this.#recent.map((frame) => frame.ms));
       let next = this.#scale * Math.sqrt((t.aim * budget) / worst);
       if (this.#sinceRaise !== null) {
         next = Math.min(next, this.#beforeRaise);
       }
+      this.#wantedBelowMin = next < this.#bounds[0];
       return this.#drop(next, "gpu");
     }
-    if (ms < t.raiseBelow * budget) {
+    if (!high) {
       this.#run += 1;
       this.#runMaxMs = Math.max(this.#runMaxMs, ms);
-    } else {
+    } else if (this.#recent.filter((frame) => frame.high).length >= t.dropCount) {
       this.#run = 0;
       this.#runMaxMs = 0;
+    } else {
+      // Alone in the last few, as a drop takes a lone frame over the budget: it stays in the run.
+      this.#run += 1;
     }
     if (this.#run >= this.#hold("gpu") && this.#scale < this.#bounds[1]) {
       // A run of empty frames (0 ms) has no cost to scale from: rise to the top.
@@ -257,7 +288,7 @@ export class ResolutionController {
       this.#drop(this.#beforeRaise, "interval");
       return;
     }
-    if (this.#push(missed, 0)) {
+    if (this.#push(missed, 0, false)) {
       this.#drop(this.#scale * t.intervalDrop, "interval");
       return;
     }
@@ -273,9 +304,9 @@ export class ResolutionController {
   }
 
   /** Records a frame; returns whether the recent frames call for a drop. */
-  #push(over: boolean, ms: number): boolean {
+  #push(over: boolean, ms: number, high: boolean): boolean {
     const t = CONTROLLER_TUNING;
-    this.#recent.push({ over, ms });
+    this.#recent.push({ over, high, ms });
     if (this.#recent.length > t.dropWindow) {
       this.#recent.shift();
     }

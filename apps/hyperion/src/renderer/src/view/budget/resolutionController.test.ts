@@ -127,6 +127,20 @@ function quantized(passes: number, seed: number): (ms: number) => number {
   };
 }
 
+/**
+ * A controller on bounds [0.5, 1] dropped once by two frames at twice the budget, its settle past:
+ * at 0.67.
+ */
+function droppedOnce(): ResolutionController {
+  const controller = new ResolutionController([0.5, 1], TARGET);
+  controller.update([2 * BUDGET_MS], TARGET.periodMs);
+  controller.update([2 * BUDGET_MS], TARGET.periodMs);
+  for (let update = 0; update < CONTROLLER_TUNING.settleUpdates; update += 1) {
+    controller.update([], TARGET.periodMs);
+  }
+  return controller;
+}
+
 /** Every 100 frames, two frames do twice the pixel work. */
 const PIXEL_SPIKES: Load = (scale, frame) => load(2, frame % 100 < 2 ? 12 : 6)(scale, frame);
 
@@ -312,6 +326,62 @@ describe("ResolutionController", () => {
     expect(controller.scale).toBe(0.5);
     run(controller, 100, () => 0, {}, 300);
     expect(controller.scale).toBe(1);
+  });
+
+  it("rises past a lone frame at or over raiseBelow, leaving it out of the run's worst, as a drop leaves a lone frame over the budget (lane fix-floor-calm)", () => {
+    const controller = droppedOnce();
+    const from = controller.scale;
+    // Every tenth frame at 0.8 of the budget, over the band's floor; the rest at half of it.
+    let frames = 0;
+    while (controller.scale === from && frames < 1_000) {
+      controller.update([frames % 10 === 5 ? 0.8 * BUDGET_MS : 0.5 * BUDGET_MS], TARGET.periodMs);
+      frames += 1;
+    }
+    expect(frames).toBe(CONTROLLER_TUNING.raiseHoldFrames);
+    expect(controller.scale).toBeCloseTo(from * Math.sqrt(CONTROLLER_TUNING.aim / 0.5), 12);
+  });
+
+  it("does not rise while two frames in four stand at or over raiseBelow, as before", () => {
+    const controller = droppedOnce();
+    const from = controller.scale;
+    for (let frame = 0; frame < 1_000; frame += 1) {
+      const pair = frame % 10 === 5 || frame % 10 === 6;
+      controller.update([pair ? 0.8 * BUDGET_MS : 0.5 * BUDGET_MS], TARGET.periodMs);
+    }
+    expect(controller.scale).toBe(from);
+  });
+
+  it("says when its drop aims below its bounds' min, and only then (lane fix-floor-calm)", () => {
+    const wanted = (ms: number, scale: number): boolean => {
+      const controller = new ResolutionController([scale, 1], TARGET);
+      controller.update([ms], TARGET.periodMs);
+      controller.update([ms], TARGET.periodMs);
+      return controller.wantedBelowMin;
+    };
+    // 5% over aims at 0.93 of the scale; five times over at 0.42.
+    expect([
+      wanted(1.05 * BUDGET_MS, 0.5),
+      wanted(5 * BUDGET_MS, 0.5),
+      wanted(1.05 * BUDGET_MS, 0.95),
+    ]).toEqual([false, true, true]);
+  });
+
+  it("keeps its scale and starts its run again when restarted (lane fix-floor-calm)", () => {
+    const controller = droppedOnce();
+    const from = controller.scale;
+    const light = (): void => {
+      controller.update([0.5 * BUDGET_MS], TARGET.periodMs);
+    };
+    for (let frame = 0; frame < CONTROLLER_TUNING.raiseHoldFrames - 1; frame += 1) {
+      light();
+    }
+    controller.restart();
+    for (let frame = 0; frame < CONTROLLER_TUNING.raiseHoldFrames - 1; frame += 1) {
+      light();
+    }
+    const held = controller.scale;
+    light();
+    expect([held, controller.scale > from]).toEqual([from, true]);
   });
 
   it("drops further when its budget shrinks", () => {

@@ -10262,4 +10262,14 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
 - **The calm line holds the M5's air stepped at a real 60 fps (lean for main, 2026-11-19):** on
   the 11-08 batch's figures the orbit's union at the lowest step is about 16.9 ms, over
   `CALM_SHARE` × 26.7 = 13.3 ms, so once stepped its air never returns; closed in, the union, about
-  29 ms at the lowest step, is over the budget itself. Not changed here.
+  29 ms at the lowest step, is over the budget itself. Ruled in lane fix-floor-calm (below).
+- **The floor's air, ruled (lane fix-floor-calm, 2026-11-19; a research ruling, lean):**
+  `floorAir.ts`. Under the pass timer the air steps only once the controller's drop aims below the
+  lowest step (`ResolutionController.wantedBelowMin`; a milder overload drops the scale alone), and
+  returns at any scale once 60 frames in a row, each carried to the lowest step by the square of the
+  scale and given the air's cost (`FloorAir.costRatio`, measured at each step, 1 until then), have
+  had no two over `aim` of the budget in four. A step within 30 s of a return doubles the next wait
+  (to 16×); one within 30 updates holds returns at that scale while its frames there stay within
+  10%, two in four heavier lifting it (lean: the square under-reads a fixed cost). Each air change calls `ResolutionController.restart`; its
+  rise keeps a lone frame over `raiseBelow` in its run. `CALM_SHARE` is gone; without a timer the
+  air is as before.

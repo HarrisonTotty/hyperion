@@ -5,16 +5,15 @@ import type { PassTimes } from "../engine/types";
 import { SETTINGS } from "../quality/qualitySetting";
 import { overlappedPasses, serialPasses } from "../../test/passTimes";
 import {
+  AIR_TUNING,
   BudgetedScale,
-  CALM_FRAMES,
   CALM_INTERVAL_SHARE,
-  CALM_SHARE,
   drawsInFrame,
   FramePacer,
   PENDING_PRIMARY_FRAMES,
   PrimaryFrameTimes,
 } from "./framePacing";
-import { gpuTimeMs } from "./resolutionController";
+import { CONTROLLER_TUNING, gpuTimeMs } from "./resolutionController";
 import { SELECTION_SCALE_HOLD_FRAMES, selectionScaleStep } from "./selectionScale";
 import { type ViewBudget, viewBudgets, type ViewSpec } from "./viewBudget";
 
@@ -449,38 +448,72 @@ describe("BudgetedScale", () => {
     ]);
   });
 
-  it("brings a floor's air back once its scale is at its max and its frames have stayed calm", () => {
-    const floor = viewBudgets(
-      [{ id: PRIMARY, slot: "primary", style: "photorealistic" }],
-      "high",
-      1080,
-    ).get(PRIMARY);
-    const gpuBudgetMs = floor?.control?.target.gpuBudgetMs ?? 0;
-    if (floor === undefined) {
-      throw new Error("no primary budget");
-    }
+  it("drops a floor's scale alone on a mild overload, its air kept (lane fix-floor-calm)", () => {
+    const floor = floorBudget(1080);
+    const [lowest, highest] = floor.control.bounds;
+    const budgetMs = floor.control.target.gpuBudgetMs;
+    // Frames 5% over the budget at full scale: the controller drops to 0.93 of it.
+    const mild = driveFloor(floor, 600, (_, scale) => 1.05 * budgetMs * scale * scale);
+    expect([mild.changes, mild.scale < highest && mild.scale > lowest]).toEqual([[], true]);
+  });
+
+  it("steps a floor's air in the frame its drop would pass its lowest step (lane fix-floor-calm)", () => {
+    const floor = floorBudget(1080);
+    const budgetMs = floor.control.target.gpuBudgetMs;
+    // Frames three times the budget: the drop aims at 0.55, below the floor's 0.67.
+    const heavy = driveFloor(floor, 600, (_, scale) => 3 * budgetMs * scale * scale);
+    expect([heavy.changes, heavy.lowestScale]).toEqual([[1], floor.control.bounds[0]]);
+  });
+
+  /** A heavy load, its own air the stepped frame again, that lightens after 600 frames. */
+  const lightening = (n: number, scale: number, stepped: boolean): number =>
+    (n < 600 ? heavyMs(scale) : lightMs(scale)) * (stepped ? 1 : 2);
+
+  it("measures what its step saved, and holds its air stepped while its frames with that cost would not fit at its lowest step (lane fix-floor-calm)", () => {
+    const floor = floorBudget(1080);
+    const run = driveFloor(floor, 600, lightening);
+    // Stepped at the lowest step the heavy frames, 13.3 ms, given the cost, 26.7, stay over 24.
+    const heldMs = 2 * heavyMs(floor.control.bounds[0]);
+    expect([
+      run.changes,
+      run.costRatio,
+      heldMs > CONTROLLER_TUNING.aim * floor.control.target.gpuBudgetMs,
+    ]).toEqual([[1], 1, true]);
+  });
+
+  it("brings its air back once its frames with the measured cost would fit at its lowest step (lane fix-floor-calm)", () => {
+    const run = driveFloor(floorBudget(1080), 2_400, lightening);
+    // Back 67 frames after the load lightens: its run of 60, and the settle of the scale's rise.
+    expect([run.changes, run.airStepped, run.scale]).toEqual([
+      [1, 600 + AIR_TUNING.returnFrames + 7],
+      false,
+      1,
+    ]);
+  });
+
+  it("keeps its air stepped when its floor's bounds change, reading the new controller's frames once they settle (lane fix-floor-calm)", () => {
+    const before = floorBudget(1080);
+    const after = floorBudget(886);
     const scale = new BudgetedScale();
-    for (let frame = 0; frame < 20; frame += 1) {
-      scale.update(floor, [3 * gpuBudgetMs], 16.7);
+    let s = scale.update(before, [], 1000 / 60);
+    for (let n = 0; n < 600; n += 1) {
+      s = scale.update(before, [heavyMs(s) * (scale.airStepped ? 1 : 2)], 1000 / 60);
     }
-    // Frames well under the budget raise the scale back to its max; the air waits for its calm run.
+    const stepped = scale.airStepped;
+    // The window's rows change: a new controller at its max, the air as it stood.
+    s = scale.update(after, [heavyMs(s)], 1000 / 60);
+    const kept = scale.airStepped;
     let frames = 0;
-    while (scale.controller?.scale !== max && frames < 2_000) {
-      scale.update(floor, [0.3 * gpuBudgetMs], 16.7);
+    while (scale.airStepped && frames < 1_000) {
+      s = scale.update(after, [lightMs(s)], 1000 / 60);
       frames += 1;
     }
-    expect([scale.controller?.scale, scale.airStepped]).toEqual([max, true]);
-    // The frame that brought the scale back was calm, its run's first; frames at the calm share's
-    // edge go on with it, and one over it, a frame short of the run, starts it again.
-    for (let frame = 0; frame < CALM_FRAMES - 2; frame += 1) {
-      scale.update(floor, [CALM_SHARE * gpuBudgetMs], 16.7);
-    }
-    scale.update(floor, [0.6 * gpuBudgetMs], 16.7);
-    expect(scale.airStepped).toBe(true);
-    for (let frame = 0; frame < CALM_FRAMES; frame += 1) {
-      scale.update(floor, [0.3 * gpuBudgetMs], 16.7);
-    }
-    expect(scale.airStepped).toBe(false);
+    // The update the bounds changed in was the settle's first.
+    expect([stepped, kept, frames]).toEqual([
+      true,
+      true,
+      CONTROLLER_TUNING.settleUpdates - 1 + AIR_TUNING.returnFrames,
+    ]);
   });
 
   it("brings a floor's air back by its frames' intervals while the timer is absent", () => {
@@ -600,6 +633,16 @@ describe("BudgetedScale", () => {
   });
 });
 
+/** A stepped frame of 30 ms at full scale, ms, all pixels; its own air costs as much again. */
+function heavyMs(scale: number): number {
+  return 30 * scale * scale;
+}
+
+/** A stepped frame of 10 ms at full scale: its own air at 1080 rows' lowest step 8.9 ms. */
+function lightMs(scale: number): number {
+  return 10 * scale * scale;
+}
+
 /** The primary alone on high, with its frame-rate floor, at `rows` render rows. */
 function floorBudget(
   rows: number,
@@ -717,6 +760,107 @@ function replayMac(
   });
 }
 
+/** What a run of a floor's frames came to: when its air changed, and how it ended. */
+interface DrivenFloor {
+  /** The frames after which its air changed, counted from 0. */
+  readonly changes: ReadonlyArray<number>;
+  readonly scale: number;
+  readonly lowestScale: number;
+  readonly airStepped: boolean;
+  readonly costRatio: number;
+}
+
+/**
+ * Drives `floor` for `frames` frames at 60 Hz, frame `n` costing `costMs(n, scale, stepped)` at the
+ * scale and the air it was drawn at, its time handed over at the next update.
+ */
+function driveFloor(
+  floor: ViewBudget,
+  frames: number,
+  costMs: (n: number, scale: number, stepped: boolean) => number,
+): DrivenFloor {
+  const scale = new BudgetedScale();
+  let s = scale.update(floor, [], 1000 / 60);
+  let lowestScale = s;
+  let stepped = scale.airStepped;
+  const changes: number[] = [];
+  for (let n = 0; n < frames; n += 1) {
+    s = scale.update(floor, [costMs(n, s, scale.airStepped)], 1000 / 60);
+    lowestScale = Math.min(lowestScale, s);
+    if (scale.airStepped !== stepped) {
+      stepped = scale.airStepped;
+      changes.push(n);
+    }
+  }
+  return { changes, scale: s, lowestScale, airStepped: stepped, costRatio: scale.airCostRatio };
+}
+
+/** What a replay of the batch's windows, the air given a cost, came to in each window. */
+interface ReplayedAir {
+  /** The window's frames after which the air changed, counted from its first. */
+  readonly airChanges: ReadonlyArray<number>;
+  /** The window's frames after which the scale changed. */
+  readonly scaleChanges: ReadonlyArray<number>;
+  readonly scale: number;
+  readonly airStepped: boolean;
+  readonly costRatio: number;
+}
+
+/**
+ * Replays `frames` frames of each of `windows` in turn through one floor, on the union, each frame
+ * of the floor's own air `airFactor` times its stepped one (the batch timed only the stepped air).
+ */
+function replayMacAir(
+  windows: ReadonlyArray<MacWindow>,
+  airFactor: number,
+  frames: number,
+): ReplayedAir[] {
+  const floor = floorBudget(886);
+  const lowest = floor.control.bounds[0];
+  const scale = new BudgetedScale();
+  let s = scale.update(floor, [], 1000 / 60);
+  return windows.map((window) => {
+    const airChanges: number[] = [];
+    const scaleChanges: number[] = [];
+    for (let n = 0; n < frames; n += 1) {
+      const stepped = scale.airStepped;
+      const before = s;
+      const ms = gpuTimeMs(macFrame(window, n, s, lowest)) * (stepped ? 1 : airFactor);
+      s = scale.update(floor, [ms], 1000 / 60);
+      if (scale.airStepped !== stepped) {
+        airChanges.push(n);
+      }
+      if (s !== before) {
+        scaleChanges.push(n);
+      }
+    }
+    return {
+      airChanges,
+      scaleChanges,
+      scale: s,
+      airStepped: scale.airStepped,
+      costRatio: scale.airCostRatio,
+    };
+  });
+}
+
+/** A small deterministic generator in [0, 1), for a load's jitter. */
+function jitter(seed: number): () => number {
+  let state = seed >>> 0;
+  return () => {
+    state = (Math.imul(state, 1_664_525) + 1_013_904_223) >>> 0;
+    return state / 2 ** 32;
+  };
+}
+
+/** The most of `changes` within any `spanFrames` frames. */
+function mostWithin(changes: ReadonlyArray<number>, spanFrames: number): number {
+  return Math.max(
+    0,
+    ...changes.map((at) => changes.filter((each) => each >= at && each < at + spanFrames).length),
+  );
+}
+
 describe("the 2026-11-08 Mac batch's high-dpr1 frames, replayed through the floor (lane fix-mac-gpu-time)", () => {
   const floor = floorBudget(886);
   const [lowest, highest] = floor.control.bounds;
@@ -742,12 +886,109 @@ describe("the 2026-11-08 Mac batch's high-dpr1 frames, replayed through the floo
     ]);
   });
 
-  it("never bring the air back at orbit once it is stepped: every frame's union is over the calm line, at any scale", () => {
-    const calmMs = CALM_SHARE * floor.control.target.gpuBudgetMs;
-    const cheapest = Math.min(
-      ...Array.from({ length: 20 }, (_, n) => gpuTimeMs(macFrame("orbit", n, lowest, lowest))),
-    );
-    const [, orbit] = replayMac(["close", "orbit"], gpuTimeMs, 3_600);
-    expect([cheapest > calmMs, orbit?.airStepped]).toEqual([true, true]);
+  it("bring high's own air back at orbit after close within 67 frames, the step having measured no cost of the air, and change nothing after (lane fix-floor-calm)", () => {
+    const [close, orbit] = replayMacAir(["close", "orbit"], 1, 3_600);
+    expect([close, orbit]).toEqual([
+      { airChanges: [1], scaleChanges: [1], scale: lowest, airStepped: true, costRatio: 0 },
+      // The controller's rise past orbit's lone dear frames to its band at frame 30, the air at 67.
+      {
+        airChanges: [67],
+        scaleChanges: [30],
+        scale: orbit?.scale,
+        airStepped: false,
+        costRatio: 0,
+      },
+    ]);
+    expect(orbit?.scale).toBeCloseTo(0.9687, 4);
+  });
+
+  it("hold close stepped at the lowest step while its frames are over the budget there, whatever the air costs (lane fix-floor-calm)", () => {
+    const pinned = (airFactor: number): ReadonlyArray<Pick<ReplayedAir, "airChanges" | "scale">> =>
+      replayMacAir(["close"], airFactor, 3_600).map(({ airChanges, scale }) => ({
+        airChanges,
+        scale,
+      }));
+    expect([pinned(1), pinned(2)]).toEqual([
+      [{ airChanges: [1], scale: lowest }],
+      [{ airChanges: [1], scale: lowest }],
+    ]);
+  });
+
+  it("hold orbit stepped from launch and after close where the air costs a stepped frame again, as R08's W5 puts it, its scale in the controller's band (lane fix-floor-calm)", () => {
+    const [fresh] = replayMacAir(["orbit"], 2, 3_600);
+    const [, after] = replayMacAir(["close", "orbit"], 2, 3_600);
+    expect([fresh?.airChanges, fresh?.airStepped, after?.airChanges, after?.airStepped]).toEqual([
+      [1],
+      true,
+      [],
+      true,
+    ]);
+    expect([fresh?.scale, after?.scale].map((s) => Number(s?.toFixed(4)))).toEqual([
+      0.9687, 0.9687,
+    ]);
+  });
+
+  it("wait twice as long to bring orbit's air back when close stepped it within 30 s of its last return (lane fix-floor-calm)", () => {
+    const replayed = replayMacAir(["close", "orbit", "close", "orbit"], 1, 1_200);
+    expect(replayed.map(({ airChanges }) => airChanges)).toEqual([
+      [1],
+      [AIR_TUNING.returnFrames + 7],
+      [1],
+      [2 * AIR_TUNING.returnFrames + 7],
+    ]);
+  });
+});
+
+describe("the floor's air at its boundary (lane fix-floor-calm)", () => {
+  const floor = floorBudget(886);
+  const lowest = floor.control.bounds[0];
+  const budgetMs = floor.control.target.gpuBudgetMs;
+  /** 20 minutes at 60 Hz, and 30 s, the guard's watch. */
+  const TWENTY_MINUTES_FRAMES = 72_000;
+  const WATCH = AIR_TUNING.returnWatchUpdates;
+  /**
+   * A load whose stepped frame is `fixedMs` and pixels, half the budget at the lowest step, and
+   * whose own air as much again in pixels, so that its own frame there is the budget, each ±5%;
+   * every tenth frame `dearFactor` dearer.
+   */
+  const boundary = (
+    fixedMs: number,
+    dearFactor = 1,
+  ): ((n: number, scale: number, stepped: boolean) => number) => {
+    const next = jitter(7);
+    const pixelMs = (budgetMs / 2 - fixedMs) / lowest ** 2;
+    const airMs = budgetMs / 2 / lowest ** 2;
+    return (n, scale, stepped) =>
+      (fixedMs + (pixelMs + (stepped ? 0 : airMs)) * scale * scale) *
+      (0.95 + 0.1 * next()) *
+      (n % 10 === 5 ? dearFactor : 1);
+  };
+
+  it("changes the air of a load at the boundary at most once in any 30 s", () => {
+    const run = driveFloor(floor, TWENTY_MINUTES_FRAMES, boundary(0));
+    expect([run.changes, mostWithin(run.changes, WATCH), run.airStepped]).toEqual([[1], 1, true]);
+  });
+
+  it("tries a return a fixed cost misjudged once at its scale, and changes nothing after it", () => {
+    // 10 ms of it fixed: carried to the lowest step by the square of the scale, it reads 3.4 ms
+    // under, and the first return fails on the frames it was judged on.
+    const run = driveFloor(floor, TWENTY_MINUTES_FRAMES, boundary(10));
+    const [step, back, again] = run.changes;
+    expect([
+      run.changes.length,
+      step,
+      (again ?? 0) - (back ?? 0) <= AIR_TUNING.quickFailUpdates,
+      run.airStepped,
+    ]).toEqual([3, 1, true, true]);
+  });
+
+  it("holds back the return a fixed cost misjudged through the load's lone dear frames", () => {
+    // Every tenth frame 15% dearer, over the hold's band but alone in four.
+    const run = driveFloor(floor, TWENTY_MINUTES_FRAMES, boundary(10, 1.15));
+    expect([run.changes.length, mostWithin(run.changes.slice(2), WATCH), run.airStepped]).toEqual([
+      3,
+      1,
+      true,
+    ]);
   });
 });

@@ -19,9 +19,10 @@
  * primary renders at the bounds' max, unless its frames run long: then its scale is the
  * controller's down to its frame-rate floor ({@link aloneScaleBounds}; the owner's report,
  * 2026-11-01), holding its GPU time to {@link GPU_FRAME_SHARE} of {@link FLOOR_RATE_HZ}'s period,
- * and its image never drawn below the low setting's look, {@link LOW_LOOK_ROWS_PX} rows; once it
- * steps, its air is drawn at the low setting's sizes too (`BudgetedScale.airStepped`), and its
- * label block states {@link IMAGE_DETAIL_LIMITED} while its scale is below 1 or its air stepped. A wireframe view draws
+ * and its image never drawn below the low setting's look, {@link LOW_LOOK_ROWS_PX} rows; once its
+ * frames would be over the budget even there, its air is drawn at the low setting's sizes too
+ * (`BudgetedScale.airStepped`, `floorAir.ts`), and its label block states
+ * {@link IMAGE_DETAIL_LIMITED} while its scale is below 1 or its air stepped. A wireframe view draws
  * straight to its canvas (R02 Design note 12) and has no internal scale: it renders at 1. The
  * outputs are data that R12's runs record.
  */
