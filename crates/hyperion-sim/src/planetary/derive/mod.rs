@@ -124,7 +124,7 @@ use crate::planetary::chem::solar_magnesium_to_silicon;
 use crate::planetary::derive::atmosphere::{
     AtmosphereInputs, Crust, ENVELOPE_LOSS_RADIUS_AGE, EnvelopeHistory, Gas, Insolation, PassLight,
     PassMaturity, PassSurface, PassWeathering, PresentClimate, PublishedState, RunawayDeck,
-    SpunClimate, SpunColdTraps, SurfaceMaterial, VolatileDraws, VolatileInventory,
+    SpunClimate, SpunColdTraps, SurfaceMaterial, VentConditions, VolatileDraws, VolatileInventory,
     atmosphere_and_lid, energy_limited_loss, formation_temperature, helium_left, nitrogen_boosted,
     pass_regolith, pass_resurfacing, solved_as_a_hothouse, solved_without_the_deck,
 };
@@ -2115,6 +2115,7 @@ impl PassBody<'_> {
             flux: sky.flux,
             maximum_greenhouse_flux_ratio: sky.maximum_greenhouse_flux_ratio,
             envelope_helium: self.envelope_helium,
+            vent: VentConditions::basaltic(bulk.elements.mantle_delta_iw()),
         };
         let (air, lid, maturity, cold_traps) = atmosphere_and_lid(&inputs, surface);
         (irradiated, heated, air, lid, maturity, cold_traps)

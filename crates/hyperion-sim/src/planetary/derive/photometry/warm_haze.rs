@@ -21,7 +21,8 @@ use crate::planetary::derive::PlanetClass;
 use crate::planetary::derive::atmosphere::RunawayDeck;
 use crate::planetary::derive::atmosphere::SurfaceState;
 use crate::planetary::derive::atmosphere::{
-    AtmosphereInputs, Crust, EnvelopeHistory, Insolation, SurfaceMaterial, VolatileInventory,
+    AtmosphereInputs, Crust, EnvelopeHistory, Insolation, SurfaceMaterial, VentConditions,
+    VolatileInventory,
 };
 use crate::planetary::derive::composition::{MassFractions, SnowLineSide, composition};
 use crate::planetary::derive::irradiation::{BondAlbedo, equilibrium_temperature};
@@ -161,6 +162,7 @@ impl WarmFixture {
             flux,
             maximum_greenhouse_flux_ratio: 0.0,
             envelope_helium: None,
+            vent: VentConditions::basaltic(crate::units::Dex::new(0.0)),
         }
     }
 

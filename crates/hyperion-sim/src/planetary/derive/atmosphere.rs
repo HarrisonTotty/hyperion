@@ -71,6 +71,7 @@ mod escaping;
 mod present;
 mod supercritical;
 mod surface_mix;
+mod vented;
 
 #[cfg(test)]
 pub(crate) use deck_base::{DECK_BASE_PRESSURE, DeckBaseRules, reducing, with_deck_base};
@@ -102,6 +103,9 @@ pub(crate) use surface_mix::{
     PassWeathered, PassWeathering, SpunClimate, SpunColdTraps, WeatheringCase, pass_regolith,
     pass_resurfacing,
 };
+#[cfg(test)]
+pub(crate) use vented::Outgassed;
+pub(crate) use vented::VentRoute;
 
 use crate::Seed;
 use crate::id::BodyId;
@@ -139,8 +143,9 @@ use crate::units::consts::{
     SECONDS_PER_JULIAN_YEAR,
 };
 use crate::units::{
-    EarthFluxes, EarthMasses, JoulesPerSquareMetre, Kelvin, Kilograms, Metres, MetresPerSecond,
-    MetresPerSecondSquared, Pascals, SolarLuminosities, SolarMasses, WattsPerSquareMetre, Years,
+    Dex, EarthFluxes, EarthMasses, JoulesPerSquareMetre, Kelvin, Kilograms, Metres,
+    MetresPerSecond, MetresPerSecondSquared, Pascals, SolarLuminosities, SolarMasses,
+    WattsPerSquareMetre, Years,
 };
 
 /// The atomic mass constant, kg (CODATA 2022: 1.660 539 068 92 × 10⁻²⁷ kg), in which molecular
@@ -2522,6 +2527,44 @@ pub struct AtmosphereInputs {
     /// took it once before its passes, which do not move it (P14.T53.a); `None` for the atmosphere
     /// to take it from [`envelope_history`](Self::envelope_history), as a hand input's is.
     pub envelope_helium: Option<EnvelopeHelium>,
+    /// Where its volcanic vent outgasses, which its carriers read from generator version 36
+    /// (P14.T55.a.c; [`VentConditions`]): its mantle's ΔIW and the vent's temperature.
+    pub vent: VentConditions,
+}
+
+/// Where a body's volcanic vent outgasses (P14.T55.a.c), as plain values: its mantle's oxygen
+/// fugacity against the iron–wüstite buffer and its vent's temperature, at which
+/// [`VentGas::speciate`](crate::planetary::chem::outgassing::VentGas::speciate) gives the shares
+/// its carbon is airborne as.
+///
+/// The vent's pressure is not here: it is the air's own, the weight of what its retention keeps of
+/// the gases that do not condense, its carbon at the least share its climate's division leaves
+/// airborne (`vented`'s module documentation), which a body's derivation does not know before its
+/// atmosphere.
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+pub struct VentConditions {
+    /// The mantle's ΔIW, log₁₀ units, finite
+    /// ([`ElementInventory::mantle_delta_iw`](crate::planetary::chem::inventory::ElementInventory::mantle_delta_iw),
+    /// P14.T50.a).
+    pub delta_iw: Dex,
+    /// The vent's temperature, K, within the gas species' records, 300–6,000 K
+    /// ([`vent_temperature`](crate::planetary::chem::outgassing::vent_temperature), or
+    /// [`DEFAULT_VENT_TEMPERATURE`](crate::planetary::chem::outgassing::DEFAULT_VENT_TEMPERATURE)).
+    pub temperature: Kelvin,
+}
+
+impl VentConditions {
+    /// A vent of a mantle at `delta_iw` erupting at a basaltic lava's 1,473.15 K
+    /// ([`DEFAULT_VENT_TEMPERATURE`](crate::planetary::chem::outgassing::DEFAULT_VENT_TEMPERATURE)),
+    /// as every body's is at generator version 36 (P14.T55.a.c's lean, 2026-11-25: a lid's own
+    /// eruption temperature is its pass's output).
+    #[must_use]
+    pub const fn basaltic(delta_iw: Dex) -> Self {
+        Self {
+            delta_iw,
+            temperature: crate::planetary::chem::outgassing::DEFAULT_VENT_TEMPERATURE,
+        }
+    }
 }
 
 /// A body's hydrogen and helium envelope's history, as its envelope's escape gives it (P14.T13.b,
@@ -2605,6 +2648,9 @@ pub struct Atmosphere {
     /// ([`carried_state`](Self::carried_state)): `None` before the area mix, where rules 1–4
     /// decide its state and where the rules agree with its climate's class.
     present: Option<PresentClimate>,
+    /// Why its carriers are, or are not, its vent's (P14.T55.a.c; [`vent`](Self::vent)): `None`
+    /// below generator version 36, and for a gas envelope and a body of no mass or radius.
+    vent: Option<VentRoute>,
 }
 
 impl Atmosphere {
@@ -2815,9 +2861,12 @@ impl Atmosphere {
     /// luminosity alone that keeps water beyond its escape's capacity (from generator version
     /// 25): its present class holds what it kept, its ice crust's and its steam's, and what it lost
     /// to space is not on its surface ([`water_state`](Self::water_state) reads that class).
+    /// From generator version 36 it is less the water its vent's methane and shift took
+    /// (P14.T55.a.c, [`vent`](Self::vent)).
     #[must_use]
     pub(crate) fn surface_water_inventory(&self, inventory: Kilograms) -> Kilograms {
-        self.kept_water.unwrap_or(inventory)
+        // From 36 less the water its vent's route took (P14.T55.a.c).
+        escaping::vent_water_left(self.kept_water.unwrap_or(inventory), self.vent)
     }
 
     /// The water a past-only runaway kept beyond its escape's capacity, which its present class
@@ -2963,7 +3012,9 @@ impl Atmosphere {
     ///
     /// A change of carrier is a recorded state change, as a change of [`Self::state`] or of
     /// [`Self::retention`] is: the carbon's partial pressure moves from one species to the other
-    /// there.
+    /// there. From generator version 36 (P14.T55.a.c) a carbon dioxide carrier's air may hold its
+    /// vent's methane beside it: the carrier names P14.T24.f's species, its vent's shares the
+    /// air's.
     #[must_use]
     pub const fn carbon_carrier(&self) -> Option<CarbonCarrier> {
         self.carbon_carrier
@@ -3006,6 +3057,22 @@ impl Atmosphere {
         self.held_ice.of(gas)
     }
 
+    /// Why its carriers are, or are not, its vent's quenched gas (P14.T55.a.c, from generator
+    /// version 36): on P14.T24.f's methane arm, a hot air, an ice bulk, an air with no carbon, a
+    /// vent its gas refused, or the vent's carriers with what they made; `None` below 36, and for a
+    /// gas envelope and a body of no mass or radius.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "the census's and the tests' until P14.T55.d reads the crust's graphite"
+        )
+    )]
+    #[must_use]
+    pub(crate) const fn vent(&self) -> Option<VentRoute> {
+        self.vent
+    }
+
     /// The same atmosphere with the Bond albedo `albedo`, for the tests of what reads it.
     #[cfg(test)]
     #[must_use]
@@ -3033,7 +3100,9 @@ pub enum CarbonCarrier {
     /// photolysis, as on Titan; and a body formed beyond the snow line supplies it from its ices
     /// and its water–rock chemistry. Every body beyond the snow line that keeps a nitrogen air
     /// carries methane (Titan, Triton, Pluto). Anywhere else carbon is carbon dioxide, standing in
-    /// for magmatic outgassing's CO₂ and CO (the model carries no CO): in almost all of Wogan,
+    /// for magmatic outgassing's CO₂ and CO (the model carries no CO; from generator version 36,
+    /// P14.T55.a.c, the vent's own shares where its air takes them, its dry CO still this
+    /// stand-in): in almost all of Wogan,
     /// Krissansen-Totton and Catling's outgassing calculations CO₂ and CO are much more abundant
     /// than methane (2020, PSJ 1, 58, Fig. 3 and §3.1, where 2–7% give more CH₄ than CO), which
     /// becomes a substantial share only below FMQ−3, at the extremes of Earth's and Mars's magmas,
@@ -3230,7 +3299,8 @@ struct Airborne {
     water: f64,
     carbon_dioxide: f64,
     /// The carbon as methane, airborne in the carbon dioxide's place where
-    /// [`Self::carbon_carrier`] is methane (P14.T24.f).
+    /// [`Self::carbon_carrier`] is methane (P14.T24.f), or beside it where the carrier is carbon
+    /// dioxide and the vent made some (P14.T55.a.c, from generator version 36).
     methane: f64,
     nitrogen: f64,
     argon: f64,
@@ -3306,11 +3376,17 @@ impl Airborne {
             CarbonCarrier::Methane => (Gas::Methane, self.methane),
         };
         let some = |gas: Gas, mass: f64| (mass > 0.0).then_some((gas, mass));
+        // The vent's methane beside its carbon dioxide (P14.T55.a.c), where there is some.
+        let vent_methane = match self.carrier {
+            CarbonCarrier::CarbonDioxide => some(Gas::Methane, self.methane),
+            CarbonCarrier::Methane => None,
+        };
         let gases = [
             some(Gas::Hydrogen, self.hydrogen),
             some(Gas::Helium, self.helium),
             Some((Gas::Water, self.water)),
             Some(carbon),
+            vent_methane,
             Some((Gas::Nitrogen, self.nitrogen)),
             some(Gas::Oxygen, self.oxygen),
             Some((Gas::Argon, self.argon)),
@@ -3775,6 +3851,13 @@ impl<'a> StepClimate<'a> {
 /// carbon monoxide a desiccated carbon dioxide air makes under an M dwarf (Gao et al. 2015), on
 /// the record only. Each element's outcome is mass-conserving.
 ///
+/// From version 36 (P14.T55.a.c, under its hold, `vented`) step 2 gives an air that is not hot
+/// (a runaway or a magma ocean by its division or its class), not on the methane arm of step 4
+/// and not an ice bulk's its vent's quenched gas: the vent's carbon shares at the mantle's ΔIW
+/// ([`AtmosphereInputs::vent`]), graphite's cap, carbon monoxide shifted to carbon dioxide where
+/// the air holds water, debiting it, and that hydrogen to escape (research-leans-58 rulings 1, 2, 4
+/// and 5).
+///
 /// From version 24 P14.T53.b part 1 joins them (decision-absurd-states-24 R3–R4;
 /// decision-t53b-arm-c):
 ///
@@ -3810,11 +3893,12 @@ impl<'a> StepClimate<'a> {
 /// use hyperion_sim::planetary::context::XUV_SATURATION_FGK;
 /// use hyperion_sim::planetary::derive::atmosphere::{
 ///     AtmosphereInputs, Crust, EnvelopeHistory, Insolation, SurfaceMaterial, SurfaceState,
-///     VolatileDraws, atmosphere, earth_xuv_fluence, formation_temperature, volatile_inventory,
+///     VentConditions, VolatileDraws, atmosphere, earth_xuv_fluence, formation_temperature,
+///     volatile_inventory,
 /// };
 /// use hyperion_sim::planetary::derive::{PlanetClass, SnowLineSide, composition};
 /// use hyperion_sim::units::{
-///     EarthMasses, EarthFluxes, EarthRadii, Kelvin, Kilograms, Metres, MetresPerSecond,
+///     Dex, EarthMasses, EarthFluxes, EarthRadii, Kelvin, Kilograms, Metres, MetresPerSecond,
 ///     WattsPerSquareMetre, Years,
 /// };
 /// use hyperion_sim::units::consts::{EARTH_MASS_KG, EARTH_RADIUS_M, METRES_PER_AU};
@@ -3853,6 +3937,9 @@ impl<'a> StepClimate<'a> {
 ///     flux: EarthFluxes::new(1.0),
 ///     maximum_greenhouse_flux_ratio: 2.85,
 ///     envelope_helium: None,
+///     // What the carriers read from version 36: the mantle of Earth's table, IW+3.6, at a
+///     // basaltic vent.
+///     vent: VentConditions::basaltic(Dex::new(3.6)),
 /// });
 /// assert_eq!(earth.state(), SurfaceState::Temperate);
 /// assert!((earth.surface_temperature().value() - 288.0).abs() < 2.0);

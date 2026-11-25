@@ -749,3 +749,41 @@ fn the_solar_system_s_vents_are_pinned() {
     assert_eq!(first.as_str(), write().as_str());
     golden!("planetary/outgassing", first.as_str());
 }
+
+/// The tripwire: below 36 the version's rules are the held arm's, so that no body moves; at 36's
+/// bump the hold goes, with everything its message lists.
+#[test]
+fn the_outgassing_speciation_is_held_below_36() {
+    use OutgassingRules::{Held, Speciated};
+    assert!(
+        GENERATOR_VERSION < OUTGASSING_SPECIATION_VERSION,
+        "the 35 → 36 bump publishes a secondary air's vent gas (P14.T55.a.c): delete \
+         `OUTGASSING_SPECIATION_VERSION`, `OutgassingRules` with its `Held` arm, \
+         `with_outgassing_speciation`, its line in `planetary/testing/held.rs` and in \
+         `with_every_36_hold`, and this test; the `Held` paths of `vented::outgassed`; unwrap the \
+         tests' switches (the carriers' tests and the census's held half, whose name loses the \
+         hold); \
+         and bless by name the goldens whose records hold a secondary air: the systems', \
+         `derive_body`, `surface_conditions` and its `_published`, `surface_inputs`, \
+         `atmosphere_speciation`, `aerosols`, `partition`, `condense`, `habitability` and the \
+         others the census's moved airs reach, R09's coarse inputs and palettes of the moved \
+         surfaces, the server's `galaxy_parameters` by its version and R10's `worker/` headers"
+    );
+    assert_eq!(OutgassingRules::in_force(), Held);
+    assert_eq!(
+        OutgassingRules::of_version(OUTGASSING_SPECIATION_VERSION),
+        Speciated
+    );
+    assert_eq!(
+        with_outgassing_speciation(Speciated, OutgassingRules::in_force),
+        Speciated
+    );
+    assert_eq!(
+        with_outgassing_speciation(Speciated, || with_outgassing_speciation(
+            Held,
+            OutgassingRules::in_force
+        )),
+        Held
+    );
+    assert_eq!(OutgassingRules::in_force(), Held);
+}

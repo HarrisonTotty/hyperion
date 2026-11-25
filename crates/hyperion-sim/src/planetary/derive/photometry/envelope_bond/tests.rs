@@ -4,8 +4,8 @@
 use hyperion_testkit::float::assert_same_bits;
 
 use super::*;
-use crate::planetary::derive::atmosphere::AtmosphereInputs;
 use crate::planetary::derive::atmosphere::Gas;
+use crate::planetary::derive::atmosphere::{AtmosphereInputs, VentConditions};
 use crate::planetary::hooks::EnvelopeAtmosphere;
 use crate::planetary::hooks::aerosols::AerosolDeck;
 use crate::substance::aloft::law_aloft;
@@ -413,6 +413,7 @@ pub(crate) fn giant_inputs(body: &crate::planetary::derive::DerivedBody) -> Atmo
         flux: body.flux(),
         maximum_greenhouse_flux_ratio: 0.0,
         envelope_helium: body.envelope_helium().copied(),
+        vent: VentConditions::basaltic(crate::units::Dex::new(0.0)),
     }
 }
 

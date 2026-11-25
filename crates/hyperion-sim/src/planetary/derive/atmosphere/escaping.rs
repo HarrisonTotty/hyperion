@@ -9,6 +9,11 @@
 //! 2. **Retention**: Jeans's test and the ice-held volatiles: P14.T54.a's stand-in for an ice
 //!    crust's water, and an ice-held nitrogen's and argon's own rule, their inventory less their
 //!    vapour air's escape at their ice's own temperature, on any solid surface (`chem::tenuous`).
+//!    From generator version 36 (P14.T55.a.c, [`vented`], under its hold) an air that is not hot,
+//!    not on P14.T24.f's methane arm and not an ice bulk's then takes its vent's carriers: the
+//!    vent's carbon shares, graphite's cap, the shift where it holds water, and the shift's
+//!    hydrogen to escape; every step below reads them, the vent's methane beside the carbon
+//!    dioxide each its own gas, and the hydrogen kept joining the air after the thin envelope's.
 //! 3. **The cosmic shoreline** ([`Shoreline`]; Zahnle and Catling 2017, ApJ 843, 122): every
 //!    airborne inventory gas is multiplied by the share it keeps, at the body's X-ray and
 //!    ultraviolet fluence over Earth's, its escape speed √(2GM ÷ R), its mean impact speed and its
@@ -91,13 +96,14 @@ use crate::units::{
     WattsPerSquareMetre, Years,
 };
 
+use super::vented::{self, VentRoute};
 use super::{
     AIRLESS_PRESSURE, Airborne, Atmosphere, AtmosphereInputs, CarbonCarrier, Crust,
     EnvelopeHistory, GREENHOUSE_STEPS, Gas, GreenhouseCeiling, GreenhouseConstants, IceHeld,
     Insolation, PartialPressures, PassSurface, PresentClimate, PublishedState, Retention,
-    RunawayDeck, SILICATE_SOLIDUS, StepClimate, SupercriticalReservoir, SurfaceState,
-    TEMPERATE_AIRBORNE_CARBON, earth_xuv_fluence, exobase_temperature, mole_fraction_of,
-    partitioned_greenhouse, retained, surface_mix,
+    RunawayDeck, SILICATE_SOLIDUS, StepClimate, SupercriticalReservoir, SurfaceMaterial,
+    SurfaceState, TEMPERATE_AIRBORNE_CARBON, earth_xuv_fluence, exobase_temperature,
+    mole_fraction_of, partitioned_greenhouse, retained, surface_mix,
 };
 
 /// The melting point of ice Ih at one standard atmosphere, K: 273.15, IAPWS R10-06's 273.152 519
@@ -869,6 +875,9 @@ struct Recorded {
     carbon_monoxide: Kilograms,
     airborne_carbon_share: f64,
     methane: MethaneOutcome,
+    /// Why its carriers are, or are not, its vent's (P14.T55.a.c): `None` below generator version
+    /// 36.
+    vent: Option<VentRoute>,
 }
 
 impl Recorded {
@@ -882,6 +891,7 @@ impl Recorded {
             carbon_monoxide: Kilograms::ZERO,
             airborne_carbon_share: 1.0,
             methane: MethaneOutcome::NONE,
+            vent: None,
         }
     }
 
@@ -1041,6 +1051,8 @@ impl Solve<'_> {
 #[must_use]
 fn air_mass(air: &Airborne) -> f64 {
     let carbon = match air.carrier {
+        // The vent's methane beside its carbon dioxide (P14.T55.a.c).
+        CarbonCarrier::CarbonDioxide if air.methane > 0.0 => air.carbon_dioxide + air.methane,
         CarbonCarrier::CarbonDioxide => air.carbon_dioxide,
         CarbonCarrier::Methane => air.methane,
     };
@@ -1154,6 +1166,12 @@ struct Kept {
     /// The free water a runaway keeps as steam beyond its escape's capacity (P14.T53.b part 3,
     /// step 5's division, [`Body::divide`]): none before the division and for every other world.
     steam: Kilograms,
+    /// Why its carriers are, or are not, its vent's (P14.T55.a.c, [`Body::vent`]): `None` below
+    /// generator version 36.
+    vent: Option<VentRoute>,
+    /// The hydrogen the vent's shift made that escape's diffusion limit left, which joins the air
+    /// after the thin envelope's (step 4): none off the vent's route.
+    vent_hydrogen: Kilograms,
 }
 
 impl<'a> Body<'a> {
@@ -1225,6 +1243,7 @@ impl<'a> Body<'a> {
             kept_water: None,
             steam_envelope: false,
             present: None,
+            vent: None,
         }
     }
 
@@ -1334,29 +1353,128 @@ impl<'a> Body<'a> {
             inventory.argon().value() - air.argon,
             Fate::Escaped,
         );
-        Kept {
+        let mut kept = Kept {
             air,
             free_water,
             held_water,
             runaway,
             carbon: carbon_kept,
             steam: Kilograms::ZERO,
+            vent: None,
+            vent_hydrogen: Kilograms::ZERO,
+        };
+        if vented::speciated() {
+            kept.vent = Some(self.vent(&mut kept, ledger));
         }
+        kept
+    }
+
+    /// Whether the body's air is hot by its recorded state (P14.T55.a.c's ruling 4): its climate's
+    /// division a runaway or a magma ocean, or its class one ([`climate_class`]: a hothouse's
+    /// re-solve), the same at every pass. The state a pass carries by P14.T53.e's rules 5–7 is not
+    /// read, so that the route does not couple the passes (`vented`'s module documentation).
+    #[must_use]
+    fn hot(&self) -> bool {
+        let division = division_state(self.inputs);
+        let published = climate_class(self.inputs, self.published);
+        [division, published].into_iter().any(|state| match state {
+            SurfaceState::RunawayGreenhouse
+            | SurfaceState::MagmaOcean
+            | SurfaceState::SteamEnvelope => true,
+            SurfaceState::GasEnvelope
+            | SurfaceState::Airless
+            | SurfaceState::Temperate
+            | SurfaceState::Desert
+            | SurfaceState::Snowball
+            | SurfaceState::Tenuous => false,
+        })
+    }
+
+    /// Step 2's vent, from generator version 36 (P14.T55.a.c, [`vented`]): on an air that is not on
+    /// P14.T24.f's methane arm, not hot ([`hot`](Self::hot)) and not an ice bulk's, with carbon
+    /// kept, its carriers become its vent's ([`vented::outgassed`]), counting to `ledger` what the
+    /// route gave the crust, the melt and escape; the route taken.
+    fn vent(&self, kept: &mut Kept, ledger: &mut Ledger) -> VentRoute {
+        let inputs = self.inputs;
+        if kept.air.carrier == CarbonCarrier::Methane {
+            return VentRoute::MethaneArm;
+        }
+        if self.hot() {
+            return VentRoute::Hot;
+        }
+        if inputs.material == SurfaceMaterial::Ice {
+            return VentRoute::IceShell;
+        }
+        // A carbon that is not a number takes none.
+        if kept.air.carbon_dioxide.is_nan() || kept.air.carbon_dioxide <= 0.0 {
+            return VentRoute::NoCarbon;
+        }
+        let (_, weight) = column_weight(inputs);
+        // The least share of its carbon its division leaves airborne: the weathering thermostat's
+        // stored state on a temperate world with water (`Solver::airborne_carbon`).
+        let share = if division_state(inputs) == SurfaceState::Temperate && kept.air.water > 0.0 {
+            TEMPERATE_AIRBORNE_CARBON
+        } else {
+            1.0
+        };
+        // The share of its air the cosmic shoreline keeps (step 3).
+        let shoreline = self.shoreline().kept();
+        let air = &mut kept.air;
+        let route = vented::outgassed(air, inputs, self.retention, weight, (share, shoreline));
+        match route {
+            VentRoute::MethaneArm
+            | VentRoute::Hot
+            | VentRoute::IceShell
+            | VentRoute::NoCarbon
+            | VentRoute::Refused(_) => route,
+            VentRoute::Vented(out) => {
+                ledger.gas(
+                    Gas::CarbonDioxide,
+                    out.graphite_as_carbon_dioxide().value(),
+                    Fate::Sequestered,
+                );
+                ledger.element(Element::O, out.melt_oxygen().value(), Fate::Sequestered);
+                ledger.element(
+                    Element::H,
+                    out.hydrogen.value() - out.hydrogen_kept.value(),
+                    Fate::Escaped,
+                );
+                // Methane follows nitrogen's retention ([`Retention::with_methane_as_nitrogen`]).
+                if air.methane > 0.0 && !self.retention.retains(Gas::Methane) {
+                    ledger.gas(Gas::Methane, air.methane, Fate::Escaped);
+                    air.methane = 0.0;
+                }
+                kept.free_water = air.water - kept.held_water;
+                kept.carbon = air.carbon_dioxide
+                    + air.methane * Gas::CarbonDioxide.molar_mass_g_per_mol()
+                        / Gas::Methane.molar_mass_g_per_mol();
+                kept.vent_hydrogen = out.hydrogen_kept;
+                route
+            }
+        }
+    }
+
+    /// The cosmic shoreline's verdict on the body (Zahnle and Catling 2017, [`Shoreline::of`]), at
+    /// its X-ray and ultraviolet fluence over Earth's, its escape speed √(2GM ÷ R), its mean
+    /// impact speed and its age: step 3's ([`erode`](Self::erode)).
+    #[must_use]
+    fn shoreline(&self) -> Shoreline {
+        let inputs = self.inputs;
+        let (m, r) = (inputs.mass.value(), inputs.radius.value());
+        let escape_speed = MetresPerSecond::new((2.0 * GRAVITATIONAL_CONSTANT * m / r).sqrt());
+        Shoreline::of(
+            inputs.xuv_fluence.value() / earth_xuv_fluence().value(),
+            escape_speed,
+            inputs.impact_speed,
+            inputs.age,
+        )
     }
 
     /// Step 3: the cosmic shoreline, on every airborne gas of `kept` but what the ice holds,
     /// counting what it takes to `ledger`; its verdict.
     #[must_use]
     fn erode(&self, kept: &mut Kept, ledger: &mut Ledger) -> Shoreline {
-        let inputs = self.inputs;
-        let (m, r) = (inputs.mass.value(), inputs.radius.value());
-        let escape_speed = MetresPerSecond::new((2.0 * GRAVITATIONAL_CONSTANT * m / r).sqrt());
-        let shoreline = Shoreline::of(
-            inputs.xuv_fluence.value() / earth_xuv_fluence().value(),
-            escape_speed,
-            inputs.impact_speed,
-            inputs.age,
-        );
+        let shoreline = self.shoreline();
         let share = shoreline.kept();
         let lost = 1.0 - share;
         let air = &mut kept.air;
@@ -1366,10 +1484,21 @@ impl<'a> Body<'a> {
         // Methane lies in the air beside the nitrogen, and is held by the ice where the nitrogen
         // is.
         let held_nitrogen = self.held.nitrogen.is_some();
-        if !(air.carrier == CarbonCarrier::Methane && held_nitrogen) {
+        if air.carrier == CarbonCarrier::CarbonDioxide && air.methane > 0.0 {
+            // The vent's methane beside its carbon dioxide (P14.T55.a.c), each its own gas.
+            ledger.gas(Gas::CarbonDioxide, air.carbon_dioxide * lost, Fate::Escaped);
+            ledger.gas(Gas::Methane, air.methane * lost, Fate::Escaped);
+            air.carbon_dioxide *= share;
+            air.methane *= share;
+        } else if !(air.carrier == CarbonCarrier::Methane && held_nitrogen) {
             ledger.carbon(air.carrier, kept.carbon * lost, Fate::Escaped);
             air.carbon_dioxide *= share;
             air.methane *= share;
+        }
+        let hydrogen = kept.vent_hydrogen.value();
+        if hydrogen > 0.0 {
+            ledger.element(Element::H, hydrogen * lost, Fate::Escaped);
+            kept.vent_hydrogen = Kilograms::new(hydrogen * share);
         }
         if !held_nitrogen {
             ledger.gas(Gas::Nitrogen, air.nitrogen * lost, Fate::Escaped);
@@ -1472,6 +1601,37 @@ impl<'a> Body<'a> {
             | SurfaceState::Tenuous
             | SurfaceState::SteamEnvelope => (state, OxygenOutcome::NONE),
         }
+    }
+}
+
+/// The surface gravity of the body `inputs` describe, G M ÷ R², and its column's weight per
+/// kilogram, g ÷ 4πR², Pa kg⁻¹: one figure for the greenhouse's column and the vent's pressure
+/// ([`Body::vent`]), so that they cannot part.
+#[must_use]
+fn column_weight(inputs: &AtmosphereInputs) -> (MetresPerSecondSquared, f64) {
+    let (m, r) = (inputs.mass.value(), inputs.radius.value());
+    let gravity = MetresPerSecondSquared::new(GRAVITATIONAL_CONSTANT * m / (r * r));
+    (gravity, gravity.value() / (4.0 * PI * r * r))
+}
+
+/// The water `water` less what the vent's route `vent` took of it (P14.T55.a.c, its methane's and
+/// its shift's), the drawn water a surface holds: `water` itself off the route.
+#[must_use]
+pub(super) fn vent_water_left(water: Kilograms, vent: Option<VentRoute>) -> Kilograms {
+    match vent {
+        Some(VentRoute::Vented(out)) if out.water_debit > Kilograms::ZERO => {
+            let left = water.value() - out.water_debit.value();
+            Kilograms::new(if left > 0.0 { left } else { 0.0 })
+        }
+        Some(
+            VentRoute::Vented(_)
+            | VentRoute::MethaneArm
+            | VentRoute::Hot
+            | VentRoute::IceShell
+            | VentRoute::NoCarbon
+            | VentRoute::Refused(_),
+        )
+        | None => water,
     }
 }
 
@@ -1944,6 +2104,10 @@ pub(super) fn state_and_greenhouse(
     let mut kept = body.kept(&mut ledger);
     let shoreline = body.erode(&mut kept, &mut ledger);
     let formed = body.thin_envelope(&mut kept.air, &shoreline, &mut ledger);
+    // The vent's shift's hydrogen beside a thin envelope's (P14.T55.a.c).
+    if kept.vent_hydrogen > Kilograms::ZERO {
+        kept.air.hydrogen += kept.vent_hydrogen.value();
+    }
     let (state, runaway_oxygen) = body.divide(&mut kept, &mut ledger);
     let (air, carrier) = (kept.air, kept.air.carrier);
     // P14.T53.b part 3: the state the water follows, a past-only runaway's present class where it
@@ -1966,16 +2130,17 @@ pub(super) fn state_and_greenhouse(
 
     // Step 5's greenhouse, the thermostat's carbonate, the cold trap's oxygen and the methane's
     // loss.
-    let gravity = MetresPerSecondSquared::new(GRAVITATIONAL_CONSTANT * m / (r * r));
+    let (gravity, weight) = column_weight(inputs);
     let greenhouse = Solver {
         body: &body,
         surface,
-        weight: gravity.value() / (4.0 * PI * r * r),
+        weight,
         ground: Ground::new(gravity, surface.basins, surface.water_at_surface),
         state,
         water_state: water,
         surface_water: if water == state {
-            inputs.inventory.water()
+            // Less the water the vent's route took (P14.T55.a.c).
+            vent_water_left(inputs.inventory.water(), kept.vent)
         } else {
             Kilograms::new(air.water)
         },
@@ -1993,6 +2158,13 @@ pub(super) fn state_and_greenhouse(
             }
         };
         ledger.carbon(carrier, stored, Fate::Sequestered);
+        if carrier == CarbonCarrier::CarbonDioxide && air.methane > 0.0 {
+            ledger.gas(
+                Gas::Methane,
+                air.methane - chosen.air.methane,
+                Fate::Sequestered,
+            );
+        }
     }
     let (solved, failed_trap) = greenhouse.cold_trap(solved.as_ref());
     let oxygen = failed_trap.unwrap_or(runaway_oxygen);
@@ -2006,13 +2178,14 @@ pub(super) fn state_and_greenhouse(
         &solved,
         (state, water, dry, gravity),
         &mut ledger,
-        Recorded {
+        &Recorded {
             envelope: body.envelope,
             shoreline,
             oxygen,
             carbon_monoxide: Kilograms::ZERO,
             airborne_carbon_share: share,
             methane,
+            vent: kept.vent,
         },
     );
     #[cfg(test)]
@@ -2308,7 +2481,7 @@ fn finish(
     solved: &Solve<'_>,
     (state, water, dry, gravity): (SurfaceState, SurfaceState, bool, MetresPerSecondSquared),
     ledger: &mut Ledger,
-    recorded: Recorded,
+    recorded: &Recorded,
 ) -> Atmosphere {
     let inputs = body.inputs;
     let Solve {
@@ -2336,6 +2509,10 @@ fn finish(
     match carrier {
         CarbonCarrier::CarbonDioxide => {
             ledger.carbon(carrier, air.carbon_dioxide, Fate::Airborne);
+            // The vent's methane beside it (P14.T55.a.c).
+            if air.methane > 0.0 {
+                ledger.gas(Gas::Methane, air.methane, Fate::Airborne);
+            }
         }
         CarbonCarrier::Methane => ledger.methane(air.methane, Fate::Airborne),
     }
@@ -2353,7 +2530,7 @@ fn finish(
     let escape = Some(
         Recorded {
             carbon_monoxide,
-            ..recorded
+            ..*recorded
         }
         .outcome(ledger),
     );
@@ -2381,6 +2558,7 @@ fn finish(
         return Atmosphere {
             column,
             escape,
+            vent: recorded.vent,
             ..air
         };
     } else {
@@ -2421,6 +2599,7 @@ fn finish(
         kept_water,
         steam_envelope: steam_hides_the_surface(solved.supercritical, gravity),
         present: None,
+        vent: recorded.vent,
     }
 }
 

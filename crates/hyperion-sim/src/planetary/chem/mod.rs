@@ -36,6 +36,11 @@
 //! - [`silicate_vapour`]: a surface melt's own vapour (P14.T55.b), its species and pressure by the
 //!   melt's temperature and composition and whether its body holds it, on the record from
 //!   generator version 35 behind its hold.
+//! - [`outgassing`]: the vent's gas by the mantle's redox (P14.T55.a.b), its species by ΔIW, the
+//!   vent's temperature and pressure, and graphite's cap, which a secondary air's carriers read on
+//!   the record from generator version 36 behind their hold (P14.T55.a.c).
+//! - [`secondary`]: the heavy-secondary equilibrium (P14.T55.a.a), Woitke et al.'s types A–C on
+//!   one root in the oxygen potential, by which P14.T55.a.c's census names each air's type.
 //! - Here, the host's C/O and Mg/Si ([`HostAbundances`]), drawn per system on
 //!   `system.abundances` ([`AbundanceDraws`]), since a star's planets share its photospheric
 //!   ratios, until plan 06 carries them on the star. Plan 06 may adopt the stream without moving

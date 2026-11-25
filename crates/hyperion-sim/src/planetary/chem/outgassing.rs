@@ -2,11 +2,11 @@
 //! a body's volcanic vent outgasses its carbon, hydrogen, nitrogen and sulphur as, at the oxygen
 //! fugacity its melt buffers, and the element budget it hands the air.
 //!
-//! A pure module of plain quantities, which nothing on the record calls until P14.T55.a.c, so it
-//! needs no hold and moves no output. There, by the route ruling (research-leans-58), a secondary
-//! air publishes this gas, quenched as it erupts, not re-equilibrated at a cool surface; its
-//! shares are the vent's, for what the vent outgasses, never a conversion of the whole water
-//! inventory, whose water stays water.
+//! A pure module of plain quantities. P14.T55.a.c's carriers read it on the record from generator
+//! version 36 (`OUTGASSING_SPECIATION_VERSION`, under `OutgassingRules`): by the route ruling
+//! (research-leans-58), a secondary air publishes this gas, quenched as it erupts, not
+//! re-equilibrated at a cool surface; its shares are the vent's, for what the vent outgasses,
+//! never a conversion of the whole water inventory, whose water stays water.
 //!
 //! # The oxygen
 //!
@@ -92,18 +92,85 @@
 use core::fmt;
 use std::error::Error;
 
-use crate::math;
 use crate::planetary::chem::inventory::{ElementInventory, Reservoir};
 use crate::planetary::chem::redox::iw_log_fugacity;
 use crate::planetary::hooks::crust::{BASALTIC_ERUPTION_TEMPERATURE, CrustLithology};
 use crate::substance::{Element, Reaction, SubstanceId, log10_formation_constant};
 use crate::units::{Dex, Kelvin, Pascals};
+use crate::{GeneratorVersion, math};
 
 #[cfg(test)]
 mod tests;
 
 /// Pascals in a bar.
 const PASCALS_PER_BAR: f64 = 1.0e5;
+
+/// The generator version from which a secondary air's carriers are its vent's quenched gas
+/// (P14.T55.a.c, [`OutgassingRules::Speciated`]): 36, a planetary hold (research-leans-58). Below
+/// it the carbon's carrier is P14.T24.f's insolation rule alone, so that no output moves at 33,
+/// 34 or 35.
+pub(crate) const OUTGASSING_SPECIATION_VERSION: GeneratorVersion = GeneratorVersion::new(36);
+
+/// Whether a secondary air's carriers are its vent's quenched gas (P14.T55.a.c; their hold,
+/// [`OUTGASSING_SPECIATION_VERSION`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum OutgassingRules {
+    /// Version 35's and before: P14.T24.f's carrier, carbon dioxide or its methane arm, the
+    /// inventory's carbon whole.
+    Held,
+    /// Version 36's: the vent's carbon shares, graphite's cap at the vent, carbon monoxide shifted
+    /// to carbon dioxide where the air holds water, and its hydrogen to escape, on every air that
+    /// is not hot and not on P14.T24.f's methane arm (`derive::atmosphere`'s `vented`).
+    Speciated,
+}
+
+impl OutgassingRules {
+    /// The rules in force: the version's ([`of_version`](Self::of_version)); in the tests, the
+    /// rules a test's switch sets on its thread ([`with_outgassing_speciation`]).
+    #[must_use]
+    pub(crate) fn in_force() -> Self {
+        #[cfg(test)]
+        if let Some(rules) = OUTGASSING_RULES.with(core::cell::Cell::get) {
+            return rules;
+        }
+        Self::of_version(crate::GENERATOR_VERSION)
+    }
+
+    /// The rules of the generator version `version`: speciated from
+    /// [`OUTGASSING_SPECIATION_VERSION`], held below it.
+    #[must_use]
+    pub(crate) const fn of_version(version: GeneratorVersion) -> Self {
+        if version.get() >= OUTGASSING_SPECIATION_VERSION.get() {
+            Self::Speciated
+        } else {
+            Self::Held
+        }
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The outgassing speciation's rules a test sets on its thread, `None` for the version's.
+    static OUTGASSING_RULES: core::cell::Cell<Option<OutgassingRules>> =
+        const { core::cell::Cell::new(None) };
+}
+
+/// `run`'s result with the outgassing speciation's rules `rules` on this thread, for the tests to
+/// reach version 36's ahead of its bump; the version's rules are set back after, a panic in `run`
+/// included. A record derives lazily, so a test reads it inside the switch. 36's bump deletes it
+/// with the hold.
+#[cfg(test)]
+pub(crate) fn with_outgassing_speciation<R>(rules: OutgassingRules, run: impl FnOnce() -> R) -> R {
+    /// Sets the thread's rules back as it drops.
+    struct Restore(Option<OutgassingRules>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            OUTGASSING_RULES.with(|cell| cell.set(self.0));
+        }
+    }
+    let _restore = Restore(OUTGASSING_RULES.with(|cell| cell.replace(Some(rules))));
+    run()
+}
 
 /// The vent's temperature on a body whose crust is not known: 1,473.15 K, a basaltic lava's
 /// eruption temperature ([`BASALTIC_ERUPTION_TEMPERATURE`], Keszthelyi et al. 2007; a lean,

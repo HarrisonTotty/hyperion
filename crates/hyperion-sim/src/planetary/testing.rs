@@ -75,6 +75,20 @@ pub(crate) fn with_every_35_hold<R>(run: impl FnOnce() -> R) -> R {
     })
 }
 
+/// `run`'s result with every planetary hold of generator version 36 in force on this thread (train
+/// 36), each switch set back as it returns, a panic in `run` included: P14.T55.a.c's carriers, a
+/// secondary air's vent gas ([`with_outgassing_speciation`], `OutgassingRules::Speciated`). It is
+/// apart from [`with_every_35_hold`]: under it the other rules are the version's. A test's own pool
+/// of shares reads it through [`in_shares`]. 36's bump deletes it with the hold; a hold of 36 added
+/// later adds its switch here.
+///
+/// [`with_outgassing_speciation`]: super::chem::outgassing::with_outgassing_speciation
+#[cfg(test)]
+pub(crate) fn with_every_36_hold<R>(run: impl FnOnce() -> R) -> R {
+    use super::chem::outgassing::{OutgassingRules, with_outgassing_speciation};
+    with_outgassing_speciation(OutgassingRules::Speciated, run)
+}
+
 /// An air's partial pressures stated by hand, each gas's `pressure(gas)` in [`Gas::ALL`]'s order,
 /// unvalidated, as the crate's own tests state one: for other crates' tests of what a derivation
 /// reads of an air, as the server's conversion of P14.T51.j's oxidised surface does (a caller's

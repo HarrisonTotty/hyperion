@@ -13,6 +13,7 @@
 //! switch.
 
 use crate::planetary::chem::envelope_abundances::{FormationDrawRules, with_formation_draws};
+use crate::planetary::chem::outgassing::{OutgassingRules, with_outgassing_speciation};
 use crate::planetary::chem::silicate_vapour::{SilicateVapourRules, with_silicate_vapour};
 use crate::planetary::chem::tenuous::{TenuousAirRules, with_tenuous_air};
 use crate::planetary::derive::atmosphere::{DeckBaseRules, with_deck_base};
@@ -87,6 +88,7 @@ held_rules! {
     silicate_vapour: SilicateVapourRules =
         SilicateVapourRules::in_force => with_silicate_vapour,
     deck_base: DeckBaseRules = DeckBaseRules::in_force => with_deck_base,
+    outgassing: OutgassingRules = OutgassingRules::in_force => with_outgassing_speciation,
 }
 
 /// `share(0)` to `share(shares − 1)` on at most `hyperion_testkit::threads::granted(reserved)`

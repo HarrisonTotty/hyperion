@@ -19,6 +19,12 @@ use crate::time::UniverseTime;
 use crate::units::consts::{EARTH_MASS_KG, SOLAR_MASS_KG};
 use crate::units::{EarthFluxes, EarthRadii};
 
+/// The vent of a hand-built body (P14.T55.a.c, which the carriers read from generator version 36):
+/// the mantle of Earth's table, IW+3.6 (research-leans-58), at a basaltic vent.
+pub(crate) const HAND_VENT: VentConditions = VentConditions::basaltic(Dex::new(3.6));
+
+mod vented;
+
 /// A body of `kg` at `a_au` and `e` about the present Sun with its history, at the rank that
 /// keeps its radius `km`, derived at `age`.
 fn about_the_sun(disc: &DiscProfile, body: (f64, f64, f64, f64), age: Years) -> DerivedBody {
@@ -553,6 +559,7 @@ fn no_surface_is_hotter_than_its_hottest_host() {
         xuv_saturation_time: XUV_SATURATION_FGK,
         envelope_history: EnvelopeHistory::NONE,
         envelope_helium: None,
+        vent: HAND_VENT,
         flux: irradiation_flux(Kelvin::new(1_500.0)),
         maximum_greenhouse_flux_ratio: sun_maximum_ratio(irradiation_flux(Kelvin::new(1_500.0))),
     };
@@ -896,6 +903,7 @@ pub(crate) fn runaway_earth(water: f64, age: f64, xuv: f64, equilibrium: f64) ->
         xuv_saturation_time: XUV_SATURATION_FGK,
         envelope_history: EnvelopeHistory::NONE,
         envelope_helium: None,
+        vent: HAND_VENT,
         flux: irradiation_flux(Kelvin::new(equilibrium)),
         maximum_greenhouse_flux_ratio: sun_maximum_ratio(irradiation_flux(Kelvin::new(
             equilibrium,
@@ -1263,6 +1271,7 @@ fn cold_moon(carbon: f64, equilibrium: f64, formed: SnowLineSide, crust: Crust) 
         xuv_saturation_time: XUV_SATURATION_FGK,
         envelope_history: EnvelopeHistory::NONE,
         envelope_helium: None,
+        vent: HAND_VENT,
         flux: irradiation_flux(TITAN_IRRADIATION),
         maximum_greenhouse_flux_ratio: sun_maximum_ratio(irradiation_flux(TITAN_IRRADIATION)),
     })
@@ -1338,6 +1347,7 @@ fn a_gas_envelope_and_a_body_of_no_mass_have_no_carbon_carrier() {
         xuv_saturation_time: XUV_SATURATION_FGK,
         envelope_history: EnvelopeHistory::NONE,
         envelope_helium: None,
+        vent: HAND_VENT,
         flux: irradiation_flux(Kelvin::new(60.0)),
         maximum_greenhouse_flux_ratio: sun_maximum_ratio(irradiation_flux(Kelvin::new(60.0))),
     };
@@ -2174,6 +2184,7 @@ pub(crate) fn earth_inputs(equilibrium: f64, insolation: Insolation) -> Atmosphe
         xuv_saturation_time: XUV_SATURATION_FGK,
         envelope_history: EnvelopeHistory::NONE,
         envelope_helium: None,
+        vent: HAND_VENT,
         flux: irradiation_flux(Kelvin::new(equilibrium)),
         maximum_greenhouse_flux_ratio: sun_maximum_ratio(irradiation_flux(Kelvin::new(
             equilibrium,
@@ -3731,6 +3742,7 @@ fn a_runaway_world_whose_water_fails_its_jeans_test_keeps_the_oxygen_it_freed() 
         xuv_saturation_time: XUV_SATURATION_FGK,
         envelope_history: EnvelopeHistory::NONE,
         envelope_helium: None,
+        vent: HAND_VENT,
         flux: irradiation_flux(Kelvin::new(305.0)),
         maximum_greenhouse_flux_ratio: sun_maximum_ratio(irradiation_flux(Kelvin::new(305.0))),
     });
@@ -3887,6 +3899,7 @@ fn a_500_km_body_at_40_k_keeps_no_nitrogen() {
         xuv_saturation_time: XUV_SATURATION_FGK,
         envelope_history: EnvelopeHistory::NONE,
         envelope_helium: None,
+        vent: HAND_VENT,
         flux: irradiation_flux(Kelvin::new(42.0)),
         maximum_greenhouse_flux_ratio: sun_maximum_ratio(irradiation_flux(Kelvin::new(42.0))),
     });
@@ -3948,6 +3961,7 @@ fn remnant_ice_bulk(equilibrium: f64) -> AtmosphereInputs {
         xuv_saturation_time: XUV_SATURATION_FGK,
         envelope_history: EnvelopeHistory::NONE,
         envelope_helium: None,
+        vent: HAND_VENT,
         flux: irradiation_flux(Kelvin::new(370.0)),
         maximum_greenhouse_flux_ratio: sun_maximum_ratio(irradiation_flux(Kelvin::new(370.0))),
     }
@@ -4452,6 +4466,7 @@ fn table_planet_inputs(
         xuv_saturation_time: sun.xuv().saturation_time(),
         envelope_history: EnvelopeHistory::NONE,
         envelope_helium: None,
+        vent: HAND_VENT,
         flux: planet.flux(),
         maximum_greenhouse_flux_ratio: sun_maximum_ratio(planet.flux()),
     }
@@ -4838,6 +4853,7 @@ fn m_dwarf_planet(
         xuv_saturation_time: history.saturation_time(),
         envelope_history: EnvelopeHistory::NONE,
         envelope_helium: None,
+        vent: HAND_VENT,
         flux: irradiation_flux(t_eq),
         maximum_greenhouse_flux_ratio: irradiation_flux(t_eq).value()
             / crate::planetary::derive::habitable_zone::HabitableLimit::MaximumGreenhouse
@@ -4964,6 +4980,7 @@ fn dry_mars_at(years: f64) -> AtmosphereInputs {
         xuv_saturation_time: sun.xuv().saturation_time(),
         envelope_history: EnvelopeHistory::NONE,
         envelope_helium: None,
+        vent: HAND_VENT,
         flux: irradiation_flux(Kelvin::new(225.0)),
         maximum_greenhouse_flux_ratio: sun_maximum_ratio(irradiation_flux(Kelvin::new(225.0))),
     }
@@ -6402,6 +6419,7 @@ pub(crate) fn on_pluto_s_orbit_at(body: &DerivedBody, albedo: f64) -> Atmosphere
         xuv_saturation_time: sun.xuv().saturation_time(),
         envelope_history: EnvelopeHistory::NONE,
         envelope_helium: None,
+        vent: HAND_VENT,
         flux: body.flux(),
         maximum_greenhouse_flux_ratio: sun_maximum_ratio(body.flux()),
     }
