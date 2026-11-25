@@ -103,9 +103,9 @@ pub(crate) use surface_mix::{
     PassWeathered, PassWeathering, SpunClimate, SpunColdTraps, WeatheringCase, pass_regolith,
     pass_resurfacing,
 };
-#[cfg(test)]
-pub(crate) use vented::Outgassed;
 pub(crate) use vented::VentRoute;
+#[cfg(test)]
+pub(crate) use vented::{Outgassed, carbon_view};
 
 use crate::Seed;
 use crate::id::BodyId;

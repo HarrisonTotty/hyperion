@@ -46,15 +46,17 @@ use crate::galaxy::params::GalaxyParams;
 use crate::galaxy::placement::SystemRecord;
 use crate::galaxy::rules::GalaxyRules;
 use crate::planetary::chem::condense::NotFormed;
+use crate::planetary::chem::escape::EscapeOutcome;
 use crate::planetary::chem::outgassing::{OutgassingRules, with_outgassing_speciation};
 use crate::planetary::chem::partition::{CondensateEntry, CondensatePhase};
+use crate::planetary::chem::quench::QuenchedSystem;
 use crate::planetary::chem::secondary::{AirElements, BuildAirElementsError, WoitkeType};
 use crate::planetary::derive::atmosphere::SNOWBALL_ICE_COVER;
 use crate::planetary::derive::atmosphere::{
     AIRLESS_PRESSURE, DECK_BASE_PRESSURE, DeckBaseRules, Gas, RunawayDeck, SurfaceState,
     WATER_MELTING_POINT, reducing, with_deck_base,
 };
-use crate::planetary::derive::atmosphere::{Outgassed, VentRoute};
+use crate::planetary::derive::atmosphere::{Outgassed, VentRoute, carbon_view};
 use crate::planetary::hooks::aerosols::{AerosolDeck, AerosolMode};
 use crate::planetary::hooks::figures::Subsurface;
 use crate::planetary::hooks::surface::Forcing;
@@ -2642,6 +2644,14 @@ struct CarrierBody {
     p_s: Option<Pascals>,
     /// Its partial pressures, Pa, in [`Gas::ALL`]'s order.
     partials: [f64; 9],
+    /// Its carbon as carbon dioxide's term reads it ([`carbon_view`], under its rules), Pa: its
+    /// CO₂, and at 36 its vent's CH₄ as CO₂ mole for mole.
+    carbon: f64,
+    /// The share of its carbon its solve left airborne (the escape record's), 1 with none.
+    airborne_carbon: f64,
+    /// Its kept carbon's column weight as CO₂, Pa: its carbon's outcome less what escaped, at its
+    /// bulk's surface gravity over 4πR²; none with no escape recorded or no bulk.
+    kept_carbon: Option<f64>,
     /// Its Bond albedo.
     albedo: f64,
     /// Why its carriers are, or are not, its vent's.
@@ -2679,11 +2689,28 @@ impl CarrierBody {
             },
             |budget| Some(budget.woitke_type()),
         );
+        let kept_carbon = air.escape().and_then(|escape| {
+            let carbon = escape.element(Element::C)?;
+            let bulk = case.record.bulk().ok()?;
+            let r = Metres::from(bulk.radius()).value();
+            let weight = bulk.surface_gravity().value() / (4.0 * core::f64::consts::PI * r * r);
+            let kept = carbon.inventory().value() - carbon.escaped().value();
+            Some(
+                kept * Gas::CarbonDioxide.molar_mass_g_per_mol()
+                    / Element::C.standard_atomic_weight_g_per_mol()
+                    * weight,
+            )
+        });
         Self {
             states: (air.state(), air.published_state()),
             t_s: air.surface_temperature(),
             p_s: air.surface_pressure(),
             partials: Gas::ALL.map(|gas| partials.of(gas).value()),
+            carbon: carbon_view(partials).of(Gas::CarbonDioxide).value(),
+            airborne_carbon: air
+                .escape()
+                .map_or(1.0, EscapeOutcome::airborne_carbon_share),
+            kept_carbon,
             albedo: air.albedo().value(),
             vent: air.vent(),
             woitke,
@@ -2897,14 +2924,7 @@ impl<'a> CarrierMoves<'a> {
     /// division and the class alone, lets vent (`escaping`'s `Body::hot`, a lean), each with its line.
     fn vented_but_hot(&self) -> Vec<String> {
         self.vented()
-            .filter(|(_, body, _)| {
-                matches!(
-                    body.states.1,
-                    SurfaceState::RunawayGreenhouse
-                        | SurfaceState::MagmaOcean
-                        | SurfaceState::SteamEnvelope
-                )
-            })
+            .filter(|(_, body, _)| hot_state(body.states.1))
             .map(|(label, body, _)| format!("{label}: {}", body.line()))
             .collect()
     }
@@ -3090,6 +3110,318 @@ impl<'a> CarrierMoves<'a> {
     }
 }
 
+/// Whether `state` is a hot one: a runaway by rule 6, a surface its greenhouse holds molten or a
+/// steam envelope.
+fn hot_state(state: SurfaceState) -> bool {
+    matches!(
+        state,
+        SurfaceState::RunawayGreenhouse | SurfaceState::MagmaOcean | SurfaceState::SteamEnvelope
+    )
+}
+
+/// The most a thermostat-held vented air's carbon may exceed its held twin's, where its class is
+/// kept (research-leans-60 ruling B, bound 1; Walker, Hays and Kasting 1981, JGR 86, 9776): 1%,
+/// the ruling's tolerance.
+const THERMOSTAT_CARBON_RATIO: f64 = 1.01;
+
+/// The rounding allowed a published figure against a bound it is computed to meet (ruling B's
+/// bounds 2 and 3), relative.
+const BOUND_ROUNDING: f64 = 1e-9;
+
+/// The age at which the census reads the CH₄–CO quench, yr (research-leans-60's 10⁶ yr).
+const QUENCH_AGE_YEARS: f64 = 1e6;
+
+/// Whether `value` is at most `bound`: false where either is not a number.
+fn at_most(value: f64, bound: f64) -> bool {
+    value <= bound
+}
+
+/// The largest of the values seen, and its label.
+#[derive(Debug, Clone, Copy)]
+struct Largest<'a>(f64, Option<&'a String>);
+
+impl<'a> Largest<'a> {
+    const NONE: Self = Self(f64::NEG_INFINITY, None);
+
+    fn see(&mut self, value: f64, label: &'a String) {
+        if value > self.0 {
+            *self = Self(value, Some(label));
+        }
+    }
+
+    fn named(self) -> String {
+        self.1.map_or_else(
+            || "none".to_owned(),
+            |label| format!("{:.6e}, {label}", self.0),
+        )
+    }
+}
+
+/// research-leans-60's checks of the shift and the carbon over the vented airs, each against its
+/// held twin ([`CarrierMoves::shift_lines`]): the breaches of its asserted bounds, each by name,
+/// and what it lists.
+struct ShiftChecks<'a> {
+    breaches: Vec<String>,
+    thermostat: usize,
+    stored: (usize, f64),
+    debit_fraction: Largest<'a>,
+    carbon_ratio: Largest<'a>,
+    carbon_dioxide_ratio: Largest<'a>,
+    /// The thermostat-held airs whose carbon passes bound 1 by their vent's CH₄ alone, their CO₂
+    /// within it: a CO₂ the partition or escape holds below the thermostat's, the CH₄ not.
+    methane_excess: Vec<&'a String>,
+    kept_ratio: Largest<'a>,
+    pressure: Largest<'a>,
+    /// The vented airs above CO₂'s saturation whose held twin is too.
+    partition: Vec<&'a String>,
+    quenched: Vec<String>,
+    /// The frozen thermostat airs: their unshifted airborne CO, kg as CO₂, and the solve's share.
+    frozen: Vec<(f64, &'a String, f64)>,
+}
+
+impl<'a> ShiftChecks<'a> {
+    fn new() -> Self {
+        Self {
+            breaches: Vec::new(),
+            thermostat: 0,
+            stored: (0, 0.0),
+            debit_fraction: Largest::NONE,
+            carbon_ratio: Largest::NONE,
+            carbon_dioxide_ratio: Largest::NONE,
+            methane_excess: Vec::new(),
+            kept_ratio: Largest::NONE,
+            pressure: Largest::NONE,
+            partition: Vec::new(),
+            quenched: Vec::new(),
+            frozen: Vec::new(),
+        }
+    }
+
+    /// The vented air `body` of `label`, its record `out`, against its held twin `twin`.
+    fn see(&mut self, label: &'a String, body: &CarrierBody, twin: &CarrierBody, out: &Outgassed) {
+        let pair = || format!("{} → {}", twin.line(), body.line());
+        if hot_state(body.states.1) && !hot_state(twin.states.1) {
+            self.breaches
+                .push(format!("{label}: flipped into a hot state: {}", pair()));
+        }
+        if out.stored_monoxide.value() > 0.0 {
+            self.stored.0 += 1;
+            self.stored.1 += out.stored_monoxide.value();
+        }
+        if out.dried && !(out.airborne_share >= 1.0 && body.states == twin.states) {
+            self.breaches.push(format!(
+                "{label}: dried at share {:e}, its class not its held twin's: {}",
+                out.airborne_share,
+                pair()
+            ));
+        }
+        if out.airborne_share < 1.0 {
+            self.thermostat(label, body, twin, out);
+        }
+        self.carbon(label, body, twin);
+        self.pressure.see(body.partials[7], label);
+        let quench = crate::units::Seconds::new(
+            QUENCH_AGE_YEARS * crate::units::consts::SECONDS_PER_JULIAN_YEAR,
+        );
+        if let Some(p) = body.p_s.filter(|p| p.value() > 0.0)
+            && QuenchedSystem::CarbonMonoxide.chemical_time(body.t_s, p, 1.0) <= quench
+        {
+            self.quenched.push(format!("{label}: {}", body.line()));
+        }
+    }
+
+    /// The thermostat's checks of a thermostat-held vented air (route share < 1).
+    fn thermostat(
+        &mut self,
+        label: &'a String,
+        body: &CarrierBody,
+        twin: &CarrierBody,
+        out: &Outgassed,
+    ) {
+        self.thermostat += 1;
+        if body.states.1 != twin.states.1 {
+            self.breaches.push(format!(
+                "{label}: thermostat-held, its state moved: {} → {}",
+                twin.line(),
+                body.line()
+            ));
+        }
+        if out.dried {
+            self.breaches
+                .push(format!("{label}: thermostat-held, dried: {}", body.line()));
+        }
+        let water = Gas::Water.molar_mass_g_per_mol();
+        let (kept, debit) = (out.water.value() / water, out.water_debit.value() / water);
+        let monoxide = monoxide_moles(out);
+        let bound = out.airborne_share * monoxide
+            + 2.0 * out.methane.value() / Gas::Methane.molar_mass_g_per_mol();
+        if !at_most(debit - bound, 1e-12 * kept) {
+            self.breaches.push(format!(
+                "{label}: thermostat-held, a debit of {debit:e} mol over {bound:e}"
+            ));
+        }
+        self.debit_fraction.see(debit / kept, label);
+        if body.states == twin.states {
+            let ratio = body.carbon / twin.carbon;
+            let carbon_dioxide = body.partials[7] / twin.partials[7];
+            self.carbon_ratio.see(ratio, label);
+            self.carbon_dioxide_ratio.see(carbon_dioxide, label);
+            if !at_most(carbon_dioxide, THERMOSTAT_CARBON_RATIO) {
+                self.breaches.push(format!(
+                    "{label}: thermostat-held, its CO2 {carbon_dioxide} times its twin's: {} → {}",
+                    twin.line(),
+                    body.line()
+                ));
+            } else if !at_most(ratio, THERMOSTAT_CARBON_RATIO) {
+                self.methane_excess.push(label);
+            }
+        }
+        if body.airborne_carbon > out.airborne_share {
+            let unshifted = monoxide
+                * (body.airborne_carbon - out.airborne_share)
+                * Gas::CarbonDioxide.molar_mass_g_per_mol()
+                * 1e-3;
+            self.frozen.push((unshifted, label, body.airborne_carbon));
+        }
+    }
+
+    /// Ruling B's bounds 2 and 3 on a vented air's carbon.
+    fn carbon(&mut self, label: &'a String, body: &CarrierBody, twin: &CarrierBody) {
+        let diagram = by_key("CO2")
+            .and_then(|id| id.substance().phase_diagram())
+            .expect("the registry's CO2 holds a phase diagram");
+        let critical = diagram.critical_temperature().value();
+        let saturated = |body: &CarrierBody| {
+            body.t_s.value() < critical
+                && !at_most(
+                    body.partials[7],
+                    diagram.saturation_pressure(body.t_s).value() * (1.0 + BOUND_ROUNDING),
+                )
+        };
+        if saturated(body) {
+            if saturated(twin) {
+                self.partition.push(label);
+            } else {
+                self.breaches.push(format!(
+                    "{label}: CO2 above its saturation: {} → {}",
+                    twin.line(),
+                    body.line()
+                ));
+            }
+        }
+        if let Some(kept) = body.kept_carbon {
+            self.kept_ratio.see(body.carbon / kept, label);
+            if !at_most(body.carbon, kept * (1.0 + BOUND_ROUNDING)) {
+                self.breaches.push(format!(
+                    "{label}: carbon {:e} Pa over its kept carbon's {kept:e}",
+                    body.carbon
+                ));
+            }
+        } else {
+            self.breaches
+                .push(format!("{label}: no kept carbon recorded"));
+        }
+    }
+
+    /// What it lists, into `report`, with the largest vented `p_CO₂` beside its held twin's from
+    /// `moves`.
+    fn write(&mut self, moves: &CarrierMoves<'_>, report: &mut String) {
+        let line = "a string takes a line";
+        self.frozen
+            .sort_by(|a, b| b.0.total_cmp(&a.0).then_with(|| a.1.cmp(b.1)));
+        writeln!(
+            report,
+            "research-leans-60: {} thermostat-held vented airs (route share < 1); the largest debit \
+             fraction of the kept water {}; class kept, the largest CO2 ratio to the held twin {} \
+             (against {THERMOSTAT_CARBON_RATIO}) and the largest carbon ratio by carbon_view {}; the \
+             largest carbon over the kept carbon's column weight {}",
+            self.thermostat,
+            self.debit_fraction.named(),
+            self.carbon_dioxide_ratio.named(),
+            self.carbon_ratio.named(),
+            self.kept_ratio.named(),
+        )
+        .expect(line);
+        writeln!(
+            report,
+            "{} thermostat-held airs over {THERMOSTAT_CARBON_RATIO} times their twin's carbon by \
+             their vent's CH4 alone, their CO2 within it (a CO2 the partition or escape holds below \
+             the thermostat's, the CH4 not; findings): {:?}",
+            self.methane_excess.len(),
+            self.methane_excess
+        )
+        .expect(line);
+        if let Some(label) = self.pressure.1 {
+            writeln!(
+                report,
+                "  the largest vented p_CO2 {label}: {} beside its held twin's {}",
+                moves.at_36[label].line(),
+                moves.held[label].line()
+            )
+            .expect(line);
+        }
+        let frozen: f64 = self.frozen.iter().map(|(mass, ..)| mass).sum();
+        writeln!(
+            report,
+            "the stored carbon's vent CO (carbonate as drawn, no debit): {} airs, {:.4e} kg as \
+             CO2; {} frozen thermostat airs (the solve's airborne share above the route's), their \
+             unshifted airborne CO {frozen:.4e} kg as CO2, the largest: {:#?}",
+            self.stored.0,
+            self.stored.1,
+            self.frozen.len(),
+            self.frozen
+                .iter()
+                .take(10)
+                .map(|(mass, label, share)| format!("{label}: {mass:.4e} kg at share {share:.4e}"))
+                .collect::<Vec<_>>()
+        )
+        .expect(line);
+        writeln!(
+            report,
+            "{} vented airs above CO2's saturation whose held twin is too (the partition's \
+             findings): {:?}",
+            self.partition.len(),
+            self.partition
+        )
+        .expect(line);
+        writeln!(
+            report,
+            "{} vented airs at or above the CH4-CO quench at {QUENCH_AGE_YEARS:e} yr (ZM14 eq. 14, \
+             m = 1; findings): {:#?}",
+            self.quenched.len(),
+            self.quenched
+        )
+        .expect(line);
+    }
+}
+
+/// The vent's CO of `out`, mol: the shifted, the dry and the stored CO, each as carbon dioxide.
+fn monoxide_moles(out: &Outgassed) -> f64 {
+    (out.shifted.value() + out.dry_monoxide.value() + out.stored_monoxide.value())
+        / Gas::CarbonDioxide.molar_mass_g_per_mol()
+}
+
+impl CarrierMoves<'_> {
+    /// research-leans-60's checks of the shift and the carbon over the vented airs, each against
+    /// its held twin, into `report`: the breaches of its asserted bounds, each by name (none
+    /// expected). Asserted: no flip into a hot state; on a thermostat-held air (route share < 1) no
+    /// published state changed, none dried and a water debit of at most share × CO + 2 CH₄ by moles
+    /// (within 10⁻¹² of its kept water, the debit being the kept water less the water left); every
+    /// dried air on share 1 with its held twin's class; and ruling B's three bounds on the carbon,
+    /// bound 1 on the CO₂ (its carbon by [`carbon_view`] over the bound by its vent's CH₄ alone is
+    /// listed, as bound 2's breaches by the held twin too are). Listed: the largest debit fraction,
+    /// carbon ratios and `p_CO₂`, the airs at or above the quench, the stored carbon's CO and the
+    /// frozen thermostat airs.
+    fn shift_lines(&self, report: &mut String) -> Vec<String> {
+        let mut checks = ShiftChecks::new();
+        for (label, body, out) in self.vented() {
+            checks.see(label, body, &self.held[label], &out);
+        }
+        checks.write(self, report);
+        checks.breaches
+    }
+}
+
 /// P14.T55.a.c over the ordinary census's systems (research-leans-58): under every other 36 hold,
 /// this one held, and under every 36 hold, every body's carriers by their route, with:
 ///
@@ -3099,13 +3431,23 @@ impl<'a> CarrierMoves<'a> {
 ///   to its inventory within 10⁻⁹, the crust's graphite and the water debit counted;
 /// - **the counts, by name**: the shifted airs and their water debit, the dry CO airs on the
 ///   stand-in, the graphite-capped bodies and their crusts' carbon, the vent-CH₄ airs held on the
-///   carbon with their CH₄ shares, and the hot airs held;
+///   carbon with their CH₄ shares, and the hot airs held; the stored carbon's vent CO (carbonate as
+///   drawn, with no debit) and the frozen thermostat airs, whose solve leaves more of the carbon
+///   airborne than the route's share, with their airborne CO left unshifted (research-leans-60);
+/// - **the shift's bounds** (research-leans-60, [`CarrierMoves::shift_lines`]): no vented air flips
+///   into a hot state, #1840 and #3346 by name among them; no thermostat-held air changes its
+///   published state or is dried, its water debit at most share × CO + 2 CH₄; every dried air is
+///   on share 1 with its held twin's class; ruling B's bounds on the carbon (a thermostat's CO₂
+///   under 1.01 times its twin's, those over it by their vent's CH₄ alone listed; CO₂ under its
+///   saturation below its critical point; and the kept carbon's column weight); and the airs at or
+///   above the CH₄–CO quench listed;
 /// - **the states**: every body that moves shares its system with a vented body (a moon reads its
 ///   planet), every body on P14.T24.f's methane arm publishes the same to the bit, the states moved
 ///   are listed by name, and the vented airs published hot, and the census's own checks hold (every registry row reached or listed, none of 25's and 26's fixed
 ///   findings, no envelope changing section inside the clock window);
 /// - **the anchors** (the table's): Earth, Venus and Mars carry their carbon as CO₂, Earth's
-///   measured state stays within 288 ± 2 K and its hydrogen is lost, and Titan's methane is
+///   shift is its thermostat's share of its CO, its measured state stays within 288 ± 2 K and its
+///   hydrogen is lost, and Titan's methane is
 ///   P14.T24.f's to the bit, within its bounds; Pluto's and Triton's kind, every methane-arm body
 ///   of the census, publishes the same air to the bit.
 #[test]
@@ -3125,10 +3467,35 @@ fn composition_census_under_every_36_hold_speciates_every_secondary_air() {
         "the same bodies at both rules"
     );
     let moves = CarrierMoves::of(&held, &at_36);
-    let report = moves.report();
+    let mut report = moves.report();
+    let breaches = moves.shift_lines(&mut report);
     eprintln!("{report}({:.1} s)", start.elapsed().as_secs_f64());
     for (label, body) in &held {
         assert_eq!(body.vent, None, "{label}: no route below 36");
+    }
+    assert_eq!(
+        breaches,
+        Vec::<String>::new(),
+        "research-leans-60's bounds on the shift and the carbon"
+    );
+    // The two runaways the whole-inventory shift made (research-leans-60 ruling A).
+    for label in [
+        "#1840 41ffacadffc00000.0200 planets",
+        "#3346 21ff76587fe80002.0200 planets",
+    ] {
+        let (before, after) = (&held[label], &at_36[label]);
+        assert!(
+            matches!(after.vent, Some(VentRoute::Vented(_))),
+            "{label}: {}",
+            after.line()
+        );
+        assert_eq!(
+            after.states.1,
+            before.states.1,
+            "{label}: {} → {}",
+            before.line(),
+            after.line()
+        );
     }
     let unfinished: Vec<String> = at_36
         .iter()
@@ -3170,7 +3537,8 @@ fn composition_census_under_every_36_hold_speciates_every_secondary_air() {
 }
 
 /// The carriers' anchors on the Solar System's table (P14.T55.a.c's census): Earth, Venus and Mars
-/// carry their carbon as CO₂, 99% of it by moles; Earth's surface moves under 0.01 K and keeps no
+/// carry their carbon as CO₂, 99% of it by moles; Earth's shift is its thermostat's share of its
+/// vent's CO (research-leans-60 ruling A); Earth's surface moves under 0.01 K and keeps no
 /// H₂ (its measured state's 288 ± 2 K is
 /// `earth_s_carbon_is_unchanged_its_co_shifted_by_its_water_and_its_hydrogen_lost`'s); Titan is
 /// P14.T24.f's to the bit, its CH₄ 4.09% by number to 10% (`titan_carries_methane_at_its_measured_share`).
@@ -3195,6 +3563,16 @@ fn assert_the_carriers_anchors() {
         }
     }
     let (earth, earth_held) = (found(&at_36, "Earth"), found(&held, "Earth"));
+    let Some(VentRoute::Vented(out)) = earth.atmosphere().vent() else {
+        panic!("Earth vents at 36: {:?}", earth.atmosphere().vent());
+    };
+    let monoxide = monoxide_moles(&out);
+    let shifted = out.shifted.value() / Gas::CarbonDioxide.molar_mass_g_per_mol();
+    assert!(
+        out.airborne_share < 1.0
+            && (shifted - out.airborne_share * monoxide).abs() <= 1e-12 * shifted,
+        "Earth's shift: {out:?}"
+    );
     let dt = earth.atmosphere().surface_temperature().value()
         - earth_held.atmosphere().surface_temperature().value();
     assert!(dt.abs() < 0.01, "Earth moves {dt} K");
