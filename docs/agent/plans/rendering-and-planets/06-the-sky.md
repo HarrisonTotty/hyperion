@@ -10185,3 +10185,22 @@ CensusCost)`.
     `census_in_steps`' third step input).
   - _Left._ A cold first sky near the Sun stays CPU-bound at about 180 CPU-s on eight workers
     (findings); the nuclear disc's first step costs about 1.6 × 10⁴ CPU-s.
+- **R06, a dense place's first shells (lane `perf-dense-first-shells`, 2026-11-20, at 33; no
+  final reply moved, near the Sun no reply).**
+  - _Sim._ `caps::FIRST_EDGES_LY` and `LayerCap::first_edges_systems` (a count's caps; forced
+    ones `None`). In `census`: `DENSE_EDGES_LY`, `DENSE_FIRST_SYSTEMS`, `RecordWindow`,
+    `ShellCell`, `CensusPlan::takes_records_by_window`, `CellSlab::shell_cells`,
+    `census_window_part`, `WindowPart`, `census_shell_cell` and the seam `census_plan_by_record`.
+    In `galaxy::placement`: `generate_cell_where_near`, `visit_cell_where_near`,
+    `CandidatesWalked`. A census job reads `shell_cells`, not `cells`.
+  - _Rule._ Dense where C's, D's and E's expected systems within 125 ly pass 3 × 10⁴; the first
+    edge is the largest of 8–64 ly at or under it (lean, 2026-11-20: the sum leaves out A, B and
+    the brown dwarfs, whose sum no threshold would separate from the Sun's).
+  - _Windows (lean, 2026-11-20)._ A record's window is its epoch distance less its cell's pad and
+    its own `star_offset_bound`, not one pad and offset a layer: at R12's system the layer's put
+    277k records in the 8 ly window, the record's own 12k. A windowed cell reads no cell cache
+    (lean). `PROTOCOL_VERSION` stays 3, doc comments only (lean).
+  - _Server._ `Work::Records` (a cell's candidate range); `SkyCaps::with_shells_by_record`;
+    `compute::sky::plan` takes `(edges, by_record)`.
+  - _Left._ R12's `nuclear-disc-sky` starts at 16 ly (12,154 systems), not 8: its first reply
+    is 27 s on 8 pod workers against about 20 s (findings).

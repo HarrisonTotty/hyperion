@@ -6,6 +6,7 @@ import { autoAt, manualAt } from "../../test/exposureFixtures";
 import {
   decodedSky,
   nearestFirstCensus,
+  skyLayerCensus,
   skyPayload,
   skyRequest,
   skyResponse,
@@ -291,5 +292,18 @@ describe("the edge a reply's stars have arrived to", () => {
       streamingEdgeLy(replyAt([null, null, null], true)),
       streamingEdgeLy(replyAt([null, null, null])),
     ]).toEqual([null, null]);
+  });
+
+  it("reads layer A where a dense place's first reply leaves it short of its cap", () => {
+    // In a dense place every layer is shelled, A, B and the brown dwarfs too, from 8 ly
+    // (perf-dense-first-shells).
+    const reply = replyAt([16, 16, 16]);
+    const dense = {
+      ...reply,
+      census: reply.census.map((layer) =>
+        layer.layer === "a" ? skyLayerCensus("a", 8, false) : layer,
+      ),
+    };
+    expect([streamingEdgeLy(dense), streamingEdgeLy(reply)]).toEqual([8, 16]);
   });
 });

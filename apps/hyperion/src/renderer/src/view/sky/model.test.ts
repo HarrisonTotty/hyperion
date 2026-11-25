@@ -7,6 +7,7 @@ import { galacticTranslated } from "../coords/position";
 import {
   decodedSky,
   nearestFirstCensus,
+  skyLayerCensus,
   skyPayload,
   skyRequest,
   skyResponse,
@@ -178,6 +179,19 @@ describe("parallaxShiftPx", () => {
   });
 });
 
+/**
+ * `reply` with layer A complete to `edgeLy` and not final, as a dense place's replies hold it: there
+ * every layer is shelled, A, B and the brown dwarfs too, from 8 ly (perf-dense-first-shells).
+ */
+function withA(reply: SkyResponse, edgeLy: number): SkyResponse {
+  return {
+    ...reply,
+    census: reply.census.map((layer) =>
+      layer.layer === "a" ? skyLayerCensus("a", edgeLy, false) : layer,
+    ),
+  };
+}
+
 describe("asCompleteAs (R06.T12.b)", () => {
   it("counts a final reply as complete as any sky", () => {
     expect(asCompleteAs(replyAt([null, null, null]), replyAt([null, null, null]))).toBe(true);
@@ -203,6 +217,17 @@ describe("asCompleteAs (R06.T12.b)", () => {
 
   it("counts a layer the held sky has final as short in a reply where it is not", () => {
     expect(asCompleteAs(replyAt([4_000, 4_000, 4_000]), replyAt([null, 500, 500]))).toBe(false);
+  });
+
+  it("counts a dense place's layer A, not final at 8 ly, as short of one complete to 16 ly", () => {
+    const first = withA(replyAt([8, 8, 8]), 8);
+    const second = withA(replyAt([16, 16, 16]), 16);
+    expect([
+      asCompleteAs(second, first),
+      asCompleteAs(first, second),
+      asCompleteAs(withA(replyAt([16, 16, 16]), 8), second),
+      asCompleteAs(replyAt([16, 16, 16]), second),
+    ]).toEqual([true, false, false, true]);
   });
 
   it("counts a layer the held sky states and the reply does not as short", () => {

@@ -66,7 +66,8 @@ feature_members_absent: boolean,
 /**
  * How far this answer's census of the layer is complete, ly, in its farthest direction
  * (rendering plan R06, R06.T11.d): the fixed shell edge its shells reach, 125, 250 or 500 ly
- * or 1,000 × 2^k ly (R06.T11.g), while it is not [`final`](Self::is_final), and `cap_ly`
+ * or 1,000 × 2^k ly (R06.T11.g), and 8, 16, 32 and 64 ly first where the place is dense
+ * (perf-dense-first-shells), while it is not [`final`](Self::is_final), and `cap_ly`
  * once it is. Towards
  * each ray of the caps' lattice it is complete to that ray's radius in
  * [`complete_to_rays_ly`](Self::complete_to_rays_ly), the edge held within the cap. It lists
@@ -97,6 +98,7 @@ complete_to_rays_ly: Array<number>,
  * of the cells it opens, as a one-shot census does, but for layers C, D and E where the reply
  * states a [`synthetic_ceiling_v`](SkyResponse::synthetic_ceiling_v), which list only the
  * stars within their real boundary towards each star's band texel. Layers A and B and the
- * brown dwarfs, one shell each, are final from the first answer.
+ * brown dwarfs, one shell each, are final from the first answer, except in a dense place,
+ * where every layer is shelled to the same edges (perf-dense-first-shells).
  */
 final: boolean, };
