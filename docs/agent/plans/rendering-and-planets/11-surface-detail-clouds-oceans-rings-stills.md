@@ -1151,7 +1151,7 @@ _Built 2026-11-13._
 
 Files: `surface/scatter/{pebbles.wgsl,scatterCull.ts,scatterCull.wgsl}`, R01's `WGSL_CATALOGUE`,
 tests. Acceptance: `pnpm test`, `just ci`, `just test-render`, by hand at the surface.
-_Built 2026-11-18 (T6.a–b); the benches are the owner's._
+_Built 2026-11-18 (T6.a–b); the benches and the by-hand look at the surface are the owner's._
 Records: [11-surface-detail-clouds-oceans-rings-stills/records/R11.T6.md](11-surface-detail-clouds-oceans-rings-stills/records/R11.T6.md).
 
 ### R11.T7 Clouds

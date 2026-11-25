@@ -336,7 +336,7 @@ import {
   PEBBLE_LARGEST_DIAMETER_M,
   pebbleLatticeLevels,
 } from "../surface/scatter/pebbleLaw";
-import type { ScatterPatchRecord } from "../surface/scatter/pebblePlace";
+import type { ScatterPatchReach, ScatterPatchRecord } from "../surface/scatter/pebblePlace";
 import type { ScatterBox } from "../surface/scatter/scatterCull";
 import type { ScatterKernelSource } from "../surface/scatter/scatterKernels";
 import { ScatterPass, scatterDrawn } from "../surface/scatter/scatterPass";
@@ -1161,10 +1161,11 @@ interface Resident {
   /** Its bake's sizes, which the time morph's spans read (R10.T16.i). */
   readonly sizes: BakeSizes;
   /**
-   * Whether a palette slot of its bake bears pebbles, its rock abundance above 0
-   * (`TerrainLayers.rockAbundances`; plan R11, R11.T6.a): only such a patch is scattered over.
+   * The largest rock abundance k of its bake's palette slots (`TerrainLayers.rockAbundances`; plan
+   * R11, R11.T6.a), 0 where none bears pebbles: only a patch above 0 is scattered over, and the
+   * scatter's budget bounds its pebbles by it (`expectedPebblesBound`).
    */
-  readonly bearsPebbles: boolean;
+  readonly largestRockAbundance: number;
   /**
    * Its bake's clusters' measured errors (`BakedPatch.clusterErrors`, plan R14, R14.T3.b), which its
    * strides' shared bands take (T3.c), and their largest e₂, e₄ and e₈, m, which an edge beside a
@@ -2427,7 +2428,7 @@ export class TerrainPass {
   #scatterBodies: ReadonlyArray<ScatterBox> = [];
   /** A view-frame's patches the scatter takes, gathered by `#write`, and their nearest distances. */
   readonly #scatterPatches: ScatterPatchRecord[] = [];
-  readonly #scatterNearestM: number[] = [];
+  readonly #scatterReach: ScatterPatchReach[] = [];
   /** Whether the view-frame `#write` last wrote drew the scatter over a patch. */
   #scattered = false;
   /** Whether it is the occlusion's variant, which binds the pyramid and the visibility (R14.T3.d). */
@@ -4776,7 +4777,7 @@ export class TerrainPass {
       interior: isInteriorBake(layers),
       opaqueBlocks: upload.opaqueBlocks,
       sizes,
-      bearsPebbles: layers?.rockAbundances?.some((k) => k > 0) === true,
+      largestRockAbundance: Math.max(0, ...(layers?.rockAbundances ?? [])),
       strideErrors:
         bake.clusterErrors === undefined
           ? null
@@ -5689,7 +5690,7 @@ export class TerrainPass {
     // its fade's footprint, on a lit pass that scatters and a frame that may draw decoration; 0
     // for none.
     this.#scatterPatches.length = 0;
-    this.#scatterNearestM.length = 0;
+    this.#scatterReach.length = 0;
     const scatterReachM =
       lit && this.#scatter?.ready === true && input.decoration !== false
         ? (PEBBLE_LARGEST_DIAMETER_M * decorationPxPerRad(input.view)) / PEBBLE_FADE_PX
@@ -5878,7 +5879,8 @@ export class TerrainPass {
           within === null &&
           !drawn.standIn &&
           level + 2 >= finestLevel &&
-          resident?.bearsPebbles === true
+          resident !== undefined &&
+          resident.largestRockAbundance > 0
         ) {
           // A whole patch of the finest levels near enough to show a pebble (plan R11, R11.T6.a).
           const originM = {
@@ -5901,7 +5903,12 @@ export class TerrainPass {
               key: patch.key,
               cells,
             });
-            this.#scatterNearestM.push(nearestM);
+            this.#scatterReach.push({
+              nearestM,
+              // A bound above its ground's area: its bounding sphere's disc.
+              areaM2: Math.PI * patch.boundingRadiusM ** 2,
+              abundance: resident.largestRockAbundance,
+            });
           }
         }
         if (edgeWeight > 0) {
@@ -6554,9 +6561,9 @@ export class TerrainPass {
     const { view } = input;
     const { cameraM } = view;
     const rows = view.rotation.rows;
-    const order = this.#scatterNearestM
-      .map((nearestM, n) => ({ nearestM, n }))
-      .toSorted((a, b) => a.nearestM - b.nearestM);
+    const order = this.#scatterReach
+      .map((reach, n) => ({ reach, n }))
+      .toSorted((a, b) => a.reach.nearestM - b.reach.nearestM);
     const patches = order.flatMap(({ n }) => this.#scatterPatches[n] ?? []);
     const [r0, r1, r2] = rows;
     const toPasses = (v: Vec3): Vec3 => ({
@@ -6585,7 +6592,7 @@ export class TerrainPass {
     );
     const frame = scatter.frame({
       patches,
-      nearestM: order.map(({ nearestM }) => nearestM),
+      reach: order.map(({ reach }) => reach),
       levels: pebbleLatticeLevels(this.#planet.finestLevel, finestPatchSizeM(this.#planet)),
       rotationRows: [rows[0], rows[1], rows[2]],
       pxPerRad,

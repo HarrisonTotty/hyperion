@@ -49,6 +49,22 @@ describe("the pebbles against the authoritative rocks' law (R11.T3)", () => {
     expect(PEBBLE_LARGEST_DIAMETER_M).toBe(authoritativeRockDiameterM());
   });
 
+  it("refuses the law a NaN abundance, a diameter not positive and finite, or a reversed range", () => {
+    expect(() => rockNumberBetweenPerM2(Number.NaN, 0.1, 0.2)).toThrow(/NaN/u);
+    for (const [low, high] of [
+      [0, 0.2],
+      [-0.1, 0.2],
+      [0.1, Number.POSITIVE_INFINITY],
+      [Number.NaN, 0.2],
+      [0.2, 0.1],
+    ] as const) {
+      expect(() => rockNumberBetweenPerM2(0.1, low, high)).toThrow(/is not one/u);
+    }
+    // An abundance outside [0, 0.40] is clamped, as `RockAbundance::new` clamps it.
+    expect(rockNumberBetweenPerM2(0.9, 0.1, 0.2)).toBe(rockNumberBetweenPerM2(0.4, 0.1, 0.2));
+    expect(rockNumberBetweenPerM2(-1, 0.1, 0.2)).toBe(0);
+  });
+
   it("take the rocks' n(D), the slope of their N(>D)", () => {
     for (const k of [0.01, 0.039, 0.07, 0.18, 0.4]) {
       for (const d of [0.02, 0.1, 0.3, 0.39]) {

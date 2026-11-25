@@ -202,7 +202,19 @@ describe("the geometry override's hand-off (plan R14, Design note 17)", () => {
     }
   });
 
-  it("reads and writes the lit terrain's selection scale, after the detail sets in the fields' order (perf-terrain-selection-scale)", () => {
+  it("reads and writes the decorative scatter's lever, after the detail sets' in the fields' order (plan R11, R11.T6.a)", () => {
+    const override = parseGeometryOverride("scatter=off,decorationSets=off");
+    expect([override, geometryText(override), parseGeometryOverride("scatter=drawn")]).toEqual([
+      { scatter: "off", decorationSets: "off" },
+      "decorationSets=off,scatter=off",
+      { scatter: "drawn" },
+    ]);
+    for (const text of ["scatter=on", "scatter=false", "scatter="]) {
+      expect(() => parseGeometryOverride(text)).toThrow("scatter is drawn or off");
+    }
+  });
+
+  it("reads and writes the lit terrain's selection scale, after the detail sets and the scatter in the fields' order (perf-terrain-selection-scale)", () => {
     const override = parseGeometryOverride("selectionScale=rendered,terrainPlanetshine=brightest");
     expect([
       override,

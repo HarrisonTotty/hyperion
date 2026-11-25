@@ -43,7 +43,7 @@ function frameOn(engine: RenderEngine, base: BucketDrawBase): ScatterFrameInput 
         cells: [NO_PARENT_SLOT, 0, 0, 0],
       },
     ],
-    nearestM: [1],
+    reach: [{ nearestM: 1, areaM2: 1024, abundance: 0.2 }],
     levels: pebbleLatticeLevels(18, 32),
     rotationRows: [
       { x: 1, y: 0, z: 0 },
@@ -185,7 +185,10 @@ describe("the decorative scatter's pass", () => {
     const zeroed = engine.writes.findLast((w) => w.buffer === "t pebbles count");
     expect(new Uint32Array(zeroed?.data.slice().buffer ?? new ArrayBuffer(4))[0]).toBe(0);
     // No entry, no dispatch.
-    const none = pass.frame({ ...frameOn(engine, base), nearestM: [1e6] });
+    const none = pass.frame({
+      ...frameOn(engine, base),
+      reach: [{ nearestM: 1e6, areaM2: 1024, abundance: 0.2 }],
+    });
     expect(none.draws).toHaveLength(0);
     pass.dispose();
     expect(pass.frame(frameOn(engine, base)).draws).toHaveLength(0);

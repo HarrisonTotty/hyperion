@@ -10,7 +10,8 @@
  *   kernel, material, mesh or buffer of it (R11.T6.b). It compiles nothing: until the session's set
  *   is compiled, and wherever it is refused, it draws nothing.
  * - **A frame** ({@link ScatterPass.frame}): the count zeroed, one dispatch of the placement over
- *   the frame's entries (`pebblePlace.ts`), labelled {@link SCATTER_PASS_LABEL}, then the particle
+ *   the frame's entries (`pebblePlace.ts`, the nearest patches within its budget of the capacity),
+ *   labelled {@link SCATTER_PASS_LABEL}, then the particle
  *   path's instance cull against the view's camera ({@link SCATTER_CULL_LABEL}), both submitted
  *   before the draws they feed; the draws are one a template, the pebbles' material over the lit
  *   terrain draw's bindings with the path's buffers and the patches' records beside, drawn after the
@@ -39,6 +40,7 @@ import {
   PEBBLE_PATH_BUFFER,
   SCATTER_PASS_LABEL,
   SCATTER_PATCH_BYTES,
+  type ScatterPatchReach,
   type ScatterPatchRecord,
   packPebbleEntries,
   packPebbleOctaves,
@@ -81,8 +83,8 @@ export interface ScatterGround {
 export interface ScatterFrameInput {
   /** The drawn patches it scatters over, nearest the camera first. */
   readonly patches: ReadonlyArray<ScatterPatchRecord>;
-  /** Each patch's nearest point's distance from the camera, m. */
-  readonly nearestM: ReadonlyArray<number>;
+  /** Each patch's reach: its nearest point's distance, its area's bound and its largest k. */
+  readonly reach: ReadonlyArray<ScatterPatchReach>;
   /** Each octave's lattice level on the body (`pebbleLatticeLevels`). */
   readonly levels: ReadonlyArray<number>;
   /** The rows of the body's rotation, body-fixed axes into the passes' frame. */
@@ -188,9 +190,13 @@ export class ScatterPass {
     }
     const patches = input.patches.slice(0, MAX_SCATTER_PATCHES);
     const entries = scatterEntries(
-      patches.map((p, n) => ({ key: p.key, nearestM: input.nearestM[n] ?? 0 })),
+      patches.map((p, n) => ({
+        key: p.key,
+        ...(input.reach[n] ?? { nearestM: 0, areaM2: 0, abundance: 0 }),
+      })),
       input.levels,
       input.pxPerRad,
+      { density: this.density, capacity: this.path.capacity },
     );
     if (entries.length === 0) {
       return NO_SCATTER;

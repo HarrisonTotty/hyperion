@@ -751,31 +751,6 @@ pub enum ResolvePhotometryError {
     Properties(ResolvePropertiesError),
 }
 
-/// Why [`WorkerFields::rock_abundance`] gave no abundance.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ResolveAbundanceError {
-    /// No field of the body is held.
-    NotStarted(BodyRef),
-    /// The field does not hold the coarse cell the site reads ([`material_site`]).
-    NotSurveyed(QueryHeightError),
-}
-
-impl std::fmt::Display for ResolveAbundanceError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::NotStarted(body) => write!(
-                f,
-                "no field of body {} of system {:#x} is held",
-                body.body_index(),
-                body.raw_system_id()
-            ),
-            Self::NotSurveyed(e) => write!(f, "{e}"),
-        }
-    }
-}
-
-impl std::error::Error for ResolveAbundanceError {}
-
 impl std::fmt::Display for ResolvePhotometryError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -795,6 +770,42 @@ impl std::error::Error for ResolvePhotometryError {
         match self {
             Self::NotStarted(_) => None,
             Self::Properties(e) => Some(e),
+        }
+    }
+}
+
+/// Why [`WorkerFields::rock_abundance`] gave no abundance.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ResolveAbundanceError {
+    /// No field of the body is held.
+    NotStarted(BodyRef),
+    /// The material's entry is past the body's palette.
+    Properties(ResolvePropertiesError),
+    /// The field does not hold the coarse cell the site reads: the patch's centre's.
+    NotSurveyed(QueryHeightError),
+}
+
+impl std::fmt::Display for ResolveAbundanceError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotStarted(body) => write!(
+                f,
+                "no field of body {} of system {:#x} is held",
+                body.body_index(),
+                body.raw_system_id()
+            ),
+            Self::Properties(e) => write!(f, "{e}"),
+            Self::NotSurveyed(e) => write!(f, "{e}"),
+        }
+    }
+}
+
+impl std::error::Error for ResolveAbundanceError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::NotStarted(_) => None,
+            Self::Properties(e) => Some(e),
+            Self::NotSurveyed(e) => Some(e),
         }
     }
 }
@@ -2740,17 +2751,19 @@ impl WorkerFields {
     }
 
     /// The rock abundance k of the ground of `material` on `body` at the centre of the patch
-    /// `key` (plan R11, R11.T6.a): [`rock_abundance`] of its [`material_site`] at the patch's centre
-    /// vertex, so that R11's decorative pebbles there take the size–frequency law the authoritative
-    /// rocks take (Design note 4), the palette entry's family, the header's surface age and
-    /// atmosphere and the coarse crater whose ejecta add the most at the patch's centre.
+    /// `key` (plan R11, R11.T6.a), the law R11's decorative pebbles there take.
     ///
-    /// The ejecta's term is read at the centre alone: a coarse crater's rim radius is many times a
+    /// It is [`rock_abundance`] of the site the authoritative rocks read (`scatter::site`'s
+    /// `material_site`) at the patch's centre vertex, so that the pebbles take the rocks'
+    /// size–frequency law (Design note 4): the palette entry's family, the header's surface age
+    /// and atmosphere, and the coarse crater whose ejecta add the most at the patch's centre. The
+    /// ejecta's term is read at the centre alone: a coarse crater's rim radius is many times a
     /// finest patch's width, so it changes little over one (R11.T6.a's lean, 2026-11-18).
     ///
     /// # Errors
     ///
-    /// [`ResolveAbundanceError::NotStarted`] where no field of `body` is held, and
+    /// [`ResolveAbundanceError::NotStarted`] where no field of `body` is held,
+    /// [`ResolveAbundanceError::Properties`] for an entry past the body's palette, and
     /// [`ResolveAbundanceError::NotSurveyed`] where the field does not hold the centre's coarse
     /// cell.
     pub fn rock_abundance(
@@ -2764,6 +2777,15 @@ impl WorkerFields {
             .get(&body)
             .ok_or(ResolveAbundanceError::NotStarted(body))?
             .field;
+        let len = field.header().palette().len();
+        if usize::from(material.entry()) >= len {
+            return Err(ResolveAbundanceError::Properties(
+                ResolvePropertiesError::EntryNotInPalette {
+                    entry: material.entry(),
+                    len,
+                },
+            ));
+        }
         let centre = key.vertex_dir(PATCH_CENTRE_VERTEX, PATCH_CENTRE_VERTEX);
         let site = material_site(field, material.class(), Some(material.entry()), centre)
             .map_err(ResolveAbundanceError::NotSurveyed)?;

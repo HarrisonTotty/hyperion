@@ -17,7 +17,9 @@
 // diameter on the proposals' law C ÷ D², its keep, its yaw and its tint (`pebbleLaw.ts`). A
 // proposal is kept where its keep is below its ground's share of the law (the palette's slots'
 // laws by their class shares, `pebble_acceptance`), times the slope's filter and the density, and
-// drawn where its fade by pixel footprint is above 0 and it meets no body's box.
+// drawn where its fade by pixel footprint rounds to a byte above 0 and it meets no body's box: at
+// its whole radius, its fade's byte in its tag above its patch's index (`pebblePlace.ts`'
+// `pebbleTag`), by which its draw takes it over to its ground's shading.
 
 struct PebbleParams {
   // The rows of the body's rotation, body-fixed axes into the passes' frame (w unused).
@@ -64,6 +66,8 @@ const PEBBLE_SALT : u32 = 16u;
 const PEBBLE_WORDS_EACH : u32 = 6u;
 const PEBBLE_MAX_PER_CELL : u32 = 48u;
 const PEBBLE_FADE_PX : f32 = 2.0;
+// `pebblePlace.ts`' PEBBLE_TAG_PATCH_BITS.
+const PEBBLE_TAG_PATCH_BITS : u32 = 24u;
 // `pebbleLaw.ts`' PEBBLE_AXES: the ellipsoid's semi-axes over its radius.
 const PEBBLE_AXES : vec3f = vec3f(1.1892071150027210, 0.8408964152537145, 0.75);
 // Golombek and Rapp 1997's q(k) = 1.79 + 0.152 ÷ k per metre, and the law's largest k
@@ -251,7 +255,9 @@ fn main(@builtin(workgroup_id) group : vec3u, @builtin(num_workgroups) groups : 
       let ground = mix(own, morphed, k);
       let centre = tile.originM + rotation * ground;
       let fade = decoration_fade(d / PEBBLE_FADE_PX, length(centre), params.view.x);
-      if (!(fade > 0.0)) {
+      // `pebbleFadeByte`'s ⌊255 fade + ½⌋, not WGSL's `round`, which rounds a half to even.
+      let fade_byte = u32(floor(clamp(fade, 0.0, 1.0) * 255.0 + 0.5));
+      if (fade_byte == 0u) {
         continue;
       }
       let datum = normalize(rec.nu0 + normalDifference(rec, directionDifferenceAt(rec, at)));
@@ -262,7 +268,7 @@ fn main(@builtin(workgroup_id) group : vec3u, @builtin(num_workgroups) groups : 
       if (!(keep < share * pebble_slope_filter(dot(normal, datum)))) {
         continue;
       }
-      let radius = 0.5 * d * fade;
+      let radius = 0.5 * d;
       var met = false;
       for (var b = 0u; b < min(params.counts.w, 8u); b = b + 1u) {
         if (scatter_box_meets(bodies[b], centre, radius * PEBBLE_AXES.x)) {
@@ -289,7 +295,7 @@ fn main(@builtin(workgroup_id) group : vec3u, @builtin(num_workgroups) groups : 
       instances[base + 4u] = pack2x16snorm(rotation_q.xy);
       instances[base + 5u] = pack2x16snorm(rotation_q.zw);
       instances[base + 6u] = colour;
-      instances[base + 7u] = entry.patchIndex;
+      instances[base + 7u] = entry.patchIndex | (fade_byte << PEBBLE_TAG_PATCH_BITS);
     }
   }
 }

@@ -466,14 +466,16 @@ pub(crate) fn site_at<F: FieldView>(
     material_site(synth.field(), material.class(), material.entry(), dir)
 }
 
-/// The site of the ground of the form `class` of the palette entry `entry` (`None` where the palette
-/// names none) at the unit direction `dir` of a point's foot on `field`'s body: [`rock_site`]'s,
-/// for a material already classified there. The palette entry's family, the header's surface age
-/// and atmosphere class, and the coarse crater of the foot's coarse cell whose ejecta add the most
-/// there (see the [module documentation](self)).
+/// [`rock_site`]'s site of the form `class` of the palette entry `entry` (`None` where the palette
+/// names none) at the unit direction `dir` of a point's foot, for a material already classified
+/// there.
 ///
-/// R11.T6.a's decorative scatter reads it at a patch's centre for each material of the patch's
-/// palette (`WorkerFields::rock_abundances`), so that its pebbles take the law the rocks do.
+/// It reads the palette entry's family, the header's surface age and atmosphere class, and the
+/// coarse crater of the foot's coarse cell whose ejecta add the most there (see the [module
+/// documentation](self)). R11.T6.a's decorative scatter reads it at a patch's centre for each
+/// material of the patch's palette
+/// ([`WorkerFields::rock_abundance`](crate::worker::WorkerFields::rock_abundance)), so that its
+/// pebbles take the law the rocks do.
 ///
 /// # Errors
 ///
@@ -482,7 +484,7 @@ pub(crate) fn site_at<F: FieldView>(
 /// # Panics
 ///
 /// If `dir` is not a finite direction, or if a crater's term is not finite (a bug).
-pub fn material_site<F: FieldView>(
+pub(crate) fn material_site<F: FieldView>(
     field: &F,
     class: MaterialClass,
     entry: Option<u8>,

@@ -15,7 +15,12 @@
  *   1.79 + 0.152 ÷ k per metre (their eqs. 1–2, as `hyperion_surface::scatter::law` takes them),
  *   so that the count per size bin runs on across the split (R11.T6.b). Each palette slot's k is
  *   the rocks' own, `rock_abundance` of the slot's material's site at its patch's centre, from the
- *   worker (`WorkerFields::rock_abundance`, the bake's `rockAbundances`).
+ *   worker (`WorkerFields::rock_abundance`, the bake's `rockAbundances`). The law was fitted to
+ *   rocks of decimetres and more; below them it is carried on unchecked, and on airless worlds,
+ *   whose k is set for the authoritative sizes, small rocks are knowingly wrong (Design note 4):
+ *   the pebbles are its continuation, not a measured count. Golombek and Rapp 1997, "Size-frequency
+ *   distributions of rocks on Mars and Earth analog sites", JGR 102(E2), 4117–4129,
+ *   doi:10.1029/96JE03319.
  * - **Proposals, then thinning.** Each octave's cells take a Poisson count of proposals at the
  *   intensity λ(D) = C ÷ D², C = (4 ÷ π)(1.79 k_max + 0.152) at the law's largest k
  *   ({@link MAX_ROCK_ABUNDANCE}), above n(D) at every k (1.79 k + 0.152 ≤ C π ÷ 4 and e^(−qD) ≤ 1),
@@ -24,8 +29,9 @@
  *   ({@link pebbleAcceptance}), times the slope's filter ({@link slopeFilter}) and the setting's
  *   `scatterDensity`. The kept points are a Poisson process of the mixed law's intensity times the
  *   density (Lewis and Shedler 1979, "Simulation of nonhomogeneous Poisson processes by thinning",
- *   Naval Research Logistics Quarterly 26, 403–413), so that a density of ½ keeps half as many and
- *   0 none ({@link scatterDensity} scales the count linearly, R11.T6.b).
+ *   Naval Research Logistics Quarterly 26, 403–413, doi:10.1002/nav.3800260304), so that a
+ *   density of ½ keeps half as many and 0 none ({@link scatterDensity} scales the count linearly,
+ *   R11.T6.b).
  * - **The lattice** (Design note 3): each octave a lattice of the cube sphere's own grid, level
  *   {@link pebbleLatticeLevels}, keyed by `decorationLattice.ts`' {@link latticeHash} of the body's
  *   decoration seed, a salt an octave, the face, the level and the cell, so that a pebble neither
@@ -33,9 +39,12 @@
  *   number of a cell is a word of its hash ({@link pebbleWord}), from its index alone.
  * - **The falloff.** A pebble fades across one octave of pixel footprint as the decoration's
  *   octaves do (`octaveFade`), wholly drawn while its diameter spans {@link PEBBLE_FADE_PX} × 2 px
- *   or more and gone at {@link PEBBLE_FADE_PX}, by its radius: so the falloff follows the view's
- *   footprint and no pebble flickers below two pixels, the flash limit's guard (Design note 3).
- * - **Its shape** is one half-buried ellipsoid of the rocks' middle proportions
+ *   or more and gone at {@link PEBBLE_FADE_PX}: so the falloff follows the view's footprint and no
+ *   pebble flickers below two pixels, the flash limit's guard (Design note 3). It fades by contrast,
+ *   not by size: drawn at its whole size, its normal and its tint go over to its ground's as it
+ *   fades (`pebbleDraw.wgsl`), so that at the end it is shaded as the ground beneath it and leaves
+ *   no step where it is dropped.
+ * - **Its shape** is one half-buried ellipsoid of about the rocks' middle proportions
  *   ({@link PEBBLE_AXES}), turned by a yaw about the ground's normal.
  */
 
@@ -59,10 +68,11 @@ export const MAX_ROCK_ABUNDANCE = 0.4;
 
 /**
  * The pebbles' octaves of diameter, m, each [low, high), from the split down to 1.25 cm (lean,
- * 2026-11-18): five, each half the last, the smallest at the top of the Wentworth scale's fine
- * pebbles (4–64 mm; Wentworth 1922, "A scale of grade and class terms for clastic sediments",
- * Journal of Geology 30, 377–392). Below it the count, which grows as 1 ÷ D, is left to R11.T2's
- * detail sets.
+ * 2026-11-18): five, each half the last, the smallest 12.5 to 25 mm, well inside the Wentworth
+ * scale's pebbles (4–64 mm; Wentworth 1922, "A scale of grade and class terms for clastic
+ * sediments", Journal of Geology 30, 377–392, doi:10.1086/622910), the top one large cobbles and
+ * small boulders (cobbles 64–256 mm, boulders above). Below it the count, which grows as 1 ÷ D,
+ * is left to R11.T2's detail sets.
  */
 export const PEBBLE_OCTAVES: ReadonlyArray<readonly [lowM: number, highM: number]> = [
   [0.2, 0.4],
@@ -91,8 +101,9 @@ export const PEBBLE_WORDS_EACH = 6;
 export const PEBBLE_SALT = 16;
 
 /**
- * A pebble's horizontal axial ratio b ÷ a: √2 ÷ 2, the fragment ratio a : b ≈ 2 : √2 about which
- * the rocks' is drawn (`hyperion_surface::scatter::ROCK_ASPECT`, 0.55 to 0.9; Design note 5).
+ * A pebble's horizontal axial ratio b ÷ a: √2 ÷ 2, the fragment ratio a : b ≈ 2 : √2, near the
+ * middle of the rocks' drawn range (`hyperion_surface::scatter::ROCK_ASPECT`, 0.55 to 0.9; Design
+ * note 5).
  */
 export const PEBBLE_ASPECT = Math.SQRT1_2;
 
@@ -122,9 +133,11 @@ export const PEBBLE_TINT: readonly [number, number] = [0.75, 1.25];
 
 /**
  * The slopes, degrees from the datum's normal, below which every pebble stays and above which none
- * does, the keep falling linearly in cos θ between: loose gravel stands up to its angle of repose,
- * about 34° to 40° for angular gravels (Al-Hashemi and Al-Amoudi 2018, "A review on the angle of
- * repose of granular materials", Powder Technology 330, 397–417; lean, 2026-11-18).
+ * does, the keep falling linearly in cos θ between (lean, 2026-11-18): loose gravel stands up to
+ * its angle of repose, commonly some 30° to 40° for dry granular material, the higher for angular
+ * grains (Al-Hashemi and Al-Amoudi 2018, "A review on the angle of repose of granular materials",
+ * Powder Technology 330, 397–417, doi:10.1016/j.powtec.2018.02.003; the figure as recalled, not
+ * re-checked against the paper here).
  */
 export const PEBBLE_REPOSE_DEG: readonly [full: number, none: number] = [30, 40];
 
@@ -147,14 +160,16 @@ export const PEBBLE_PROPOSAL_COEFFICIENT = lawCoefficient(MAX_ROCK_ABUNDANCE);
 
 /**
  * n(D), rocks per square metre per metre of diameter at the abundance `k`: (4 k q ÷ π) e^(−qD) ÷ D²,
- * 0 at k ≤ 0 (`law.rs`' `number_per_m2_per_m`).
+ * k clamped to at most {@link MAX_ROCK_ABUNDANCE} as `RockAbundance::new` clamps it, 0 at k ≤ 0
+ * (`law.rs`' `number_per_m2_per_m`).
  */
 export function numberDensityPerM2PerM(k: number, diameterM: number): number {
   if (!(k > 0)) {
     return 0;
   }
-  const q = Q_CONSTANT_PER_M + Q_INVERSE_PER_M / k;
-  return (lawCoefficient(k) * Math.exp(-q * diameterM)) / (diameterM * diameterM);
+  const kept = Math.min(k, MAX_ROCK_ABUNDANCE);
+  const q = Q_CONSTANT_PER_M + Q_INVERSE_PER_M / kept;
+  return (lawCoefficient(kept) * Math.exp(-q * diameterM)) / (diameterM * diameterM);
 }
 
 /**

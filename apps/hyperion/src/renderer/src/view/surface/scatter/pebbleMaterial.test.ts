@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { PARTICLE_INSTANCE_BYTES, sphereParticleTemplates } from "../../clusters/particles";
 import { terrainLitMaterialSpec } from "../../terrain/terrainMaterial";
 import { PEBBLE_AXES } from "./pebbleLaw";
+import { PEBBLE_TAG_PATCH_BITS } from "./pebblePlace";
 import {
   PEBBLE_BINDINGS,
   PEBBLE_MATERIALS,
@@ -69,6 +70,18 @@ describe("the pebbles' material", () => {
     expect(source).toContain(
       "struct PebbleRecord {\n  centre : vec3f,\n  radius : f32,\n  rotation : vec2u,\n  colour : u32,\n  tag : u32,\n}",
     );
+  });
+
+  it("fades a pebble by contrast: its patch below its tag's fade byte, its normal and tint taken over to its ground's", () => {
+    const source = PEBBLE_MATERIALS["baked-offsets"].vertexWgsl;
+    expect(source).toContain(
+      `const PEBBLE_TAG_PATCH_BITS : u32 = ${String(PEBBLE_TAG_PATCH_BITS)}u;`,
+    );
+    expect(source).toContain("pebble_patches[pebble.tag & ((1u << PEBBLE_TAG_PATCH_BITS) - 1u)]");
+    expect(source).toContain("f32(pebble.tag >> PEBBLE_TAG_PATCH_BITS) / 255.0");
+    expect(source).toContain("mix(1.0, pebble_tint(pebble.colour >> 24u), fade)");
+    expect(source).toContain("shadingNormalAt(in.slot, in.parent, in.patchUv, in.morph)");
+    expect(source).toContain("mix(under, normalize(in.normalBf), in.fade)");
   });
 
   it("draws by the sphere templates, their bounds and errors grown by the largest semi-axis", () => {

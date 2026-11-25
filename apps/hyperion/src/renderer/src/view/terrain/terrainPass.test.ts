@@ -2,6 +2,8 @@ import type { DiscSecondary } from "../bodies/discShading";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { countingRenderEngine, type CountingRenderEngine } from "../../test/countingRenderEngine";
+import { viewId } from "../camera/state";
+import type { ScatterBox } from "../surface/scatter/scatterCull";
 import { ScatterKernelSet } from "../surface/scatter/scatterKernels";
 import { bindingStages } from "../../test/wgslStages";
 import { materialBindings, storageBuffersPerStage } from "../engine/webgpu/materials";
@@ -95,6 +97,8 @@ import {
   TerrainPass,
   type TerrainPool,
   type TerrainView,
+  type TerrainViewFrame,
+  type TerrainViewFrameInput,
   terrainShadingOf,
 } from "./terrainPass";
 import { distanceToBoxFromM } from "./viewGeometry";
@@ -1767,6 +1771,137 @@ describe("the lit terrain of a body (R10.T10.b)", () => {
         setEngine,
       ),
     ).toBeNull();
+  });
+
+  /**
+   * A high lit pass of {@link BODY} whose bakes bear pebbles at `abundances`, given a compiled
+   * scatter set on its own engine, and a view 1.5 m over the fake pool's bake origin looking down,
+   * its patches streamed until a frame draws them (or 200 steps a second apart, so that each
+   * refine's time morph has run).
+   */
+  async function scatteringPass(abundances: Float32Array): Promise<{
+    readonly pass: TerrainPass;
+    readonly engine: CountingRenderEngine;
+    readonly scatter: ScatterKernelSet;
+    readonly frameOf: (
+      extra?: Partial<TerrainViewFrameInput>,
+      bodies?: ReadonlyArray<ScatterBox>,
+    ) => TerrainViewFrame;
+  }> {
+    const engine = await countingRenderEngine({
+      maxStorageBufferBindingSize: MAX_REQUESTED_BUFFER_BYTES,
+      maxBufferSize: MAX_REQUESTED_BUFFER_BYTES,
+    });
+    const scatter = new ScatterKernelSet(engine, "baked-offsets");
+    expect(await scatter.ready).toBe(true);
+    const pools: FakePool[] = [];
+    const pass = new TerrainPass({
+      engine,
+      setting: "high",
+      planet: PLANET,
+      source: BODY,
+      createPool: (bake) => {
+        const pool = new FakePool(bake);
+        pools.push(pool);
+        return pool;
+      },
+      scatter,
+    });
+    await pass.ready();
+    expect(pass.layout.vertexPath).toBe("baked-offsets");
+    const view: TerrainView = {
+      rotation: IDENTITY_ROTATION,
+      cameraM: { x: 1_000, y: 2_000, z: PLANET.figure.polarRadiusM + 1.5 },
+      orientation: lookAlong({ x: 0.2, y: 0, z: -1 }, { x: 1, y: 0, z: 0 }),
+      fovXRad: Math.PI / 3,
+      viewport: { widthPx: 640, heightPx: 360 },
+    };
+    const id = viewId("scatter view");
+    let nowMs = 0;
+    const frameOf = (
+      extra: Partial<TerrainViewFrameInput> = {},
+      bodies: ReadonlyArray<ScatterBox> = [],
+    ): TerrainViewFrame => {
+      nowMs += 1_000;
+      pass.step({
+        views: [{ id, view, tauPx: 1, weight: 1 }],
+        grounded: [],
+        scatterBodies: bodies,
+      });
+      return pass.drawFor(id, { ...inputAt(view, nowMs), lighting: LIGHTING, ...extra });
+    };
+    for (let n = 0; n < 200; n += 1) {
+      const pool = pools.at(-1);
+      if (pool === undefined) {
+        throw new Error("no pool was made");
+      }
+      pool.layers = { ...bodyLayers(), rockAbundances: abundances };
+      if (frameOf().decorated) {
+        break;
+      }
+      // Each step asks for the next levels, which the fake pool bakes at once.
+      pool.bakeDemand(pass);
+    }
+    return { pass, engine, scatter, frameOf };
+  }
+
+  it("scatters over its finest patches whose bakes bear pebbles, culled by the bodies at the ground, and states its decoration (R11.T6.a)", async () => {
+    const { pass, engine, scatter, frameOf } = await scatteringPass(
+      Float32Array.of(0.2, 0, 0, 0, 0, 0, 0, 0),
+    );
+    // A box at the camera's foot, body-fixed, as the session passes it.
+    const box: ScatterBox = {
+      centreM: { x: 1_000, y: 2_000, z: PLANET.figure.polarRadiusM + 0.5 },
+      axes: [
+        { x: 1, y: 0, z: 0 },
+        { x: 0, y: 1, z: 0 },
+        { x: 0, y: 0, z: 1 },
+      ],
+      halfExtentsM: [1, 1, 0.5],
+    };
+    const before = engine.dispatched.length;
+    const frame = frameOf({}, [box]);
+    expect(frame.decorated).toBe(true);
+    const dispatched = engine.dispatched.slice(before);
+    expect(dispatched.map((d) => d.pass).filter((p) => p?.startsWith("scatter") === true)).toEqual([
+      "scatter",
+      "scatter cull",
+    ]);
+    // Drawn last, by the pebbles' material.
+    expect(frame.draws.at(-1)?.material).toBe(scatter.kernels?.material);
+    // The box in the passes' frame, less the camera, and one body packed.
+    const place = dispatched.find((d) => d.pass === "scatter");
+    const bodies = place?.bindings.uniforms["bodies"];
+    expect(Array.from(bodies?.subarray(0, 3) ?? [])).toEqual([0, 0, -1]);
+    expect(
+      new Uint32Array(place?.bindings.uniforms["params"]?.buffer ?? new ArrayBuffer(80))[19],
+    ).toBe(1);
+    // Shed while the view's frame-rate floor has stepped it down.
+    const shedFrom = engine.dispatched.length;
+    const shed = frameOf({ decoration: false });
+    expect(shed.decorated).toBe(false);
+    expect(
+      engine.dispatched.slice(shedFrom).some((d) => d.pass?.startsWith("scatter") === true),
+    ).toBe(false);
+    // Made again on the restored device.
+    const first = pass.scatter;
+    engine.loseDevice();
+    engine.restore();
+    expect(pass.scatter).not.toBeNull();
+    expect(pass.scatter).not.toBe(first);
+    pass.dispose();
+    scatter.dispose();
+  });
+
+  it("scatters over no patch whose bake bears no pebbles, and states no decoration (R11.T6.a)", async () => {
+    const { pass, engine, scatter, frameOf } = await scatteringPass(new Float32Array(8));
+    const before = engine.dispatched.length;
+    expect(frameOf().decorated).toBe(false);
+    expect(
+      engine.dispatched.slice(before).some((d) => d.pass?.startsWith("scatter") === true),
+    ).toBe(false);
+    pass.dispose();
+    scatter.dispose();
   });
 
   it("holds its scatter's density at the setting's, or at the one it is given (R11.T6.b)", async () => {

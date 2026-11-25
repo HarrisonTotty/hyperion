@@ -4757,6 +4757,19 @@ fn worker_rock_abundance_is_the_rocks_site_law_at_the_patch_centre() {
         fields.rock_abundance(other, material, key),
         Err(ResolveAbundanceError::NotStarted(other))
     );
+    // An entry past the body's palette, refused before the site is read.
+    let len = field.header().palette().len();
+    let entries = u8::try_from(len).unwrap();
+    let past = Material::new(MaterialClass::Bedrock, entries).unwrap();
+    assert_eq!(
+        fields.rock_abundance(f.body, past, key),
+        Err(ResolveAbundanceError::Properties(
+            ResolvePropertiesError::EntryNotInPalette {
+                entry: entries,
+                len
+            }
+        ))
+    );
     // A patch far from the surveyed cells: its centre's coarse cell is not held.
     let far = PatchKey::containing(level + 6, unit_dir([-1.0, -0.2, 0.3])).unwrap();
     assert!(matches!(

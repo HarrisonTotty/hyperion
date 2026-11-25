@@ -7,15 +7,18 @@
  * - **Made only where drawn** ({@link ScatterKernelSet.forSetting}): the low setting, a density of
  *   0 and the geometry's `scatter` `off` make none, so that no scatter pipeline is created there
  *   (R11.T6.b).
- * - **After the terrain's own.** Its compile starts once `after` settles (the session's material
- *   set's), so that the terrain's materials, which a hand-over's first frame waits for, are never
- *   queued behind the pebbles'.
+ * - **After the terrain's own.** On the first device its compile starts once `after` settles (the
+ *   session's material set's), so that the terrain's materials, which a hand-over's first frame
+ *   waits for, are never queued behind the pebbles'. After a restore it compiles at once, beside
+ *   the set's own compiles again (a lean: the set gives no promise of a restore's).
  * - **What it holds**: the placement on the session's lit vertex path, the particle path's instance
  *   cull, the pebbles' material on that path and the templates' mesh it was compiled against.
- * - **A device loss.** At the restore the lost handles are dropped and all of it is made again; a
- *   compile settling after a restore or after the set is let go holds the lost engine's handles,
- *   which `ResilientEngine` drops, or is released at once. It never rejects: a failure is reported
- *   and settles {@link ScatterKernelSet.ready} `false`, when no pass draws pebbles.
+ * - **A device loss.** At the restore the lost handles are dropped and all of it is made again. A
+ *   compile belongs to the device it was scheduled on: one scheduled before a restore and not yet
+ *   started makes nothing, one settling after a restore holds the lost engine's handles, which
+ *   `ResilientEngine` drops, and one settling after the set is let go is released at once. It never
+ *   rejects: a failure is reported (but a lost device's `EngineUnavailable`) and settles
+ *   {@link ScatterKernelSet.ready} `false`, when no pass draws pebbles.
  */
 
 import { INSTANCE_CULL_KERNEL } from "../../clusters/instanceCull";
@@ -104,15 +107,17 @@ export class ScatterKernelSet implements ScatterKernelSource {
   ) {
     this.#engine = engine;
     this.path = path;
+    // The first device's compile, which a restore before `after` settles leaves to its own.
+    const epoch = this.#epoch;
     this.#ready = after.then(
-      async () => this.#compiled(),
-      async () => this.#compiled(),
+      async () => this.#compiled(epoch),
+      async () => this.#compiled(epoch),
     );
     this.#offRestored = engine.onRestored(() => {
       // The lost device's handles went with it: `ResilientEngine` drops their release.
       this.#kernels = null;
       this.#epoch += 1;
-      this.#ready = this.#compiled();
+      this.#ready = this.#compiled(this.#epoch);
     });
   }
 
@@ -126,10 +131,10 @@ export class ScatterKernelSet implements ScatterKernelSource {
     return this.#ready;
   }
 
-  /** The compile, its failure reported: it never rejects. */
-  async #compiled(): Promise<boolean> {
+  /** The compile scheduled on the device of `epoch`, its failure reported: it never rejects. */
+  async #compiled(epoch: number): Promise<boolean> {
     try {
-      return await this.#compile();
+      return await this.#compile(epoch);
     } catch (error: unknown) {
       if (!(error instanceof EngineUnavailable)) {
         console.error("the decorative scatter's kernels could not be compiled:", error);
@@ -138,11 +143,11 @@ export class ScatterKernelSet implements ScatterKernelSource {
     }
   }
 
-  async #compile(): Promise<boolean> {
-    if (this.#disposed) {
+  async #compile(epoch: number): Promise<boolean> {
+    // Let go, or a restore since it was scheduled, whose own compile owns the new device.
+    if (this.#disposed || epoch !== this.#epoch) {
       return false;
     }
-    const epoch = this.#epoch;
     const engine = this.#engine;
     const mesh = engine.createMesh(this.#templates.mesh);
     // Each ask in an async function, so that one that throws at once is a rejection like the rest.
@@ -159,6 +164,7 @@ export class ScatterKernelSet implements ScatterKernelSource {
       cull.status === "fulfilled" &&
       material.status === "fulfilled"
     ) {
+      this.#release();
       this.#kernels = {
         path: this.path,
         place: place.value,
@@ -199,13 +205,8 @@ export class ScatterKernelSet implements ScatterKernelSource {
     return !this.#disposed;
   }
 
-  /** Releases its handles and stops following restores; idempotent. */
-  dispose(): void {
-    if (this.#disposed) {
-      return;
-    }
-    this.#disposed = true;
-    this.#offRestored();
+  /** Releases the handles held, if any. */
+  #release(): void {
     const kernels = this.#kernels;
     this.#kernels = null;
     if (kernels !== null) {
@@ -214,5 +215,15 @@ export class ScatterKernelSet implements ScatterKernelSource {
       this.#engine.releaseMaterial(kernels.material);
       this.#engine.releaseMesh(kernels.mesh);
     }
+  }
+
+  /** Releases its handles and stops following restores; idempotent. */
+  dispose(): void {
+    if (this.#disposed) {
+      return;
+    }
+    this.#disposed = true;
+    this.#offRestored();
+    this.#release();
   }
 }

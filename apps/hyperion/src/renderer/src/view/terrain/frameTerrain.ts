@@ -433,8 +433,8 @@ export interface LiveFrameTerrainInput {
   readonly tile?: TerrainViewFrameInput["tile"];
   /**
    * Whether the view's frame-rate floor has stepped it down (`BudgetedScale.airStepped`), which
-   * sheds its decoration, the decorative scatter first (plan R11, R11.T6.a; `decorationAllowed`);
-   * `false` where absent.
+   * sheds all its decoration, the decorative scatter with the rest (plan R11, R11.T6.a;
+   * `decorationAllowed`); `false` where absent.
    */
   readonly floorStepped?: boolean | undefined;
 }

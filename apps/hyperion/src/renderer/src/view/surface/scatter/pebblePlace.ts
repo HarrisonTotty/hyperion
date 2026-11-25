@@ -9,7 +9,12 @@
  *   most {@link MAX_SCATTER_PATCHES} ({@link scatterEntries}): for each octave whose largest pebble
  *   spans more than `PEBBLE_FADE_PX` at the patch's nearest point, the octave's lattice cells over
  *   the patch in blocks of {@link PEBBLE_BLOCK_SIDE}², a workgroup a block, at most
- *   {@link MAX_PEBBLE_ENTRIES}.
+ *   {@link MAX_PEBBLE_ENTRIES}, whole patches only.
+ * - **Its budget.** The patches are taken, nearest first, only while a bound of the pebbles they
+ *   keep on average ({@link expectedPebblesBound}) stays within {@link PEBBLE_BUDGET_SHARE} of the
+ *   instances' capacity: so the kernel's count all but never meets the capacity, past which which
+ *   pebbles stay would be the device's order of its atomic adds, and the nearest ground, not a
+ *   frame's luck, keeps its pebbles when the budget binds.
  * - **The patches' records** ({@link SCATTER_PATCH_BYTES}) are the terrain instance's own terms of
  *   the patch: its origin less the camera, in the passes' frame, narrowed once from `f64`, its slot,
  *   morph bands, parent and class sets, and its key, so that a pebble stands on the triangle of the
@@ -17,8 +22,10 @@
  *   coarse–fine edge, which move it by a centimetre or two at most), and its draw shades it as that
  *   ground (`pebbleDraw.wgsl`, which reads the record by the instance's tag).
  * - **The instance** is the particle path's record (`clusters/particles.ts`): its centre, its
- *   radius D ÷ 2 times its fade, its rotation, its colour word (its place in the patch, two 12-bit
- *   fractions, and its tint's byte above them) and its tag, the patch record's index.
+ *   radius D ÷ 2, its rotation, its colour word (its place in the patch, two 12-bit fractions, and
+ *   its tint's byte above them) and its tag ({@link pebbleTag}): the patch record's index, and its
+ *   fade's byte above, by which its draw takes it over to its ground's shading (`pebbleLaw.ts`'
+ *   falloff). A pebble whose fade's byte is 0 is not placed.
  * - **Arithmetic.** The kernel's `f32` is the device's (`presentation-only`): the twin takes the
  *   slot record's `FaceDifferences` terms in `f32` (`vertexEmulation.ts`) and the law in `f64`, so
  *   that a proposal at its keep's edge or a cell at its count's may fall either way; the smoke check
@@ -79,6 +86,29 @@ export const SCATTER_PATCH_BYTES = 64;
 
 /** The placement's pass label, R12's `scatter` row's (Design note 18). */
 export const SCATTER_PASS_LABEL = "scatter";
+
+/**
+ * The share of the instances' capacity a frame's patches may fill on average, by
+ * {@link expectedPebblesBound} (the module's remarks): a tenth held back, many times the count's
+ * Poisson spread at any capacity the pass holds.
+ */
+export const PEBBLE_BUDGET_SHARE = 0.9;
+
+/** The bits of an instance's tag that hold its patch record's index; its fade's byte is above. */
+export const PEBBLE_TAG_PATCH_BITS = 24;
+
+/** A fade in [0, 1] as the byte its tag carries: `pebbles.wgsl`'s, ⌊255 fade + ½⌋. */
+export function pebbleFadeByte(fade: number): number {
+  return Math.floor(Math.fround(Math.fround(Math.min(Math.max(fade, 0), 1)) * 255) + 0.5);
+}
+
+/**
+ * An instance's tag: its patch record's index below {@link PEBBLE_TAG_PATCH_BITS} and its fade's
+ * byte ({@link pebbleFadeByte}) above.
+ */
+export function pebbleTag(patch: number, fadeByte: number): number {
+  return (patch | (fadeByte << PEBBLE_TAG_PATCH_BITS)) >>> 0;
+}
 
 /** The `f32` words of `pebbles.wgsl`'s patch arithmetic every path's prelude defines. */
 const PATCH_CONSTANTS =
@@ -193,17 +223,52 @@ export interface PebbleEntry {
   readonly block: number;
 }
 
-/** A patch's place for {@link scatterEntries}: its key and its nearest point's distance, m. */
-export interface ScatterPatchPlace {
-  readonly key: PatchKey;
+/** What a frame knows of a patch it may scatter over, beside its record, for its entries. */
+export interface ScatterPatchReach {
+  /** Its nearest point's distance from the camera, m. */
   readonly nearestM: number;
+  /** A bound above its ground's area, m²: π r² of its bounding sphere's radius r. */
+  readonly areaM2: number;
+  /** The largest rock abundance k of its palette's slots (`TerrainLayers.rockAbundances`). */
+  readonly abundance: number;
+}
+
+/** A patch's place for {@link scatterEntries}: its key and its reach. */
+export interface ScatterPatchPlace extends ScatterPatchReach {
+  readonly key: PatchKey;
+}
+
+/** What a frame's pebbles may fill: the pass's density and its instances' capacity. */
+export interface ScatterBudget {
+  readonly density: number;
+  readonly capacity: number;
+}
+
+/**
+ * A bound above the pebbles octave `octave` keeps on average over a patch of `place` at
+ * `density`: its proposals over the patch's area bound, each kept at most as at its octave's least
+ * diameter on a ground wholly of the patch's largest k (the law's share rises with k and falls
+ * with D), the slope and the fade taken as keeping all.
+ */
+export function expectedPebblesBound(
+  place: ScatterPatchReach,
+  octave: number,
+  density: number,
+): number {
+  const range = PEBBLE_OCTAVES[octave];
+  if (range === undefined || !(place.areaM2 > 0)) {
+    return 0;
+  }
+  const share = pebbleAcceptance([0, 1], [place.abundance], range[0]);
+  return scatterDensity(density) * proposalsPerM2(octave) * place.areaM2 * share;
 }
 
 /**
  * The entries a frame dispatches over `patches` (in their order, nearest first; see the module's
  * remarks): for each octave whose largest pebble spans more than `PEBBLE_FADE_PX` at the patch's
  * nearest point, a block of its lattice's cells at a time, at most {@link MAX_PEBBLE_ENTRIES},
- * whole patches only.
+ * whole patches only, and only while the patches' {@link expectedPebblesBound} stays within
+ * {@link PEBBLE_BUDGET_SHARE} of `budget`'s capacity.
  *
  * @param levels - Each octave's lattice level (`pebbleLatticeLevels`).
  * @param pxPerRad - The view's px per rad (`decorationPxPerRad`).
@@ -212,14 +277,18 @@ export function scatterEntries(
   patches: ReadonlyArray<ScatterPatchPlace>,
   levels: ReadonlyArray<number>,
   pxPerRad: number,
+  budget: ScatterBudget,
 ): PebbleEntry[] {
   const out: PebbleEntry[] = [];
+  const most = PEBBLE_BUDGET_SHARE * budget.capacity;
+  let expected = 0;
   for (let p = 0; p < patches.length && p < MAX_SCATTER_PATCHES; p += 1) {
     const place = patches[p];
     if (place === undefined) {
       continue;
     }
     const own: PebbleEntry[] = [];
+    let ownExpected = 0;
     PEBBLE_OCTAVES.forEach(([, high], octave) => {
       const level = levels[octave];
       const cellLevels = level === undefined ? -1 : level - place.key.level;
@@ -227,14 +296,16 @@ export function scatterEntries(
       if (cellLevels < 0 || !(spanPx > PEBBLE_FADE_PX)) {
         return;
       }
+      ownExpected += expectedPebblesBound(place, octave, budget.density);
       const blocks = Math.max(1, 2 ** cellLevels / PEBBLE_BLOCK_SIDE) ** 2;
       for (let block = 0; block < blocks; block += 1) {
         own.push({ patch: p, octave, cellLevels, block });
       }
     });
-    if (out.length + own.length > MAX_PEBBLE_ENTRIES) {
+    if (out.length + own.length > MAX_PEBBLE_ENTRIES || expected + ownExpected > most) {
       break;
     }
+    expected += ownExpected;
     out.push(...own);
   }
   return out;
@@ -507,7 +578,8 @@ export function placePebblesCpu(inputs: PebbleTwinInputs): PebbleTwinInstance[] 
           Math.hypot(centreM.x, centreM.y, centreM.z),
           params.pxPerRad,
         );
-        if (!(fade > 0)) {
+        const fadeByte = pebbleFadeByte(fade);
+        if (fadeByte === 0) {
           continue;
         }
         const datum = datumNormalAt(slot.terms, at);
@@ -524,7 +596,7 @@ export function placePebblesCpu(inputs: PebbleTwinInputs): PebbleTwinInstance[] 
         if (!(p.keep < share * slopeFilter(dot(normal, datum)))) {
           continue;
         }
-        const radiusM = 0.5 * p.diameterM * fade;
+        const radiusM = 0.5 * p.diameterM;
         if (intersectsBody({ centreM, radiusM: radiusM * PEBBLE_AXES[0] }, bodies)) {
           continue;
         }
@@ -538,7 +610,7 @@ export function placePebblesCpu(inputs: PebbleTwinInputs): PebbleTwinInstance[] 
           diameterM: p.diameterM,
           rotation: pebbleRotation(rotated(params.rotationRows, normal), p.yawRad),
           colour,
-          tag: entry.patch,
+          tag: pebbleTag(entry.patch, fadeByte),
         });
         if (out.length >= params.capacity) {
           return out;

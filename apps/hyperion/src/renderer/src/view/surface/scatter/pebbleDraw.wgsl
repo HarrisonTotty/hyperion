@@ -3,15 +3,17 @@
 // cull (`clusters/particlePath.ts`) as a half-buried ellipsoid of `PEBBLE_AXES`, lit as the ground
 // it stands on: `terrainLit.wgsl`'s `shade_terrain` at the ground's place under the pebble, its
 // palette's laws by their class shares, its horizon map, the shadow cascades, the air and the
-// planetshine, with the pebble's own normal and its tint on the albedo. Composed after the lit
+// planetshine, with the pebble's own normal and its tint on the albedo, both taken over to the
+// ground's own, its shading normal and no tint, as the pebble fades (`pebbleLaw.ts`' falloff), so
+// that a pebble at the end of its fade is shaded as the ground beneath it. Composed after the lit
 // terrain's source, its own vertex and fragment stages renamed (`pebbleMaterial.ts`), whose `Draw`
 // takes `clusterBase`; it declares the instances, the lists and the patches' records past the lit
 // material's bindings.
 //
 // Its instance (`clusters/particles.ts`' record): the centre less the camera in the passes' frame,
-// the radius D ÷ 2 times the fade, the rotation of the pebble's axes, the colour word (its place in
-// its patch, two 12-bit fractions, and its tint's byte above them) and its tag, its patch record's
-// index (`pebbles.wgsl`'s `ScatterPatch`).
+// the radius D ÷ 2, the rotation of the pebble's axes, the colour word (its place in its patch, two
+// 12-bit fractions, and its tint's byte above them) and its tag, its patch record's index
+// (`pebbles.wgsl`'s `ScatterPatch`) below PEBBLE_TAG_PATCH_BITS and its fade's byte above.
 
 struct PebbleRecord {
   centre : vec3f,
@@ -37,10 +39,11 @@ struct PebblePatch {
 @group(2) @binding(26) var<storage, read> pebble_lists : array<u32>;
 @group(2) @binding(27) var<storage, read> pebble_patches : array<PebblePatch>;
 
-// `pebbleLaw.ts`' PEBBLE_AXES and PEBBLE_TINT.
+// `pebbleLaw.ts`' PEBBLE_AXES and PEBBLE_TINT, and `pebblePlace.ts`' PEBBLE_TAG_PATCH_BITS.
 const PEBBLE_AXES : vec3f = vec3f(1.1892071150027210, 0.8408964152537145, 0.75);
 const PEBBLE_TINT_LOW : f32 = 0.75;
 const PEBBLE_TINT_HIGH : f32 = 1.25;
+const PEBBLE_TAG_PATCH_BITS : u32 = 24u;
 
 struct PebbleVertexOut {
   @builtin(position) clip : vec4f,
@@ -60,8 +63,10 @@ struct PebbleVertexOut {
   @location(9) @interpolate(flat) cells : vec4u,
   // The pebble's own outward normal at the vertex, body-fixed.
   @location(10) normalBf : vec3f,
-  // Its tint, a factor on its ground's albedo.
+  // Its tint, a factor on its ground's albedo, taken over to 1 by its fade.
   @location(11) @interpolate(flat) tint : f32,
+  // Its fade, 1 wholly drawn and 0 at its end.
+  @location(12) @interpolate(flat) fade : f32,
 }
 
 // `v` turned by the unit quaternion `q` (x, y, z, w), as `particleInstance.wgsl`'s.
@@ -82,7 +87,8 @@ fn vertexMain(@location(0) local : vec3f, @builtin(instance_index) entry : u32) 
   let q = raw * inverseSqrt(max(dot(raw, raw), 1e-12));
   let from_camera = pebble.centre + pebble.radius * pebble_rotate(q, local * PEBBLE_AXES);
   let rotation = mat3x3f(draw.bodyRotation[0].xyz, draw.bodyRotation[1].xyz, draw.bodyRotation[2].xyz);
-  let tile = pebble_patches[pebble.tag];
+  let tile = pebble_patches[pebble.tag & ((1u << PEBBLE_TAG_PATCH_BITS) - 1u)];
+  let fade = f32(pebble.tag >> PEBBLE_TAG_PATCH_BITS) / 255.0;
   let rec = slots[tile.slot];
   let uv = vec2f(f32(pebble.colour & 0xfffu), f32((pebble.colour >> 12u) & 0xfffu)) / 4095.0;
   let at = uv * 64.0;
@@ -105,7 +111,8 @@ fn vertexMain(@location(0) local : vec3f, @builtin(instance_index) entry : u32) 
   out.parent = vec2u(tile.parentSlot, tile.parentQuadrant & 3u);
   out.cells = tile.cells;
   out.normalBf = transpose(rotation) * pebble_rotate(q, normalize(local / PEBBLE_AXES));
-  out.tint = pebble_tint(pebble.colour >> 24u);
+  out.tint = mix(1.0, pebble_tint(pebble.colour >> 24u), fade);
+  out.fade = fade;
   return out;
 }
 
@@ -131,7 +138,11 @@ fn fragmentMain(in : PebbleVertexOut) -> @location(0) vec4f {
   ground.rebakeFade = 0.0;
   ground.cells = in.cells;
   ground.sub = 0u;
-  let normal = normalize(in.normalBf);
+  // The pebble's normal taken over to its ground's shading normal by its fade; the ground's where
+  // the two cancel, as they do on no face the camera sees.
+  let under = shadingNormalAt(in.slot, in.parent, in.patchUv, in.morph);
+  let blended = mix(under, normalize(in.normalBf), in.fade);
+  let normal = select(under, normalize(blended), dot(blended, blended) > 1e-12);
   var cascade_lit = 1.0;
   if (LIT_PROBE != 6u) {
     let rotation = mat3x3f(draw.bodyRotation[0].xyz, draw.bodyRotation[1].xyz, draw.bodyRotation[2].xyz);

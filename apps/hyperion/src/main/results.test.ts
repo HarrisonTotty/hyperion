@@ -3095,6 +3095,9 @@ describe("the schema check", () => {
         asFile(8, { ...settings, farCascadeRate: 1, terrainPlanetshine: "brightest" }),
       ),
       validateResults(asFile(8, { ...settings, farCascadeRate: 1, terrainPlanetshine: "all" })),
+      // And the decorative scatter (R11.T6.a): `drawn` or `off` where the file holds it.
+      validateResults(asFile(8, { ...settings, farCascadeRate: 1, scatter: "off" })),
+      validateResults(asFile(8, { ...settings, farCascadeRate: 1, scatter: "on" })),
       // And the lit terrain's τ's pixel: `presented` or `rendered` where the file holds it.
       validateResults(asFile(8, { ...settings, farCascadeRate: 1, selectionScale: "rendered" })),
       validateResults(asFile(8, { ...settings, farCascadeRate: 1, selectionScale: "device" })),

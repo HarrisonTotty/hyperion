@@ -1921,8 +1921,8 @@ impl JsSurfaceFields {
     /// # Errors
     ///
     /// A `JsError` naming the problem if the body index is above 65,535, the key names no patch,
-    /// the palette is not 8 × 2 bytes, or a slot's class code names no class or its entry is one no
-    /// palette holds.
+    /// the palette is not 8 × 2 bytes, or a slot's class code names no class, its entry is one no
+    /// palette holds, or past the body's palette.
     #[wasm_bindgen(js_name = rockAbundances)]
     #[expect(
         clippy::too_many_arguments,
@@ -1968,7 +1968,10 @@ impl JsSurfaceFields {
                 Ok(abundance) => *k = abundance.k() as f32,
                 // The centre's coarse cell not held: its ground is not surveyed and draws none.
                 Err(ResolveAbundanceError::NotSurveyed(_)) => {}
-                Err(e @ ResolveAbundanceError::NotStarted(_)) => {
+                Err(
+                    e @ (ResolveAbundanceError::NotStarted(_)
+                    | ResolveAbundanceError::Properties(_)),
+                ) => {
                     return Err(JsError::new(&e.to_string()));
                 }
             }

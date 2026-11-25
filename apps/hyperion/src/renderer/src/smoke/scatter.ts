@@ -15,7 +15,7 @@
  *   with a body's box hovering 0.1 m up in view, culled and drawn in the same pass after the
  *   terrain. It checks that the pass places pebbles, every one below 0.4 m across and none meeting
  *   the box; that the GPU's pebbles are the CPU twin's (`placePebblesCpu`), their count to 1% and
- *   each matched by place, tint, patch, centre and radius; that half the density keeps about half
+ *   each matched by place, tint, patch, centre, radius and fade; that half the density keeps about half
  *   as many, within the binomial interval; and that the frame with them is finite, its pebbles lit
  *   and drawn where the frame without them shows the ground.
  */
@@ -30,12 +30,13 @@ import { viewRotation4 } from "../view/camera/projection";
 import { cameraCullPassOf, viewAxisOf } from "../view/clusters/instanceScene";
 import { PARTICLE_INSTANCE_BYTES } from "../view/clusters/particles";
 import { BUFFER_USAGE } from "../view/engine/gpuFlags";
-import type { BufferHandle, DrawItem, RenderEngine } from "../view/engine/types";
+import type { BufferHandle, DrawItem, MaterialHandle, RenderEngine } from "../view/engine/types";
 import { METER_CLASS } from "../view/post/meter";
 import { TERRAIN_SETTINGS, type TerrainVertexPath } from "../view/quality/qualitySetting";
 import { decorationSeed } from "../view/surface/decoration/decorationLattice";
 import { PEBBLE_LARGEST_DIAMETER_M, pebbleLatticeLevels } from "../view/surface/scatter/pebbleLaw";
 import {
+  PEBBLE_TAG_PATCH_BITS,
   type PebbleTwinInstance,
   type PebbleTwinSlot,
   placePebblesCpu,
@@ -219,10 +220,15 @@ function readPebbles(words: ArrayBuffer, count: number): PebbleTwinInstance[] {
   return out;
 }
 
+/** A tag's patch record's index, below its fade's byte (`pebbleTag`). */
+function tagPatch(tag: number): number {
+  return tag & (2 ** PEBBLE_TAG_PATCH_BITS - 1);
+}
+
 /**
  * How many of `cpu`'s pebbles a pebble of `gpu` matches: the same colour word (place and tint) and
- * patch, its centre within {@link CENTRE_ALLOWANCE_M} and its radius within
- * {@link RADIUS_ALLOWANCE}; each matched once. The radius is the fade's, so compared relatively.
+ * patch, its centre within {@link CENTRE_ALLOWANCE_M}, its radius within {@link RADIUS_ALLOWANCE}
+ * and its fade's byte within 1, the twin's fade being `f64`; each matched once.
  */
 function matched(
   gpu: ReadonlyArray<PebbleTwinInstance>,
@@ -230,12 +236,12 @@ function matched(
 ): number {
   const byWord = new Map<string, PebbleTwinInstance[]>();
   for (const p of cpu) {
-    const key = `${String(p.tag)}:${String(p.colour)}`;
+    const key = `${String(tagPatch(p.tag))}:${String(p.colour)}`;
     byWord.set(key, [...(byWord.get(key) ?? []), p]);
   }
   let found = 0;
   for (const p of gpu) {
-    const near = byWord.get(`${String(p.tag)}:${String(p.colour)}`) ?? [];
+    const near = byWord.get(`${String(tagPatch(p.tag))}:${String(p.colour)}`) ?? [];
     const k = near.findIndex(
       (q) =>
         Math.hypot(
@@ -243,7 +249,8 @@ function matched(
           q.centreM.y - p.centreM.y,
           q.centreM.z - p.centreM.z,
         ) <= CENTRE_ALLOWANCE_M &&
-        Math.abs(q.radiusM - p.radiusM) <= RADIUS_ALLOWANCE * Math.max(q.radiusM, 1e-6),
+        Math.abs(q.radiusM - p.radiusM) <= RADIUS_ALLOWANCE * Math.max(q.radiusM, 1e-6) &&
+        Math.abs((q.tag >>> PEBBLE_TAG_PATCH_BITS) - (p.tag >>> PEBBLE_TAG_PATCH_BITS)) <= 1,
     );
     if (k >= 0) {
       found += 1;
@@ -315,6 +322,7 @@ async function pebblesOn(
   const kernels = new ScatterKernelSet(engine, path);
   const scatter = new ScatterPass(engine, `scatter smoke ${path}`, kernels, 1);
   const half = new ScatterPass(engine, `scatter smoke ${path} half`, kernels, 0.5);
+  let litMaterial: MaterialHandle | null = null;
   const target = engine.createRenderTarget({
     name: `scatter smoke ${path}`,
     size: FRAME,
@@ -418,6 +426,7 @@ async function pebblesOn(
       ["rgba16float"],
       [resources.mesh],
     );
+    litMaterial = material;
     const atlas = normalsAtlasOf(resources.layout);
     const litDraw: DrawItem = {
       mesh: resources.mesh,
@@ -480,7 +489,12 @@ async function pebblesOn(
     );
     const order = nearestM.map((m, n) => ({ m, n })).toSorted((p, q) => p.m - q.m);
     const patches = order.flatMap(({ n }) => records[n] ?? []);
-    const nearest = order.map(({ m }) => m);
+    // Each patch's reach as the terrain pass takes it: its bounding sphere's disc and its largest k.
+    const reach = order.map(({ m, n }) => ({
+      nearestM: m,
+      areaM2: Math.PI * (bakes[n]?.boundingRadiusM ?? 0) ** 2,
+      abundance: Math.max(0, ...(bakes[n]?.layers?.rockAbundances ?? [])),
+    }));
     const identity: readonly [Vec3, Vec3, Vec3] = [
       { x: 1, y: 0, z: 0 },
       { x: 0, y: 1, z: 0 },
@@ -490,7 +504,7 @@ async function pebblesOn(
     const frameOf = (pass: ScatterPass): ReadonlyArray<DrawItem> =>
       pass.frame({
         patches,
-        nearestM: nearest,
+        reach,
         levels,
         rotationRows: identity,
         pxPerRad,
@@ -527,9 +541,13 @@ async function pebblesOn(
       half.path.capacity,
     );
     const entries = scatterEntries(
-      patches.map((p, n) => ({ key: p.key, nearestM: nearest[n] ?? 0 })),
+      patches.map((p, n) => ({
+        key: p.key,
+        ...(reach[n] ?? { nearestM: 0, areaM2: 0, abundance: 0 }),
+      })),
       levels,
       pxPerRad,
+      { density: scatter.density, capacity: scatter.path.capacity },
     );
     const cpu = placePebblesCpu({
       params: {
@@ -599,6 +617,9 @@ async function pebblesOn(
     scatter.dispose();
     half.dispose();
     kernels.dispose();
+    if (litMaterial !== null) {
+      engine.releaseMaterial(litMaterial);
+    }
     resources.dispose();
     engine.releaseTexture(air.body);
     engine.releaseTexture(shadow);

@@ -917,6 +917,89 @@ describe("the height worker's fields on the real module", () => {
     }
   });
 
+  it("gives each bake's palette its rocks' abundance at the patch's centre, as the module answers it alone (R11.T6.a)", () => {
+    const fields = heldFields();
+    const { direct, args } = directFields();
+    const empty: number[] = [];
+    const named: number[] = [];
+    let palettes = 0;
+    /** A palette that names a slot whose k is above 0. */
+    let rockyPalette: Uint8Array | undefined;
+    for (const record of recordsOf("patch")) {
+      const [, name, face, level, i, j, path, normals, weights] = record.head;
+      const key = { face: faceOf(face), level: Number(level), i: Number(i), j: Number(j) };
+      const settings: BakeSettings = {
+        vertexPath: lookup(VERTEX_PATHS, path),
+        normals: lookup(NORMALS, normals),
+        source: {
+          kind: "body",
+          body: FIXTURE.body,
+          detailSeed: FIXTURE.seed,
+          weights: lookup(WEIGHTS, weights),
+        },
+      };
+      const { reply, transfer } = answerRequest(
+        module,
+        { kind: "bake", id: 3, key, generation: 5, settings },
+        fields,
+      );
+      if (reply.kind !== "baked" || reply.bake.layers === null) {
+        throw new Error(`${String(name)} was not baked: ${JSON.stringify(reply)}`);
+      }
+      const { palette, rockAbundances } = reply.bake.layers;
+      if (rockAbundances === undefined) {
+        throw new Error(`${String(name)} was baked with no rock abundances`);
+      }
+      expect(transfer).toContain(rockAbundances.buffer);
+      expect(rockAbundances).toEqual(
+        direct.rockAbundances(...args, palette, key.face, key.level, key.i, key.j),
+      );
+      palettes += 1;
+      for (let k = 0; k < 8; k += 1) {
+        const k8 = rockAbundances[k] ?? Number.NaN;
+        if (palette[2 * k] === PALETTE_NONE || palette[2 * k + 1] === PALETTE_NONE) {
+          empty.push(k8);
+        } else {
+          named.push(k8);
+          rockyPalette ??= k8 > 0 ? palette : undefined;
+        }
+      }
+    }
+    expect(empty.filter((k) => k !== 0)).toEqual([]);
+    expect(named.filter((k) => !(k >= 0 && k <= Math.fround(0.4)))).toEqual([]);
+    expect(palettes).toBeGreaterThan(0);
+    // The Moon-like ground bears rocks: some named slot's k is above 0.
+    expect(named.some((k) => k > 0)).toBe(true);
+    expect(rockyPalette).toBeDefined();
+    // The field's cell at the middle of a face the survey never reached, its coarse cell not held,
+    // answers 0 for its named slots rather than a refusal.
+    const unsurveyed = { face: 4, level: 6, i: 32, j: 32 } as const;
+    const surveyed = new Set(
+      FIXTURE.changes.flatMap((runs) =>
+        runs.flatMap((run) => {
+          if (run === "-") {
+            return [];
+          }
+          const [first = 0, past = 0] = run.split("-").map(Number);
+          return Array.from({ length: past - first }, (_, k) => first + k);
+        }),
+      ),
+    );
+    expect(surveyed.size).toBeGreaterThan(0);
+    expect(surveyed.has((unsurveyed.face * 64 + unsurveyed.j) * 64 + unsurveyed.i)).toBe(false);
+    expect(
+      direct.rockAbundances(
+        ...args,
+        rockyPalette ?? new Uint8Array(16),
+        unsurveyed.face,
+        unsurveyed.level,
+        unsurveyed.i,
+        unsurveyed.j,
+      ),
+    ).toEqual(new Float32Array(8));
+    direct.free();
+  });
+
   it("answers the fixture's class map, a texel for each surveyed cell, packed with none elsewhere (R10.T10.d)", () => {
     const fields = heldFields();
     const { reply, transfer } = answerRequest(
@@ -1497,6 +1580,12 @@ describe("the height worker's fields on the real module", () => {
     );
     expect(() => direct.rockAbundances(id, bodyIndex, empty, 1, 9, 600, 0)).toThrow(
       /outside level 9/u,
+    );
+    expect(() => direct.rockAbundances(id, bodyIndex, slot(1, 20), 1, 9, 0, 0)).toThrow(
+      /no palette holds/u,
+    );
+    expect(() => direct.rockAbundances(id, bodyIndex, slot(1, 14), 1, 9, 0, 0)).toThrow(
+      /past a palette/u,
     );
     direct.free();
   });
