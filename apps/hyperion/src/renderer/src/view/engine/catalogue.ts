@@ -638,8 +638,9 @@ export const TABLE_ONLY_ENTRIES: ReadonlyArray<CatalogueEntry> = [
  * which a lit body without an atmosphere is drawn by; the air forms' records carry their air. And
  * plan R11's lit passes, each of which binds a body's tables and is drawn by its twin wherever those
  * are `createAirlessTables`' zeros: the clouds' layer and volume and the lit terrain's cloudy forms
- * (R11.T7.b–c), and the far and near seas (R11.T8.b–c), which a sea whose air the frame does not
- * draw is lit through.
+ * (R11.T7.b–c), the far and near seas (R11.T8.b–c), which a sea whose air the frame does not draw
+ * is lit through, and the rocks' lit draw and their resolve by the visibility buffer (R11.T4.b,
+ * R14.T5.e), which an airless body's ground carries.
  */
 const AIRLESS_SOURCES: ReadonlyArray<CatalogueEntry> = [
   ...TERRAIN_ENTRIES,
@@ -650,6 +651,8 @@ const AIRLESS_SOURCES: ReadonlyArray<CatalogueEntry> = [
   ...CLOUD_ENTRIES,
   { kind: "material", spec: OCEAN_FAR_PASS_MATERIAL },
   { kind: "material", spec: OCEAN_NEAR_PASS_MATERIAL },
+  { kind: "material", spec: rockLitMaterialSpec() },
+  { kind: "material", spec: rockResolveMaterialSpec() },
 ];
 
 /**

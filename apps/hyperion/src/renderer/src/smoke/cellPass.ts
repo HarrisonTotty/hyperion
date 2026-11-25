@@ -49,6 +49,7 @@ import {
   type LitBodyEngine,
   type LitBodyInput,
   LitBodyRenderer,
+  type LitBodyRing,
   planLitBodies,
 } from "../view/bodies/draw";
 import {
@@ -67,6 +68,7 @@ import { DISC_ANNULI_HIGH } from "../view/lighting/annuli";
 import { sunLikeHostDisc } from "../view/lighting/hostDisc";
 import { PLANETSHINE_SOURCES_HIGH } from "../view/lighting/planetshine";
 import { PHOTOREAL_PASS_LABELS } from "../view/photoreal/passes";
+import { ringProfile } from "../view/rings/ringProfile";
 import { createSceneTarget } from "../view/photoreal/sceneTarget";
 import { METER_CLASS } from "../view/post/meter";
 import { AU_M } from "../view/scenes/kept";
@@ -126,6 +128,8 @@ interface CellBody {
   readonly mesh: boolean;
   /** The cells per axis it should take inside and on the limb. */
   readonly samples: readonly [number, number];
+  /** The ring whose shadow falls on it (plan R11, R11.T9.a); absent for none. */
+  readonly ring?: LitBodyRing;
 }
 
 /** One case of the check: a plan of bodies in a view. */
@@ -155,6 +159,7 @@ function planOf(item: CellCase, sunDeg = 80): BodyFramePlan {
       photometry: PROVISIONAL_PHOTOMETRY,
       lighting: undefined,
       ...(spec.atmosphere === undefined ? {} : { atmosphere: spec.atmosphere }),
+      ...(spec.ring === undefined ? {} : { ring: spec.ring }),
       ...(spec.mapped === undefined
         ? {}
         : {
@@ -873,11 +878,13 @@ export async function checkSourceTableTwins(engine: RenderEngine, checks: Checks
  * Plan R07's airless twins (perf-bodies-pass; `SourceTableEngine`): airless bodies, a 13 px disc
  * and a 13 px one under a half-surveyed two-class map, a 96 px mesh body, plain and mapped, and a
  * 220 px disc, plain and under a two-class map whose classes' edges are keyed (lane
- * fix-jagged-biome-edges' `classEdge.wgsl`), as is a 96 px mesh body's, the Sun 80° and 120° off
+ * fix-jagged-biome-edges' `classEdge.wgsl`), as is a 96 px mesh body's, and a 96 px mesh body under
+ * a Saturn-like ring's shadow (plan R11, R11.T9.a's `ringShadow.wgsl`), the Sun 80° and 120° off
  * the line of sight, drawn in-fragment and through the `disc cells` pass, per cell and packed, once
  * on the engine the page's wraps (their modules as written) and once on the page's, their twins made
- * and prepared by a first draw; every byte the same, the twins taken, and the keyed edges moving
- * the 220 px disc's bytes from the same map's unkeyed.
+ * and prepared by a first draw; every byte the same, the twins taken, the keyed edges moving the
+ * 220 px disc's bytes from the same map's unkeyed, and the ring's shadow the mesh body's from its
+ * ringless.
  */
 export async function checkAirlessTwins(engine: RenderEngine, checks: Checks): Promise<void> {
   const name = "plan R07: airless bodies drawn by their airless twins draw their modules' bytes";
@@ -925,6 +932,21 @@ export async function checkAirlessTwins(engine: RenderEngine, checks: Checks): P
       texels: halves,
     };
     const unkeyed = { surface: halvesWeights, texels: halves };
+    // A Saturn-like massive ring of porous ice, 1.24 a to 2.27 a, τ 1.5, a gap at 1.95 a (the
+    // rings' own check's, `rings.ts`), its plane 37° from the Sun at 80°, so that its shadow falls
+    // across the lit face below it.
+    const a = EARTH.equatorialRadiusM;
+    const ring: LitBodyRing = {
+      profile: ringProfile({
+        ringKind: "massive",
+        material: "porous_ice",
+        innerRadiusM: 1.24 * a,
+        outerRadiusM: 2.27 * a,
+        opticalDepth: 1.5,
+        gapRadiiM: [1.95 * a],
+      }),
+      normal: vec3(0.6, 0.8, 0),
+    };
     const [writtenKernel, writtenPacked, twinnedKernel, twinnedPacked] = await Promise.all([
       engine.inner.createComputeAsync(BODY_DISC_CELLS_KERNEL),
       engine.inner.createComputeAsync(BODY_DISC_CELLS_PACKED_KERNEL),
@@ -981,8 +1003,16 @@ export async function checkAirlessTwins(engine: RenderEngine, checks: Checks): P
         bodies: one({ diameterPx: 96, mapped: keyed, mesh: true, samples: [1, 4] }),
         twin: false,
       },
+      {
+        name: "a 96 px airless mesh body under its ring's shadow",
+        viewport: { widthPx: 128, heightPx: 112 },
+        bodies: one({ diameterPx: 96, mesh: true, samples: [1, 4], ring }),
+        twin: false,
+      },
     ];
     const keyedDisc = cases.find((item) => item.name.startsWith("a 220 px disc under"));
+    const ringless = cases.find((item) => item.name === "a 96 px airless body in the mesh regime");
+    const ringed = cases.find((item) => item.name.endsWith("under its ring's shadow"));
     const unkeyedDisc: CellCase = {
       name: "a 220 px disc under the same map, unkeyed",
       viewport: { widthPx: 256, heightPx: 256 },
@@ -1036,8 +1066,11 @@ export async function checkAirlessTwins(engine: RenderEngine, checks: Checks): P
     let pixels = 0;
     let differing = 0;
     const results: string[] = [];
-    // The keyed disc's bytes as written in-fragment at 80°, which its edges move from the unkeyed's.
+    // The keyed disc's bytes as written in-fragment at 80°, which its edges move from the unkeyed's,
+    // and the ringed body's and its ringless one's, which its ring's shadow moves.
     let keyedBytes: ArrayBuffer | null = null;
+    let ringedBytes: ArrayBuffer | null = null;
+    let ringlessBytes: ArrayBuffer | null = null;
     for (const item of cases) {
       for (const sunDeg of [80, 120]) {
         for (const way of ways) {
@@ -1051,8 +1084,10 @@ export async function checkAirlessTwins(engine: RenderEngine, checks: Checks): P
           results.push(
             `${item.name} at ${String(sunDeg)}° ${way.by}${way.packed ? " packed" : ""}: ${String(apart.differing)} channels differ`,
           );
-          if (item === keyedDisc && sunDeg === 80 && way.by === "in-fragment") {
-            keyedBytes = asWritten.bytes;
+          if (sunDeg === 80 && way.by === "in-fragment") {
+            keyedBytes = item === keyedDisc ? asWritten.bytes : keyedBytes;
+            ringedBytes = item === ringed ? asWritten.bytes : ringedBytes;
+            ringlessBytes = item === ringless ? asWritten.bytes : ringlessBytes;
           }
         }
       }
@@ -1061,10 +1096,14 @@ export async function checkAirlessTwins(engine: RenderEngine, checks: Checks): P
     const unkeyedBytes = (await draw(false, unkeyedDisc, 80, { by: "in-fragment", packed: false }))
       .bytes;
     const moved = keyedBytes === null ? 0 : halfUlpsApart(keyedBytes, unkeyedBytes).differing;
+    const shaded =
+      ringedBytes === null || ringlessBytes === null
+        ? 0
+        : halfUlpsApart(ringedBytes, ringlessBytes).differing;
     checks.check(
       name,
-      differing === 0 && swaps > 0 && moved > 0,
-      `${String(pixels)} pixels, ${String(differing)} channels differing; ${String(swaps)} draws and dispatches by a twin; the keyed edges move ${String(moved)} channels of the 220 px disc from its unkeyed map's; ${results.join("; ")}`,
+      differing === 0 && swaps > 0 && moved > 0 && shaded > 0,
+      `${String(pixels)} pixels, ${String(differing)} channels differing; ${String(swaps)} draws and dispatches by a twin; the keyed edges move ${String(moved)} channels of the 220 px disc from its unkeyed map's, the ring's shadow ${String(shaded)} of the 96 px mesh body from its ringless; ${results.join("; ")}`,
     );
   } finally {
     writtenRenderer.dispose();

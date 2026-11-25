@@ -154,6 +154,8 @@ import { InThreadRockPageBuilder } from "../view/clusters/meshPageProducer";
 import { addCanvas } from "./frames";
 import { bytesDigest, type Checks, halfTexels, pause } from "./harness";
 import { MOON_LIKE } from "./litTerrain";
+import { byAirlessTwins } from "./airlessPasses";
+import { SourceTableEngine } from "../view/atmosphere/sourceTableEngine";
 import {
   bodyAt,
   datumAt,
@@ -2897,6 +2899,64 @@ function withTestRocks(near: Vec3): (bake: BakedPatch) => BakedPatch {
   };
 }
 
+/** `words`' bits, a word apiece; none for none. */
+function bitsOf(words: Float32Array | Uint32Array | null): Uint32Array {
+  return words === null
+    ? new Uint32Array()
+    : new Uint32Array(words.buffer, words.byteOffset, words.length);
+}
+
+/** Of two frames, how many of their colour, depth and ID words differ in any bit. */
+function wordsApart(a: DrawnScene, b: DrawnScene): number {
+  let apart = 0;
+  for (const [x, y] of [
+    [a.colour, b.colour],
+    [a.depth, b.depth],
+    [a.ids, b.ids],
+  ] as const) {
+    const [p, q] = [bitsOf(x), bitsOf(y)];
+    apart += Math.abs(p.length - q.length);
+    for (let k = 0; k < Math.min(p.length, q.length); k += 1) {
+      apart += p[k] === q[k] ? 0 : 1;
+    }
+  }
+  return apart;
+}
+
+/** A frame against its draws by their airless twins ({@link framesByTwins}). */
+interface TwinFrames {
+  readonly apart: number;
+  readonly twinned: number;
+  readonly names: ReadonlyArray<string>;
+}
+
+/** {@link TwinFrames} in words, for `what`'s frame; `null` for none drawn. */
+function twinWords(what: string, twins: TwinFrames | null): string {
+  return twins === null
+    ? `${what}: no frame`
+    : `${what}: ${String(twins.apart)} words apart, ${String(twins.twinned)} draws by ${twins.names.join(", ")}`;
+}
+
+/**
+ * Plan R07's airless twins (perf-bodies-pass) of a frame's draws: drawn by `drawn` as written, and
+ * again with each draw over the body's airless tables by its module's twin (`byAirlessTwins`), on
+ * `engine`, the engine the page's wraps; the words apart, the draws a twin took, and the twins.
+ */
+async function framesByTwins(
+  engine: RenderEngine,
+  draws: ReadonlyArray<DrawItem>,
+  drawFrame: (draws: ReadonlyArray<DrawItem>) => Promise<DrawnScene>,
+): Promise<TwinFrames> {
+  const twins = await byAirlessTwins(engine, draws);
+  try {
+    const written = await drawFrame(draws);
+    const byTwins = await drawFrame(twins.draws);
+    return { apart: wordsApart(written, byTwins), twinned: twins.twinned, names: twins.names };
+  } finally {
+    twins.release();
+  }
+}
+
 /** Whether `draw` is a rock draw: the one kind that binds the rocks' pages. */
 function isRockDraw(draw: DrawItem): boolean {
   return draw.storageBuffers?.["rockPages"] !== undefined;
@@ -2954,6 +3014,13 @@ export async function checkRocksByIds(engine: RenderEngine, checks: Checks): Pro
     ]);
     // The rocks alone, for the pixels judged: those a rock draws, by its meter class.
     const judged = await drawnScene(engine, pose, rockDraws);
+    // Plan R07's airless twins (perf-bodies-pass): the forward frame's ground and rocks drawn again
+    // on the engine the page's wraps, as written and by their modules' airless twins over the
+    // Moon-like body's airless tables; the same bytes. The frame by IDs after it, as so.
+    const inner = engine instanceof SourceTableEngine ? engine.inner : engine;
+    const forwardTwins = await framesByTwins(inner, forwardFrame.terrainDraws, (draws) =>
+      drawnScene(inner, pose, draws),
+    );
     pass.setGeometry({ ...LOW_AT_STRIDE_1, shading: "visibility" });
     let idFrame = liveFrame(pass, mask, pose, performance.now(), [craft]);
     const rocksByIds = (): boolean =>
@@ -2967,6 +3034,16 @@ export async function checkRocksByIds(engine: RenderEngine, checks: Checks): Pro
       byIds === null || !rocksByIds()
         ? null
         : await drawnByIds(engine, pose, renderer.meshDraws(idFrame.plan), byIds);
+    const idTwins =
+      byIds === null || idScene === null
+        ? null
+        : await framesByTwins(inner, [...byIds.resolve, ...byIds.forward], (draws) =>
+            drawnByIds(inner, pose, [], {
+              ...byIds,
+              resolve: draws.slice(0, byIds.resolve.length),
+              forward: draws.slice(byIds.resolve.length),
+            }),
+          );
     pass.setGeometry(LOW_AT_STRIDE_1);
     const apart =
       idScene === null ? null : stopsApart(forwardScene.colour, idScene.colour, judged.colour);
@@ -2988,6 +3065,15 @@ export async function checkRocksByIds(engine: RenderEngine, checks: Checks): Pro
       apart === null
         ? `no frame of rocks by IDs (settled ${String(near.done)}: ${near.state}; ${String(rockDraws.length)} rock draws forward, the last frame's rocks ${JSON.stringify(drawnRocks.get(pass) ?? null)}; the ground first ${first.state})`
         : `settled ${String(near.done)}; ${String(drawnCount)} rocks in ${JSON.stringify(drawnRocks.get(pass) ?? null)}; ${String(rockDraws.length)} rock draws forward, by IDs ${String(rockRaster)} raster, ${String(rockResolves)} resolve, ${String(forwardRocks)} forward; rocks ${String(apart.terrain)} px: ${String(apart.within)} within ⅓ stop (${((100 * apart.within) / apart.terrain).toFixed(3)}%), ${String(apart.differing)} differing at all, the largest ${apart.largestStops.toFixed(4)} stops; the depth ${depthSame ? "the same bytes" : "differs"}; digests ${bytesDigest(forwardScene.colour)} forward, ${idScene === null ? "—" : bytesDigest(idScene.colour)} by IDs`,
+    );
+    checks.check(
+      "plan R07: the ground and the rocks drawn by their airless twins draw their modules' bytes, forward and by the visibility buffer",
+      forwardTwins.apart === 0 &&
+        forwardTwins.names.includes("rock-lit (airless)") &&
+        idTwins !== null &&
+        idTwins.apart === 0 &&
+        idTwins.names.includes("rock-resolve (airless)"),
+      `${twinWords("forward", forwardTwins)}; ${twinWords("by IDs", idTwins)}`,
     );
   } finally {
     renderer.dispose();

@@ -10284,3 +10284,8 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     1,505–2,628 → 571–579 ms (descent arc 1,285–1,326 → 542–556), p95 9.4–9.9 → 6.0–6.6 s; discs
     and disc cells −59%. Spike results version 10 add `gpu.deviceLosses`.
   - Pending: the owner's UHD 620 and Mac re-runs (the lane's outbox has the commands).
+- **The airless twins over R11's lit passes (2026-11-25, land-pod-bodies-pass):** their checks are
+  test-render's named part `twins`. `AIRLESS_SOURCES` holds every lit material a body without air
+  may be drawn by (`catalogue.test.ts` fails on one left out): the clouds', the seas', the lit
+  terrain's cloudy forms and the rocks'; `smoke/airlessPasses.ts`' `byAirlessTwins` draws a frame's
+  draws by their twins, for a byte check.

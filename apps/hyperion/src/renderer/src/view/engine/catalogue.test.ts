@@ -180,13 +180,16 @@ describe("the airless twins (plan R07, perf-bodies-pass)", () => {
         "bodies:disc (airless)",
         "BODY DISC CELLS (airless)",
         "bodies:smoothMeshEmissive (airless)",
-        // Plan R11's lit passes: the clouds, the lit terrain's cloudy forms and the seas.
+        // Plan R11's lit passes: the clouds, the lit terrain's cloudy forms, the seas and the rocks.
         "cloud layer (airless)",
         "cloud volume (airless)",
         "terrain-lit-baked-offsets-clouds (airless)",
         "terrain-lit-fin-face-differences-clouds (airless)",
         "ocean far pass (airless)",
         "ocean near pass (airless)",
+        // Plan R11's rocks, forward and by the visibility buffer.
+        "rock-lit (airless)",
+        "rock-resolve (airless)",
       ]),
     );
     expect(names.some((name) => name.startsWith("terrain"))).toBe(true);

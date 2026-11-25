@@ -62,7 +62,8 @@
  *
  * The `twins` part (plan R07, perf-bodies-pass) holds the airless twins' catalogue and the checks
  * that the lit modules drawn by them draw their modules' bytes on an airless body (`cellPass.ts`,
- * `litTerrain.ts`, `airlessPasses.ts`): named, as the ladder is, not numbered.
+ * `litTerrain.ts`, `airlessPasses.ts`): named, as the ladder is, not numbered. The rocks' twins are
+ * checked in part 34's frames, whose world the rocks need (`terrainFrame.ts`' `checkRocksByIds`).
  *
  * The `ladder` part (plan R12, R12.T7.a; `ladder.ts`) runs at the setting its query names, `high` or
  * `low`: what that setting's own code makes, made and drawn at it, and found in the catalogue, so

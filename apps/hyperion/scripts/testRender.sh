@@ -103,8 +103,9 @@
 # --part=twins runs plan R07's airless twins (perf-bodies-pass; `src/renderer/src/smoke/cellPass.ts`,
 # `litTerrain.ts` and `airlessPasses.ts`): their catalogue, and the checks that the lit modules drawn
 # by them (the bodies, the lit terrain and its cloudy forms, the clouds and the seas) draw their
-# modules' bytes on an airless body, a run per variant as a numbered part's. It runs after the
-# numbered parts, before the ladder, when no part is asked for.
+# modules' bytes on an airless body, a run per variant as a numbered part's; the rocks' twins are
+# checked in their own frames, part 34's. It runs after the numbered parts, before the ladder, when
+# no part is asked for.
 #
 # --part=ladder runs plan R12's ladder (R12.T7.a; `src/renderer/src/smoke/ladder.ts`): once per
 # quality setting and variant, side by side, each run making and drawing what its setting makes, so

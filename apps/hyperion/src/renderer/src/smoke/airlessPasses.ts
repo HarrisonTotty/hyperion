@@ -10,12 +10,24 @@
  * `createAirlessTables`' zeros, a sea whose air the frame does not draw among them. Its swap is
  * checked on the bodies and the lit terrain (`cellPass.ts`, `litTerrain.ts`); here the twins are
  * made in their modules' places from the start, on the engine the page's wraps, so that each check's
- * every draw is by its twin and the two runs differ in their modules alone.
+ * every draw is by its twin and the two runs differ in their modules alone. A frame's own draws can
+ * be swapped so too ({@link byAirlessTwins}): the rocks' frames, forward and by the visibility
+ * buffer, are (`terrainFrame.ts`' `checkRocksByIds`).
  */
 
 import { SourceTableEngine } from "../view/atmosphere/sourceTableEngine";
-import { airlessMaterial } from "../view/atmosphere/surfaceLighting";
-import type { RenderEngine, WgslMaterialSpec } from "../view/engine/types";
+import {
+  airlessMaterial,
+  BODY_TABLE_DRAW_TEXTURE,
+  isAirlessTable,
+} from "../view/atmosphere/surfaceLighting";
+import { WGSL_CATALOGUE } from "../view/engine/catalogue";
+import type {
+  DrawItem,
+  MaterialHandle,
+  RenderEngine,
+  WgslMaterialSpec,
+} from "../view/engine/types";
 import { checkCloudLayerDraw, checkCloudVolumeDraw } from "./clouds";
 import { Checks } from "./harness";
 import { checkOceanNear, checkOceanPass } from "./ocean";
@@ -119,4 +131,68 @@ export async function checkAirlessPassTwins(engine: RenderEngine, checks: Checks
       `${String(asWritten.reads.length)} read-backs as written, ${String(byTwins.reads.length)} by ${String(byTwins.twins)} twins, ${String(apart)} apart; its own checks pass as written ${String(passes[0])}, by its twins ${String(passes[1])}`,
     );
   }
+}
+
+/** The catalogue's materials by name, of which {@link byAirlessTwins} makes the airless twins. */
+const CATALOGUE_MATERIALS: ReadonlyMap<string, WgslMaterialSpec> = new Map(
+  WGSL_CATALOGUE.flatMap((entry) =>
+    entry.kind === "material" ? [[entry.spec.name, entry.spec] as const] : [],
+  ),
+);
+
+/** A frame's draws by their airless twins ({@link byAirlessTwins}). */
+export interface TwinnedDraws {
+  /** The draws, each over a body's airless tables by its material's airless twin where it has one. */
+  readonly draws: ReadonlyArray<DrawItem>;
+  /** How many of them a twin draws. */
+  readonly twinned: number;
+  /** The twins made, by name. */
+  readonly names: ReadonlyArray<string>;
+  /** Releases the twins made. */
+  readonly release: () => void;
+}
+
+/**
+ * `draws` with each draw whose body's tables are `createAirlessTables`' zeros, and whose material is
+ * the catalogue's and has an airless twin, drawn by that twin, made once on `engine` (the engine the
+ * page's wraps, which swaps nothing itself) for its `rgba16float` scene: a frame as written, to draw
+ * against its twins' (plan R07, perf-bodies-pass).
+ */
+export async function byAirlessTwins(
+  engine: RenderEngine,
+  draws: ReadonlyArray<DrawItem>,
+): Promise<TwinnedDraws> {
+  const made = new Map<string, MaterialHandle>();
+  const swapped: DrawItem[] = [];
+  let twinned = 0;
+  for (const draw of draws) {
+    const spec = CATALOGUE_MATERIALS.get(draw.material.name);
+    const twin =
+      spec === undefined || !isAirlessTable(draw.textures[BODY_TABLE_DRAW_TEXTURE])
+        ? null
+        : airlessMaterial(spec);
+    if (twin === null) {
+      swapped.push(draw);
+      continue;
+    }
+    let material = made.get(twin.name);
+    if (material === undefined) {
+      // Each twin once, in the draws' order.
+      // oxlint-disable-next-line no-await-in-loop
+      material = await engine.createMaterialAsync(twin, ["rgba16float"], [draw.mesh]);
+      made.set(twin.name, material);
+    }
+    twinned += 1;
+    swapped.push({ ...draw, material });
+  }
+  return {
+    draws: swapped,
+    twinned,
+    names: [...made.keys()],
+    release: () => {
+      for (const material of made.values()) {
+        engine.releaseMaterial(material);
+      }
+    },
+  };
 }
