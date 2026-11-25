@@ -5,7 +5,7 @@
 # It exits with the code of the first run, in part and then variant order, that does not exit 0: 1
 # a property failed or a request went out, 2 a setup error (no adapter), 3 the watchdog.
 #
-#   testRender.sh [--variant=NAME]... [--part=N|twins|ladder|casters]... [--setting=high|low]...
+#   testRender.sh [--variant=NAME]... [--part=N|twins|scatter|ladder|casters]... [--setting=high|low]...
 #                 [--fixture=broken-wgsl|external-fetch] [--drop-adapter-switches] [--captures=DIR]
 #                 [--geometry=FIELD=VALUE[,...]]
 #
@@ -107,6 +107,14 @@
 # checked in their own frames, part 34's. It runs after the numbered parts, before the ladder, when
 # no part is asked for.
 #
+# --part=scatter runs plan R11's decorative scatter (R11.T6.a–b; `src/renderer/src/smoke/scatter.ts`),
+# a part of its own by name, as the ladder is, rather than a number (it landed beside the rocks'
+# parts 33 and 34, its lane's part 31 being the stills'): its kernels' and materials' catalogue, its
+# cull against its twin, its placement against its twin over the Moon-like fixture's finest patches
+# on both vertex paths, and the scatter through a lit pass at the surface, each variant side by
+# side, about 150 s on a pod. It runs after the parts and the twins, before the ladder, when no part
+# is asked for.
+#
 # --part=ladder runs plan R12's ladder (R12.T7.a; `src/renderer/src/smoke/ladder.ts`): once per
 # quality setting and variant, side by side, each run making and drawing what its setting makes, so
 # that a setting left to rot fails the render. It runs after the parts when no part is asked for;
@@ -161,6 +169,7 @@ variants=()
 parts=()
 twins=0
 ladder=0
+scatter=0
 settings=()
 fixture=none
 captures=()
@@ -172,6 +181,7 @@ for arg in "$@"; do
         --part=twins) twins=1 ;;
         --part=ladder) ladder=1 ;;
         --part=casters) parts+=(casters) ;;
+        --part=scatter) scatter=1 ;;
         --setting=high | --setting=low) settings+=("${arg#--setting=}") ;;
         --fixture=*) fixture="${arg#--fixture=}" ;;
         --drop-adapter-switches) adapter_switches=() ;;
@@ -183,20 +193,24 @@ done
 if [[ ${#variants[@]} -eq 0 ]]; then
     variants=(default no-subgroups)
 fi
-if [[ ${#parts[@]} -eq 0 && $twins -eq 0 && $ladder -eq 0 ]]; then
+if [[ ${#parts[@]} -eq 0 && $twins -eq 0 && $scatter -eq 0 && $ladder -eq 0 ]]; then
     parts=(1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34)
     twins=1
+    scatter=1
     ladder=1
     parts+=(casters)
 fi
 if [[ ${#settings[@]} -eq 0 ]]; then
     settings=(high low)
 fi
-# The units run one after the other: each part's variants side by side, the twins' as a part's, then
-# the ladder's settings and variants side by side.
+# The units run one after the other: each part's variants side by side, the twins' and then the
+# scatter's as a part's, then the ladder's settings and variants side by side.
 units=(${parts[@]+"${parts[@]}"})
 if [[ $twins -eq 1 ]]; then
     units+=(twins)
+fi
+if [[ $scatter -eq 1 ]]; then
+    units+=(scatter)
 fi
 if [[ $ladder -eq 1 ]]; then
     units+=(ladder)

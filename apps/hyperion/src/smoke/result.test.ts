@@ -146,8 +146,11 @@ const script = (): string => readFileSync(join(__dirname, "../../scripts/testRen
  */
 const LATER_PARTS = Array.from({ length: 33 }, (_, k) => String(k + 2));
 
-/** The named parts, by name: plan R07's airless twins (perf-bodies-pass) and plan R12's ladder. */
-const NAMED_PARTS = ["twins", "ladder"];
+/**
+ * The named parts, by name: plan R07's airless twins (perf-bodies-pass), plan R11's decorative
+ * scatter (R11.T6.b) and plan R12's ladder.
+ */
+const NAMED_PARTS = ["twins", "scatter", "ladder"];
 
 describe("smokeWatchdogMs", () => {
   const plain = {
@@ -346,7 +349,7 @@ describe.runIf(process.platform !== "win32")("testRender.sh's parts", () => {
   it("takes the named part casters, and runs it after the numbered parts when none is asked for (plan R14, R14.T6.c)", () => {
     expect(runScriptAtScale("1", ["--part=casters"]).stderr).not.toContain("unknown argument");
     expect(script()).toMatch(
-      /^ {4}parts=\([\d ]+\)\n {4}twins=1\n {4}ladder=1\n {4}parts\+=\(casters\)$/mu,
+      /^ {4}parts=\([\d ]+\)\n {4}twins=1\n {4}scatter=1\n {4}ladder=1\n {4}parts\+=\(casters\)$/mu,
     );
     const refused = runScriptAtScale("1", ["--part=caster"]);
     expect([refused.status, refused.stderr]).toEqual([
@@ -355,11 +358,18 @@ describe.runIf(process.platform !== "win32")("testRender.sh's parts", () => {
     ]);
   });
 
-  it("runs the airless twins and then the ladder after the parts when none is asked for", () => {
-    // Plan R07's airless twins (perf-bodies-pass) and plan R12's ladder (R12.T7.a).
-    expect(script()).toMatch(/^ {4}parts=\([\d ]+\)\n {4}twins=1\n {4}ladder=1$/mu);
+  it("runs the airless twins, the scatter's part and then the ladder after the parts when none is asked for", () => {
+    // Plan R07's airless twins (perf-bodies-pass), plan R11's decorative scatter (R11.T6.b) and
+    // plan R12's ladder (R12.T7.a).
+    expect(script()).toMatch(/^ {4}parts=\([\d ]+\)\n {4}twins=1\n {4}scatter=1\n {4}ladder=1$/mu);
     expect(scriptArray("units")).toEqual(['${parts[@]+"${parts[@]}"}']);
-    expect(script()).toMatch(/^ {4}units\+=\(twins\)\nfi\nif .*\n {4}units\+=\(ladder\)$/mu);
+    expect(script()).toMatch(
+      /^ {4}units\+=\(twins\)\nfi\nif .*\n {4}units\+=\(scatter\)\nfi\nif .*\n {4}units\+=\(ladder\)$/mu,
+    );
+  });
+
+  it("takes the decorative scatter's part by name, --part=scatter (plan R11, R11.T6.b)", () => {
+    expect(runScriptAtScale("1", ["--part=scatter"]).stderr).not.toContain("unknown argument");
   });
 
   it("takes --part=ladder and --setting=high or low", () => {
@@ -475,6 +485,13 @@ describe.runIf(process.platform === "linux")("testRender.sh's launch", () => {
     expect(asked(["--part=casters", "--setting=high"])).toEqual([
       "casters none default",
       "casters none no-subgroups",
+    ]);
+  });
+
+  it("launches the decorative scatter's part once per variant, at no setting (plan R11, R11.T6.b)", () => {
+    expect(asked(["--part=scatter", "--setting=low"])).toEqual([
+      "scatter none default",
+      "scatter none no-subgroups",
     ]);
   });
 

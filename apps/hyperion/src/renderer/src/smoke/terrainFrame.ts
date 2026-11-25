@@ -124,6 +124,8 @@ import {
   type TerrainDrawnPatches,
   type TerrainGeometryCounts,
   type TerrainPool,
+  type TerrainView,
+  type TerrainViewFrame,
 } from "../view/terrain/terrainPass";
 import {
   CLUSTER_LIT_LATE_PASS,
@@ -169,6 +171,7 @@ import {
 } from "./surveyEdge";
 import { BROKEN_CULL_KERNEL, type SmokeFixture } from "./catalogue";
 import { smokeGeometry } from "./geometry";
+import { type ScatterKernelSource, ScatterKernelSet } from "../view/surface/scatter/scatterKernels";
 import { LaneHold, type LockstepStep, settleInLockstep } from "./lockstep";
 
 /** The passes' cache budget, 32 MiB: a few hundred lit slots, as the survey-edge check takes. */
@@ -2230,14 +2233,18 @@ interface PartWorld {
 /**
  * Part 15's frame check's world, workers and coverage mask made again for a part of its own (plan
  * R14, R14.T2): the Moon-like fixture's first survey, taken by a pool of two height workers, and one
- * lit pass on the low setting over it, its bakes laid by `lay` (as baked where `null`), made once
- * the field's levels are held, as the frame check's passes are.
+ * lit pass on `setting`, the low one by default, over it, its bakes laid by `lay` (as baked where
+ * `null`), building its rocks with `rocks` where given (plan R11, R11.T4) and with the decorative
+ * scatter's handles `scatter` where given (plan R11, R11.T6.a), made once the field's levels are
+ * held, as the frame check's passes are.
  */
 async function partWorld(
   engine: RenderEngine,
   name: string,
   lay: ((bake: BakedPatch) => BakedPatch) | null = null,
   rocks: RockSource | null = null,
+  setting: "high" | "low" = "low",
+  scatter?: ScatterKernelSource,
 ): Promise<PartWorld> {
   const field = moonLikeFixture("first");
   const pool = new HeightWorkerPool({
@@ -2278,15 +2285,16 @@ async function partWorld(
     const hold = new LaneHold();
     const pass = new TerrainPass({
       engine,
-      setting: "low",
-      terrain: { ...TERRAIN_SETTINGS.low, cacheBytes: CACHE_BYTES },
-      geometry: smokeGeometry("low"),
+      setting,
+      terrain: { ...TERRAIN_SETTINGS[setting], cacheBytes: CACHE_BYTES },
+      geometry: smokeGeometry(setting),
       planet: planetGeometry(MOON_LIKE_FIGURE, pool.fieldLevels(field.body)),
       source: { kind: "body", body: field.body, detailSeed: field.seed, weights: "baked" },
       createPool: (bake) =>
         hold.wrap(lay === null ? pool.lane(bake) : onTheDatumLane(pool.lane(bake), lay)),
       survey,
       ...(rocks === null ? {} : { rocks }),
+      ...(scatter === undefined ? {} : { scatter }),
     });
     made = pass;
     pass.setReducedMotion(true);
@@ -3078,5 +3086,137 @@ export async function checkRocksByIds(engine: RenderEngine, checks: Checks): Pro
   } finally {
     renderer.dispose();
     world.release();
+  }
+}
+
+/** What {@link checkScatterThroughPass} found of one setting's pass. */
+interface ScatterRun {
+  readonly done: boolean;
+  readonly made: boolean;
+  readonly draws: number;
+  readonly pebbles: number;
+  readonly last: boolean;
+  readonly placed: number;
+  readonly decorated: boolean;
+}
+
+/** A {@link ScatterRun} as the check's details state it. */
+function scatterRunText(name: string, r: ScatterRun): string {
+  return `${name}: settled ${String(r.done)}, ${String(r.draws)} draws, scatter ${r.made ? "made" : "none"}, ${String(r.pebbles)} pebble draws${r.last ? " last" : ""}, ${String(r.placed)} placed, decorated ${String(r.decorated)}`;
+}
+
+/**
+ * Plan R11's decorative scatter through a lit pass (R11.T6.a; test-render's `scatter` part): part 15's
+ * world on the high setting, its bakes wholly on the datum, the camera 1.5 m over a surveyed point
+ * of it looking 30° down, 0.6 rad across, its view stepped and drawn by the pass itself (no plan
+ * hands a body over from 1.5 m: the frame checks' bodies stand on the equatorial sphere's limb).
+ * Once its selection has streamed with nothing missing, the pass's view-frame draws the pebbles
+ * after its own draws, has placed some, and states its decoration (`TerrainViewFrame.decorated`);
+ * the low setting's pass, given the same handles and settled, makes no scatter and states none.
+ */
+export async function checkScatterThroughPass(engine: RenderEngine, checks: Checks): Promise<void> {
+  const kernels = new ScatterKernelSet(engine, TERRAIN_SETTINGS.high.vertexPath);
+  const { p, nu } = datumAt(OVER, 32, 32);
+  const pose = poseLookingAt(p, nu, Math.PI / 6, 3, 0.6);
+  const view: TerrainView = {
+    rotation: IDENTITY_ROTATION,
+    cameraM: pose.cameraM,
+    orientation: pose.camera.orientation,
+    fovXRad: pose.camera.fovXRad,
+    viewport: VIEWPORT,
+  };
+  const run = async (setting: "high" | "low"): Promise<ScatterRun> => {
+    const world = await partWorld(
+      engine,
+      `scatter ${setting}`,
+      whollyOnTheDatum,
+      null,
+      setting,
+      kernels,
+    );
+    const { pass, pool } = world;
+    try {
+      const step = (): LockstepStep<TerrainViewFrame> => {
+        pass.step({
+          views: [{ id: VIEW, view, tauPx: handoverTauPx("photorealistic", setting), weight: 1 }],
+          grounded: [],
+        });
+        const frame = pass.drawFor(VIEW, {
+          view,
+          sunDirectionBodyFixed: pose.sun,
+          sunIlluminanceLx: [1.3e5, 1.3e5, 1.3e5],
+          exposureScale: EXPOSURE,
+          nowMs: performance.now(),
+        });
+        const drawSet = pass.lastStep?.drawSet;
+        const material = kernels.kernels?.material;
+        // Streamed far enough: on high once the pebbles draw over a selection with nothing
+        // missing (its far stand-ins may stream on past the check's time), on low once settled.
+        const far =
+          setting === "high"
+            ? frame.draws.some((draw) => draw.material === material)
+            : drawSet?.standingIn === 0 && pass.refining === 0;
+        return {
+          done: frame.draws.length > 0 && drawSet !== undefined && drawSet.missing === 0 && far,
+          frame,
+          drawSet,
+          resting: pass.bandsAtTarget(VIEW),
+        };
+      };
+      const streamed = (): boolean =>
+        pool.queuedCount === 0 &&
+        pool.inFlightCount === 0 &&
+        pool.waitingCount === 0 &&
+        pass.refining === 0;
+      const hold = laneHolds.get(pass);
+      hold?.release();
+      const { done, frame } = await settleInLockstep(step, streamed, STREAM_TIMEOUT_MS);
+      hold?.hold();
+      const material = kernels.kernels?.material;
+      const scatter = pass.scatter;
+      const placed =
+        scatter === null
+          ? 0
+          : Math.min(
+              new Uint32Array(await engine.readBuffer(scatter.path.count, "tolerance"))[0] ?? 0,
+              scatter.path.capacity,
+            );
+      return {
+        done,
+        made: scatter !== null,
+        draws: frame.draws.length,
+        pebbles: frame.draws.filter((draw) => draw.material === material).length,
+        last: frame.draws.at(-1)?.material === material,
+        placed,
+        decorated: frame.decorated,
+      };
+    } finally {
+      world.release();
+    }
+  };
+  try {
+    if (!(await kernels.ready)) {
+      checks.check("R11.T6.a a lit pass's decorative scatter", false, "its handles were refused");
+      return;
+    }
+    // In order: each world streams and is let go before the next's workers start.
+    const high = await run("high");
+    const low = await run("low");
+    checks.check(
+      "R11.T6.a a lit pass on high scatters pebbles over its finest patches at the surface, drawn after the terrain's draws, and states its decoration; on low none",
+      high.done &&
+        high.made &&
+        high.pebbles > 0 &&
+        high.last &&
+        high.placed > 0 &&
+        high.decorated &&
+        low.done &&
+        !low.made &&
+        low.pebbles === 0 &&
+        !low.decorated,
+      `${scatterRunText("high", high)}; ${scatterRunText("low", low)}`,
+    );
+  } finally {
+    kernels.dispose();
   }
 }

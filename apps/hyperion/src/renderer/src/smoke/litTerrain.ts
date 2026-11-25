@@ -157,7 +157,7 @@ const MORPH_M = [0, 120_000] as const;
 const MORPH_DONE_M = [0, 1] as const;
 
 /** Posts the fixture's field to a fresh height worker and bakes `wanted` over it. */
-async function bakeOverField(
+export async function bakeOverField(
   wanted: ReadonlyArray<PatchKey>,
   settings: BakeSettings,
   field: WorkerFixture,

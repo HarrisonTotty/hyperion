@@ -129,11 +129,12 @@ describe("the Mac batch's matrix", () => {
       "limb-rays-high-dpr1-b2",
     ]);
     // Four own runs, 25 pairs at DPR 1 (the terrain's four probes, its selection scale, the
-    // classes' edges, the decoration sets' pair, the composite's five and R14.T5.d's instances
-    // among them) and the two shading pairs at 1 and 2, four runs each; then two counted settings
-    // and the occlusion's, the instances', figure-shading's and both shading pairs' two counted
-    // sides each.
-    expect(matrix).toHaveLength(4 + 25 * 4 + 2 * 2 * 4 + 2 + 5 * 2);
+    // Four own runs, 26 pairs at DPR 1 (the terrain's four probes, its selection scale, the
+    // classes' edges, the decoration sets' pair, R11.T6.a's scatter, the composite's five and
+    // R14.T5.d's instances among them) and the two shading pairs at 1 and 2, four runs each; then
+    // two counted settings and the occlusion's, the instances', figure-shading's and both shading
+    // pairs' two counted sides each.
+    expect(matrix).toHaveLength(4 + 26 * 4 + 2 * 2 * 4 + 2 + 5 * 2);
     expect(new Set(matrix.map((run) => run.id)).size).toBe(matrix.length);
   });
 
@@ -179,6 +180,16 @@ describe("the Mac batch's matrix", () => {
       "mesh-casters-high-dpr1-a2",
       "mesh-casters-high-dpr1-b2",
     ]);
+  });
+
+  it("pairs the decorative scatter drawn (A) against none (B) at DPR 1 (R11.T6.a)", () => {
+    expect(leverNamed("scatter")).toMatchObject({
+      a: [],
+      b: ["--geometry", "scatter=off"],
+      ratios: [1],
+      countSides: false,
+    });
+    expect(MAC_PROFILE_DEFAULTS.levers).toContain("scatter");
   });
 
   it("leaves the decked air's ground, the ring's shadow, the rocks, their casters and the cloud volume out of the defaults, whose body has no deck or ring, whose pose stands off its ground and whose view draws no volume, and runs each when named (R08, R11.T9.a, R11.T4, R14.T6.c, R11.T7.c)", () => {
@@ -593,7 +604,7 @@ describe("a lever's pair", () => {
     });
     const text = lines.join("\n");
     expect(lines[0]).toBe("# The Mac batch: Apple M5, 16 GiB");
-    expect(text).toContain("Tree e9966e0, body 41ffecb200000002.0400; 5 of 132 runs kept");
+    expect(text).toContain("Tree e9966e0, body 41ffecb200000002.0400; 5 of 136 runs kept");
     expect(text).toContain("| high-dpr1 | high | 1 | — | not kept |");
     // A run kept with its windows though its views check failed after them.
     expect(text).toContain(

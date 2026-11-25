@@ -1485,6 +1485,19 @@ describe("the height worker's fields on the real module", () => {
     expect(() => direct.photometry(id, bodyIndex, slot(200, 0))).toThrow(/class code 200/u);
     expect(() => direct.photometry(id, bodyIndex, slot(1, 20))).toThrow(/no palette holds/u);
     expect(() => direct.photometry(id, bodyIndex, slot(1, 14))).toThrow(/past a palette/u);
+    // Each slot's rock abundance at a patch's centre (R11.T6.a): 0 for an empty slot, the key and
+    // the palette checked as the photometry's is, `undefined` for a body not held.
+    expect(direct.rockAbundances(id, bodyIndex, empty, 1, 9, 0, 0)).toEqual(new Float32Array(8));
+    expect(direct.rockAbundances(id, bodyIndex ^ 1, empty, 1, 9, 0, 0)).toBeUndefined();
+    expect(() => direct.rockAbundances(id, bodyIndex, new Uint8Array(15), 1, 9, 0, 0)).toThrow(
+      /palette of 15 bytes/u,
+    );
+    expect(() => direct.rockAbundances(id, bodyIndex, slot(200, 0), 1, 9, 0, 0)).toThrow(
+      /class code 200/u,
+    );
+    expect(() => direct.rockAbundances(id, bodyIndex, empty, 1, 9, 600, 0)).toThrow(
+      /outside level 9/u,
+    );
     direct.free();
   });
 

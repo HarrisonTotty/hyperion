@@ -19,8 +19,9 @@
  * R08.T18.b's thermal forms and R08.T11's (T) row, part 32 R11.T9.c's ring slab (its materials'
  * catalogue and its frames against their twin; its captures stay with part 1's) and R11.T9.d's
  * particles (their field's placement against its twin and their frames), parts 33 and 34 R11.T4's
- * rocks (with R14.T5.c, and by the visibility buffer, R14.T5.e), and part 1 every other; with no
- * part given the page runs them all, in its order.
+ * rocks (with R14.T5.c, and by the visibility buffer, R14.T5.e), the `scatter` part R11.T6's
+ * decorative scatter, and part 1 every other; with no part given the page runs them all, in its
+ * order.
  * Each part checks its path (T9.c) itself. R08.T6.f's slices and bands run in two groups: the
  * Saturn-class figure's in part 5, with R08.T6.i's layer edges, and Earth's, which took R08.T6.g's
  * Earth, in part 8, with R07.T8.e–f's cell pass for every record (`cellPass.ts`) after it;
@@ -95,6 +96,7 @@ import {
   INSTANCE_ENTRIES,
   LEAN_BODY_ENTRIES,
   ROCK_ENTRIES,
+  SCATTER_ENTRIES,
   WGSL_CATALOGUE,
 } from "../view/engine/catalogue";
 import { loadRenderEngine } from "../view/engine/loadEngine";
@@ -194,6 +196,7 @@ import { checkIdTarget } from "./idTarget";
 import { checkInstanceCull, checkInstancesAboveClusters, checkParticleFaces } from "./instances";
 import { captureRings, checkRingSlab } from "./rings";
 import { checkRingParticles } from "./ringParticles";
+import { checkPebbles, checkScatterCull } from "./scatter";
 import { checkDepthLayers } from "./depthLayers";
 import { captureEclipse, checkEclipse } from "./eclipse";
 import { captureViewLight } from "./viewLight";
@@ -253,6 +256,7 @@ import {
   checkOcclusionByIds,
   checkRocksByIds,
   checkStridesUnderCraft,
+  checkScatterThroughPass,
   checkTerrainFrame,
   checkTerrainFrameSymbology,
   checkVisibilityFrame,
@@ -406,10 +410,13 @@ const VARIANTS: Readonly<Record<string, CapabilityOverrides | undefined>> = {
  * catalogue, the height worker's bake of finest patches with their rocks and its cost, the
  * procedural builder's worker against the render thread, and placed rocks drawn (2026-11-18). Their
  * frame by the visibility buffer against the forward one (R14.T5.e), which streams a world of its
- * own about a grounded craft, took part 34, alone (2026-11-18). Plan R14's rocks cast into the
- * cascades (R14.T6.c), which streams a high pass and a low one of its own about a grounded craft,
- * took a named part, `casters`, alone (2026-11-25): named, so that the lanes landing beside it,
- * which add numbered parts, take none of the same number.
+ * own about a grounded craft, took part 34, alone (2026-11-18). Plan R11's decorative scatter
+ * (R11.T6.a–b) took a part of its own by name, `scatter`, alone: its kernels' and materials'
+ * catalogue, the cull against its twin, and the pass over a generated world on each vertex path
+ * (2026-11-18; landed beside the rocks as a named part, its lane's part 31 being the stills').
+ * Plan R14's rocks cast into the cascades (R14.T6.c), which streams a high pass and a low one of
+ * its own about a grounded craft, took a named part, `casters`, alone (2026-11-25): named, so that
+ * the lanes landing beside it, which add numbered parts, take none of the same number.
  */
 type PagePart =
   | 1
@@ -450,6 +457,8 @@ type PagePart =
   | "twins"
   // Plan R12's ladder (R12.T7.a): a run per setting, which its query names (`ladder.ts`).
   | "ladder"
+  // Plan R11's decorative scatter (R11.T6.a–b): a part of its own, by name, beside the ladder.
+  | "scatter"
   // Plan R14's rocks cast into the cascades (R14.T6.c).
   | "casters";
 
@@ -531,6 +540,8 @@ function partOf(value: string | null): PagePart | "all" | null {
       return "twins";
     case "ladder":
       return "ladder";
+    case "scatter":
+      return "scatter";
     case "casters":
       return "casters";
     default:
@@ -595,7 +606,7 @@ async function run(
     setupError,
   });
   if (part === null) {
-    return failed("the part asked for is not 1 to 34, twins, ladder, casters or all");
+    return failed("the part asked for is not 1 to 34, twins, scatter, ladder, casters or all");
   }
   if (part === "ladder" && ladderSetting === null) {
     return failed("the ladder's part runs at a setting, high or low, and none was given");
@@ -687,6 +698,7 @@ async function run(
       !INSTANCE_ENTRIES.includes(entry) &&
       !LEAN_BODY_ENTRIES.includes(entry) &&
       !ROCK_ENTRIES.includes(entry) &&
+      !SCATTER_ENTRIES.includes(entry) &&
       !ATMOSPHERE_THICK_LEVER_ENTRIES.includes(entry) &&
       !RING_ENTRIES.includes(entry) &&
       !OCEAN_ENTRIES.includes(entry),
@@ -1027,6 +1039,21 @@ async function run(
   // their forward frame (plan R14, R14.T5.e), its own pass streamed about the craft.
   await group(34, "R14.T5.e the rocks by the visibility buffer", () =>
     checkRocksByIds(engine, checks),
+  );
+  // Plan R11's decorative scatter (R11.T6.a–b) in the `scatter` part, alone: its kernels' and
+  // materials' catalogue, the cull against its twin, and the pass over a generated world's finest
+  // patches on each vertex path, its placement against its twin, its density and its frame.
+  await group("scatter", "T9.b catalogue: the decorative scatter's kernels and materials", () =>
+    checkCatalogue(engine, status, SCATTER_ENTRIES, checks),
+  );
+  await group("scatter", "R11.T6.b the scatter's cull against its twin", () =>
+    checkScatterCull(engine, checks),
+  );
+  await group("scatter", "R11.T6.a–b the pebbles over a generated world", async () => {
+    images = [...images, ...(await checkPebbles(engine, checks, captures))];
+  });
+  await group("scatter", "R11.T6.a the scatter through a lit pass at the surface", () =>
+    checkScatterThroughPass(engine, checks),
   );
   await group(17, "R08.T8.d the far limb's node rays packed in the general forms", () =>
     checkMarchPackedGeneral(engine, checks, summary.fallback),

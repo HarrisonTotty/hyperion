@@ -2,6 +2,7 @@ import type { DiscSecondary } from "../bodies/discShading";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { countingRenderEngine, type CountingRenderEngine } from "../../test/countingRenderEngine";
+import { ScatterKernelSet } from "../surface/scatter/scatterKernels";
 import { bindingStages } from "../../test/wgslStages";
 import { materialBindings, storageBuffersPerStage } from "../engine/webgpu/materials";
 import { goldenLevelTable, WGS84_FIGURE } from "../../test/terrainFixtures";
@@ -292,6 +293,9 @@ async function passOn(
       | "lookaheadClockMs"
       | "budgetHoldMargin"
       | "detailSets"
+      | "scatterDensity"
+      | "scatter"
+      | "geometry"
     >
   > = {},
 ): Promise<{ pass: TerrainPass; pool: () => FakePool; engine: CountingRenderEngine }> {
@@ -325,6 +329,16 @@ async function passOn(
       return pool;
     },
   };
+}
+
+/** The scatter's kernels `engine` was asked to compile (plan R11, R11.T6.a). */
+function scatterKernels(engine: CountingRenderEngine): string[] {
+  return engine.kernelPairs.map((k) => k.name).filter((name) => name.startsWith("scatter"));
+}
+
+/** The scatter's materials `engine` was asked to compile (plan R11, R11.T6.a). */
+function scatterMaterials(engine: CountingRenderEngine): string[] {
+  return engine.compiles.map((c) => c.name).filter((name) => name.startsWith("scatter"));
 }
 
 /** The slots of the instance records last written into `buffer`, the edge patches' by default. */
@@ -1706,6 +1720,66 @@ describe("the lit terrain of a body (R10.T10.b)", () => {
     made.pool().deliver(made.pass, { face: 2, level: 3, i: 1, j: 1 });
     return { pass: made.pass, engine: made.engine, set };
   }
+
+  it("makes its decorative scatter on the high setting's lit pass alone, none on low, at a density of 0 or with the geometry's scatter off (R11.T6.a–b)", async () => {
+    // The session's handles, of an engine of their own: the pass compiles none (R10.T14.d).
+    const setEngine = await countingRenderEngine();
+    const scatter = new ScatterKernelSet(setEngine, "baked-offsets");
+    expect(await scatter.ready).toBe(true);
+    const high = await passOn("high", { source: BODY, scatter });
+    expect(high.pass.scatter).not.toBeNull();
+    expect(high.pass.scatter?.ready).toBe(true);
+    expect(scatterKernels(high.engine)).toEqual([]);
+    expect(scatterMaterials(high.engine)).toEqual([]);
+    // The Mac pair's B side lets it go, and its A side makes it again.
+    const first = high.pass.scatter;
+    high.pass.setGeometry({ ...high.pass.geometry, scatter: "off" });
+    expect(high.pass.scatter).toBeNull();
+    high.pass.setGeometry({ ...high.pass.geometry, scatter: "drawn" });
+    expect(high.pass.scatter).not.toBeNull();
+    expect(high.pass.scatter).not.toBe(first);
+    high.pass.dispose();
+    expect(high.pass.scatter).toBeNull();
+    for (const made of [
+      await passOn("low", { source: BODY, scatter }),
+      await passOn("high", { source: BODY, scatter, scatterDensity: 0 }),
+      await passOn("high", {
+        source: BODY,
+        scatter,
+        geometry: { ...SETTINGS.high.geometry, scatter: "off" },
+      }),
+      // Without the session's handles, and with R05's spike shading, the test planet's.
+      await passOn("high", { source: BODY }),
+      await passOn("high", { scatter }),
+    ]) {
+      expect(made.pass.scatter).toBeNull();
+      expect(scatterKernels(made.engine)).toEqual([]);
+      expect(scatterMaterials(made.engine)).toEqual([]);
+      made.pass.dispose();
+    }
+    scatter.dispose();
+    // The low setting's session makes no set at all.
+    expect(
+      ScatterKernelSet.forSetting(
+        SETTINGS.low,
+        SETTINGS.low.geometry,
+        "face-differences",
+        setEngine,
+      ),
+    ).toBeNull();
+  });
+
+  it("holds its scatter's density at the setting's, or at the one it is given (R11.T6.b)", async () => {
+    const scatter = new ScatterKernelSet(await countingRenderEngine(), "baked-offsets");
+    const full = await passOn("high", { source: BODY, scatter });
+    const half = await passOn("high", { source: BODY, scatter, scatterDensity: 0.5 });
+    expect(full.pass.scatter?.density).toBe(SETTINGS.high.scatterDensity);
+    expect(half.pass.scatter?.density).toBe(0.5);
+    expect(half.pass.scatter?.path.capacity).toBe((full.pass.scatter?.path.capacity ?? 0) / 2);
+    full.pass.dispose();
+    half.pass.dispose();
+    scatter.dispose();
+  });
 
   it("generates none of its detail sets under the geometry's decorationSets off, the Mac pair's B side (R11.T2.c)", async () => {
     const { pass, set } = await passWithSets();

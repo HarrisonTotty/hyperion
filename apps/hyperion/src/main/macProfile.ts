@@ -288,6 +288,15 @@ export const MAC_PROFILE_LEVERS: ReadonlyArray<MacProfileLever> = [
     countSides: false,
   },
   {
+    name: "scatter",
+    decides:
+      "R11.T6.a, the decorative scatter at the surface on high: the pebbles placed, culled and drawn (A) against none (B)",
+    a: [],
+    b: ["--geometry", "scatter=off"],
+    ratios: [1],
+    countSides: false,
+  },
+  {
     name: "pacing-120",
     decides:
       "R07.T19, the frame pacing on a 120 Hz clock: frames counted, up to 120 Hz (A), against each view at its own rate (B)",

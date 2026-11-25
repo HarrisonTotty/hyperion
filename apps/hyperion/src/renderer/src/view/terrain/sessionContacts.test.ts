@@ -75,7 +75,14 @@ import {
   selectPatches,
   type ViewSelectionInput,
 } from "./select";
-import { craftVelocityAgainst, sceneContacts, sceneSweeps, TerrainSession } from "./session";
+import { hullBox } from "../surface/scatter/scatterCull";
+import {
+  craftVelocityAgainst,
+  sceneContacts,
+  sceneScatterBoxes,
+  sceneSweeps,
+  TerrainSession,
+} from "./session";
 import {
   type BakedPatch,
   type BakeSettings,
@@ -331,6 +338,20 @@ describe("the scene's craft as a pass's contacts on the workers' ground (R10.T14
 
   it("takes none of that craft under the datum's rule", () => {
     expect(sceneContacts(withCraft(2_300, -5), moon, ground, 30)).toEqual([]);
+  });
+
+  it("culls the scatter against a craft's hull box only while it comes within 0.2 m of the ground (R11.T6.a)", () => {
+    // Standing on the datum at the pole: its box, the hull's, reaches the ground.
+    const standing = sceneScatterBoxes(withCraft(0, 0), moon, ground);
+    expect(standing).toHaveLength(1);
+    expect(standing[0]?.halfExtentsM).toEqual(hullBox(TEST_HULL).halfExtentsM);
+    // 5 km up, and 5 km over the plateau's 1.5 km: no box.
+    expect(sceneScatterBoxes(withCraft(5_000, 0), moon, ground)).toEqual([]);
+    expect(sceneScatterBoxes(withCraft(6_500, 0), moon, plateau)).toEqual([]);
+    // On the plateau, its box's reach below its centre against the plateau's ground.
+    expect(sceneScatterBoxes(withCraft(1_500, 0), moon, plateau)).toHaveLength(1);
+    // A body whose rotation is not known places none.
+    expect(sceneScatterBoxes(withCraft(0, 0), { ...moon, rotation: null }, ground)).toEqual([]);
   });
 
   /** The four field cells about the moon's north pole, the middle of face +z, in rising index. */
