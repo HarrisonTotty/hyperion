@@ -1093,8 +1093,8 @@ export interface FarCascadeFrame {
   /** Whether the frame's casters take T1.c's receivers' cull (`GeometrySettings.casterDepthCull`). */
   readonly depthCull: boolean;
   /**
-   * Whether it may keep a held cascade at all: not where casters that are not terrain cast, whose
-   * moves a held cascade would not show (a lean).
+   * Whether it may keep a held cascade at all: not where a caster that is not terrain casts with
+   * no revision, whose moves a held cascade would not show (a lean; plan R14, R14.T6.c).
    */
   readonly holdable: boolean;
   /**

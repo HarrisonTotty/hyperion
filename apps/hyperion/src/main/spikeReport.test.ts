@@ -191,6 +191,7 @@ describe("the spike report's check", () => {
         decorationSets: "generated",
         selectionScale: "presented",
         classEdges: "shaped",
+        meshCasters: "off",
       },
       segments: [
         {
@@ -213,7 +214,7 @@ describe("the spike report's check", () => {
     // the overlay's hidden marks (R10.T16.c), drawn, the edge bakes' stand-ins (T3.c's edge
     // stand-ins), off, plan R07's disc cells, per cell, its figure's shading, forward, the terrain's
     // planetshine, every source the record carries, the lit terrain's τ, at the presented CSS px,
-    // and the classes' edges (fix-jagged-biome-edges), shaped.
+    // the classes' edges (fix-jagged-biome-edges), shaped, and the meshes' casters (T6.c), off.
     const {
       figureClusters: _figureClusters,
       hullClusters: _hullClusters,
@@ -233,6 +234,7 @@ describe("the spike report's check", () => {
       decorationSets: _decorationSets,
       selectionScale: _selectionScale,
       classEdges: _classEdges,
+      meshCasters: _meshCasters,
       ...beforeT4
     } = geometry.settings;
     expect([

@@ -3632,17 +3632,44 @@ describe("the far cascades at a lower rate (plan R14, R14.T6.b)", () => {
     expect(rendered.flat()).toEqual(Array.from({ length: 6 }, () => [0, 1, 2, 3]));
   });
 
-  it("renders every cascade every frame while a caster that is not terrain casts, and at a rate of 1", async () => {
+  it("renders every cascade every frame while a caster that is not terrain casts with no revision, and at a rate of 1", async () => {
     const made = await streamedAt(NEAR);
     const remove = made.shadows.casters.add(() => []);
     const draw = (): number =>
       layersOf(made.pass.drawFor(PRIMARY, frameOf(crept(NEAR), true))).length;
     const withOther = [draw(), draw(), draw()];
     remove();
-    const without = draw();
+    const without = [draw(), draw()];
     made.pass.setGeometry(EVERY_FRAME);
     const everyFrame = [draw(), draw(), draw()];
-    expect([withOther, without, everyFrame]).toEqual([[4, 4, 4], 2, [4, 4, 4]]);
+    expect([withOther, without, everyFrame]).toEqual([
+      [4, 4, 4],
+      [4, 2],
+      [4, 4, 4],
+    ]);
+  });
+
+  it("holds the far cascades while a caster that is not terrain casts with a revision, and renders all four again where it changes, and where a caster comes or goes (plan R14, R14.T6.c)", async () => {
+    const made = await streamedAt(NEAR);
+    const draw = (): number =>
+      layersOf(made.pass.drawFor(PRIMARY, frameOf(crept(NEAR), true))).length;
+    const alone = [draw(), draw(), draw()];
+    let revision = 0;
+    const remove = made.shadows.casters.add(
+      () => [],
+      () => revision,
+    );
+    const added = [draw(), draw(), draw()];
+    revision += 1;
+    const changed = [draw(), draw()];
+    remove();
+    const removed = [draw(), draw()];
+    expect([alone, added, changed, removed]).toEqual([
+      [4, 2, 3],
+      [4, 2, 3],
+      [4, 2],
+      [4, 2],
+    ]);
   });
 
   it("culls no cluster into a held cascade, and widens the far two's receivers by their slack with no cover below (R14.T1.c)", async () => {
@@ -4227,6 +4254,7 @@ describe("the authoritative rocks in the lit pass (plan R11, R11.T4.b; plan R14,
         .map((c) => [c.name, c.targets]),
     ).toEqual([
       ["rock-lit", ["rgba16float"]],
+      ["rock-caster", ["depth-only"]],
       ["rock-id", ["r32uint"]],
       ["rock-resolve", ["rgba16float"]],
     ]);

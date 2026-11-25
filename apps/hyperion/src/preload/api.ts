@@ -680,6 +680,8 @@ export interface GeometryOverride {
    * noise, held out near the hand-over; or drawn as the reconstruction leaves them, no class keyed.
    */
   readonly classEdges?: "shaped" | "off";
+  /** R14.T6.c: the meshes' shadow casters on the cluster cull, R11's rocks: cast, or none. */
+  readonly meshCasters?: "cast" | "off";
 }
 
 /** A mesh's DAG-cut tolerance (plan R14, R14.T5.f), px: in its camera pass, and as an occluder. */

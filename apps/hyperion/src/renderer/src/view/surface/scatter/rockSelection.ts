@@ -140,6 +140,12 @@ export interface RockDrawnPatch {
   /** Its terrain slot. */
   readonly terrainSlot: number;
   readonly rule: RockDrawRule;
+  /**
+   * A sphere that holds its rocks (plan R14, R14.T6.c), body-fixed: its bounding sphere widened by
+   * its rocks' largest diameter, since no point of a rock standing on its ground lies farther from
+   * that ground; the sphere its cascades are chosen by, as the terrain's patch's own is.
+   */
+  readonly casterSphere: RockPatchSphere;
 }
 
 /**
@@ -195,7 +201,12 @@ export function rocksToDraw(
     inView.push({ ...sphere, largestRockM: held?.largestRockM ?? 0 });
     const rule = rockRule(sphere, region, setting);
     if (rule !== null && held !== undefined) {
-      patches.push({ keyString: drawn.keyString, terrainSlot: drawn.patch.slot, rule });
+      patches.push({
+        keyString: drawn.keyString,
+        terrainSlot: drawn.patch.slot,
+        rule,
+        casterSphere: { centreM: sphere.centreM, radiusM: sphere.radiusM + held.largestRockM },
+      });
     }
     regionRefused ||= rule === "region" && held === undefined && meshes.isRefused(drawn.keyString);
   }

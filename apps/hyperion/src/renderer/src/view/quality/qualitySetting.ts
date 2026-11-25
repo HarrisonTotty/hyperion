@@ -319,6 +319,15 @@ export interface GeometrySettings {
    * orbit's `disc cells` falling.
    */
   readonly classEdges: "shaped" | "off";
+  /**
+   * R14.T6.c: the meshes' shadow casters on the cluster cull. `cast` culls R11's authoritative
+   * rocks into each shadow cascade the frame renders by the dispatch that culls them for the
+   * camera, each rock where it is wider than the cascade's texel, and draws them by their caster
+   * after the terrain's; `off` casts none, as before, for the owner's Mac pair `mesh-casters`. Read
+   * on the cluster path alone, where the rocks are drawn. `cast` on both settings (the low setting
+   * draws no cascades).
+   */
+  readonly meshCasters: "cast" | "off";
 }
 
 /**
@@ -356,6 +365,7 @@ export const GEOMETRY_BEFORE_R14: GeometrySettings = {
   decorationSets: "generated",
   selectionScale: "presented",
   classEdges: "shaped",
+  meshCasters: "off",
 };
 
 /**
@@ -545,6 +555,7 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       decorationSets: "generated",
       selectionScale: "presented",
       classEdges: "shaped",
+      meshCasters: "cast",
     },
     decoration: true,
     scatterDensity: 1,
@@ -604,6 +615,7 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       decorationSets: "generated",
       selectionScale: "presented",
       classEdges: "shaped",
+      meshCasters: "cast",
     },
     decoration: false,
     scatterDensity: 0,

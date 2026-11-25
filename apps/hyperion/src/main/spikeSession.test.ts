@@ -281,6 +281,7 @@ const GEOMETRY_SETTINGS = {
   decorationSets: "generated",
   selectionScale: "presented",
   classEdges: "shaped",
+  meshCasters: "cast",
 } as const;
 
 /** A smoke's report: 10 s of frames at 60 Hz from 1,000 ms, its trace in three windows. */

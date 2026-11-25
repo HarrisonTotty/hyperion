@@ -20,9 +20,12 @@
  *   the lost engine disposed of the set's target with itself, so its disposal does nothing; and each
  *   is made again at its first need after it: the placeholder at the next lit draw, the set at the
  *   next frame that draws cascades.
- * - **The other casters** ({@link ShadowCasters}): craft and R11's rocks give each cascade's
- *   draws through a provider; nothing in the app fills it yet, and the cascades' `casterHeightM`
- *   stays 0 until one does (D9). The cascades are fitted to the top edge of star 0's disc
+ * - **The other casters** ({@link ShadowCasters}): craft give each cascade's draws through a
+ *   provider; nothing in the app fills it yet, and the cascades' `casterHeightM` stays 0 until one
+ *   does (D9). R11's rocks are no provider: they cast on the cluster cull through the terrain
+ *   pass's own consumer, culled into each cascade it renders as the terrain's casters are (plan
+ *   R14, R14.T6.c; `terrainPass.ts`' `#drawCasters`), their height under every body's relief. The
+ *   cascades are fitted to the top edge of star 0's disc
  *   (decision-r10-t9b-penumbra), so their shadow begins where the horizon map's share m reaches 0,
  *   and min(m, c′) is m across the penumbra; non-terrain casters' shadows, which the map does not
  *   see, are short by about half a penumbra, ρL (4.7 cm at 10 m).
@@ -34,7 +37,9 @@
  * - **Reuse** (plan R14, R14.T6.a; {@link CascadeReuse}): a view skips a cascade's pass where every
  *   input of its casters is as it was at its last render of the layer, word for word, and it
  *   rendered the layer last. A provider of other casters that gives no revision
- *   ({@link ShadowCasters.add}) re-renders every cascade every frame.
+ *   ({@link ShadowCasters.add}) re-renders every cascade every frame, and holds no far cascade
+ *   (R14.T6.b); one that gives a revision lets them be reused and held, and a provider added or
+ *   removed, or a revision changed, renders them again (R14.T6.c).
  */
 
 import { depthLayersTexture } from "../../engine/depthLayers";
@@ -144,7 +149,8 @@ export class ShadowCasters {
    * on.
    *
    * @param revision - Its revision (plan R14, R14.T6.a); absent, every cascade is rendered again
-   *   every frame while it is held, so that a moving craft's shadow never freezes.
+   *   every frame while it is held, and no far cascade is held (R14.T6.b), so that a moving craft's
+   *   shadow never freezes.
    * @returns Its removal, which takes effect at once.
    */
   add(provider: ShadowCasterProvider, revision?: ShadowCasterRevision): () => void {

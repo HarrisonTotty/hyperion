@@ -44,6 +44,13 @@ describe("the smoke page's geometry override (plan R14, Design note 17)", () => 
     ]).toEqual([{ classEdges: "off" }, {}]);
   });
 
+  it("reads the meshes' casters from the query (plan R14, R14.T6.c)", () => {
+    expect([
+      queryOverride(new URLSearchParams("geometry-meshCasters=off")),
+      queryOverride(new URLSearchParams("geometry-meshCasters=on")),
+    ]).toEqual([{ meshCasters: "off" }, {}]);
+  });
+
   it("leaves out a value that is not its field's, and a field the query does not give", () => {
     expect([
       queryOverride(

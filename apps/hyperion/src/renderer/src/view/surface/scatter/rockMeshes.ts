@@ -17,6 +17,10 @@
  *   or holds an older bake's, and removes each mesh whose patch has left; a build that lands after
  *   its layer left or was rebaked is dropped. Nothing is asked while the resident layers' revision
  *   is unchanged.
+ * - **Its revision** ({@link RockMeshes.revision}; plan R14, R14.T6.c): it rises whenever a mesh is
+ *   held or let go, the only times the pool's pages and records change, so that a cascade the
+ *   rocks cast into is reused while it and their instances are as at its last render (T6.a). The
+ *   patch cache's rock lists change only with a bake.
  */
 
 import { vec3, type Vec3 } from "../../../geometry/vec3";
@@ -57,7 +61,9 @@ export class RockMeshes {
   readonly #meshes = new Map<string, RockPatchMesh>();
   /** Each key's build in flight, by the generation it builds. */
   readonly #building = new Map<string, number>();
-  #revision = -1;
+  /** The resident layers' revision it last brought its meshes to. */
+  #synced = -1;
+  #revision = 0;
   #refused = 0;
   /** Each patch whose mesh the pool last refused, by the generation refused. */
   readonly #refusedKeys = new Map<string, number>();
@@ -92,6 +98,14 @@ export class RockMeshes {
     return this.#building.size;
   }
 
+  /**
+   * How many times a mesh was held or let go since it was made (see the module's remarks): the
+   * pool's pages and records are as they were wherever it is unchanged.
+   */
+  get revision(): number {
+    return this.#revision;
+  }
+
   /** How many meshes the pool could not hold whole since it was made. */
   get refused(): number {
     return this.#refused;
@@ -112,10 +126,10 @@ export class RockMeshes {
 
   /** Brings its meshes to `rocks`, the pass's resident layers (see the module's remarks). */
   sync(rocks: ResidentRocksView): void {
-    if (this.#disposed || rocks.revision === this.#revision) {
+    if (this.#disposed || rocks.revision === this.#synced) {
       return;
     }
-    this.#revision = rocks.revision;
+    this.#synced = rocks.revision;
     for (const [keyString, generation] of this.#refusedKeys) {
       if (rocks.get(keyString)?.generation !== generation) {
         this.#refusedKeys.delete(keyString);
@@ -125,6 +139,7 @@ export class RockMeshes {
       if (rocks.get(keyString)?.generation !== held.generation) {
         this.pool.removeMesh(held.mesh);
         this.#meshes.delete(keyString);
+        this.#revision += 1;
       }
     }
     for (const resident of rocks.values()) {
@@ -214,6 +229,7 @@ export class RockMeshes {
     const { file: _file, ...held } = built;
     this.#meshes.set(keyString, { ...held, mesh });
     this.#refusedKeys.delete(keyString);
+    this.#revision += 1;
   }
 
   /** Releases the pool and stops the builder. */

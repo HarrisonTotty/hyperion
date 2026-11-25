@@ -210,12 +210,22 @@ describe("the rocks' draw rules (R11.T4.b, Design note 7)", () => {
     const held = { get: (key: string) => meshes.get(key), isRefused: () => false };
     const region = [couldTouch(BODY)];
     const high = rocksToDraw(drawSet, 1, PLANET.finestLevel, held, region, "high");
+    const widened = (key: PatchKey, largestRockM: number) => ({
+      centreM: sphereOf(key).centreM,
+      radiusM: sphereOf(key).radiusM + largestRockM,
+    });
     expect(high.patches).toEqual([
-      { keyString: patchKeyString(SITE), terrainSlot: SITE.i % 100, rule: "region" },
+      {
+        keyString: patchKeyString(SITE),
+        terrainSlot: SITE.i % 100,
+        rule: "region",
+        casterSphere: widened(SITE, 2),
+      },
       {
         keyString: patchKeyString({ ...SITE, i: SITE.i + 60 }),
         terrainSlot: (SITE.i + 60) % 100,
         rule: "pixel",
+        casterSphere: widened({ ...SITE, i: SITE.i + 60 }, 3),
       },
     ]);
     expect(high.inView.map((p) => p.largestRockM)).toEqual([2, 3]);

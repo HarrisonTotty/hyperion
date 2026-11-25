@@ -81,8 +81,9 @@ function countFigures(value: unknown): SpikeCountFigures | null | undefined {
  * bakes' stand-ins on the cluster path (T3.c's edge stand-ins), absent read as `off`, plan R07's
  * `disc cells` pass, absent read as `per-cell`, its figure's shading, absent read as `forward`,
  * the terrain's planetshine, absent read as `record`, the pixel the lit terrain's τ is counted
- * in, absent read as `presented`, and the classes' edges (lane fix-jagged-biome-edges), absent
- * read as `shaped`.
+ * in, absent read as `presented`, the classes' edges (lane fix-jagged-biome-edges), absent
+ * read as `shaped`, and the meshes' shadow casters (T6.c), absent read as `off`: that run cast no
+ * mesh.
  */
 const LATER_FIELDS = [
   "figureClusters",
@@ -104,6 +105,7 @@ const LATER_FIELDS = [
   "decorationSets",
   "selectionScale",
   "classEdges",
+  "meshCasters",
 ] as const;
 
 /** `value` as a mesh tolerance, two numbers of at least 0, px, or `null`. */
@@ -159,6 +161,7 @@ function settingsOf(value: unknown, version: 7 | 8): SpikeGeometryReport["settin
     decorationSets = "generated",
     selectionScale = "presented",
     classEdges = "shaped",
+    meshCasters = "off",
   } = value;
   const meshTolerancePx = meshToleranceOf(tolerance);
   if (
@@ -185,6 +188,7 @@ function settingsOf(value: unknown, version: 7 | 8): SpikeGeometryReport["settin
     (decorationSets !== "generated" && decorationSets !== "off") ||
     (selectionScale !== "presented" && selectionScale !== "rendered") ||
     (classEdges !== "shaped" && classEdges !== "off") ||
+    (meshCasters !== "cast" && meshCasters !== "off") ||
     (casterStrideCap !== 1 &&
       casterStrideCap !== 2 &&
       casterStrideCap !== 4 &&
@@ -219,6 +223,7 @@ function settingsOf(value: unknown, version: 7 | 8): SpikeGeometryReport["settin
     decorationSets,
     selectionScale,
     classEdges,
+    meshCasters,
   };
 }
 
@@ -345,8 +350,9 @@ function settingsWords(settings: SpikeGeometryReport["settings"]): string {
     decorationSets,
     selectionScale,
     classEdges,
+    meshCasters,
   } = settings;
-  return `cluster path ${clusterPath ? "on" : "off (the way back)"}, casters culled by their receivers' depths ${casterDepthCull ? "on" : "off"}, caster stride cap ${String(casterStrideCap)}, overlay depth ${overlayDepth}, the lit pass's interior patches by ${litClusters ? "clusters" : "the interior mesh"}, far cascades ${farCascadeRate === 1 ? "every frame" : `every ${String(farCascadeRate)} frames`}, the mesh bodies' figures by ${figureClusters ? "clusters" : "their instanced draws"}, the hulls' faces by ${hullClusters ? "clusters" : "their instanced draws"}, the wireframe's interior patches by ${wireClusters ? "clusters" : "the lit mesh"}, ${pageBytes === 0 ? "no mesh page pool" : `the mesh page pool's bytes ${String(pageBytes / 2 ** 20)} MiB`}, meshes cut at ${String(meshTolerancePx.camera)} px in the camera and ${String(meshTolerancePx.wireframeOccluder)} px as the wireframe's occluders, the lit pass's edge patches by ${finClusters ? "clusters" : "the lit mesh"}, the camera's strides ${strides === "measured" ? "by measured error" : "off"}, occlusion ${occlusion === "hzb" ? "two-pass against the depth pyramid" : "off"}, the lit pass's interior patches shaded ${shading === "visibility" ? "by the visibility buffer" : "forward"}, the lit selection's budget ${terrainBudget === "triangles" ? "its patches and lit triangles" : "its patches"}, the stand-ins ${standInStrides === "all" ? "strided, on their own grids at the camera's cap and their masks by their bands" : standInStrides === "own-grids" ? "on their own grids at the camera's stride cap, their masks at stride 1" : "at stride 1"}, the overlay's marks the ground hides ${hiddenMarks === "culled" ? "culled" : "drawn"}, the edge bakes' stand-ins ${edgeStandIns === "masks" ? "on the cluster path where exact, and as level-1 masks across the survey's edge" : edgeStandIns === "surveyed" ? "on the cluster path where exact" : "by the lit mesh"}, the disc cells ${discCells === "packed" ? "packed" : "a cell an invocation"}, the mesh bodies' figures shaded ${figureShading === "screen" ? "once a pixel" : "forward"}, the terrain lit by ${terrainPlanetshine === "brightest" ? "its brightest planetshine source" : "every planetshine source"}, the detail sets ${decorationSets === "off" ? "off" : "generated"}, the lit terrain's τ ${selectionScale === "rendered" ? "of the larger of a CSS and a rendered pixel" : "of a CSS pixel"}, the classes' edges ${classEdges === "off" ? "as the reconstruction leaves them" : "shaped"}`;
+  return `cluster path ${clusterPath ? "on" : "off (the way back)"}, casters culled by their receivers' depths ${casterDepthCull ? "on" : "off"}, caster stride cap ${String(casterStrideCap)}, overlay depth ${overlayDepth}, the lit pass's interior patches by ${litClusters ? "clusters" : "the interior mesh"}, far cascades ${farCascadeRate === 1 ? "every frame" : `every ${String(farCascadeRate)} frames`}, the mesh bodies' figures by ${figureClusters ? "clusters" : "their instanced draws"}, the hulls' faces by ${hullClusters ? "clusters" : "their instanced draws"}, the wireframe's interior patches by ${wireClusters ? "clusters" : "the lit mesh"}, ${pageBytes === 0 ? "no mesh page pool" : `the mesh page pool's bytes ${String(pageBytes / 2 ** 20)} MiB`}, meshes cut at ${String(meshTolerancePx.camera)} px in the camera and ${String(meshTolerancePx.wireframeOccluder)} px as the wireframe's occluders, the lit pass's edge patches by ${finClusters ? "clusters" : "the lit mesh"}, the camera's strides ${strides === "measured" ? "by measured error" : "off"}, occlusion ${occlusion === "hzb" ? "two-pass against the depth pyramid" : "off"}, the lit pass's interior patches shaded ${shading === "visibility" ? "by the visibility buffer" : "forward"}, the lit selection's budget ${terrainBudget === "triangles" ? "its patches and lit triangles" : "its patches"}, the stand-ins ${standInStrides === "all" ? "strided, on their own grids at the camera's cap and their masks by their bands" : standInStrides === "own-grids" ? "on their own grids at the camera's stride cap, their masks at stride 1" : "at stride 1"}, the overlay's marks the ground hides ${hiddenMarks === "culled" ? "culled" : "drawn"}, the edge bakes' stand-ins ${edgeStandIns === "masks" ? "on the cluster path where exact, and as level-1 masks across the survey's edge" : edgeStandIns === "surveyed" ? "on the cluster path where exact" : "by the lit mesh"}, the disc cells ${discCells === "packed" ? "packed" : "a cell an invocation"}, the mesh bodies' figures shaded ${figureShading === "screen" ? "once a pixel" : "forward"}, the terrain lit by ${terrainPlanetshine === "brightest" ? "its brightest planetshine source" : "every planetshine source"}, the detail sets ${decorationSets === "off" ? "off" : "generated"}, the lit terrain's τ ${selectionScale === "rendered" ? "of the larger of a CSS and a rendered pixel" : "of a CSS pixel"}, the classes' edges ${classEdges === "off" ? "as the reconstruction leaves them" : "shaped"}, the rocks ${meshCasters === "cast" ? "cast into the cascades" : "cast nothing"}`;
 }
 
 /** The summary's "Geometry" section of `geometry` (plan R14, R14.T1.f). */

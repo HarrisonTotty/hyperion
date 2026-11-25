@@ -170,6 +170,7 @@ describe("the geometry's settings (plan R14)", () => {
         decorationSets: "generated",
         selectionScale: "presented",
         classEdges: "shaped",
+        meshCasters: "cast",
       });
     }
     expect([SETTINGS.high.geometry.pageBytes, SETTINGS.low.geometry.pageBytes]).toEqual([
@@ -201,6 +202,7 @@ describe("the geometry's settings (plan R14)", () => {
       decorationSets: "generated",
       selectionScale: "presented",
       classEdges: "shaped",
+      meshCasters: "off",
     });
   });
 

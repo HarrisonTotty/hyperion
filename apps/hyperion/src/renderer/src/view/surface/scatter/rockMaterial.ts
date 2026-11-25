@@ -16,6 +16,12 @@
  *   wireframe ground's with `clusterBase` after it, so that a draw takes the ground's uniforms.
  * - Both draw with the mesh shape's template (`clusters/templates.ts`' `meshClusterMesh`), cull
  *   back faces and write depth.
+ * - **The casters** (plan R14, R14.T6.c; `rockCaster.wgsl`): the rocks into the high setting's
+ *   shadow cascades, depth alone into a `depth-only` target, placed as the lit draw places them,
+ *   with the terrain's casters' states: culling off, `CASCADE_DEPTH_BIAS` away from the light and
+ *   the device's `unclippedDepth`. Its `Draw` is the cluster casters' body rotation with
+ *   `clusterBase` after it, so that a draw takes the terrain casters' uniforms; its storage is the
+ *   vertex stage's lists, pages and instances alone.
  * - **By the visibility buffer** (plan R14, R14.T5.e; Design note 9): the ID raster
  *   (`rockId.wgsl`), the lit draw's vertex function and an ID a pixel into `r32uint`, its `Draw`
  *   the lit draw's with `visibleFirst` after `clusterBase`; and the resolve (`rockResolve.wgsl`), a
@@ -30,6 +36,7 @@ import resolveBarycentricsWgsl from "../../clusters/resolveBarycentrics.wgsl?raw
 import { VISIBLE_FIRST_UNIFORM } from "../../clusters/visibility";
 import type { StorageBufferSpec, WgslMaterialSpec } from "../../engine/types";
 import frameWgsl from "../../shaders/frame.wgsl?raw";
+import { CASCADE_DEPTH_BIAS } from "../../terrain/shadows/cascades";
 import {
   RESOLVE_FRAME_TEXTURE,
   TERRAIN_LIT_BINDINGS,
@@ -38,6 +45,7 @@ import {
   withLitStagesAsFunctions,
 } from "../../terrain/terrainMaterial";
 import rockWgsl from "./rock.wgsl?raw";
+import rockCasterWgsl from "./rockCaster.wgsl?raw";
 import rockForwardWgsl from "./rockForward.wgsl?raw";
 import rockIdWgsl from "./rockId.wgsl?raw";
 import rockPageWgsl from "./rockPage.wgsl?raw";
@@ -81,6 +89,9 @@ export const ROCK_ID_MATERIAL = "rock-id";
 
 /** The resolve's material name (plan R14, R14.T5.e). */
 export const ROCK_RESOLVE_MATERIAL = "rock-resolve";
+
+/** The casters' material name (plan R14, R14.T6.c). */
+export const ROCK_CASTER_MATERIAL = "rock-caster";
 
 /** The lit `Draw`'s end, which `terrainMaterial.ts`' `withClusterBase` extends. */
 const CLUSTER_BASE_END = "  clusterBase : u32,\n}";
@@ -268,5 +279,41 @@ export function rockWireMaterialSpec(): WgslMaterialSpec {
     colourWrites: true,
     blend: "none",
     storageBuffers: ROCK_STORAGE,
+  };
+}
+
+/**
+ * The casters' material (see the module's remarks), for a device with `depth-clip-control` or
+ * without (`unclippedDepth`, as `terrainClusterShadowMaterialSpec` takes it).
+ */
+export function rockCasterMaterialSpec(unclippedDepth: boolean): WgslMaterialSpec {
+  const source = frameWgsl + rockPageWgsl + rockCasterWgsl;
+  const vertex = ["vertex"] as const;
+  return {
+    name: ROCK_CASTER_MATERIAL,
+    displayName: "ROCK SHADOWS",
+    vertexWgsl: source,
+    fragmentWgsl: source,
+    uniforms: [
+      { name: "bodyRotation", type: "mat4x4f" },
+      { name: "clusterBase", type: "u32" },
+    ],
+    samplers: [],
+    textures: [],
+    cullMode: "none",
+    depthWrite: true,
+    colourWrites: false,
+    blend: "none",
+    storageBuffers: [
+      { name: "clusterLists", binding: ROCK_BINDINGS.clusterLists, stages: vertex },
+      { name: "rockPages", binding: ROCK_BINDINGS.rockPages, stages: vertex },
+      { name: "rockInstances", binding: ROCK_BINDINGS.rockInstances, stages: vertex },
+    ],
+    depthBiasAway: {
+      constant: CASCADE_DEPTH_BIAS.constant,
+      slopeScale: CASCADE_DEPTH_BIAS.slopeScale,
+      clamp: CASCADE_DEPTH_BIAS.clamp,
+    },
+    unclippedDepth,
   };
 }

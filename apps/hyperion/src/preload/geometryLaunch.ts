@@ -13,7 +13,8 @@
  * `standInStrides` `off`, `own-grids` or `all`, `hiddenMarks` `drawn` or `culled`, `edgeStandIns`
  * `off`, `surveyed` or `masks`, `discCells` `per-cell` or `packed`, `figureShading` `forward`
  * or `screen`, `terrainPlanetshine` `record` or `brightest`, `decorationSets` `generated` or
- * `off`, `selectionScale` `presented` or `rendered`, and `classEdges` `shaped` or `off`. As
+ * `off`, `selectionScale` `presented` or `rendered`, `classEdges` `shaped` or `off`, and
+ * `meshCasters` `cast` or `off` (plan R14, R14.T6.c). As
  * `qualityLaunch.ts` does for the setting, it rides in the renderer's own `argv` as an extra
  * switch, `--hyperion-geometry=<override>`, present only when the launch gave one, in the
  * canonical form {@link geometryText} writes, and the preload gives it to
@@ -55,6 +56,7 @@ const FIELDS = [
   "decorationSets",
   "selectionScale",
   "classEdges",
+  "meshCasters",
 ] as const;
 
 /** A field's values, as a refusal names them. */
@@ -84,6 +86,7 @@ const VALUES: Readonly<Record<(typeof FIELDS)[number], string>> = {
   decorationSets: "generated or off",
   selectionScale: "presented or rendered",
   classEdges: "shaped or off",
+  meshCasters: "cast or off",
 };
 
 /** The refusal of `text` as `field`'s value. */
@@ -224,6 +227,12 @@ function readField(out: OverrideBeingRead, field: (typeof FIELDS)[number], text:
         throw refused(field, text);
       }
       out.classEdges = text;
+      break;
+    case "meshCasters":
+      if (text !== "cast" && text !== "off") {
+        throw refused(field, text);
+      }
+      out.meshCasters = text;
       break;
     case "farCascadeRate": {
       const rate = text === "1" ? 1 : text === "2" ? 2 : text === "4" ? 4 : null;

@@ -233,6 +233,21 @@ describe("the geometry override's hand-off (plan R14, Design note 17)", () => {
     }
   });
 
+  it("reads and writes the meshes' casters, last in the fields' order (plan R14, R14.T6.c)", () => {
+    const override = parseGeometryOverride("meshCasters=off,classEdges=off");
+    expect([override, geometryText(override), parseGeometryOverride("meshCasters=cast")]).toEqual([
+      { meshCasters: "off", classEdges: "off" },
+      "classEdges=off,meshCasters=off",
+      { meshCasters: "cast" },
+    ]);
+  });
+
+  it("refuses the meshes' casters other than cast or off (plan R14, R14.T6.c)", () => {
+    for (const text of ["meshCasters=on", "meshCasters=true", "meshCasters="]) {
+      expect(() => parseGeometryOverride(text)).toThrow("meshCasters is cast or off");
+    }
+  });
+
   it("refuses a figure's shading other than forward or screen (plan R07)", () => {
     for (const text of ["figureShading=visibility", "figureShading=deferred", "figureShading="]) {
       expect(() => parseGeometryOverride(text)).toThrow("figureShading is forward or screen");

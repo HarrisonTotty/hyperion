@@ -95,6 +95,7 @@ import { CLUSTER_SHAPE_CODE } from "../clusters/record";
 import {
   cullHorizonOf,
   type CameraCullPass,
+  type CascadeCullPass,
   type CullParams,
   type CullPass,
   CULL_PARAMS_BYTES,
@@ -264,13 +265,17 @@ import { PATCH_VERTICES_PER_SIDE, TERRAIN_SHADING_TRAITS, type TerrainShading } 
 import { ResidentRocks, type ResidentRocksView } from "../surface/scatter/residentRocks";
 import type { RockPageBuilder } from "../clusters/meshPageProducer";
 import {
+  ROCK_CASCADE_PASS,
   ROCK_CLUSTER_MESH,
+  type RockCullInput,
   type RockFrameCounts,
   type RockIdsInput,
+  type RockPack,
   RockView,
   type RockVisibility,
 } from "../surface/scatter/rockDraw";
 import {
+  rockCasterMaterialSpec,
   rockIdMaterialSpec,
   rockLitMaterialSpec,
   rockResolveMaterialSpec,
@@ -279,6 +284,7 @@ import {
 import { RockMeshes } from "../surface/scatter/rockMeshes";
 import {
   couldTouch,
+  type RockDrawnPatch,
   ROCK_DETAIL_PX,
   rocksLimitDetail,
   rocksToDraw,
@@ -602,6 +608,14 @@ export interface TerrainCascadeFrame {
    * frame holds or reuses, which draws none.
    */
   readonly litMeshCasters: readonly [number, number, number, number];
+  /**
+   * Each cascade's rock instances cast this frame, nearest first (plan R14, R14.T6.c): the resident
+   * pages of the drawn finest patches' rock meshes that enter its caster pass, whose clusters and
+   * triangles drawn are the rocks' counters' ({@link TerrainPass.rockClusterStats}). 0 for a cascade
+   * the frame holds or reuses, and where no rock casts (`GeometrySettings.meshCasters` off, the
+   * way back, the low setting).
+   */
+  readonly rockCasters: readonly [number, number, number, number];
   /** Whether the interior patches cast through the cluster path this frame (R14.T1.b). */
   readonly clustered: boolean;
   /**
@@ -682,9 +696,10 @@ export interface TerrainGeometryCounts {
    */
   readonly litClusterTriangles: number | null;
   /**
-   * Each cascade's caster triangles, nearest first: the lit mesh's casters' 10,752 each and the
-   * cluster path's counted triangles, from the last sample to have come back; `null` where the
-   * frame drew no cascades, or cast through the cluster path with no sample back yet.
+   * Each cascade's caster triangles, nearest first: the lit mesh's casters' 10,752 each, the
+   * cluster path's counted triangles and the rocks' (plan R14, R14.T6.c), from the last samples to
+   * have come back; `null` where the frame drew no cascades, or cast through the cluster path or
+   * cast rocks with no sample back yet.
    */
   readonly casterTriangles: readonly [number, number, number, number] | null;
   /**
@@ -1011,6 +1026,31 @@ interface DeviceRocks {
     BucketDrawBase,
     { readonly frame: TextureHandle; readonly input: RockIdsInput }
   >;
+  /**
+   * Their casters' material into the shadow cascades (plan R14, R14.T6.c), made where the pass is
+   * lit and draws cascades; `null` until made, and for good where refused or not made.
+   */
+  caster: MaterialHandle | null;
+  /** The casters' draw base made of each view's caster uniforms, the same while they are. */
+  readonly casterBases: WeakMap<object, BucketDrawBase>;
+}
+
+/**
+ * A view-frame's rocks before their cull (plan R14, R14.T6.c): the device's rocks, whether the low
+ * setting limits the frame's detail for rocks it leaves out, and, where the frame draws any, the
+ * patches drawn and what their cull takes but the cascades; and whether the frame's caster passes
+ * have culled them already, with the cascades they render ({@link TerrainPass}'s `#drawCasters`),
+ * so that the camera's draws take that cull's buckets.
+ */
+interface RockPlan {
+  readonly rocks: DeviceRocks;
+  readonly limited: boolean;
+  readonly draw: {
+    readonly patches: ReadonlyArray<RockDrawnPatch>;
+    readonly cameraBodyFixedM: Vec3;
+    readonly cull: Omit<RockCullInput, "cascades">;
+  } | null;
+  culled: boolean;
 }
 
 /**
@@ -1377,6 +1417,8 @@ interface Device {
   rocks: DeviceRocks | null;
   /** Each view's rock draw on this device, by view. */
   readonly rockViews: Map<TerrainViewId, RockView>;
+  /** Each view's rocks' counters on this device while measured (plan R14, R14.T6.c), by view. */
+  readonly rockStats: Map<TerrainViewId, ClusterStats>;
 }
 
 /** One view's own frame state: its records, bands, uniforms, draw and debounce. */
@@ -1451,6 +1493,12 @@ interface ViewState {
    */
   readonly farHolds: FarCascadeHolds;
   farPlan: FarCascadePlan | null;
+  /**
+   * The other casters as its last plan of the far cascades took them (plan R14, R14.T6.c): their
+   * registry's version, 1 where every provider gives a revision and 0 where one does not, and each
+   * provider's revision; `null` before a plan.
+   */
+  otherCasters: ReadonlyArray<number> | null;
   /** Its cascades' caster inputs as each was last rendered (plan R14, R14.T6.a). */
   readonly casterInputs: CascadeReuse;
   /** The draw set's index of each of this frame's instance records, in their order (R10.T9.b). */
@@ -1725,7 +1773,27 @@ interface LatePass {
 const OVERLAY_CULL_MARGIN_RAD = 0.01;
 
 /** A frame's caster passes and their counts, as {@link TerrainPass}'s `#drawCasters` drew them. */
-type CasterFrame = Pick<TerrainCascadeFrame, "passes" | "litMeshCasters" | "clustered" | "reused">;
+type CasterFrame = Pick<
+  TerrainCascadeFrame,
+  "passes" | "litMeshCasters" | "rockCasters" | "clustered" | "reused"
+>;
+
+/**
+ * A frame's rocks as its caster passes cast them (plan R14, R14.T6.c; {@link TerrainPass}'s
+ * `#drawCasters`): the plan they were laid out from, the view's rock draw, the instances as laid
+ * out and how many enter each cascade, their cull's camera passes, their caster's draw base and
+ * template mesh, and the rocks' revision.
+ */
+interface RockCast {
+  readonly plan: RockPlan;
+  readonly view: RockView;
+  readonly pack: RockPack;
+  readonly into: readonly [number, number, number, number];
+  readonly cull: Omit<RockCullInput, "cascades">;
+  readonly base: BucketDrawBase;
+  readonly mesh: MeshHandle;
+  readonly revision: number;
+}
 
 /** An instance record's 32-bit words. */
 const INSTANCE_WORDS = INSTANCE_RECORD_BYTES / 4;
@@ -1785,6 +1853,65 @@ export function appendCasterRecord(
   }
 }
 
+/**
+ * Appends the rocks' caster inputs every cascade shares to `reuse` (plan R14, R14.T6.c): none
+ * cast, or the rocks' revision, which rises wherever the pool's pages or records change, and their
+ * instances as laid out, each about the camera with its pool slot, page and terrain slot.
+ */
+function appendRockInputs(reuse: CascadeReuse, cast: RockCast | null): void {
+  if (cast === null) {
+    reuse.word(0);
+    return;
+  }
+  reuse.word(1);
+  reuse.f64(cast.revision);
+  reuse.word(cast.pack.count);
+  reuse.words(new Uint32Array(cast.pack.instances));
+}
+
+/** Appends the rock instances that enter cascade `index` to `reuse`, each by its index, and their count. */
+function appendRockCascade(reuse: CascadeReuse, cast: RockCast | null, index: CascadeIndex): void {
+  if (cast === null) {
+    reuse.word(0);
+    return;
+  }
+  const bit = 1 << (ROCK_CASCADE_PASS + index);
+  const { inputs, count } = cast.pack;
+  for (let n = 0; n < count; n += 1) {
+    if (((inputs[2 * n] ?? 0) & bit) !== 0) {
+      reuse.word(n);
+    }
+  }
+  reuse.word(cast.into[index]);
+}
+
+/**
+ * `set`'s four cascades as the cull's passes in the non-rotating axes the instances' origins are in
+ * (plan R14, R14.T1.b): its light basis turned by the body's rotation `rows`, R v = (r₀·v, r₁·v,
+ * r₂·v), the receivers' cull taking `viewAxis` there (`receivers.ts`' `cascadeCullPasses`).
+ */
+function cascadePassesTurned(
+  set: CascadeSet,
+  rows: readonly [Vec3, Vec3, Vec3],
+  viewAxis: Vec3,
+  strideCap: Stride,
+  depthCull: boolean,
+): readonly [CascadeCullPass, CascadeCullPass, CascadeCullPass, CascadeCullPass] {
+  const [r0, r1, r2] = rows;
+  const turn = (v: Vec3): Vec3 => ({
+    x: r0.x * v.x + r0.y * v.y + r0.z * v.z,
+    y: r1.x * v.x + r1.y * v.y + r1.z * v.z,
+    z: r2.x * v.x + r2.y * v.y + r2.z * v.z,
+  });
+  return cascadeCullPasses(
+    set,
+    [turn(set.basis.x), turn(set.basis.y), turn(set.basis.z)],
+    viewAxis,
+    strideCap,
+    depthCull,
+  );
+}
+
 /** No cascade reused (plan R14, R14.T6.a). */
 const NONE_REUSED: readonly [boolean, boolean, boolean, boolean] = [false, false, false, false];
 
@@ -1792,6 +1919,7 @@ const NONE_REUSED: readonly [boolean, boolean, boolean, boolean] = [false, false
 const NO_CASTERS: CasterFrame = {
   passes: NO_PASSES,
   litMeshCasters: [0, 0, 0, 0],
+  rockCasters: [0, 0, 0, 0],
   clustered: false,
   reused: NONE_REUSED,
 };
@@ -2449,6 +2577,16 @@ export class TerrainPass {
   }
 
   /**
+   * View `id`'s rocks' counters (plan R14, R14.T6.c): each pass of the rocks' cull's clusters and
+   * triangles drawn, from the last sample to have come back (`rockDraw.ts`' `ROCK_PASS_NAMES`'
+   * order: the camera's two passes, then each cascade the rocks cast into, nearest first, up to
+   * the farthest); `null` before any, and while {@link TerrainPass.measureClusters} is off.
+   */
+  rockClusterStats(id: TerrainViewId): ReadonlyArray<ClusterPassStats> | null {
+    return this.#measuring ? (this.#device.rockStats.get(id)?.latest() ?? null) : null;
+  }
+
+  /**
    * View `id`'s triangles at its last draw (plan R14, R14.T1.b; {@link TerrainGeometryCounts}), its
    * cluster path's from its counters ({@link TerrainPass.clusterStats}); `null` for a view the
    * pass holds no state of.
@@ -2464,10 +2602,20 @@ export class TerrainPass {
       : PATCH_INDICES;
     const cast = state.lastCasters;
     const stats = this.clusterStats(id);
+    // The rocks' casters among them, from their own counters (plan R14, R14.T6.c).
+    const rocksCast = cast !== null && cast.rockCasters.some((n) => n > 0);
+    const rockStats = rocksCast ? this.rockClusterStats(id) : null;
     let casterTriangles: TerrainGeometryCounts["casterTriangles"] = null;
-    if (cast !== null && (!cast.clustered || stats !== null)) {
+    if (
+      cast !== null &&
+      (!cast.clustered || stats !== null) &&
+      (!rocksCast || rockStats !== null)
+    ) {
       const [a, b, c, d] = cast.litMeshCasters.map(
-        (n, k) => (n * LIT_PATCH_INDICES) / 3 + (cast.clustered ? (stats?.[k]?.triangles ?? 0) : 0),
+        (n, k) =>
+          (n * LIT_PATCH_INDICES) / 3 +
+          (cast.clustered ? (stats?.[k]?.triangles ?? 0) : 0) +
+          (rockStats?.[ROCK_CASCADE_PASS + k]?.triangles ?? 0),
       );
       casterTriangles = [a ?? 0, b ?? 0, c ?? 0, d ?? 0];
     }
@@ -3436,6 +3584,8 @@ export class TerrainPass {
     const missing = (drawSet.missingViews & mask) !== 0;
     const standingIn = (drawSet.standingInViews & mask) !== 0;
     const set = this.#cascadesFor(state, input);
+    // The rocks laid out before the casters, which cull them with the cascades they render.
+    const rockPlan = this.#rockPlan(input, mask);
     const {
       draws,
       patches,
@@ -3448,9 +3598,9 @@ export class TerrainPass {
       opaqueDraws,
       lit,
       still,
-    } = this.#writeOrNone(state, mask, selected.nearContacts, input, set);
+    } = this.#writeOrNone(state, mask, selected.nearContacts, input, set, rockPlan);
     this.#lastStill = still;
-    const rocks = this.#rockFrame(state, input, mask, visibility !== null);
+    const rocks = this.#rockFrame(state, rockPlan, visibility !== null);
     const drawn =
       rocks.draws.length === 0 || visibility !== null ? draws : [...draws, ...rocks.draws];
     // By IDs, the rocks' own raster and resolve in a range after the terrain's (plan R14, R14.T5.e),
@@ -3507,23 +3657,16 @@ export class TerrainPass {
   }
 
   /**
-   * View `state`'s authoritative rocks this frame, of view bit `mask` (plan R11, R11.T4.b; plan R14,
-   * R14.T5.c): the rock meshes of the finest patches its draw set draws whole, each by its rule
-   * (`rockSelection.ts`'s `rockRule`, the region what the last step's grounded and descending
-   * bodies could touch, `couldTouch`),
-   * culled by the camera's frustum and the body's horizon at the setting's mesh tolerance, a
-   * region's at 0, and drawn by its lit or wireframe cluster base with the rocks' material; and
-   * whether the low setting limits its detail for rocks it leaves out. None where the pass takes
-   * no rocks, the cluster path or its pool is off, or the rocks' material or kernel is not made.
-   * Where the frame's terrain draws by the visibility buffer (`byIds`), by their own ID raster and
-   * resolve once their forms are made (plan R14, R14.T5.e), forward until then.
+   * A view's authoritative rocks this frame before their cull, of view bit `mask` (plan R11,
+   * R11.T4.b; plan R14, R14.T5.c and T6.c): the rock meshes of the finest patches its draw set draws
+   * whole, each by its rule (`rockSelection.ts`'s `rockRule`, the region what the last step's
+   * grounded and descending bodies could touch, `couldTouch`), and what their cull takes: the
+   * camera's frustum and the body's horizon at the setting's mesh tolerance, a region's at 0; and
+   * whether the low setting limits its detail for rocks it leaves out. `null` where the pass takes
+   * no rocks or the cluster path or its pool is off; no patches where none is drawn or the rocks'
+   * material or kernel is not made.
    */
-  #rockFrame(
-    state: ViewState,
-    input: TerrainViewFrameInput,
-    mask: number,
-    byIds: boolean,
-  ): RockFrame {
+  #rockPlan(input: TerrainViewFrameInput, mask: number): RockPlan | null {
     const device = this.#device;
     const geometry = this.#geometry;
     const source = this.#rockSource;
@@ -3534,7 +3677,7 @@ export class TerrainPass {
       !geometry.clusterPath ||
       geometry.pageBytes <= 0
     ) {
-      return NO_ROCKS;
+      return null;
     }
     const rocks = (device.rocks ??= this.#makeRocks(device, source));
     rocks.meshes.sync(this.#rocks);
@@ -3558,41 +3701,93 @@ export class TerrainPass {
     const limited =
       regionRefused ||
       rocksLimitDetail(inView, region, this.#setting, cameraBodyFixedM, pxPerRad, ROCK_DETAIL_PX);
-    const base = state.clusters?.litBase ?? null;
-    const { material, kernel } = rocks;
-    if (patches.length === 0 || base === null || material === null || kernel === null) {
-      return { draws: NO_DRAWS, byIds: null, limited, counts: null };
+    const { kernel } = rocks;
+    if (patches.length === 0 || rocks.material === null || kernel === null) {
+      return { rocks, limited, draw: null, culled: false };
     }
-    const ids = byIds ? this.#rockIdsInput(device, rocks, state, base) : null;
+    const cull = this.#litCullPass(input, false, 0);
+    return {
+      rocks,
+      limited,
+      draw: {
+        patches,
+        cameraBodyFixedM,
+        cull: {
+          meshes: rocks.meshes,
+          rotationRows: view.rotation.rows,
+          planes: cull.planes,
+          horizon: cull.horizon,
+          toleranceRad: wireframeToleranceRad(
+            geometry.meshTolerancePx.camera,
+            view.fovXRad,
+            view.viewport,
+          ),
+          viewAxis: viewAxisOf(view.orientation),
+          kernel,
+        },
+      },
+      culled: false,
+    };
+  }
+
+  /** View `state`'s rock draw on the device, made at its first need. */
+  #rockViewOf(state: ViewState): RockView {
+    const device = this.#device;
     let rockView = device.rockViews.get(state.id);
     if (rockView === undefined) {
       rockView = new RockView(this.#engine, `terrain ${String(state.id)}`);
       device.rockViews.set(state.id, rockView);
     }
+    return rockView;
+  }
+
+  /**
+   * View `state`'s authoritative rocks this frame, as `plan` lays them out (plan R11, R11.T4.b;
+   * plan R14, R14.T5.c and T6.c): culled, where the frame's caster passes did not cull them with
+   * their cascades, and drawn by the view's lit or wireframe cluster base with the rocks' material;
+   * none where the plan draws none or the frame has no cluster base. Where the frame's terrain
+   * draws by the visibility buffer (`byIds`), by their own ID raster and resolve once their forms
+   * are made (plan R14, R14.T5.e), forward until then. With the measurement switch on, the cull's
+   * counts are sampled ({@link TerrainPass.rockClusterStats}).
+   */
+  #rockFrame(state: ViewState, plan: RockPlan | null, byIds: boolean): RockFrame {
+    if (plan === null) {
+      return NO_ROCKS;
+    }
+    const { rocks, limited, draw } = plan;
+    const base = state.clusters?.litBase ?? null;
+    const material = rocks.material;
+    if (draw === null || base === null || material === null) {
+      return { draws: NO_DRAWS, byIds: null, limited, counts: null };
+    }
+    const device = this.#device;
+    const ids = byIds ? this.#rockIdsInput(device, rocks, state, base) : null;
+    const rockView = this.#rockViewOf(state);
     let rockBase = rocks.bases.get(base);
     if (rockBase?.material !== material) {
       rockBase = { ...base, material };
       rocks.bases.set(base, rockBase);
     }
-    const cull = this.#litCullPass(input, false, 0);
-    const draws = rockView.frame({
-      patches,
-      meshes: rocks.meshes,
-      cameraBodyFixedM,
-      rotationRows: view.rotation.rows,
-      planes: cull.planes,
-      horizon: cull.horizon,
-      toleranceRad: wireframeToleranceRad(
-        geometry.meshTolerancePx.camera,
-        view.fovXRad,
-        view.viewport,
-      ),
-      viewAxis: viewAxisOf(view.orientation),
-      kernel,
-      mesh: rocks.mesh,
-      base: rockBase,
-      ids,
-    });
+    if (!plan.culled) {
+      const pack = rockView.pack({
+        patches: draw.patches,
+        meshes: rocks.meshes,
+        cameraBodyFixedM: draw.cameraBodyFixedM,
+        rotationRows: draw.cull.rotationRows,
+      });
+      if (pack !== null) {
+        rockView.cull(pack, draw.cull);
+      }
+    }
+    const draws = rockView.draws({ mesh: rocks.mesh, base: rockBase, ids });
+    if (this.#measuring && rockView.passes > 0) {
+      let stats = device.rockStats.get(state.id);
+      if (stats === undefined) {
+        stats = new ClusterStats(this.#engine, `terrain rocks (${state.id})`);
+        device.rockStats.set(state.id, stats);
+      }
+      rockView.sample(stats);
+    }
     return { draws: draws.forward, byIds: draws.byIds, limited, counts: rockView.counts };
   }
 
@@ -3678,6 +3873,8 @@ export class TerrainPass {
       ids: null,
       idsAsked: false,
       idInputs: new WeakMap(),
+      caster: null,
+      casterBases: new WeakMap(),
     };
     // Its specs are composed inside, and one that cannot be composed rejects.
     void this.#readyRocks(device, rocks).catch((error: unknown) => {
@@ -3688,20 +3885,37 @@ export class TerrainPass {
 
   /**
    * Compiles `rocks`' material, the lit pass's into the scene target or the wireframe's into the
-   * canvas, and the plain cluster cull's kernel. One the device refuses is reported, and no rock
-   * is drawn; it rejects only where a spec cannot be composed (a bug).
+   * canvas, and the plain cluster cull's kernel; and where the pass is lit and draws cascades, the
+   * rocks' caster into their `depth-only` layers (plan R14, R14.T6.c). One the device refuses is
+   * reported, and no rock is drawn, or, the caster refused, none cast; it rejects only where a
+   * spec cannot be composed (a bug).
    */
   async #readyRocks(device: Device, rocks: DeviceRocks): Promise<void> {
     const lit = this.#shading === "lit";
-    const [material, kernel] = await Promise.allSettled([
+    const casts = lit && this.#shadows?.cascades === true;
+    const [material, kernel, caster] = await Promise.allSettled([
       this.#engine.createMaterialAsync(
         lit ? rockLitMaterialSpec() : rockWireMaterialSpec(),
         [lit ? "rgba16float" : "canvas"],
         [rocks.mesh],
       ),
       this.#engine.createComputeAsync(CLUSTER_CULL_KERNEL),
+      casts
+        ? this.#engine.createMaterialAsync(
+            rockCasterMaterialSpec(this.#engine.capabilities.depthClipControl),
+            ["depth-only"],
+            [rocks.mesh],
+          )
+        : Promise.resolve(null),
     ]);
     const current = device === this.#device && !this.#disposed && device.rocks === rocks;
+    if (caster.status === "fulfilled" && caster.value !== null) {
+      if (current) {
+        rocks.caster = caster.value;
+      } else {
+        this.#releaseOwn(caster.value);
+      }
+    }
     if (material.status === "fulfilled") {
       if (current) {
         rocks.material = material.value;
@@ -3716,13 +3930,18 @@ export class TerrainPass {
         this.#engine.releaseCompute(kernel.value);
       }
     }
-    for (const outcome of [material, kernel]) {
+    for (const outcome of [material, kernel, caster]) {
       if (
         outcome.status === "rejected" &&
         !this.#superseded(device) &&
         !(outcome.reason instanceof EngineUnavailable)
       ) {
-        console.error("the terrain's rocks could not be made: none is drawn", outcome.reason);
+        console.error(
+          outcome === caster
+            ? "the terrain's rocks' casters could not be made: none casts"
+            : "the terrain's rocks could not be made: none is drawn",
+          outcome.reason,
+        );
       }
     }
   }
@@ -3817,12 +4036,24 @@ export class TerrainPass {
     ];
     const shadows = this.#shadows;
     const owner = state.farHolds;
+    // The other casters may be held where each gives a revision (plan R14, R14.T6.c); a provider
+    // added or removed, or a revision changed, cuts the holds, which would keep their old casts.
+    const revisions = shadows.casters.revisions();
+    const others = [shadows.casters.version, revisions === null ? 0 : 1, ...(revisions ?? [])];
+    const before = state.otherCasters;
+    if (
+      before !== null &&
+      (others.length !== before.length || others.some((value, n) => value !== before[n]))
+    ) {
+      owner.cut();
+    }
+    state.otherCasters = others;
     state.farPlan = owner.plan({
       input: fit,
       set,
       sunAngularRadiusRad: rhoRad,
       depthCull: geometry.casterDepthCull,
-      holdable: shadows.casters.size === 0,
+      holdable: revisions !== null,
       kept: (index) => shadows.holds(owner, index),
     });
     return set;
@@ -4021,6 +4252,8 @@ export class TerrainPass {
   #forgetView(id: TerrainViewId): void {
     this.#device.rockViews.get(id)?.dispose();
     this.#device.rockViews.delete(id);
+    this.#device.rockStats.get(id)?.dispose();
+    this.#device.rockStats.delete(id);
     this.#stepped.delete(id);
     this.#nearestGround.delete(id);
     this.#margins.delete(id);
@@ -4168,12 +4401,19 @@ export class TerrainPass {
       view.dispose();
     }
     device.rockViews.clear();
+    for (const stats of device.rockStats.values()) {
+      stats.dispose();
+    }
+    device.rockStats.clear();
     const rocks = device.rocks;
     if (rocks !== null) {
       rocks.meshes.dispose();
       this.#engine.releaseMesh(rocks.mesh);
       if (rocks.material !== null) {
         this.#releaseOwn(rocks.material);
+      }
+      if (rocks.caster !== null) {
+        this.#releaseOwn(rocks.caster);
       }
       if (rocks.kernel !== null) {
         this.#engine.releaseCompute(rocks.kernel);
@@ -4274,6 +4514,7 @@ export class TerrainPass {
       graticules: new Map(),
       rocks: null,
       rockViews: new Map(),
+      rockStats: new Map(),
     };
     return device;
   }
@@ -4623,6 +4864,7 @@ export class TerrainPass {
       centres: null,
       farHolds: new FarCascadeHolds(),
       farPlan: null,
+      otherCasters: null,
       casterInputs: new CascadeReuse(),
       drawn: [],
       lastPatches: NO_PATCHES,
@@ -5186,6 +5428,7 @@ export class TerrainPass {
     contacts: ReadonlyArray<GroundContact>,
     input: TerrainViewFrameInput,
     cascades: CascadeSet | null,
+    rocks: RockPlan | null,
   ): {
     readonly draws: ReadonlyArray<DrawItem>;
     readonly patches: TerrainDrawnPatches;
@@ -5201,7 +5444,7 @@ export class TerrainPass {
   } {
     try {
       return {
-        ...this.#write(this.#device, state, mask, contacts, input, cascades),
+        ...this.#write(this.#device, state, mask, contacts, input, cascades, rocks),
         refused: false,
       };
     } catch (error: unknown) {
@@ -5227,7 +5470,8 @@ export class TerrainPass {
   /**
    * Writes view `state`'s records, the drawn patches in `mask`, relative to its camera, and returns
    * its draws, with how many patches it draws; and, where its lit draw receives `cascades`
-   * (R10.T9.b), draws their caster passes, which it returns.
+   * (R10.T9.b), draws their caster passes, which it returns, the rocks of `rocks` among their
+   * casters (plan R14, R14.T6.c).
    *
    * @remarks
    * On a lit pass whose interior form is made for the frame's lighting, the interior patches'
@@ -5269,6 +5513,7 @@ export class TerrainPass {
     contacts: ReadonlyArray<GroundContact>,
     input: TerrainViewFrameInput,
     cascades: CascadeSet | null,
+    rocks: RockPlan | null,
   ): {
     readonly draws: ReadonlyArray<DrawItem>;
     readonly patches: TerrainDrawnPatches;
@@ -5626,7 +5871,7 @@ export class TerrainPass {
         : draws.filter((draw) => draw.mesh === resources.interiorMesh).length;
     const cast =
       draws.length > 0 && live !== null
-        ? this.#drawCasters(device, state, input, live, clusters)
+        ? this.#drawCasters(device, state, input, live, clusters, rocks)
         : NO_CASTERS;
     // Without casters the overlay's and the lit pass's passes are culled alone (the low setting's,
     // and w = 0's).
@@ -6190,6 +6435,15 @@ export class TerrainPass {
    * layer's owner, and the plan is committed. So does a cascade the view reuses (R14.T6.a;
    * {@link CascadeReuse}): every input of its casters as at its last render of the layer, which it
    * rendered last, on the cluster path.
+   *
+   * The view's authoritative rocks (plan R14, R14.T6.c; `rocks`, where `meshCasters` casts them and
+   * the frame draws them) cast after the terrain in each pass. Each drawn patch's instances enter
+   * the cascades its caster sphere is admitted to as a terrain patch is, by `castsInto` and, with
+   * `casterDepthCull`, by its receivers; the rocks' one cull ({@link RockView.cull}) then tests each
+   * of their clusters against each cascade it renders, as the terrain's, and draws a rock where it
+   * is wider than the cascade's texel. Their instances as laid out, the cascades each enters and
+   * the rocks' revision ({@link RockMeshes.revision}) are among each cascade's caster inputs, so
+   * that a cascade they cast into is reused and held as one of terrain alone is.
    */
   #drawCasters(
     device: Device,
@@ -6197,6 +6451,7 @@ export class TerrainPass {
     input: TerrainViewFrameInput,
     set: CascadeSet,
     clusters: ClusterPath | null,
+    rocks: RockPlan | null,
   ): CasterFrame {
     const shadows = this.#shadows;
     const target = shadows?.target ?? null;
@@ -6277,6 +6532,17 @@ export class TerrainPass {
       casters.device = device;
       casters.material = material;
     }
+    // The rocks laid out with the cascades each may cast into (plan R14, R14.T6.c).
+    const rockCast = this.#rockCasting(
+      state,
+      set,
+      clusters,
+      rocks,
+      camera,
+      viewAxis,
+      receivers,
+      rendered,
+    );
     // A cascade whose casters' inputs are all as at the view's last render of its layer, which it
     // rendered last, keeps its layer (plan R14, R14.T6.a); on the cluster path, as every R14 lever.
     const revisions = shadows.casters.revisions();
@@ -6285,6 +6551,7 @@ export class TerrainPass {
     if (this.#geometry.clusterPath) {
       reuse.start();
       this.#appendSharedInputs(reuse, state, input, set, camera, viewAxis, revisions);
+      appendRockInputs(reuse, rockCast);
       const shared = reuse.shared();
       for (const index of CASCADES) {
         if (!rendered[index]) {
@@ -6293,6 +6560,7 @@ export class TerrainPass {
         reuse.start();
         reuse.word(shared);
         this.#appendCascadeCasters(reuse, device, state, index, clustered ? clusters : null);
+        appendRockCascade(reuse, rockCast, index);
         if (revisions !== null && shadows.holds(state.farHolds, index) && reuse.unchanged(index)) {
           reused[index] = true;
         } else {
@@ -6320,6 +6588,20 @@ export class TerrainPass {
     if (clusters !== null && (clustered || clusters.overlay || clusters.litBase !== null)) {
       this.#cullClusters(device, state, clusters, input, clustered ? set : null, due);
     }
+    // The rocks culled for the camera and into each cascade they cast into that the frame renders.
+    if (rockCast !== null) {
+      const cascadePasses = cascadePassesTurned(
+        set,
+        input.view.rotation.rows,
+        rockCast.cull.viewAxis,
+        1,
+        this.#geometry.casterDepthCull,
+      ).map((pass, index) =>
+        due[index] === true && (rockCast.into[index] ?? 0) > 0 ? pass : null,
+      );
+      rockCast.view.cull(rockCast.pack, { ...rockCast.cull, cascades: cascadePasses });
+      rockCast.plan.culled = true;
+    }
     const items = casters.items;
     const casterBase = clustered ? clusters.casterBase : null;
     const passes = CASCADES.filter((index) => due[index]).map((index): DepthLayerPass => {
@@ -6340,12 +6622,14 @@ export class TerrainPass {
           ),
         );
       }
+      const rockDraws =
+        rockCast === null ? [] : rockCast.view.casterDraws(index, rockCast.mesh, rockCast.base);
       return {
         label: TERRAIN_SHADOW_PASS_LABEL,
         layer: index,
         viewRotation: cascade.viewRotation,
         projection: cascade.projection,
-        draws: [...terrain, ...others],
+        draws: [...terrain, ...rockDraws, ...others],
       };
     });
     shadows.renderCasters(state.farHolds, state.id, passes);
@@ -6353,7 +6637,100 @@ export class TerrainPass {
       state.farHolds.commit(plan);
     }
     const drawn = (index: CascadeIndex): number => (due[index] ? casters.records[index].count : 0);
-    return { passes, litMeshCasters: [drawn(0), drawn(1), drawn(2), drawn(3)], clustered, reused };
+    const rocksIn = (index: CascadeIndex): number =>
+      due[index] && rockCast !== null ? rockCast.into[index] : 0;
+    return {
+      passes,
+      litMeshCasters: [drawn(0), drawn(1), drawn(2), drawn(3)],
+      rockCasters: [rocksIn(0), rocksIn(1), rocksIn(2), rocksIn(3)],
+      clustered,
+      reused,
+    };
+  }
+
+  /**
+   * The rocks view `state` casts into `set` this frame (plan R14, R14.T6.c; `rocks`): each patch's
+   * instances laid out with the cascades of those `rendered` its caster sphere is admitted to, as a
+   * terrain patch's sphere is ({@link castsInto}, and T1.c's `receiversRefuse` where `receivers` is
+   * given), in the body-fixed frame about `camera`; with their caster's draw base, of the view's
+   * caster uniforms. `null` where `meshCasters` is off, the plan draws none, the frame draws no
+   * cluster base (when no rock is drawn either), the rocks' caster is not made, or no instance is
+   * laid out.
+   */
+  #rockCasting(
+    state: ViewState,
+    set: CascadeSet,
+    clusters: ClusterPath | null,
+    rocks: RockPlan | null,
+    camera: Vec3,
+    viewAxis: Vec3,
+    receivers: ReadonlyArray<CascadeCullPass> | null,
+    rendered: ReadonlyArray<boolean>,
+  ): RockCast | null {
+    const draw = rocks?.draw ?? null;
+    const caster = rocks?.rocks.caster ?? null;
+    if (
+      rocks === null ||
+      draw === null ||
+      caster === null ||
+      this.#geometry.meshCasters !== "cast" ||
+      (clusters?.litBase ?? null) === null
+    ) {
+      return null;
+    }
+    const patches = draw.patches.map((patch) => {
+      const { centreM, radiusM } = patch.casterSphere;
+      const fromCamera = sub(centreM, camera);
+      let cascades = 0;
+      for (const index of CASCADES) {
+        const culled = receivers?.[index] ?? null;
+        if (
+          rendered[index] === true &&
+          castsInto(set, index, fromCamera, radiusM) &&
+          (culled === null || !receiversRefuse(culled, viewAxis, fromCamera, radiusM))
+        ) {
+          cascades |= 1 << index;
+        }
+      }
+      return { ...patch, cascades };
+    });
+    const view = this.#rockViewOf(state);
+    const pack = view.pack({
+      patches,
+      meshes: rocks.rocks.meshes,
+      cameraBodyFixedM: draw.cameraBodyFixedM,
+      rotationRows: draw.cull.rotationRows,
+    });
+    if (pack === null) {
+      return null;
+    }
+    const into: [number, number, number, number] = [0, 0, 0, 0];
+    for (let n = 0; n < pack.count; n += 1) {
+      const passes = pack.inputs[2 * n] ?? 0;
+      for (const index of CASCADES) {
+        into[index] += (passes >>> (ROCK_CASCADE_PASS + index)) & 1;
+      }
+    }
+    let base = rocks.rocks.casterBases.get(state.casterUniforms);
+    if (base?.material !== caster) {
+      base = {
+        material: caster,
+        offsetFromCameraM: ZERO_OFFSET,
+        uniforms: state.casterUniforms,
+        textures: {},
+      };
+      rocks.rocks.casterBases.set(state.casterUniforms, base);
+    }
+    return {
+      plan: rocks,
+      view,
+      pack,
+      into,
+      cull: draw.cull,
+      base,
+      mesh: rocks.rocks.mesh,
+      revision: rocks.rocks.meshes.revision,
+    };
   }
 
   /**
@@ -6408,6 +6785,7 @@ export class TerrainPass {
     reuse.word(geometry.hullClusters ? 1 : 0);
     reuse.word(geometry.wireClusters ? 1 : 0);
     reuse.word(geometry.finClusters ? 1 : 0);
+    reuse.word(geometry.meshCasters === "cast" ? 1 : 0);
     reuse.f64(geometry.pageBytes);
     reuse.f64(geometry.meshTolerancePx.camera);
     reuse.f64(geometry.meshTolerancePx.wireframeOccluder);
@@ -6914,21 +7292,15 @@ export class TerrainPass {
     const engine = this.#engine;
     const count = state.interior.count;
     const [r0, r1, r2] = input.view.rotation.rows;
-    // Body-fixed into the non-rotating axes the instance origins are in: R v = (r₀·v, r₁·v, r₂·v).
-    const turn = (v: Vec3): Vec3 => ({
-      x: r0.x * v.x + r0.y * v.y + r0.z * v.z,
-      y: r1.x * v.x + r1.y * v.y + r1.z * v.z,
-      z: r2.x * v.x + r2.y * v.y + r2.z * v.z,
-    });
     const viewAxis = viewAxisOf(input.view.orientation);
     const { casterStrideCap, casterDepthCull } = this.#geometry;
     // A far cascade the frame holds (plan R14, R14.T6.b), or one it reuses (R14.T6.a), takes none.
     const cascades: ReadonlyArray<CullPass | null> =
       set === null
         ? [null, null, null, null]
-        : cascadeCullPasses(
+        : cascadePassesTurned(
             set,
-            [turn(set.basis.x), turn(set.basis.y), turn(set.basis.z)],
+            input.view.rotation.rows,
             viewAxis,
             casterStrideCap,
             casterDepthCull,
