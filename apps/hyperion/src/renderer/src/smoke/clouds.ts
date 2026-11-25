@@ -42,6 +42,7 @@ import {
   normalTail,
 } from "../view/clouds/cloudDensity";
 import {
+  type CloudBodyGpu,
   CLOUD_LAYER_MATERIAL,
   CLOUD_SEASON_STEP_RAD,
   type CloudFrame,
@@ -653,6 +654,24 @@ function tallyTexels(texels: Float32Array): { readonly drawn: number; readonly b
     }
   }
   return { drawn, bad };
+}
+
+/**
+ * A body's clouds for another check to bind: {@link FRAME}'s state, its noise made at once (plan
+ * R07's airless twins of the lit terrain's cloudy forms, `litTerrain.ts`). `dispose` releases it.
+ */
+export function smokeCloudBody(
+  engine: RenderEngine,
+  name: string,
+): { readonly gpu: CloudBodyGpu; readonly dispose: () => void } {
+  const layers = new CloudLayers(engine, name);
+  layers.step(() => performance.now(), Number.POSITIVE_INFINITY);
+  const gpu = layers.frame(FRAME);
+  if (gpu === null) {
+    layers.dispose();
+    throw new Error("the clouds' state was not made");
+  }
+  return { gpu, dispose: () => layers.dispose() };
 }
 
 /** R11.T7.b's layer drawn from above and below its shell: every texel finite, its α in [0, 1]. */

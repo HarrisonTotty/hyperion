@@ -635,7 +635,11 @@ export const TABLE_ONLY_ENTRIES: ReadonlyArray<CatalogueEntry> = [
 /**
  * The entries plan R07's airless twins are made of (perf-bodies-pass; `sourceTableEngine.ts`):
  * each lit material and `disc cells` kernel, per cell and packed, of the plain and emissive forms,
- * which a lit body without an atmosphere is drawn by; the air forms' records carry their air.
+ * which a lit body without an atmosphere is drawn by; the air forms' records carry their air. And
+ * plan R11's lit passes, each of which binds a body's tables and is drawn by its twin wherever those
+ * are `createAirlessTables`' zeros: the clouds' layer and volume and the lit terrain's cloudy forms
+ * (R11.T7.b–c), and the far and near seas (R11.T8.b–c), which a sea whose air the frame does not
+ * draw is lit through.
  */
 const AIRLESS_SOURCES: ReadonlyArray<CatalogueEntry> = [
   ...TERRAIN_ENTRIES,
@@ -643,6 +647,9 @@ const AIRLESS_SOURCES: ReadonlyArray<CatalogueEntry> = [
   ...THERMAL_ENTRIES,
   { kind: "compute", spec: BODY_DISC_CELLS_PACKED_KERNEL },
   { kind: "compute", spec: BODY_DISC_CELLS_PACKED_EMISSIVE_KERNEL },
+  ...CLOUD_ENTRIES,
+  { kind: "material", spec: OCEAN_FAR_PASS_MATERIAL },
+  { kind: "material", spec: OCEAN_NEAR_PASS_MATERIAL },
 ];
 
 /**

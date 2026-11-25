@@ -6,6 +6,7 @@ import {
   TABLE_ONLY_ENTRIES,
   WGSL_CATALOGUE,
 } from "./catalogue";
+import { airlessMaterial } from "../atmosphere/surfaceLighting";
 import { fragmentOutputAt } from "./webgpu/fragmentOutput";
 import {
   assertOutputsFit,
@@ -179,10 +180,37 @@ describe("the airless twins (plan R07, perf-bodies-pass)", () => {
         "bodies:disc (airless)",
         "BODY DISC CELLS (airless)",
         "bodies:smoothMeshEmissive (airless)",
+        // Plan R11's lit passes: the clouds, the lit terrain's cloudy forms and the seas.
+        "cloud layer (airless)",
+        "cloud volume (airless)",
+        "terrain-lit-baked-offsets-clouds (airless)",
+        "terrain-lit-fin-face-differences-clouds (airless)",
+        "ocean far pass (airless)",
+        "ocean near pass (airless)",
       ]),
     );
     expect(names.some((name) => name.startsWith("terrain"))).toBe(true);
     expect(names.filter((name) => name.includes("Air") || name.includes("table only"))).toEqual([]);
     expect(new Set(names).size).toBe(names.length);
+  });
+
+  it("twins every lit material of the catalogue that a body without air may be drawn by", () => {
+    // Every material the engine would draw by its airless twin where a body's airless tables are
+    // bound: all but the air forms, whose records carry their air, and the table-only twins, bound
+    // to a body of one band's sources' table.
+    const twinned = new Set(AIRLESS_ENTRIES.map((entry) => entry.spec.name));
+    const missing = WGSL_CATALOGUE.flatMap((entry) => {
+      if (
+        entry.kind !== "material" ||
+        AIRLESS_ENTRIES.includes(entry) ||
+        TABLE_ONLY_ENTRIES.includes(entry) ||
+        entry.spec.name.includes("Air")
+      ) {
+        return [];
+      }
+      const twin = airlessMaterial(entry.spec);
+      return twin === null || twinned.has(twin.name) ? [] : [entry.spec.name];
+    });
+    expect(missing).toEqual([]);
   });
 });

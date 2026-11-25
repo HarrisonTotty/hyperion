@@ -36,6 +36,9 @@ import {
   type SurfaceLightingTables,
 } from "../view/atmosphere/surfaceLighting";
 import { SourceTableEngine } from "../view/atmosphere/sourceTableEngine";
+import { CLOUD_TEXTURES, type CloudBodyGpu } from "../view/clouds/cloudLayer";
+import { terrainLitCloudMaterialSpec } from "../view/terrain/cloudLight";
+import { smokeCloudBody } from "./clouds";
 import type { Quaternion } from "../view/camera/pose";
 import { viewRotation4 } from "../view/camera/projection";
 import { quaternionFromRows } from "../view/camera/quaternion";
@@ -273,10 +276,15 @@ interface LitFrames {
   /** The `Melt` slots' frame on a night side (R08.T18.a). */
   readonly melt: LitFrame;
   /**
-   * The lit material's and its emissive form's frames drawn again by their airless twins, against
-   * their first draws as written (plan R07, perf-bodies-pass); where the frames were asked to.
+   * The lit material's, its emissive form's and its cloudy form's frames drawn again by their
+   * airless twins, against their first draws as written (plan R07, perf-bodies-pass); where the
+   * frames were asked to.
    */
-  readonly twins?: { readonly lit: LitFrame; readonly emissive: LitFrame };
+  readonly twins?: {
+    readonly lit: LitFrame;
+    readonly emissive: LitFrame;
+    readonly cloudy: LitFrame;
+  };
 }
 
 /**
@@ -513,11 +521,29 @@ async function drawInto(
     const first = await renderInto(engine, target, draw);
     // The first draw is the module's as written; once its airless twin is prepared, the twin's.
     let litTwin: LitFrame | null = null;
+    let cloudyTwin: LitFrame | null = null;
     if (twins !== undefined) {
       await twins.twinsSettled();
       const before = twins.swaps;
       const again = await renderInto(engine, target, draw);
       litTwin = twinFrameOf("the lit material", first, again, twins.swaps - before);
+      // Its cloudy form (plan R11, R11.T7.b), under a body's clouds, in the same light.
+      const clouds = smokeCloudBody(engine, `lit terrain ${setting} clouds`);
+      try {
+        const cloudy = await engine.createMaterialAsync(
+          terrainLitCloudMaterialSpec(layout.vertexPath),
+          ["rgba16float"],
+          [resources.mesh],
+        );
+        const clouded = { ...draw, material: cloudy, clouds: clouds.gpu };
+        const written = await renderInto(engine, target, clouded);
+        await twins.twinsSettled();
+        const swaps = twins.swaps;
+        const byTwin = await renderInto(engine, target, clouded);
+        cloudyTwin = twinFrameOf("its cloudy form", written, byTwin, twins.swaps - swaps);
+      } finally {
+        clouds.dispose();
+      }
     }
     const blended = litFrameOf(layout.vertexPath, draw, first);
     // The morph's end's frames run in order, each read back before the next is written.
@@ -583,9 +609,9 @@ async function drawInto(
         albedos,
         exposureScale: lighting.exposureScale,
       }),
-      ...(litTwin === null || emissiveTwin === null
+      ...(litTwin === null || emissiveTwin === null || cloudyTwin === null
         ? {}
-        : { twins: { lit: litTwin, emissive: emissiveTwin } }),
+        : { twins: { lit: litTwin, emissive: emissiveTwin, cloudy: cloudyTwin } }),
     };
   } finally {
     target.dispose();
@@ -761,6 +787,8 @@ interface LitDraw {
   /** 1 ÷ a, per metre. */
   readonly inverseRadius: number;
   readonly patches: number;
+  /** The body's clouds a cloudy form binds (plan R11, R11.T7.b); absent for every other form. */
+  readonly clouds?: CloudBodyGpu;
 }
 
 /** Renders `draw` into `target` and reads it back, four channels a texel. */
@@ -769,7 +797,8 @@ async function renderInto(
   target: RenderTarget,
   draw: LitDraw,
 ): Promise<Float32Array> {
-  const { resources, material, air, shadow, lit, storageBuffers, orientation, camera } = draw;
+  const { resources, material, air, shadow, lit, storageBuffers, orientation, camera, clouds } =
+    draw;
   const { layout } = resources;
   const atlas = normalsAtlasOf(layout);
   target.render({
@@ -798,8 +827,14 @@ async function renderInto(
           [SHADOW_CASCADES_TEXTURE]: shadow,
           // No disc normal map: read at no detail share below 1 (R10.T15.b.2).
           [DISC_NORMALS_TEXTURE]: resources.normals,
+          ...(clouds === undefined
+            ? {}
+            : { [CLOUD_TEXTURES.coverage]: clouds.coverage, [CLOUD_TEXTURES.noise]: clouds.noise }),
         },
-        storageBuffers,
+        storageBuffers:
+          clouds === undefined
+            ? storageBuffers
+            : { ...storageBuffers, [CLOUD_TEXTURES.layer]: clouds.layer },
         indirect: { buffer: resources.indirect, offsetBytes: 0 },
       },
     ],
@@ -940,9 +975,10 @@ export async function checkLitTerrain(engine: RenderEngine, checks: Checks): Pro
 
 /**
  * Plan R07's airless twins on the lit terrain (perf-bodies-pass; `SourceTableEngine`): the field's
- * block drawn through the page's engine by the lit material, then by its emissive form, each first
- * as written and again by its airless twin once that is prepared, at both settings' vertex paths;
- * every bit the same, and the twins taken.
+ * block drawn through the page's engine by the lit material, by its cloudy form under a body's
+ * clouds (plan R11, R11.T7.b) and by its emissive form, each first as written and again by its
+ * airless twin once that is prepared, at both settings' vertex paths; every bit the same, and the
+ * twins taken.
  */
 export async function checkLitTerrainAirlessTwins(
   engine: RenderEngine,
@@ -960,8 +996,10 @@ export async function checkLitTerrainAirlessTwins(
     const { twins } = await drawLit(engine, setting, field, engine);
     checks.check(
       `${name} (${setting})`,
-      twins !== undefined && twins.lit.pass && twins.emissive.pass,
-      twins === undefined ? "no twin's frame" : `${twins.lit.detail}; ${twins.emissive.detail}`,
+      twins !== undefined && twins.lit.pass && twins.cloudy.pass && twins.emissive.pass,
+      twins === undefined
+        ? "no twin's frame"
+        : `${twins.lit.detail}; ${twins.cloudy.detail}; ${twins.emissive.detail}`,
     );
   }
 }

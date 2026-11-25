@@ -100,8 +100,9 @@
 # which add numbered parts, take none of the same number. It runs after the numbered parts when no
 # part is asked for (2026-11-25).
 #
-# --part=twins runs plan R07's airless twins (perf-bodies-pass; `src/renderer/src/smoke/cellPass.ts`
-# and `litTerrain.ts`): their catalogue, and the checks that the lit modules drawn by them draw their
+# --part=twins runs plan R07's airless twins (perf-bodies-pass; `src/renderer/src/smoke/cellPass.ts`,
+# `litTerrain.ts` and `airlessPasses.ts`): their catalogue, and the checks that the lit modules drawn
+# by them (the bodies, the lit terrain and its cloudy forms, the clouds and the seas) draw their
 # modules' bytes on an airless body, a run per variant as a numbered part's. It runs after the
 # numbered parts, before the ladder, when no part is asked for.
 #

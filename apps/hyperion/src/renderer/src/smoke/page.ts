@@ -62,7 +62,7 @@
  *
  * The `twins` part (plan R07, perf-bodies-pass) holds the airless twins' catalogue and the checks
  * that the lit modules drawn by them draw their modules' bytes on an airless body (`cellPass.ts`,
- * `litTerrain.ts`): named, as the ladder is, not numbered.
+ * `litTerrain.ts`, `airlessPasses.ts`): named, as the ladder is, not numbered.
  *
  * The `ladder` part (plan R12, R12.T7.a; `ladder.ts`) runs at the setting its query names, `high` or
  * `low`: what that setting's own code makes, made and drawn at it, and found in the catalogue, so
@@ -207,6 +207,7 @@ import {
 } from "./ocean";
 import { checkClassCurveSeam, checkLitBody } from "./litBody";
 import { checkLitTerrain, checkLitTerrainAirlessTwins } from "./litTerrain";
+import { checkAirlessPassTwins } from "./airlessPasses";
 import { checkClusterCull } from "./clusterCull";
 import { checkClusterGrid } from "./clusterGrid";
 import { checkOcclusionCull } from "./occlusionCull";
@@ -705,6 +706,9 @@ async function run(
   );
   await group("twins", "plan R07: the lit terrain drawn by its airless twins", () =>
     checkLitTerrainAirlessTwins(engine, checks),
+  );
+  await group("twins", "plan R07: the clouds and the seas drawn by their airless twins", () =>
+    checkAirlessPassTwins(engine, checks),
   );
   // R08.T8.e's table's march twins, in part 16 after R08.T9.b's.
   await group(16, "T9.b catalogue: the march's table-only twins", () =>

@@ -872,10 +872,12 @@ export async function checkSourceTableTwins(engine: RenderEngine, checks: Checks
 /**
  * Plan R07's airless twins (perf-bodies-pass; `SourceTableEngine`): airless bodies, a 13 px disc
  * and a 13 px one under a half-surveyed two-class map, a 96 px mesh body, plain and mapped, and a
- * 220 px disc, the Sun 80° and 120° off the line of sight, drawn in-fragment and through the
- * `disc cells` pass, per cell and packed, once on the engine the page's wraps (their modules as
- * written) and once on the page's, their twins made and prepared by a first draw; every byte the
- * same, and the twins taken.
+ * 220 px disc, plain and under a two-class map whose classes' edges are keyed (lane
+ * fix-jagged-biome-edges' `classEdge.wgsl`), as is a 96 px mesh body's, the Sun 80° and 120° off
+ * the line of sight, drawn in-fragment and through the `disc cells` pass, per cell and packed, once
+ * on the engine the page's wraps (their modules as written) and once on the page's, their twins made
+ * and prepared by a first draw; every byte the same, the twins taken, and the keyed edges moving
+ * the 220 px disc's bytes from the same map's unkeyed.
  */
 export async function checkAirlessTwins(engine: RenderEngine, checks: Checks): Promise<void> {
   const name = "plan R07: airless bodies drawn by their airless twins draw their modules' bytes";
@@ -888,23 +890,41 @@ export async function checkAirlessTwins(engine: RenderEngine, checks: Checks): P
   const writtenRenderer = new LitBodyRenderer(written.engine, WIREFRAME_MATERIALS.starSprite);
   const twinnedRenderer = new LitBodyRenderer(twinned.engine, WIREFRAME_MATERIALS.starSprite);
   let weights: ClassMapDiscSurface | null = null;
+  let halvesWeights: ClassMapDiscSurface | null = null;
   // The kernels made, each with the engine that made it, released at the end.
   const made: Array<{ readonly by: RenderEngine; readonly kernel: ComputeHandle }> = [];
   try {
     const twoClass = packClassMap(4, 2, ({ i, j }) =>
       (i + j) % 2 !== 0 ? null : i % 2 === 0 ? [1, 0] : [0.25, 0.75],
     );
+    const laws = [
+      lawFor([0.12, 0.12, 0.12], [0.6, 0.6, 0.6], "moon"),
+      lawFor([0.5, 0.45, 0.4], [1.3, 1.3, 1.3], "earth"),
+    ];
     weights = classMapSurface(
       engine,
       "smoke airless twins class map",
       twoClass,
-      [
-        lawFor([0.12, 0.12, 0.12], [0.6, 0.6, 0.6], "moon"),
-        lawFor([0.5, 0.45, 0.4], [1.3, 1.3, 1.3], "earth"),
-      ],
+      laws,
       PROVISIONAL_PHOTOMETRY.law,
     );
     const mapped = { surface: weights, texels: twoClass };
+    // The classes' edges (lane fix-jagged-biome-edges): a two-class map of four texels a face split
+    // along i = 2, its classes' edges keyed, so that their noise shapes them, as the disc's own check
+    // of them draws it (`bodies.ts`' `checkEdgeKeys`); and the same map with no keys.
+    const halves = packClassMap(4, 2, ({ i }) => (i < 2 ? [1, 0] : [0, 1]));
+    halvesWeights = classMapSurface(
+      engine,
+      "smoke airless twins keyed edges",
+      halves,
+      laws,
+      PROVISIONAL_PHOTOMETRY.law,
+    );
+    const keyed = {
+      surface: { ...halvesWeights, edgeKeys: [0x51f00d, 0x2c0ffe] },
+      texels: halves,
+    };
+    const unkeyed = { surface: halvesWeights, texels: halves };
     const [writtenKernel, writtenPacked, twinnedKernel, twinnedPacked] = await Promise.all([
       engine.inner.createComputeAsync(BODY_DISC_CELLS_KERNEL),
       engine.inner.createComputeAsync(BODY_DISC_CELLS_PACKED_KERNEL),
@@ -949,7 +969,26 @@ export async function checkAirlessTwins(engine: RenderEngine, checks: Checks): P
         bodies: one({ diameterPx: 220, mesh: false, samples: [1, 4] }),
         twin: false,
       },
+      {
+        name: "a 220 px disc under a two-class map, its edges keyed",
+        viewport: { widthPx: 256, heightPx: 256 },
+        bodies: one({ diameterPx: 220, mapped: keyed, mesh: false, samples: [1, 4] }),
+        twin: false,
+      },
+      {
+        name: "a 96 px mesh body under a two-class map, its edges keyed",
+        viewport: { widthPx: 128, heightPx: 112 },
+        bodies: one({ diameterPx: 96, mapped: keyed, mesh: true, samples: [1, 4] }),
+        twin: false,
+      },
     ];
+    const keyedDisc = cases.find((item) => item.name.startsWith("a 220 px disc under"));
+    const unkeyedDisc: CellCase = {
+      name: "a 220 px disc under the same map, unkeyed",
+      viewport: { widthPx: 256, heightPx: 256 },
+      bodies: one({ diameterPx: 220, mapped: unkeyed, mesh: false, samples: [1, 4] }),
+      twin: false,
+    };
     const ways: ReadonlyArray<{ readonly by: DrawnBy; readonly packed: boolean }> = [
       { by: "in-fragment", packed: false },
       { by: "pass", packed: false },
@@ -997,6 +1036,8 @@ export async function checkAirlessTwins(engine: RenderEngine, checks: Checks): P
     let pixels = 0;
     let differing = 0;
     const results: string[] = [];
+    // The keyed disc's bytes as written in-fragment at 80°, which its edges move from the unkeyed's.
+    let keyedBytes: ArrayBuffer | null = null;
     for (const item of cases) {
       for (const sunDeg of [80, 120]) {
         for (const way of ways) {
@@ -1010,14 +1051,20 @@ export async function checkAirlessTwins(engine: RenderEngine, checks: Checks): P
           results.push(
             `${item.name} at ${String(sunDeg)}° ${way.by}${way.packed ? " packed" : ""}: ${String(apart.differing)} channels differ`,
           );
+          if (item === keyedDisc && sunDeg === 80 && way.by === "in-fragment") {
+            keyedBytes = asWritten.bytes;
+          }
         }
       }
     }
     const swaps = engine.swaps - swapsBefore;
+    const unkeyedBytes = (await draw(false, unkeyedDisc, 80, { by: "in-fragment", packed: false }))
+      .bytes;
+    const moved = keyedBytes === null ? 0 : halfUlpsApart(keyedBytes, unkeyedBytes).differing;
     checks.check(
       name,
-      differing === 0 && swaps > 0,
-      `${String(pixels)} pixels, ${String(differing)} channels differing; ${String(swaps)} draws and dispatches by a twin; ${results.join("; ")}`,
+      differing === 0 && swaps > 0 && moved > 0,
+      `${String(pixels)} pixels, ${String(differing)} channels differing; ${String(swaps)} draws and dispatches by a twin; the keyed edges move ${String(moved)} channels of the 220 px disc from its unkeyed map's; ${results.join("; ")}`,
     );
   } finally {
     writtenRenderer.dispose();
@@ -1025,8 +1072,10 @@ export async function checkAirlessTwins(engine: RenderEngine, checks: Checks): P
     for (const { by, kernel } of made) {
       by.releaseCompute(kernel);
     }
-    if (weights !== null) {
-      engine.releaseTexture(weights.weights);
+    for (const surface of [weights, halvesWeights]) {
+      if (surface !== null) {
+        engine.releaseTexture(surface.weights);
+      }
     }
   }
 }
