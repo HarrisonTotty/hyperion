@@ -195,28 +195,17 @@ pub(super) fn evaluate_near_from_bound(
     bound: &CellBound,
     near: impl Fn(&GalacticPosition) -> bool,
 ) -> Option<CandidateOutcome> {
-    let id = candidate_id(key, index);
-    let position = candidate_position(galaxy.seed(), key, id);
-    if !near(&position) {
-        return None;
+    match place_near(galaxy, key, index, bound, near) {
+        Placing::Refused => None,
+        Placing::Thinned => Some(CandidateOutcome::Thinned),
+        Placing::Placed(placed) => Some(evaluate_placed(
+            galaxy,
+            key,
+            bound,
+            placed,
+            catalogue_claims,
+        )),
     }
-    let mark = acceptance_mark(galaxy.seed(), id);
-    let Some(picked) = pick_component(galaxy, key, bound, &position, mark) else {
-        return Some(CandidateOutcome::Thinned);
-    };
-    let placed = Placed {
-        id,
-        position,
-        mark,
-        picked,
-    };
-    Some(evaluate_placed(
-        galaxy,
-        key,
-        bound,
-        placed,
-        catalogue_claims,
-    ))
 }
 
 /// Candidate `index` of `key` up to the thinning's pick, or `None` if the pick thins it: the
@@ -228,16 +217,48 @@ pub(super) fn place(
     index: u32,
     bound: &CellBound,
 ) -> Option<Placed> {
+    match place_near(galaxy, key, index, bound, |_| true) {
+        Placing::Placed(placed) => Some(placed),
+        Placing::Refused | Placing::Thinned => None,
+    }
+}
+
+/// What [`place_near`] made of a candidate.
+#[derive(Debug)]
+enum Placing {
+    /// Its epoch position was refused, and nothing past it drawn.
+    Refused,
+    /// The thinning's pick thinned it.
+    Thinned,
+    /// It was placed and picked.
+    Placed(Placed),
+}
+
+/// [`place`] for a candidate whose epoch position `near` accepts, its position drawn first, the one
+/// body of both (perf-dense-first-shells): one `near` refuses draws no word past its position.
+#[must_use]
+fn place_near(
+    galaxy: &Galaxy,
+    key: CellKey,
+    index: u32,
+    bound: &CellBound,
+    near: impl Fn(&GalacticPosition) -> bool,
+) -> Placing {
     let id = candidate_id(key, index);
     let position = candidate_position(galaxy.seed(), key, id);
+    if !near(&position) {
+        return Placing::Refused;
+    }
     let mark = acceptance_mark(galaxy.seed(), id);
-    let picked = pick_component(galaxy, key, bound, &position, mark)?;
-    Some(Placed {
-        id,
-        position,
-        mark,
-        picked,
-    })
+    match pick_component(galaxy, key, bound, &position, mark) {
+        Some(picked) => Placing::Placed(Placed {
+            id,
+            position,
+            mark,
+            picked,
+        }),
+        None => Placing::Thinned,
+    }
 }
 
 /// The rest of [`evaluate_with_hook`] for a placed candidate: its marks, the field's share, the

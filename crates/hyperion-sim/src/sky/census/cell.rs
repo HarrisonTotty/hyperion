@@ -2325,7 +2325,7 @@ const WINDOW_DISTANCE_SLACK_LY: f64 = 1e-6;
 /// is the lesser, should the two ever part, so that the record stays among those its window
 /// generates.
 #[must_use]
-fn nearest_distance(
+fn nearest_distance_ly(
     galaxy: &Galaxy,
     record: &SystemRecord,
     query: &SkyQuery,
@@ -2343,7 +2343,7 @@ fn nearest_distance(
 
 /// What a part of one cell's census by window did ([`census_window_part`]): its stars' counts and
 /// cost, and how far through the cell's candidates it came.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct WindowPart {
     tallies: CensusTallies,
     cost: CensusCost,
@@ -2446,7 +2446,7 @@ pub fn census_window_part(
             least <= d && d <= farthest
         },
         |record| {
-            if !window.holds(nearest_distance(galaxy, &record, query, &reach)) {
+            if !window.holds(nearest_distance_ly(galaxy, &record, query, &reach)) {
                 return ControlFlow::Continue(());
             }
             if !first && !go_on() {
@@ -2469,8 +2469,8 @@ pub fn census_window_part(
     WindowPart {
         tallies: counts.tallies,
         cost: counts.cost,
-        reached: walked.reached,
-        candidates: walked.candidates,
+        reached: walked.reached(),
+        candidates: walked.candidates(),
     }
 }
 
@@ -4849,7 +4849,7 @@ mod tests {
                 let floor = floor_at(galaxy, ctx.envelope, key, &query, &reach);
                 generate_cell_where(galaxy, key, |m| m.value() >= floor.value(), &mut records);
                 for record in &records {
-                    if window.holds(nearest_distance(galaxy, record, &query, &reach)) {
+                    if window.holds(nearest_distance_ly(galaxy, record, &query, &reach)) {
                         *held.entry(record.id()).or_default() += 1;
                         later += usize::from(!window.opens_the_cell());
                     }

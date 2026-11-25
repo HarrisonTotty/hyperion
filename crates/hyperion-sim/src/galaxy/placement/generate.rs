@@ -202,13 +202,25 @@ pub fn generate_cell_where_near(
 }
 
 /// Where a walk of a cell's candidates stopped ([`visit_cell_where_near`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub struct CandidatesWalked {
+    reached: u32,
+    candidates: u32,
+}
+
+impl CandidatesWalked {
     /// The index of the first candidate not taken: the range's end, held within the cell's
-    /// candidates, or the candidate `visit` stopped before.
-    pub reached: u32,
+    /// candidates, or the candidate whose system `visit` stopped before.
+    #[must_use]
+    pub const fn reached(&self) -> u32 {
+        self.reached
+    }
+
     /// How many candidates the cell has ([`candidate_count`](super::candidate_count)).
-    pub candidates: u32,
+    #[must_use]
+    pub const fn candidates(&self) -> u32 {
+        self.candidates
+    }
 }
 
 /// [`generate_cell_where_near`]'s systems among the candidates whose indices `candidates` holds,
@@ -223,6 +235,43 @@ pub struct CandidatesWalked {
 /// # Panics
 ///
 /// As [`generate_cell`].
+///
+/// # Examples
+///
+/// A walk stopped after its first system and taken up again from where it stopped, as a server's
+/// census jobs split a dense cell, gives the systems of one walk:
+///
+/// ```
+/// use std::ops::ControlFlow;
+///
+/// use hyperion_sim::Seed;
+/// use hyperion_sim::galaxy::Galaxy;
+/// use hyperion_sim::galaxy::placement::{CellKey, generate_cell_where_near, visit_cell_where_near};
+/// use hyperion_sim::id::Layer;
+///
+/// let galaxy = Galaxy::new(Seed::new(19));
+/// let key = CellKey::new(Layer::E, [0, 203, 0])?;
+/// let (keep, near) = (|_| true, |_: &_| true);
+/// let mut parts = Vec::new();
+/// let first = visit_cell_where_near(&galaxy, key, 0..u32::MAX, keep, near, |system| {
+///     if parts.is_empty() {
+///         parts.push(system);
+///         ControlFlow::Continue(())
+///     } else {
+///         ControlFlow::Break(())
+///     }
+/// });
+/// assert!(first.reached() < first.candidates());
+/// let rest = first.reached()..first.candidates();
+/// visit_cell_where_near(&galaxy, key, rest, keep, near, |system| {
+///     parts.push(system);
+///     ControlFlow::Continue(())
+/// });
+/// let mut whole = Vec::new();
+/// generate_cell_where_near(&galaxy, key, keep, near, &mut whole);
+/// assert_eq!(parts, whole);
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
 pub fn visit_cell_where_near(
     galaxy: &Galaxy,
     key: CellKey,
@@ -519,6 +568,61 @@ mod tests {
             }
         }
         assert!(parted > 100, "only {parted} cells parted by position");
+    }
+
+    /// `visit_cell_where_near` over any split of a cell's candidates, ranges empty, past the cell's
+    /// last candidate and stopped and taken up again from where they stopped, gives
+    /// `generate_cell_where_near`'s systems, each once, in order (perf-dense-first-shells).
+    #[test]
+    fn a_walk_of_a_cells_candidates_in_any_split_is_the_whole_walk() {
+        let galaxy = galaxy();
+        for layer in [Layer::C, Layer::E] {
+            let key = CellKey::containing(layer, &in_the_bulge()).unwrap();
+            let at = GalacticPosition::from_light_years(key.origin_ly().map(f64::from)).unwrap();
+            let reach = 0.8 * f64::from(key.size_ly());
+            let near =
+                |p: &GalacticPosition| at.distance_to(p).value() / METRES_PER_LIGHT_YEAR < reach;
+            let keep = |m: SolarMasses| m.value() >= 0.9;
+            let mut whole = Vec::new();
+            generate_cell_where_near(&galaxy, key, keep, near, &mut whole);
+            let count = candidate_count(&galaxy, key);
+            assert!(whole.len() > 20, "{layer:?}: {}", whole.len());
+            for parts in [2_u32, 3, 7, 50] {
+                let mut joined = Vec::new();
+                let mut from = 0;
+                // Uneven ranges, the last running past the cell, and an empty one after each.
+                let edges = (1..parts)
+                    .map(|k| count / parts * k + k % 3)
+                    .chain([u32::MAX]);
+                for to in edges {
+                    let mut taken = 0;
+                    let mut start = from;
+                    // Each range stopped after every fifth system and taken up again.
+                    loop {
+                        let walked =
+                            visit_cell_where_near(&galaxy, key, start..to, keep, near, |r| {
+                                if taken == 5 {
+                                    return ControlFlow::Break(());
+                                }
+                                taken += 1;
+                                joined.push(r);
+                                ControlFlow::Continue(())
+                            });
+                        assert_eq!(walked.candidates(), count);
+                        if walked.reached() >= to.min(count) {
+                            break;
+                        }
+                        (start, taken) = (walked.reached(), 0);
+                    }
+                    from = to.min(count);
+                    let empty = visit_cell_where_near(&galaxy, key, from..from, keep, near, |_| {
+                        panic!("an empty range visits nothing")
+                    });
+                    assert_eq!(empty.reached(), from);
+                }
+                assert_eq!(joined, whole, "{layer:?} in {parts} parts");
+            }
+        }
     }
 
     /// `generate_cell_where_near` shows `near` every candidate's position once, in index order, the

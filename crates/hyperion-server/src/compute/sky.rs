@@ -199,9 +199,21 @@ pub struct SkyCaps {
     far_first_from_ly: Option<NonZeroU32>,
     /// A test's band, in place of [`BandSpec::STANDARD`].
     band: Option<BandSpec>,
-    /// Whether a test's plan takes every layer's records by window, as a dense place's does,
-    /// whatever its caps (perf-dense-first-shells).
-    by_record: bool,
+    /// How a test's plan takes its layers' records: by window for every layer, as a dense place's
+    /// does, whatever its caps (perf-dense-first-shells), or as its caps' count says.
+    shells: PlanShells,
+}
+
+/// How a sky's plan takes each layer's records (perf-dense-first-shells).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub(crate) enum PlanShells {
+    /// As the plan's caps' count says: by window in a dense place, and otherwise R06.T8.i's cells
+    /// whole. Every sky a client asks is planned so.
+    #[default]
+    AsCounted,
+    /// Every layer's by window to exactly the census's edges, whatever the caps: a test's
+    /// ([`SkyCaps::with_shells_by_record`]).
+    ByRecord,
 }
 
 /// The luminosity tables a sky reads (Design note 7).
@@ -224,7 +236,7 @@ impl SkyCaps {
         c_deferred_beyond_ly: None,
         far_first_from_ly: None,
         band: None,
-        by_record: false,
+        shells: PlanShells::AsCounted,
     };
 
     /// Every layer's cap forced to `radius`, over tables that hold no star.
@@ -259,7 +271,7 @@ impl SkyCaps {
                 c_deferred_beyond_ly: None,
                 far_first_from_ly: None,
                 band: None,
-                by_record: false,
+                shells: PlanShells::AsCounted,
             })
         } else {
             Err(ForceSkyCapsError)
@@ -308,17 +320,17 @@ impl SkyCaps {
     #[must_use]
     pub const fn with_shells_by_record(self) -> Self {
         Self {
-            by_record: true,
+            shells: PlanShells::ByRecord,
             ..self
         }
     }
 
     /// The shells the census takes: the edges, ly ([`shell_edges_ly`](Self::shell_edges_ly)), and
-    /// whether a test takes every layer's records by window at them
+    /// how its plan takes the layers' records at them
     /// ([`with_shells_by_record`](Self::with_shells_by_record)).
     #[must_use]
-    pub(crate) fn shells(&self) -> (&'static [u32], bool) {
-        (self.shell_edges_ly(), self.by_record)
+    pub(crate) fn shells(&self) -> (&'static [u32], PlanShells) {
+        (self.shell_edges_ly(), self.shells)
     }
 
     /// The same caps with layer C's shells whose inner edge is at or beyond `edge_ly` censused a
@@ -876,7 +888,7 @@ pub(crate) async fn plan(
     galaxy: &Arc<Galaxy>,
     tables: &Arc<SkyTables>,
     query: Arc<SkyQuery>,
-    (edges_ly, by_record): (&'static [u32], bool),
+    (edges_ly, shells): (&'static [u32], PlanShells),
     token: &CancelToken,
 ) -> Result<(Arc<SkyQuery>, CensusPlan), ComputeError> {
     let (ceiling, caps) = match query.forced_caps() {
@@ -891,12 +903,9 @@ pub(crate) async fn plan(
     };
     let query = at(query, ceiling);
     let planned = Arc::clone(&query);
-    let plan = bulk(pool, token, move |_: &CancelToken| {
-        if by_record {
-            census_plan_by_record(&planned, caps, edges_ly)
-        } else {
-            census_plan_with_edges(&planned, caps, edges_ly)
-        }
+    let plan = bulk(pool, token, move |_: &CancelToken| match shells {
+        PlanShells::AsCounted => census_plan_with_edges(&planned, caps, edges_ly),
+        PlanShells::ByRecord => census_plan_by_record(&planned, caps, edges_ly),
     })
     .await?;
     Ok((query, plan))
@@ -1901,17 +1910,20 @@ struct JobClock<'a> {
 
 impl JobClock<'_> {
     /// Whether the job is to stop at once: its request is cancelled, or its census gone.
+    #[must_use]
     fn stopped(&self) -> bool {
         self.token.is_cancelled() || self.abandoned.is_cancelled()
     }
 
     /// Whether the job has time for more of its work: its slice is not yet spent and its request
     /// not cancelled.
+    #[must_use]
     fn has_time(&self) -> bool {
         !self.token.is_cancelled() && self.started.elapsed() < self.slice
     }
 
     /// The job's slice of `layer`'s work: its stars, tallies and cost, and nothing left.
+    #[must_use]
     fn slice(
         &self,
         layer: Layer,
@@ -2635,7 +2647,7 @@ pub(crate) mod tests {
                 &galaxy,
                 &tables,
                 Arc::new(query),
-                (&SHELL_EDGES_LY, false),
+                (&SHELL_EDGES_LY, PlanShells::AsCounted),
                 &token,
             ),
         )
@@ -2861,7 +2873,7 @@ pub(crate) mod tests {
             .unwrap());
         let pool = pool(3);
         let token = CancelToken::new();
-        let edges: (&'static [u32], bool) = (&[4, 8], false);
+        let edges: (&'static [u32], _) = (&[4, 8], PlanShells::AsCounted);
         let (query, plan) = timeout(
             WAIT,
             plan(&pool, &galaxy, &tables, Arc::new(query), edges, &token),
@@ -3014,7 +3026,7 @@ pub(crate) mod tests {
                 &galaxy,
                 &tables,
                 Arc::new(query),
-                (&[20], false),
+                (&[20], PlanShells::AsCounted),
                 &token,
             ),
         )
@@ -3087,7 +3099,7 @@ pub(crate) mod tests {
                 &galaxy,
                 &tables,
                 Arc::new(query),
-                (&SHELL_EDGES_LY, false),
+                (&SHELL_EDGES_LY, PlanShells::AsCounted),
                 &token,
             ),
         )
@@ -3198,7 +3210,7 @@ pub(crate) mod tests {
             .unwrap());
         let pool = pool(3);
         let token = CancelToken::new();
-        let edges: (&'static [u32], bool) = (&[4, 8], false);
+        let edges: (&'static [u32], _) = (&[4, 8], PlanShells::AsCounted);
         let (query, plan) = timeout(
             WAIT,
             plan(&pool, &galaxy, &tables, Arc::new(query), edges, &token),
@@ -3379,7 +3391,7 @@ pub(crate) mod tests {
                 &galaxy,
                 &tables,
                 Arc::new(query),
-                (&[20], false),
+                (&[20], PlanShells::AsCounted),
                 &token,
             ),
         )
@@ -3484,7 +3496,7 @@ pub(crate) mod tests {
                 &galaxy,
                 &tables,
                 Arc::new(query),
-                (&SHELL_EDGES_LY, false),
+                (&SHELL_EDGES_LY, PlanShells::AsCounted),
                 &token,
             ),
         )
@@ -3831,7 +3843,7 @@ pub(crate) mod tests {
                     &galaxy,
                     &tables,
                     Arc::new(query),
-                    (&SHELL_EDGES_LY, false),
+                    (&SHELL_EDGES_LY, PlanShells::AsCounted),
                     &token,
                 ),
             )
@@ -3978,7 +3990,7 @@ pub(crate) mod tests {
                     &galaxy,
                     &tables,
                     Arc::clone(&query),
-                    (&SHELL_EDGES_LY, false),
+                    (&SHELL_EDGES_LY, PlanShells::AsCounted),
                     &token,
                 ),
             )
@@ -4095,7 +4107,7 @@ pub(crate) mod tests {
                     &galaxy,
                     &tables,
                     Arc::new(asked),
-                    (&SHELL_EDGES_LY, false),
+                    (&SHELL_EDGES_LY, PlanShells::AsCounted),
                     &token,
                 ),
             )
