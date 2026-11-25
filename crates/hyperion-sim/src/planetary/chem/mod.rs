@@ -93,6 +93,7 @@ pub mod partition;
 pub mod photochem;
 pub mod quench;
 pub mod redox;
+pub mod secondary;
 pub mod silicate_vapour;
 pub mod tenuous;
 

@@ -8852,6 +8852,10 @@ Each is labelled "not yet modelled" where a console could show it:
   - _Split_ in three (lean, 2026-11-25): a, the heavy-secondary equilibrium; b, the vent's gas by
     ΔIW; c, the carriers on the snapshot path, held. _Built_ b, 2026-11-25, with no hold: Risks,
     "P14.T55.a.b's vent gas, as built".
+  - **P14.T55.a.a The heavy-secondary equilibrium** (split off with b, the vent's redox, and c,
+    the carriers, held; lean, 2026-11-25): `chem::secondary`, Woitke's types A–C on one bracketed
+    root in the oxygen potential, with the hydrogen's inner root (Risks). _Built_ 2026-11-25, read
+    by nothing: Risks, "Deviations in P14.T55.a.a, as built".
 - **P14.T55.b** silicate-vapour atmospheres (`silicate_vapour`; Schaefer and Fegley 2009; Ito et
   al. 2015; Kite et al. 2016; Zilinskas et al. 2022).
   - It fills `BodySurfaceDto.silicate_vapour` (P14.T35.f): `null` on a surface with no melt, a
@@ -34720,3 +34724,30 @@ ACTIVE HOST · HOST LEAVING MAIN SEQUENCE · EXTRAPOLATED ZONE · FROZEN SURFACE
   - _Recorded for later:_ `sulphur_dioxide_to_hydrogen_sulphide` is the deck base's input for a
     reducing air's sulphur.
   - _Accept:_ `cargo test -p hyperion-sim --lib planetary::chem::outgassing`.
+- **Deviations in P14.T55.a.a, as built (lane `p14-t55aa-secondary-equilibrium`, 2026-11-25).** A
+  pure module, read by nothing, so no hold; 33 bit for bit; `golden_diff.py`: extended only
+  (`planetary/secondary_equilibrium`).
+  - _Split (lean, 2026-11-25):_ P14.T55.a is a, the equilibrium; b, the vent's redox
+    (`chem::outgassing`); c, the carriers on the snapshot path, held at 36. By research-leans-58 c
+    publishes the vent's quenched gas; a names the census's Woitke type and is the hot branch's
+    solver above the quench.
+  - _New items:_ in `chem::secondary`, `solve`, `AirElements` (`woitke_type`,
+    `low_temperature_limit`), `BuildAirElementsError`, `WoitkeType`, `SecondaryEquilibrium`,
+    `SolveSecondaryError`, `SPECIES`, `FLOOR`, `CEILING` and the roots' constants.
+  - _Deviation:_ the hydrogen's balance is an inner bracketed root (in ψ, the logit of H₂ and H₂O's
+    share of the pressure), not a quadratic in p(H₂): with λ unknown, CH₄ and NH₃ couple it.
+    The outer root is in ω, the logit of p(O₂) ÷ P; C closes linearly, N with the total pressure as
+    a quadratic.
+  - _Roots:_ Newton's steps on the exact slope inside the signs' bracket, bisecting where a step
+    would leave it, from the low-temperature limit's potentials; at most 80 evaluations each, and a
+    stop after a step of at most 10⁻⁹, not a fixed count. A miss over 10⁻¹³ is refused
+    (`NotConverged`); none in the tests' domain is.
+  - _Range:_ 300 K (graphite's record; held below) to 2,000 K (research-leans-58), refused above
+    (`AboveRange`). At 2,000 K OH, not carried, holds up to 19% of a hydrogen-poor air's hydrogen
+    (0.74% at 1,500 K). A budget with C ≥ H ÷ 4 + O has no gas solution (`CarbonBeyondGas`).
+  - _Tests:_ the low-temperature limit's 1% holds at 300 K but for type A's N₂ variant's NH₃ (3.6%
+    under at 1 bar, held to 5%) and H₂ (0.4% of the gas, held under 1%): the Haber equilibrium.
+    Woitke et al.'s boundaries and CO's onset near 600 K are recalled (the pod's web refused the
+    paper); the onset is checked on the registry's own records.
+  - _Cost:_ 2.7 µs a solve (pod, 16 vCPU, release, one thread); no table (lean, research-leans-58:
+    nothing calls it per body at 36).
