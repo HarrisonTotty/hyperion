@@ -820,6 +820,10 @@ describe("the photorealistic still renderer (R11.T10.b)", () => {
       const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, 6.371e6);
       const cloudyAt = (viewport: ViewSize, setting: QualitySetting): PhotorealFrame => {
         const frame = viewFrame(viewport);
+        const [body] = frame.bodies;
+        if (body === undefined) {
+          throw new Error("the view's frame has no body");
+        }
         const air = airOver(tables, viewport, EARTH_CLOUDS);
         return {
           ...frame,
@@ -827,7 +831,7 @@ describe("the photorealistic still renderer (R11.T10.b)", () => {
           meter: null,
           time: { seconds: 1_000, nanos: 0 },
           timeRate: 1,
-          bodies: frame.bodies.map((body) => ({ ...body, centreM: vec3(0, 0, -distanceM) })),
+          bodies: [{ ...body, centreM: vec3(0, 0, -distanceM) }],
           atmospheres: [{ ...air, camera: { ...air.camera, positionM: vec3(0, 0, distanceM) } }],
         };
       };
