@@ -1118,6 +1118,8 @@ impl CarbonDioxideTerm {
             exponent,
             collisions,
         } = self;
+        // The vent's methane as carbon dioxide, from 36 (P14.T55.a.c's ruling 3).
+        let partials = &vented::carbon_view(partials);
         band * math::powf(broadened_variable(partials, gravity), exponent)
             + collisions * collision_variable(partials, gravity)
     }
@@ -1132,6 +1134,7 @@ impl CarbonDioxideTerm {
             exponent,
             collisions,
         } = self;
+        let partials = &vented::carbon_view(partials);
         let p = partials.of(Gas::CarbonDioxide).value().max(0.0);
         let surface = partials.total().value().max(0.0);
         let share = if surface > 0.0 { p / surface } else { 0.0 };
@@ -3855,8 +3858,8 @@ impl<'a> StepClimate<'a> {
 /// (a runaway or a magma ocean by its division or its class), not on the methane arm of step 4
 /// and not an ice bulk's its vent's quenched gas: the vent's carbon shares at the mantle's ΔIW
 /// ([`AtmosphereInputs::vent`]), graphite's cap, carbon monoxide shifted to carbon dioxide where
-/// the air holds water, debiting it, and that hydrogen to escape (research-leans-58 rulings 1, 2, 4
-/// and 5).
+/// the air holds water, debiting it, and that hydrogen to escape; the vent's methane counts in
+/// carbon dioxide's term mole for mole (research-leans-58 rulings 1–5).
 ///
 /// From version 24 P14.T53.b part 1 joins them (decision-absurd-states-24 R3–R4;
 /// decision-t53b-arm-c):

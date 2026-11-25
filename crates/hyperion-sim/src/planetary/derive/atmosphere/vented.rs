@@ -88,9 +88,8 @@
 //!   (`methane_outcome`, P14.T53.a), a reservoir's, stays P14.T24.f's arm's (a lean, 2026-11-25:
 //!   at Titan's rate scaled to 1 S⊕ it would photolyse any vent's methane many times over, where a
 //!   steady supply keeps some).
-//! - Methane's greenhouse: the vent's CH₄ is in no τ term, as P14.T24.f's arm's (ruling 3's
-//!   stand-in, carbon dioxide's term reading it, is its own step); and the weathering thermostat
-//!   stores it with the carbon
+//! - Methane's greenhouse: the vent's CH₄ counts in carbon dioxide's term mole for mole, a stated
+//!   stand-in (ruling 3, [`carbon_view`]); and the weathering thermostat stores it with the carbon
 //!   dioxide, its carbon held on the carbon as CH₄ oxidised by OH would be before weathering (a
 //!   lean, 2026-11-25: silicate weathering itself stores no CH₄).
 //! - H₂'s steady state from the present outgassing at the vent's ratio (research-leans-58,
@@ -108,7 +107,9 @@ use crate::substance::Element;
 use crate::units::consts::SECONDS_PER_JULIAN_YEAR;
 use crate::units::{Kilograms, Pascals};
 
-use super::{Airborne, AtmosphereInputs, Gas, Retention, VentConditions, VolatileInventory};
+use super::{
+    Airborne, AtmosphereInputs, Gas, PartialPressures, Retention, VentConditions, VolatileInventory,
+};
 
 /// The most trials of the vent's pressure ([the module](self)'s step 1): 16, a fixed bound (the
 /// lane's). Each reads the carriers the trial before published; the trials stop where a pressure
@@ -471,5 +472,45 @@ pub(crate) fn outgassed(
         dried: water > 0.0 && air.water <= 0.0,
         hydrogen: made,
         hydrogen_kept: hydrogen,
+    })
+}
+
+/// The partial pressures carbon dioxide's term of the grey optical depth reads (P14.T55.a.c's
+/// ruling 3, a stated stand-in, from generator version 36): `partials` with the vent's methane
+/// counted as carbon dioxide mole for mole, its carbon's moles at carbon dioxide's molar mass, in
+/// X and Y alike (`CarbonDioxideTerm`); `partials` itself below 36 and where there is no vent
+/// methane.
+///
+/// The vent's methane is methane in an air that holds carbon dioxide: P14.T24.f's methane arm
+/// holds its carbon as methane alone (no air below 36 holds both), and every vent air holds carbon
+/// dioxide beside its methane, its CO₂/CO a positive constant at the vent and its CO shifted or
+/// published as carbon dioxide. So an air whose carbon moved from carbon dioxide to the vent's
+/// methane keeps that term's greenhouse, and T24.f's arm (Titan's) its own, with methane in no τ
+/// term, its share riding in nitrogen's fit (science-p14-t24f §2). Its shortwave, its haze's
+/// cooling and its strong-line band are a later lane's term (research-leans-58 ruling 3).
+#[must_use]
+pub(crate) fn carbon_view(partials: &PartialPressures) -> PartialPressures {
+    if !speciated() {
+        return *partials;
+    }
+    let (methane, carbon_dioxide) = (
+        partials.of(Gas::Methane).value(),
+        partials.of(Gas::CarbonDioxide).value(),
+    );
+    if !(methane > 0.0 && carbon_dioxide > 0.0) {
+        return *partials;
+    }
+    let as_carbon_dioxide =
+        methane * Gas::CarbonDioxide.molar_mass_g_per_mol() / Gas::Methane.molar_mass_g_per_mol();
+    PartialPressures::from_fn(|gas| match gas {
+        Gas::CarbonDioxide => Pascals::new(carbon_dioxide + as_carbon_dioxide),
+        Gas::Methane => Pascals::ZERO,
+        Gas::Hydrogen
+        | Gas::Helium
+        | Gas::Water
+        | Gas::Ammonia
+        | Gas::Nitrogen
+        | Gas::Oxygen
+        | Gas::Argon => partials.of(gas),
     })
 }

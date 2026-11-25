@@ -760,9 +760,9 @@ fn the_outgassing_speciation_is_held_below_36() {
         "the 35 → 36 bump publishes a secondary air's vent gas (P14.T55.a.c): delete \
          `OUTGASSING_SPECIATION_VERSION`, `OutgassingRules` with its `Held` arm, \
          `with_outgassing_speciation`, its line in `planetary/testing/held.rs` and in \
-         `with_every_36_hold`, and this test; the `Held` paths of `vented::outgassed`; unwrap the \
-         tests' switches (the carriers' tests and the census's held half, whose name loses the \
-         hold); \
+         `with_every_36_hold`, and this test; the `Held` paths of `vented::outgassed` and of the \
+         carbon dioxide term's methane stand-in (`carbon_view`); unwrap the tests' switches (the \
+         carriers' tests, the stand-in's and the census's held half, whose name loses the hold); \
          and bless by name the goldens whose records hold a secondary air: the systems', \
          `derive_body`, `surface_conditions` and its `_published`, `surface_inputs`, \
          `atmosphere_speciation`, `aerosols`, `partition`, `condense`, `habitability` and the \

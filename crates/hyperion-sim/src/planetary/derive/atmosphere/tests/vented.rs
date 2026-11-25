@@ -3,7 +3,10 @@
 //! held bodies and the carbon dioxide term's stand-in for the vent's methane.
 
 use super::*;
-use crate::planetary::chem::outgassing::{SpeciateVentGasError, VentElements, VentGas, VentInputs};
+use crate::planetary::chem::outgassing::{
+    OutgassingRules, SpeciateVentGasError, VentElements, VentGas, VentInputs,
+    with_outgassing_speciation,
+};
 use crate::planetary::derive::atmosphere::{Outgassed, VentRoute};
 use crate::planetary::testing::with_every_36_hold;
 
@@ -400,6 +403,56 @@ fn a_reduced_cool_thick_vent_makes_methane_from_the_water() {
     );
     eprintln!("its haze index {index:.4}");
     assert!(index > 1.0, "{index}");
+}
+
+/// Ruling 3's stand-in: under the hold an air whose carbon moved from CO₂ to the vent's methane,
+/// beside some CO₂, takes the grey optical depth of the air with that carbon as CO₂, to the bit;
+/// below 36 its methane is in no term; and Titan's methane, with no CO₂ beside it, is in none at
+/// 36 either.
+#[test]
+fn the_vent_s_methane_counts_in_carbon_dioxide_s_term_mole_for_mole() {
+    let gravity = MetresPerSecondSquared::new(9.81);
+    let base = Kelvin::new(255.0);
+    let ratio = Gas::CarbonDioxide.molar_mass_g_per_mol() / Gas::Methane.molar_mass_g_per_mol();
+    let (nitrogen, carbon_dioxide, methane) = (0.78e5, 40.0, 20.0);
+    let air = |pairs: &[(Gas, f64)]| {
+        PartialPressures::from_fn(|gas| {
+            Pascals::new(
+                pairs
+                    .iter()
+                    .find(|(g, _)| *g == gas)
+                    .map_or(0.0, |&(_, p)| p),
+            )
+        })
+    };
+    let vented = air(&[
+        (Gas::Nitrogen, nitrogen),
+        (Gas::CarbonDioxide, carbon_dioxide),
+        (Gas::Methane, methane),
+    ]);
+    let as_carbon = air(&[
+        (Gas::Nitrogen, nitrogen),
+        (Gas::CarbonDioxide, carbon_dioxide + methane * ratio),
+    ]);
+    let without = air(&[
+        (Gas::Nitrogen, nitrogen),
+        (Gas::CarbonDioxide, carbon_dioxide),
+    ]);
+    let tau = |p: &PartialPressures| optical_depth(p, base, gravity);
+    let at_36 = with_every_36_hold(|| tau(&vented));
+    assert_same_bits(at_36, with_every_36_hold(|| tau(&as_carbon)));
+    // Below 36 the methane absorbs in no term; it only broadens, its weight in p_s.
+    let held = tau(&vented);
+    assert!(
+        held < at_36 && relative(held, tau(&without)) < 1e-3,
+        "{held} against {at_36}"
+    );
+    let titan = air(&[(Gas::Nitrogen, 1.4e5), (Gas::Methane, 3.5e3)]);
+    assert_same_bits(with_every_36_hold(|| tau(&titan)), tau(&titan));
+    assert_same_bits(
+        with_every_36_hold(|| with_outgassing_speciation(OutgassingRules::Held, || tau(&vented))),
+        tau(&vented),
+    );
 }
 
 /// The balance: at 36 each element's outcome still sums to its inventory within 10⁻⁹ of the
