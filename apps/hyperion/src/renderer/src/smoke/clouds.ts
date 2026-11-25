@@ -705,21 +705,27 @@ export async function checkCloudLayerDraw(engine: RenderEngine, checks: Checks):
     const material = engine.createMaterial(CLOUD_LAYER_MATERIAL);
     const triangle = fullScreenMesh(engine, "cloud layer's triangle");
     const shell = cloudShellOf(FIGURE, cloudLayerHeightM(CONDENSATE));
-    for (const view of LAYER_VIEWS) {
-      const uniforms = cloudLayerUniforms(layerViewOf(view, shell, size, 9));
-      target.render(
-        frameOf(`cloud layer ${view.name}`, [
-          cloudLayerDraw(triangle, material, gpu, scene.depth, tables, uniforms),
-        ]),
-      );
-      // The harness's checks run in order: each reads the GPU back before the next draws.
-      // oxlint-disable-next-line no-await-in-loop
-      const { drawn, bad } = tallyTexels(halfTexels(await engine.readTexture(target.colour)));
-      checks.check(
-        `R11.T7.b the cloud layer seen from ${view.name} its shell draws every texel finite`,
-        bad === 0 && drawn > 0,
-        `${drawn} of ${LAYER_SIDE_PX * LAYER_SIDE_PX} texels drawn, ${bad} not finite or of α outside [0, 1]`,
-      );
+    // Released with the check: plan R07's airless twins run it again (`airlessPasses.ts`).
+    try {
+      for (const view of LAYER_VIEWS) {
+        const uniforms = cloudLayerUniforms(layerViewOf(view, shell, size, 9));
+        target.render(
+          frameOf(`cloud layer ${view.name}`, [
+            cloudLayerDraw(triangle, material, gpu, scene.depth, tables, uniforms),
+          ]),
+        );
+        // The harness's checks run in order: each reads the GPU back before the next draws.
+        // oxlint-disable-next-line no-await-in-loop
+        const { drawn, bad } = tallyTexels(halfTexels(await engine.readTexture(target.colour)));
+        checks.check(
+          `R11.T7.b the cloud layer seen from ${view.name} its shell draws every texel finite`,
+          bad === 0 && drawn > 0,
+          `${drawn} of ${LAYER_SIDE_PX * LAYER_SIDE_PX} texels drawn, ${bad} not finite or of α outside [0, 1]`,
+        );
+      }
+    } finally {
+      engine.releaseMaterial(material);
+      engine.releaseMesh(triangle);
     }
   } finally {
     target.dispose();
@@ -794,36 +800,44 @@ export async function checkCloudVolumeDraw(engine: RenderEngine, checks: Checks)
     const shell = cloudShellOf(FIGURE, cloudLayerHeightM(CONDENSATE));
     const { viewRotation, projection } = frameOf("cloud volume", []);
     const pass = { viewRotation, projection };
-    for (const view of LAYER_VIEWS) {
-      volumes.cut();
-      for (let frame = 0; frame < VOLUME_FRAMES; frame += 1) {
-        target.render(frameOf(`cloud volume ${view.name} clear`, []));
-        volumes.draw(
-          {
-            id: FRAME.id,
-            gpu,
-            condensate: CONDENSATE,
-            view: layerViewOf(view, shell, size, 12),
-            lighting: tables,
-            sceneDepth: scene.depth,
-            blueNoise,
-            correction,
-          },
-          materials,
-          target,
-          size,
-          pass,
-          null,
+    // Released with the check: plan R07's airless twins run it again (`airlessPasses.ts`).
+    try {
+      for (const view of LAYER_VIEWS) {
+        volumes.cut();
+        for (let frame = 0; frame < VOLUME_FRAMES; frame += 1) {
+          target.render(frameOf(`cloud volume ${view.name} clear`, []));
+          volumes.draw(
+            {
+              id: FRAME.id,
+              gpu,
+              condensate: CONDENSATE,
+              view: layerViewOf(view, shell, size, 12),
+              lighting: tables,
+              sceneDepth: scene.depth,
+              blueNoise,
+              correction,
+            },
+            materials,
+            target,
+            size,
+            pass,
+            null,
+          );
+        }
+        // The harness's checks run in order: each reads the GPU back before the next draws.
+        // oxlint-disable-next-line no-await-in-loop
+        const { drawn, bad } = tallyTexels(halfTexels(await engine.readTexture(target.colour)));
+        checks.check(
+          `R11.T7.c the cloud volume seen from ${view.name} its deck draws every texel finite`,
+          bad === 0 && drawn > 0,
+          `${drawn} of ${LAYER_SIDE_PX * LAYER_SIDE_PX} texels drawn, ${bad} not finite or of α outside [0, 1]`,
         );
       }
-      // The harness's checks run in order: each reads the GPU back before the next draws.
-      // oxlint-disable-next-line no-await-in-loop
-      const { drawn, bad } = tallyTexels(halfTexels(await engine.readTexture(target.colour)));
-      checks.check(
-        `R11.T7.c the cloud volume seen from ${view.name} its deck draws every texel finite`,
-        bad === 0 && drawn > 0,
-        `${drawn} of ${LAYER_SIDE_PX * LAYER_SIDE_PX} texels drawn, ${bad} not finite or of α outside [0, 1]`,
-      );
+    } finally {
+      engine.releaseMaterial(materials.march);
+      engine.releaseMaterial(materials.resolve);
+      engine.releaseMaterial(materials.composite);
+      engine.releaseMesh(materials.triangle);
     }
   } finally {
     target.dispose();

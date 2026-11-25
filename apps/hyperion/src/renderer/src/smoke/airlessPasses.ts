@@ -108,6 +108,7 @@ export async function checkAirlessPassTwins(engine: RenderEngine, checks: Checks
     // The runs go in turn, each reading its targets back before the next draws.
     // oxlint-disable-next-line no-await-in-loop
     await check(asWritten.engine, own[0]);
+    // The twins' run, after the run as written has read its every target back.
     // oxlint-disable-next-line no-await-in-loop
     await check(byTwins.engine, own[1]);
     const apart = readsApart(asWritten.reads, byTwins.reads);

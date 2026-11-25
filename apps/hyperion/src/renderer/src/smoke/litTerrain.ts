@@ -535,12 +535,17 @@ async function drawInto(
           ["rgba16float"],
           [resources.mesh],
         );
-        const clouded = { ...draw, material: cloudy, clouds: clouds.gpu };
-        const written = await renderInto(engine, target, clouded);
-        await twins.twinsSettled();
-        const swaps = twins.swaps;
-        const byTwin = await renderInto(engine, target, clouded);
-        cloudyTwin = twinFrameOf("its cloudy form", written, byTwin, twins.swaps - swaps);
+        try {
+          const clouded = { ...draw, material: cloudy, clouds: clouds.gpu };
+          const written = await renderInto(engine, target, clouded);
+          await twins.twinsSettled();
+          const swaps = twins.swaps;
+          const byTwin = await renderInto(engine, target, clouded);
+          cloudyTwin = twinFrameOf("its cloudy form", written, byTwin, twins.swaps - swaps);
+        } finally {
+          // Its twin with it.
+          engine.releaseMaterial(cloudy);
+        }
       } finally {
         clouds.dispose();
       }
