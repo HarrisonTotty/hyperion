@@ -50,11 +50,16 @@ import {
   cullOverTwin,
   cullTwin,
   NO_MARK,
+  receiversRefuse,
 } from "../clusters/cull";
 import { type CameraCullPass, type CascadeCullPass, CULL_PASS_BYTES } from "../clusters/cullPass";
+import { MAX_PAGE_CLUSTERS, PAGE_LOD_BYTES, PAGE_RECORD_BYTES } from "../clusters/pageFormat";
+import { cascadeCullPasses } from "../clusters/receivers";
 import {
+  CLUSTER_FLAG_DAG,
   CLUSTER_FLAG_MAY_DISCARD,
   CLUSTER_FLAG_MEASURED,
+  type ClusterLod,
   type ClusterRecord,
 } from "../clusters/record";
 import {
@@ -113,7 +118,13 @@ import {
 } from "./gpu/uniforms";
 import { MAX_LEVEL, type PatchKey } from "./patchKey";
 import { InThreadRockPageBuilder, type RockPageBuilder } from "../clusters/meshPageProducer";
-import type { RockLayer } from "../surface/scatter/rockLayer";
+import {
+  ROCK_CASCADE_PASS,
+  ROCK_CLUSTER_MESH,
+  ROCK_CULL_LABEL,
+  ROCK_INSTANCE_BYTES,
+} from "../surface/scatter/rockDraw";
+import { type RockLayer, rocksOf } from "../surface/scatter/rockLayer";
 import { rockLayerFrom, rocksAbout } from "../../test/rockFixtures";
 import { type PlanetGeometry, planetGeometry, spheroidNormal, surfacePoint } from "./planet";
 import type { GroundContact } from "./grounded";
@@ -4093,7 +4104,100 @@ function isRock(draw: DrawItem): boolean {
   return draw.storageBuffers?.["rockPages"] !== undefined;
 }
 
-describe("the authoritative rocks in the lit pass (plan R11, R11.T4.b; plan R14, R14.T5.c and T5.e)", () => {
+/** The kind of each pass of a cull's `passes` uniform (`cullPass.ts`' layout), in order. */
+function passKinds(words: ArrayLike<number> | undefined): number[] {
+  const all = Array.from(words ?? []);
+  return all.filter((_, at) => at % (CULL_PASS_BYTES / 4) === 0).filter((kind) => kind > 0);
+}
+
+/** The bytes last written over each range of `buffer`, applied in order into one image. */
+function bufferImage(engine: CountingRenderEngine, buffer: string): DataView {
+  const writes = engine.writes.filter((w) => w.buffer === buffer);
+  const bytes = new Uint8Array(Math.max(0, ...writes.map((w) => w.offsetBytes + w.bytes)));
+  for (const write of writes) {
+    bytes.set(write.data, write.offsetBytes);
+  }
+  return new DataView(bytes.buffer);
+}
+
+/** The view's rock instances as last written: each one's origin less the camera and its pool slot. */
+function rockInstances(
+  engine: CountingRenderEngine,
+): Array<{ readonly originM: Vec3; readonly page: number; readonly terrainSlot: number }> {
+  const data =
+    engine.writes.findLast((w) => w.buffer === `terrain ${PRIMARY} rock instances`)?.data ??
+    new Uint8Array();
+  const view = new DataView(data.slice().buffer);
+  const out: Array<{ originM: Vec3; page: number; terrainSlot: number }> = [];
+  for (let at = 0; at + ROCK_INSTANCE_BYTES <= view.byteLength; at += ROCK_INSTANCE_BYTES) {
+    out.push({
+      originM: {
+        x: view.getFloat32(at, true),
+        y: view.getFloat32(at + 4, true),
+        z: view.getFloat32(at + 8, true),
+      },
+      page: view.getUint32(at + 12, true),
+      terrainSlot: view.getUint32(at + 20, true),
+    });
+  }
+  return out;
+}
+
+/** A pool slot's cluster's place among the rocks' pool's records, by slot and cluster. */
+function poolAt(page: number, cluster: number): number {
+  return page * MAX_PAGE_CLUSTERS + cluster;
+}
+
+/** The `f32` at `offset` of `view`, NaN past its end. */
+function f32At(view: DataView, offset: number): number {
+  return offset + 4 <= view.byteLength ? view.getFloat32(offset, true) : Number.NaN;
+}
+
+/** The rocks' pool's records and LOD spheres as written, by slot and cluster, and which are a page's. */
+function rockRecordsOf(engine: CountingRenderEngine): {
+  readonly records: (page: number, cluster: number) => ClusterRecord;
+  readonly lods: (page: number, cluster: number) => ClusterLod;
+  readonly real: (page: number, cluster: number) => boolean;
+} {
+  const records = bufferImage(engine, "rock page records");
+  const lods = bufferImage(engine, "rock page lods");
+  const flags = (page: number, cluster: number): number => {
+    const offset = poolAt(page, cluster) * PAGE_RECORD_BYTES + 28;
+    return offset + 4 <= records.byteLength ? records.getUint32(offset, true) : 0;
+  };
+  return {
+    records: (page, cluster) => {
+      const o = poolAt(page, cluster) * PAGE_RECORD_BYTES;
+      return {
+        centreM: { x: f32At(records, o), y: f32At(records, o + 4), z: f32At(records, o + 8) },
+        radiusM: f32At(records, o + 12),
+        mode: "dag",
+        errorsM: [f32At(records, o + 16), f32At(records, o + 20)],
+        templateRef: o + 28 <= records.byteLength ? records.getUint32(o + 24, true) : 0,
+        shape: SHAPES[flags(page, cluster) & 0xf] ?? "terrain-block",
+        mayDiscard: false,
+        material: 0,
+      };
+    },
+    lods: (page, cluster) => {
+      const o = poolAt(page, cluster) * PAGE_LOD_BYTES;
+      return {
+        parentCentreM: { x: f32At(lods, o), y: f32At(lods, o + 4), z: f32At(lods, o + 8) },
+        parentRadiusM: f32At(lods, o + 12),
+      };
+    },
+    real: (page, cluster) => (flags(page, cluster) & CLUSTER_FLAG_DAG) !== 0,
+  };
+}
+
+/** The rocks' caster draws of each of a frame's caster passes, by layer, their materials' names. */
+function rockCastsOf(frame: TerrainViewFrame): Array<readonly [number, string[]]> {
+  return cascadesOf(frame).passes.map(
+    (pass) => [pass.layer, pass.draws.filter(isRock).map((draw) => draw.material.name)] as const,
+  );
+}
+
+describe("the authoritative rocks in the lit pass (plan R11, R11.T4.b; plan R14, R14.T5.c, T5.e and T6.c)", () => {
   /** The primary 4 m over the place, where the finest patches are drawn. */
   const LOW_VIEW = viewOver(4);
 
@@ -4154,6 +4258,258 @@ describe("the authoritative rocks in the lit pass (plan R11, R11.T4.b; plan R14,
       await settle();
     }
   }
+
+  it("casts the rocks it draws into each cascade their patches are admitted to, by their caster after the terrain's casters, in the one cull of the camera's passes (plan R14, R14.T6.c)", async () => {
+    const made = await rockyPass("high");
+    made.pass.setGeometry({ ...SETTINGS.high.geometry, strides: "off", farCascadeRate: 1 });
+    const before = made.engine.dispatched.length;
+    const frame = made.pass.drawFor(PRIMARY, frameOf(LOW_VIEW, true));
+    const culls = made.engine.dispatched.slice(before).filter((d) => d.pass === ROCK_CULL_LABEL);
+    const { rockCasters, passes } = cascadesOf(frame);
+    const kinds = passKinds(culls[0]?.bindings.uniforms["passes"]);
+    const farthest = rockCasters.findLastIndex((n) => n > 0);
+    expect([culls.length, rockCasters[0] > 0, farthest >= 0]).toEqual([1, true, true]);
+    // The camera's two passes, then each cascade up to the farthest the rocks cast into.
+    expect(kinds).toEqual([2, 2, ...Array.from({ length: farthest + 1 }, () => 1)]);
+    expect(rockCastsOf(frame).map(([layer, names]) => [layer, names.length > 0])).toEqual(
+      passes.map((pass) => [pass.layer, (rockCasters[pass.layer] ?? 0) > 0]),
+    );
+    for (const pass of passes) {
+      const first = pass.draws.findIndex(isRock);
+      expect(pass.draws.filter(isRock).every((draw) => draw.material.name === "rock-caster")).toBe(
+        true,
+      );
+      // After every draw of the terrain's.
+      expect(first < 0 || pass.draws.slice(first).every(isRock)).toBe(true);
+    }
+    expect(frame.draws.filter(isRock).map((draw) => draw.material.name)).toEqual([
+      "rock-lit",
+      "rock-lit",
+    ]);
+  });
+
+  it("keeps or refuses each rock in each cascade as the terrain's casters are: its patch's caster sphere by castsInto and its receivers, then each cluster by the cascade's box and receivers, a rock wider than the texel (plan R14, R14.T6.c)", async () => {
+    const made = await rockyPass("high");
+    made.pass.setGeometry({ ...SETTINGS.high.geometry, strides: "off", farCascadeRate: 1 });
+    const frame = made.pass.drawFor(PRIMARY, frameOf(LOW_VIEW, true));
+    const { set } = cascadesOf(frame);
+    const dispatch = made.engine.dispatched.findLast((d) => d.pass === ROCK_CULL_LABEL);
+    const words = dispatch?.bindings.uniforms["passes"] ?? new Uint32Array();
+    // Each cascade's pass by its place, `null` for one the cull did not take.
+    const passWords = CULL_PASS_BYTES / 4;
+    const passes = ([0, 1, 2, 3] as const).map(
+      (index) =>
+        parsePasses(
+          words.slice(
+            (ROCK_CASCADE_PASS + index) * passWords,
+            (ROCK_CASCADE_PASS + index + 1) * passWords,
+          ),
+        )[0] ?? null,
+    );
+    const viewAxis = parsedViewAxis(dispatch?.bindings.uniforms["params"] ?? new Uint32Array());
+    const inputs = wordsIn(made.engine, "rocks cull inputs");
+    const instances = rockInstances(made.engine);
+    const { records, lods, real } = rockRecordsOf(made.engine);
+    // Each instance's patch's caster sphere, from the draw set and its resident rocks.
+    const drawSet = made.pass.lastStep?.drawSet ?? fail();
+    const sphereOf = (slot: number): { readonly centreM: Vec3; readonly radiusM: number } => {
+      const drawn = drawSet.patches.slice(0, drawSet.count).find((p) => p.patch.slot === slot);
+      const layer = drawn === undefined ? undefined : made.pass.rocks.get(drawn.keyString)?.layer;
+      if (drawn === undefined || layer === undefined) {
+        return fail();
+      }
+      const largestM = Math.max(...rocksOf(layer).map((rock) => 2 * Math.max(...rock.semiAxesM)));
+      return { centreM: drawn.patch.originM, radiusM: drawn.patch.boundingRadiusM + largestM };
+    };
+    // The body does not turn: its fixed axes are the passes'.
+    const camera = LOW_VIEW.cameraM;
+    const templates = ROCK_CLUSTER_MESH.templates.length;
+    const twin = cullTwin(
+      {
+        instances: instances.map((instance, n) => ({
+          originM: instance.originM,
+          page: instance.page,
+          passMask: inputs[2 * n] ?? 0,
+          unitM: f32Of(inputs[2 * n + 1] ?? 0),
+        })),
+        records,
+        lods,
+        clustersPerPage: MAX_PAGE_CLUSTERS,
+        rotationColumns: [
+          { x: 1, y: 0, z: 0 },
+          { x: 0, y: 1, z: 0 },
+          { x: 0, y: 0, z: 1 },
+        ],
+        // The camera's two passes are none here: their buckets are not judged.
+        passes: [null, null, ...passes],
+        places: [null, null, ...passes].map((_, k) => ({ bucketBase: templates * k, listBase: 0 })),
+        templates,
+        viewAxis,
+        firstShape: 2,
+      },
+      0,
+    );
+    const kept = new Map<number, Set<number>>();
+    for (const [bucket, list] of twin) {
+      kept.set(Math.floor(bucket / templates) - ROCK_CASCADE_PASS, new Set(list));
+    }
+    // The cascades' receivers for the patch's test, in f64 in the body's axes, the passes' here.
+    const [q0, q1, q2] = rotationRows(LOW_VIEW.orientation);
+    const forward = { x: -q0.z, y: -q1.z, z: -q2.z };
+    const receivers = cascadeCullPasses(
+      set,
+      [set.basis.x, set.basis.y, set.basis.z],
+      forward,
+      1,
+      true,
+    );
+    let cast = 0;
+    // Each instance's cascade its patch's test enters otherwise than the terrain's, and each
+    // cluster the cull keeps otherwise than the terrain's casters' tests.
+    const entering: string[] = [];
+    const keeping: string[] = [];
+    instances.forEach((instance, n) => {
+      const sphere = sphereOf(instance.terrainSlot);
+      const fromCamera = sub(sphere.centreM, camera);
+      for (const k of [0, 1, 2, 3] as const) {
+        const admitted =
+          castsInto(set, k, fromCamera, sphere.radiusM) &&
+          !receiversRefuse(receivers[k], forward, fromCamera, sphere.radiusM);
+        const enters = (((inputs[2 * n] ?? 0) >>> (ROCK_CASCADE_PASS + k)) & 1) === 1;
+        // The patch's test, in f64 on the CPU: exactly the terrain's.
+        if (enters !== admitted) {
+          entering.push(`${String(n)} in ${String(k)}`);
+        }
+        const pass = passes[k] ?? null;
+        for (let cluster = 0; cluster < MAX_PAGE_CLUSTERS; cluster += 1) {
+          if (!real(instance.page, cluster)) {
+            continue;
+          }
+          const record = records(instance.page, cluster);
+          const centre = add(instance.originM, record.centreM);
+          const parent = record.mode === "dag" ? record.errorsM[1] : 0;
+          // A cascade no instance enters takes no pass, and keeps none.
+          const keeps =
+            pass !== null &&
+            enters &&
+            cascadeKeeps(pass, centre, record.radiusM, 0) &&
+            !receiversRefuse(pass, viewAxis, centre, record.radiusM, 0) &&
+            parent > pass.toleranceM;
+          const drawn = kept.get(k)?.has(n * 256 + cluster) === true;
+          if (drawn !== keeps) {
+            keeping.push(`${String(n)}:${String(cluster)} in ${String(k)}`);
+          }
+          cast += drawn ? 1 : 0;
+        }
+      }
+    });
+    expect([entering, keeping]).toEqual([[], []]);
+    expect([cast > 0, passes[0] !== null]).toEqual([true, true]);
+  });
+
+  it("casts no rock by the way back, with meshCasters off, at w = 0 or on the low setting, and draws the camera's rocks as before (plan R14, R14.T6.c)", async () => {
+    const made = await rockyPass("high");
+    const rocksCast = (geometry: GeometrySettings, takes = true): number[] => {
+      made.pass.setGeometry(geometry);
+      const frame = made.pass.drawFor(PRIMARY, frameOf(LOW_VIEW, takes));
+      return [
+        (frame.cascades?.rockCasters ?? [0, 0, 0, 0]).reduce((a, b) => a + b, 0),
+        (frame.cascades?.passes ?? []).flatMap((pass) => pass.draws.filter(isRock)).length,
+        frame.draws.filter(isRock).length,
+      ];
+    };
+    const high = { ...SETTINGS.high.geometry, strides: "off" as const };
+    const [cast = 0, castDraws = 0] = rocksCast(high);
+    expect([cast > 0, castDraws > 0]).toEqual([true, true]);
+    expect([
+      rocksCast({ ...high, meshCasters: "off" }),
+      rocksCast(GEOMETRY_BEFORE_R14),
+      rocksCast(high, false),
+    ]).toEqual([
+      [0, 0, 2],
+      [0, 0, 0],
+      [0, 0, 2],
+    ]);
+    const low = await rockyPass("low", [{ positionM: ground, radiusM: 20 }]);
+    const lowFrame = low.pass.drawFor(PRIMARY, frameOf(LOW_VIEW, true));
+    expect([lowFrame.cascades, lowFrame.draws.filter(isRock).length]).toEqual([null, 2]);
+    expect(low.engine.compiles.some((c) => c.name === "rock-caster")).toBe(false);
+  });
+
+  it("reuses every cascade the rocks cast into on a still camera with time paused, and renders them again where their lever turns (plan R14, R14.T6.a and T6.c)", async () => {
+    const made = await rockyPass("high");
+    const geometry = {
+      ...SETTINGS.high.geometry,
+      strides: "off" as const,
+      farCascadeRate: 1 as const,
+    };
+    made.pass.setGeometry(geometry);
+    const still = frameOf(LOW_VIEW, true);
+    const draw = (): [number[], number] => {
+      const frame = made.pass.drawFor(PRIMARY, still);
+      return [layersOf(frame), cascadesOf(frame).rockCasters.reduce((a, b) => a + b, 0)];
+    };
+    const first = draw();
+    const again = draw();
+    made.pass.setGeometry({ ...geometry, meshCasters: "off" });
+    const off = draw();
+    const offAgain = draw();
+    made.pass.setGeometry(geometry);
+    const on = draw();
+    expect(first[1]).toBeGreaterThan(0);
+    expect([first[0], again, off, offAgain, on[0]]).toEqual([
+      [0, 1, 2, 3],
+      [[], 0],
+      [[0, 1, 2, 3], 0],
+      [[], 0],
+      [0, 1, 2, 3],
+    ]);
+  });
+
+  it("holds the far cascades the rocks cast into at the high setting's rate over a creeping view (plan R14, R14.T6.b and T6.c)", async () => {
+    const made = await rockyPass("high");
+    made.pass.setGeometry({ ...SETTINGS.high.geometry, strides: "off" });
+    let creep = 0;
+    const frames = Array.from({ length: 5 }, () => {
+      creep += 1;
+      const frame = made.pass.drawFor(PRIMARY, frameOf(movedNorth(LOW_VIEW, creep * 1e-3), true));
+      return [layersOf(frame), cascadesOf(frame).rockCasters[0] > 0] as const;
+    });
+    expect(frames).toEqual([
+      [[0, 1, 2, 3], true],
+      [[0, 1], true],
+      [[0, 1, 3], true],
+      [[0, 1], true],
+      [[0, 1, 2], true],
+    ]);
+  });
+
+  it("counts the rocks' casters among the cascades' triangles from their counters, only while measured (plan R14, R14.T6.c)", async () => {
+    const made = await rockyPass("high");
+    made.pass.setGeometry({ ...SETTINGS.high.geometry, strides: "off" });
+    made.pass.drawFor(PRIMARY, frameOf(LOW_VIEW, true));
+    const unmeasured = [
+      made.pass.counts(PRIMARY)?.casterTriangles ?? null,
+      made.pass.rockClusterStats(PRIMARY),
+    ];
+    made.pass.measureClusters(true);
+    // A millimetre on, so that no cascade is reused (R14.T6.a).
+    made.pass.drawFor(PRIMARY, frameOf(movedNorth(LOW_VIEW, 1e-3), true));
+    const reductions = made.engine.dispatched.filter(
+      (d) =>
+        d.kernel === "cluster stats reduction" && d.pass === `terrain rocks (${PRIMARY}) stats`,
+    );
+    await settle();
+    const stats = made.pass.rockClusterStats(PRIMARY);
+    expect([unmeasured, reductions.length]).toEqual([[null, null], 1]);
+    expect(stats?.map((pass) => pass.label).slice(0, 3)).toEqual([
+      "rocks pixel",
+      "rocks region",
+      "rocks cascade 0",
+    ]);
+    // The fake device reads back zeros: every count there, the cascades' too.
+    expect(made.pass.counts(PRIMARY)?.casterTriangles?.length).toBe(4);
+  });
 
   it("has a view streamed only once the rocks' meshes of the finest patches it sees are built (plan R11, R11.T10.e)", async () => {
     // A builder whose builds wait until the test lets them go.
@@ -4229,6 +4585,15 @@ describe("the authoritative rocks in the lit pass (plan R11, R11.T4.b; plan R14,
       freshFrame.draws.filter(isRock).map(drawShape),
     );
     expect(restored.rocks).toEqual(freshFrame.rocks);
+    // And their casters (plan R14, R14.T6.c), a millimetre on, so that no cascade is reused.
+    const moved = frameOf(movedNorth(LOW_VIEW, 1e-3), true);
+    const castShape = (frame: TerrainViewFrame): unknown => [
+      cascadesOf(frame).rockCasters,
+      cascadesOf(frame).passes.map((pass) => pass.draws.filter(isRock).map(drawShape)),
+    ];
+    const restoredCast = castShape(made.pass.drawFor(PRIMARY, moved));
+    expect(restoredCast).toEqual(castShape(fresh.pass.drawFor(PRIMARY, moved)));
+    expect(JSON.stringify(restoredCast)).toContain("rock-caster");
   });
 
   it("draws them by the visibility buffer by their own ID raster and resolve, in their range after the terrain's, nothing forward (R14.T5.e)", async () => {
