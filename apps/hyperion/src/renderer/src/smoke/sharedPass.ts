@@ -42,6 +42,8 @@
  * renders none, its frame and layers the frame before's byte for byte; and the passes each frame
  * renders over that flight and a hover at its end, with time stopped and running: the near cascades
  * every frame of the flight, and hovering with time stopped none, each far one at most once more.
+ * And, in a named part of its own, R11's rocks cast into the cascades on the cluster cull
+ * (R14.T6.c; {@link checkMeshCasters}).
  */
 
 import { withTemplateCurve } from "../view/appearance/phase";
@@ -83,11 +85,17 @@ import type { TerrainLighting } from "../view/terrain/terrainMaterial";
 import {
   TerrainPass,
   type TerrainPassView,
+  type TerrainPool,
   type TerrainView,
   type TerrainVisibility,
   type TerrainViewFrame,
 } from "../view/terrain/terrainPass";
-import { HeightWorkerPool } from "../view/terrain/workers/pool";
+import type { BakedPatch } from "../view/terrain/workers/messages";
+import { HeightWorkerPool, type HeightWorkerLane } from "../view/terrain/workers/pool";
+import type { GroundContact } from "../view/terrain/grounded";
+import { InThreadRockPageBuilder } from "../view/clusters/meshPageProducer";
+import { ROCK_CASCADE_PASS } from "../view/surface/scatter/rockDraw";
+import { rockLayerFrom, rocksAbout } from "../test/rockFixtures";
 import { moonLikeFixture } from "../test/moonLikeFixture";
 import type { CapturedImage } from "./atmosphere";
 import { againstUnshadowed, NEVER_BRIGHTER } from "./cascadeDarkening";
@@ -574,10 +582,12 @@ async function streamedFor(
   hold: LaneHold,
   passView: TerrainPassView,
   light: TerrainLighting,
+  grounded: ReadonlyArray<GroundContact> = [],
+  timeoutMs = CASCADES_STREAM_MS,
 ): Promise<boolean> {
   const { done } = await settleInLockstep(
     () => {
-      made.step({ views: [passView], grounded: [] });
+      made.step({ views: [passView], grounded });
       const streaming = made.drawFor(
         passView.id,
         frameInput(passView.view, light, false, performance.now()),
@@ -595,10 +605,10 @@ async function streamedFor(
       };
     },
     () => streamedAll(pool, made),
-    CASCADES_STREAM_MS,
+    timeoutMs,
   );
   hold.hold();
-  made.step({ views: [passView], grounded: [] });
+  made.step({ views: [passView], grounded });
   return done;
 }
 
@@ -1609,4 +1619,403 @@ export async function checkVisibilityCascades(
     pool.terminate();
   }
   return images;
+}
+
+/**
+ * The sun's elevation in R14.T6.c's frame, towards the east, rad: 30°, high enough that the
+ * crater's east rim leaves the floor about the craft lit (its shadow some 260 m from the rim), low
+ * enough that a rock of 2 m casts some 3.5 m of shadow.
+ */
+const CASTERS_SUN_RAD = (30 * Math.PI) / 180;
+
+/** R14.T6.c's grounded craft's radius, m, whose could-touch region forces the finest bakes about it. */
+const CASTERS_CRAFT_RADIUS_M = 10;
+
+/** How far from the craft's ground a finest bake takes the test rocks, m. */
+const CASTERS_ROCKS_WITHIN_M = 40;
+
+/** The polls, 20 ms apart, over which the frame's rocks must hold their count: a second. */
+const CASTERS_HELD_POLLS = 50;
+
+/** How long the rocks may take to be built, compiled and drawn after the streaming, ms. */
+const CASTERS_ROCKS_MS = 30_000;
+
+/** How long each of R14.T6.c's passes may stream before its frames are drawn, ms. */
+const CASTERS_STREAM_MS = 90_000;
+
+/**
+ * R14.T6.c's passes' cache budget, 256 MiB: the craft's forced region holds some 320 patches of the
+ * high setting's selection, which the other checks' 32 MiB, some hundred lit slots, cannot.
+ */
+const CASTERS_CACHE_BYTES = 2 ** 28;
+
+/** The fewest terrain texels the rocks' shadows must darken in R14.T6.c's comparison frame. */
+const CASTERS_DARKER_LEAST = 20;
+
+/**
+ * A lane's laying of each bake with test rocks (plan R14, R14.T6.c): within
+ * {@link CASTERS_ROCKS_WITHIN_M} of `near` along the ground, 12 rocks of 1 to 3 m over a 24 m square
+ * about the patch's origin, their bases on the sphere of `near`'s radius, seeded by its key, so that
+ * they stand on the crater's floor about the craft and cast shadows the frame can see; farther,
+ * none; any other bake as it is.
+ */
+function withCasterRocks(near: Xyz): (bake: BakedPatch) => BakedPatch {
+  const radiusM = Math.hypot(near.x, near.y, near.z);
+  const up = unit(near);
+  return (bake) => {
+    const layers = bake.layers;
+    if (layers?.rocks === undefined) {
+      return bake;
+    }
+    const { key, originM } = bake;
+    const at = unit(originM);
+    const apartM = Math.hypot(at.x - up.x, at.y - up.y, at.z - up.z) * radiusM;
+    const seed = (key.face * 7_919 + key.i * 104_729 + key.j) >>> 0;
+    const rocks =
+      apartM <= CASTERS_ROCKS_WITHIN_M ? rocksAbout(seed, 12, at, 24, radiusM, [1, 3]) : [];
+    return { ...bake, layers: { ...layers, rocks: rockLayerFrom(rocks) } };
+  };
+}
+
+/** `lane` with each bake laid by `lay` before the pass takes it. */
+function layingLane(lane: HeightWorkerLane, lay: (bake: BakedPatch) => BakedPatch): TerrainPool {
+  return {
+    reprioritise: (demand) => {
+      lane.reprioritise(demand);
+    },
+    onBaked: (cb) =>
+      lane.onBaked((bake) => {
+        cb(lay(bake));
+      }),
+    onFailed: (cb) => lane.onFailed(cb),
+    terminate: () => {
+      lane.terminate();
+    },
+    get unavailable(): boolean {
+      return lane.unavailable;
+    },
+  };
+}
+
+/** Each cascade's rock caster draws of `frame`'s passes, by layer. */
+function rockCastsOf(frame: TerrainViewFrame): number[] {
+  const byLayer = [0, 0, 0, 0];
+  for (const pass of frame.cascades?.passes ?? []) {
+    byLayer[pass.layer] = pass.draws.filter((draw) => draw.material.name === "rock-caster").length;
+  }
+  return byLayer;
+}
+
+/** Whether `frame` draws a rock anywhere: in the camera's draws or its caster passes. */
+function drawsRocks(frame: TerrainViewFrame): boolean {
+  const passes = frame.cascades?.passes ?? [];
+  return [...frame.draws, ...passes.flatMap((pass) => pass.draws)].some(
+    (draw) => draw.storageBuffers?.["rockPages"] !== undefined,
+  );
+}
+
+/** The rocks' counters' triangles in each cascade's pass, nearest first. */
+function rockCasterTriangles(stats: ReadonlyArray<ClusterPassStats> | null): number[] {
+  return [0, 1, 2, 3].map((k) => stats?.[ROCK_CASCADE_PASS + k]?.triangles ?? 0);
+}
+
+/**
+ * Plan R14, R14.T6.c's acceptance on the run's adapter (`R14.T6.c the rocks' casters on the
+ * cluster cull`), in a named part of its own (`--part=casters`): the rocks cast into the high
+ * setting's shadow cascades through their consumer's cascade passes, against the same frame with
+ * no mesh caster (`meshCasters` off, the Mac pair `mesh-casters`' B side), and by the way back.
+ *
+ * @remarks
+ * A high pass with cascades of its own, streamed to R10.T9.b's view over the crater's floor (40 m
+ * up, looking south-east 20° down), a 10 m craft grounded where the view's axis meets the floor,
+ * some 110 m ahead (its could-touch region forcing the finest bakes about it), and each finest bake
+ * within 40 m of it laid with 12 test rocks of 1 to 3 m on the floor ({@link withCasterRocks}),
+ * the sun 30° up in the east, its frames drawn at the comparison's 320 × 180, its cache
+ * {@link CASTERS_CACHE_BYTES}. Once the rocks are built, compiled and drawn and their count has
+ * held for a second, it checks:
+ *
+ * - the rocks cast into each cascade their patches are admitted to, by their caster after the
+ *   terrain's casters, and their counters count their clusters in the nearest;
+ * - their shadows darken some of the ground and brighten no texel against the same frame with no
+ *   mesh caster, and move the nearest layer;
+ * - with them cast, a still camera's next frame with time paused renders none of the four
+ *   cascades, its frame and layers the frame before's, byte for byte (R14.T6.a);
+ * - the way back (`GEOMETRY_BEFORE_R14`) casts no rock and draws none, as before plan R14;
+ * - and a low pass of its own over the same place draws no cascade and casts no rock, its rocks
+ *   drawn by the camera's passes alone.
+ *
+ * Each check logs the caster triangles by cascade, the terrain's and the rocks', with the rocks
+ * cast and without.
+ */
+export async function checkMeshCasters(engine: RenderEngine, checks: Checks): Promise<void> {
+  const unclipped = engine.capabilities.depthClipControl;
+  const path = unclipped
+    ? "unclipped: depth-clip-control, the casters pancaked"
+    : "pulled back: no depth-clip-control, the near plane at the caster reach";
+  const field = moonLikeFixture("first");
+  const pool = new HeightWorkerPool({
+    workers: 2,
+    createWorker: () =>
+      new Worker(new URL("../view/terrain/workers/height.worker.ts", import.meta.url), {
+        type: "module",
+      }),
+  });
+  const survey = new SurveyedCells();
+  const offChange = pool.onFieldChange((change) => {
+    survey.add(change);
+  });
+  const shadows = new TerrainShadows(engine, { cascades: true });
+  const lowShadows = new TerrainShadows(engine, { cascades: false });
+  const made: TerrainPass[] = [];
+  try {
+    field.blocks.forEach((block, n) => {
+      if (n === 0) {
+        pool.fieldInit(field.body, block);
+      } else {
+        pool.fieldChunk(field.body, block);
+      }
+    });
+    const held = await until(
+      () => pool.fieldBlocks(field.body)?.reported === field.blocks.length,
+      FIELD_TIMEOUT_MS,
+    );
+    if (!held) {
+      throw new Error("the workers did not take the fixture's blocks in time");
+    }
+    /** The field's own ground under the place `eastM` east and `northM` north of the centre's. */
+    const groundAt = async (eastM: number, northM: number): Promise<Xyz> => {
+      const place = placeOverCentre(eastM, northM);
+      const down = vector(spheroidNormal(MOON_LIKE_FIGURE, place));
+      const ground = await pool.groundReadout(field.body, field.seed, {
+        originM: vector(surfacePoint(MOON_LIKE_FIGURE, place, 20_000)),
+        direction: { x: -down.x, y: -down.y, z: -down.z },
+        maxM: 40_000,
+        slopeBaselineM: 2,
+        padWidthM: 1,
+        seasonMeanAnomalyRad: undefined,
+      });
+      if (ground?.kind !== "ground") {
+        throw new Error(`the casters' place has no ground under it: ${ground?.kind ?? "no field"}`);
+      }
+      return vector(ground.sight.hitM);
+    };
+    // R10.T9.b's view over the crater's floor, which settles, and the craft on the floor where its
+    // view's axis meets it, some 110 m ahead.
+    const nu = vector(
+      spheroidNormal(MOON_LIKE_FIGURE, placeOverCentre(CASCADES_EAST_M, CASCADES_NORTH_M)),
+    );
+    const view = viewFrom(
+      along(await groundAt(CASCADES_EAST_M, CASCADES_NORTH_M), 1, nu, CASCADES_HEIGHT_M),
+      CASCADES_DEPRESSION_DEG,
+      CASCADES_HEADING_DEG,
+    );
+    const aheadM = CASCADES_HEIGHT_M / Math.tan((CASCADES_DEPRESSION_DEG * Math.PI) / 180);
+    const headingRad = (CASCADES_HEADING_DEG * Math.PI) / 180;
+    const foot = await groundAt(
+      CASCADES_EAST_M + aheadM * Math.sin(headingRad),
+      CASCADES_NORTH_M + aheadM * Math.cos(headingRad),
+    );
+    const craft: GroundContact = { positionM: foot, radiusM: CASTERS_CRAFT_RADIUS_M };
+    const light = lighting(CASTERS_SUN_RAD);
+    const laying = withCasterRocks(foot);
+    // The bakes landed and those laid with rocks, for the log.
+    const tally = { landed: 0, laid: 0 };
+    const lay = (bake: BakedPatch): BakedPatch => {
+      const laid = laying(bake);
+      tally.landed += 1;
+      tally.laid += laid === bake ? 0 : 1;
+      return laid;
+    };
+    /** A pass on `setting` over the place, its bakes laid with the test rocks, streamed. */
+    const passOn = async (
+      setting: "high" | "low",
+    ): Promise<{
+      readonly pass: TerrainPass;
+      readonly passView: TerrainPassView;
+      readonly settled: boolean;
+      readonly streaming: string;
+    }> => {
+      const hold = new LaneHold();
+      const pass = new TerrainPass({
+        engine,
+        setting,
+        terrain: { ...TERRAIN_SETTINGS[setting], cacheBytes: CASTERS_CACHE_BYTES },
+        geometry: smokeGeometry(setting),
+        planet: planetGeometry(MOON_LIKE_FIGURE, pool.fieldLevels(field.body)),
+        source: { kind: "body", body: field.body, detailSeed: field.seed, weights: "baked" },
+        createPool: (bake) => hold.wrap(layingLane(pool.lane(bake), lay)),
+        survey,
+        shadows: setting === "high" ? shadows : lowShadows,
+        reliefM: () => MOON_LIKE_RELIEF_M,
+        rocks: { createBuilder: () => new InThreadRockPageBuilder() },
+      });
+      made.push(pass);
+      // The frames compared byte for byte: the time morph's changes cut at their first draw.
+      pass.setReducedMotion(true);
+      await pass.ready();
+      const passView: TerrainPassView = {
+        id: viewId(`casters ${setting}`),
+        view,
+        tauPx: TERRAIN_SETTINGS[setting].tauPx,
+        weight: 1,
+      };
+      const started = performance.now();
+      const settled = await streamedFor(
+        pass,
+        pool,
+        hold,
+        passView,
+        light,
+        [craft],
+        CASTERS_STREAM_MS,
+      );
+      const frame = pass.drawFor(passView.id, frameInput(view, light, false, performance.now()));
+      const selection = pass.lastStep?.selection;
+      const streaming = `${setting} settled ${String(settled)} in ${((performance.now() - started) / 1_000).toFixed(1)} s, ${String(frame.patches.interior)} interior and ${String(frame.patches.edge)} edge patches, missing ${String(frame.missing)}, standing in ${String(frame.standingIn)}; ${String(tally.laid)} of ${String(tally.landed)} bakes laid with rocks; selection ${String(selection?.patches.size)} patches, limited ${String(selection?.limited)}`;
+      return { pass, passView, settled, streaming };
+    };
+    /** Draws `pass`'s view, without its cascades, until its rocks draw and hold their count. */
+    const rocksDrawn = async (pass: TerrainPass, passView: TerrainPassView): Promise<number> => {
+      let count = 0;
+      let polls = 0;
+      await until(() => {
+        pass.step({ views: [passView], grounded: [craft] });
+        const frame = pass.drawFor(passView.id, frameInput(view, light, false, performance.now()));
+        const now = frame.rocks?.rocks ?? 0;
+        polls = now > 0 && now === count ? polls + 1 : 0;
+        count = now;
+        return polls >= CASTERS_HELD_POLLS;
+      }, CASTERS_ROCKS_MS);
+      return count;
+    };
+    const high = await passOn("high");
+    const { pass, passView } = high;
+    // At stride 1, every cascade rendered every frame: the casters' checks alone.
+    pass.setGeometry(EVERY_FRAME);
+    const rocks = await rocksDrawn(pass, passView);
+    pass.measureClusters(true);
+    const cast = pass.drawFor(passView.id, frameInput(view, light, true, performance.now()));
+    const castTexels = await texelsOf(engine, "casters: rocks cast", view, cast.draws, COMPARISON);
+    const target = shadows.target;
+    const layerCount = target?.layers ?? 0;
+    const layersCast =
+      target === null
+        ? ["none"]
+        : await layerDigests(engine, target.depth, layerCount, target.sizePx);
+    // Each read waits on the device, and so on the counters' read of the frame before it.
+    const castStats = pass.clusterStats(passView.id);
+    const castRockStats = pass.rockClusterStats(passView.id);
+    const castCascades = cast.cascades;
+    const rockCasters = castCascades?.rockCasters ?? [0, 0, 0, 0];
+    const rockDraws = rockCastsOf(cast);
+    const terrainCast = casterTriangles(castCascades?.litMeshCasters ?? [], castStats);
+    const rocksCast = rockCasterTriangles(castRockStats);
+    const afterTerrain = (castCascades?.passes ?? []).every((each) => {
+      const first = each.draws.findIndex((draw) => draw.material.name === "rock-caster");
+      return (
+        first < 0 || each.draws.slice(first).every((draw) => draw.material.name === "rock-caster")
+      );
+    });
+    checks.check(
+      "R14.T6.c the rocks cast into each cascade their patches are admitted to through their consumer's cascade passes, by their caster after the terrain's casters, counted in the nearest",
+      high.settled &&
+        rocks > 0 &&
+        (castCascades?.passes.length ?? 0) === 4 &&
+        rockCasters[0] > 0 &&
+        (rockDraws[0] ?? 0) > 0 &&
+        rockDraws.every((n, k) => n > 0 === (rockCasters[k] ?? 0) > 0) &&
+        afterTerrain &&
+        castRockStats !== null &&
+        (castRockStats[ROCK_CASCADE_PASS]?.clusters ?? 0) > 0,
+      `${path}; ${high.streaming}; ${String(rocks)} rocks drawn in ${JSON.stringify(cast.rocks ?? null)}; rock instances cast by cascade ${rockCasters.join(", ")}, their caster draws ${rockDraws.join(", ")}; caster triangles by cascade, the terrain's ${terrainCast.join(", ")}, the rocks' ${rocksCast.join(", ")} (clusters ${clustersOf(castRockStats)})`,
+    );
+    // R14.T6.a with the rocks cast: the same frame again, of a still camera with time paused.
+    const again = pass.drawFor(passView.id, frameInput(view, light, true, performance.now()));
+    const againTexels = await texelsOf(engine, "casters: reused", view, again.draws, COMPARISON);
+    const layersAgain =
+      target === null
+        ? ["none"]
+        : await layerDigests(engine, target.depth, layerCount, target.sizePx);
+    const reused = again.cascades?.reused ?? [];
+    checks.check(
+      "R14.T6.c with the rocks cast, a still camera's next frame with time paused renders none of the 4 cascades, and shadows the frame and keeps the layers of the frame before, byte for byte (R14.T6.a)",
+      again.cascades?.passes.length === 0 &&
+        reused.length === 4 &&
+        reused.every(Boolean) &&
+        bytesDigest(againTexels) === bytesDigest(castTexels) &&
+        layersAgain.join() === layersCast.join(),
+      `${path}; passes ${String(again.cascades?.passes.length)}, reused ${reused.map((each) => (each ? 1 : 0)).join("")}; digests ${bytesDigest(againTexels)}, ${bytesDigest(castTexels)} the frame before; layers ${layersAgain.join(", ")}`,
+    );
+    // The same frame with no mesh caster (the Mac pair's B side), from the same selection and
+    // residents: the rocks drawn as before, casting none.
+    pass.setGeometry({ ...EVERY_FRAME, meshCasters: "off" });
+    const none = pass.drawFor(passView.id, frameInput(view, light, true, performance.now()));
+    const noneTexels = await texelsOf(
+      engine,
+      "casters: no rock cast",
+      view,
+      none.draws,
+      COMPARISON,
+    );
+    const layersNone =
+      target === null
+        ? ["none"]
+        : await layerDigests(engine, target.depth, layerCount, target.sizePx);
+    const noneStats = pass.clusterStats(passView.id);
+    const terrainNone = casterTriangles(none.cascades?.litMeshCasters ?? [], noneStats);
+    const seen = againstUnshadowed(castTexels, noneTexels);
+    const finite = castTexels.every(Number.isFinite) && noneTexels.every(Number.isFinite);
+    checks.check(
+      "R14.T6.c the rocks' shadows darken the ground and brighten no texel against the same frame with no mesh caster, and move the nearest layer",
+      finite &&
+        rockCastsOf(none).every((n) => n === 0) &&
+        (none.cascades?.rockCasters ?? []).every((n) => n === 0) &&
+        none.draws.length === cast.draws.length &&
+        seen.darker >= CASTERS_DARKER_LEAST &&
+        seen.brighter <= NEVER_BRIGHTER &&
+        layersNone[0] !== layersCast[0],
+      `${path}; finite ${String(finite)}; terrain ${String(seen.terrain)} texels, ${String(seen.darker)} darker with the rocks cast, ${String(seen.halved)} of them by more than half, the most brighter ${seen.brighter.toExponential(2)} (at most ${String(NEVER_BRIGHTER)}); caster triangles by cascade, the terrain's ${terrainNone.join(", ")} without the rocks' casts, ${terrainCast.join(", ")} and the rocks' ${rocksCast.join(", ")} with them; digests ${bytesDigest(castTexels)} cast, ${bytesDigest(noneTexels)} none; layers ${layersCast.join(", ")} cast, ${layersNone.join(", ")} none`,
+    );
+    // The way back: as before plan R14, no rock drawn or cast.
+    pass.setGeometry(GEOMETRY_BEFORE_R14);
+    const back = pass.drawFor(passView.id, frameInput(view, light, true, performance.now()));
+    const backTriangles = casterTriangles(back.cascades?.litMeshCasters ?? [], null);
+    checks.check(
+      "R14.T6.c the way back casts no rock and draws none, as before plan R14",
+      !drawsRocks(back) &&
+        (back.cascades?.rockCasters ?? []).every((n) => n === 0) &&
+        (back.cascades?.passes.length ?? 0) === 4,
+      `${path}; rocks ${JSON.stringify(back.rocks ?? null)}; caster passes ${String(back.cascades?.passes.length)}, rock instances cast ${(back.cascades?.rockCasters ?? []).join(", ")}; the lit mesh's caster triangles by cascade ${backTriangles.join(", ")}`,
+    );
+    pass.measureClusters(false);
+    pass.dispose();
+    made.splice(made.indexOf(pass), 1);
+    // The low setting: no cascades, its rocks the craft's region's, drawn by the camera alone.
+    const low = await passOn("low");
+    const lowRocks = await rocksDrawn(low.pass, low.passView);
+    low.pass.measureClusters(true);
+    const lowFrame = low.pass.drawFor(
+      low.passView.id,
+      frameInput(view, light, true, performance.now()),
+    );
+    await texelsOf(engine, "casters: low", view, lowFrame.draws, COMPARISON);
+    const lowRockStats = low.pass.rockClusterStats(low.passView.id);
+    checks.check(
+      "R14.T6.c the low setting draws no cascade and casts no rock, its rocks drawn by the camera's passes alone",
+      low.settled &&
+        lowRocks > 0 &&
+        lowFrame.cascades === null &&
+        low.pass.counts(low.passView.id)?.casterTriangles === null &&
+        (lowRockStats === null || lowRockStats.length === ROCK_CASCADE_PASS),
+      `${low.streaming}; ${String(lowRocks)} rocks drawn in ${JSON.stringify(lowFrame.rocks ?? null)}; cascades ${lowFrame.cascades === null ? "none" : "drawn"}; the rocks' counters' passes ${lowRockStats === null ? "not back" : lowRockStats.map((each) => `${each.label} ${String(each.clusters)}`).join(", ")}`,
+    );
+  } finally {
+    for (const each of made) {
+      each.dispose();
+    }
+    shadows.dispose();
+    lowShadows.dispose();
+    offChange();
+    pool.terminate();
+  }
 }

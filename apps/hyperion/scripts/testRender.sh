@@ -5,7 +5,7 @@
 # It exits with the code of the first run, in part and then variant order, that does not exit 0: 1
 # a property failed or a request went out, 2 a setup error (no adapter), 3 the watchdog.
 #
-#   testRender.sh [--variant=NAME]... [--part=N|ladder]... [--setting=high|low]...
+#   testRender.sh [--variant=NAME]... [--part=N|ladder|casters]... [--setting=high|low]...
 #                 [--fixture=broken-wgsl|external-fetch] [--drop-adapter-switches] [--captures=DIR]
 #                 [--geometry=FIELD=VALUE[,...]]
 #
@@ -88,7 +88,11 @@
 # their twin and R02's ellipses, and its forms drawn alone) took part 32, alone, as R11's others
 # took theirs (2026-11-18): in part 1 it took 12 to 22 s, part 1 then 268 s of its 360 s on a pod.
 # Its captures are part 1's, with the others.
-# --part=N runs that part alone (every part by default).
+# --part=N runs that part alone (every part by default). --part=casters runs the named part of plan
+# R14's rocks cast into the cascades (R14.T6.c), which streams a high pass and a low one of its own
+# about a grounded craft; it is named rather than numbered so that the lanes landing beside it,
+# which add numbered parts, take none of the same number. It runs after the numbered parts when no
+# part is asked for (2026-11-25).
 #
 # --part=ladder runs plan R12's ladder (R12.T7.a; `src/renderer/src/smoke/ladder.ts`): once per
 # quality setting and variant, side by side, each run making and drawing what its setting makes, so
@@ -152,6 +156,7 @@ for arg in "$@"; do
         --variant=*) variants+=("${arg#--variant=}") ;;
         --part=[1-9] | --part=1[0-9] | --part=2[0-9] | --part=3[0-4]) parts+=("${arg#--part=}") ;;
         --part=ladder) ladder=1 ;;
+        --part=casters) parts+=(casters) ;;
         --setting=high | --setting=low) settings+=("${arg#--setting=}") ;;
         --fixture=*) fixture="${arg#--fixture=}" ;;
         --drop-adapter-switches) adapter_switches=() ;;
@@ -166,6 +171,7 @@ fi
 if [[ ${#parts[@]} -eq 0 && $ladder -eq 0 ]]; then
     parts=(1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34)
     ladder=1
+    parts+=(casters)
 fi
 if [[ ${#settings[@]} -eq 0 ]]; then
     settings=(high low)

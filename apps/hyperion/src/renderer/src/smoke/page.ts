@@ -231,7 +231,12 @@ import { checkSpatialStrokeContrast } from "./spatial";
 import { checkStrokeContrast } from "./strokeContrast";
 import { checkStills, checkStillsAtSize, smokeStills } from "./stills";
 import { checkWireframe } from "./wireframe";
-import { checkShadowCascades, checkSharedPass, checkVisibilityCascades } from "./sharedPass";
+import {
+  checkMeshCasters,
+  checkShadowCascades,
+  checkSharedPass,
+  checkVisibilityCascades,
+} from "./sharedPass";
 import {
   checkOcclusionByIds,
   checkRocksByIds,
@@ -385,7 +390,10 @@ const VARIANTS: Readonly<Record<string, CapabilityOverrides | undefined>> = {
  * catalogue, the height worker's bake of finest patches with their rocks and its cost, the
  * procedural builder's worker against the render thread, and placed rocks drawn (2026-11-18). Their
  * frame by the visibility buffer against the forward one (R14.T5.e), which streams a world of its
- * own about a grounded craft, took part 34, alone (2026-11-18).
+ * own about a grounded craft, took part 34, alone (2026-11-18). Plan R14's rocks cast into the
+ * cascades (R14.T6.c), which streams a high pass and a low one of its own about a grounded craft,
+ * took a named part, `casters`, alone (2026-11-25): named, so that the lanes landing beside it,
+ * which add numbered parts, take none of the same number.
  */
 type PagePart =
   | 1
@@ -423,7 +431,9 @@ type PagePart =
   | 33
   | 34
   // Plan R12's ladder (R12.T7.a): a run per setting, which its query names (`ladder.ts`).
-  | "ladder";
+  | "ladder"
+  // Plan R14's rocks cast into the cascades (R14.T6.c).
+  | "casters";
 
 /** The part a run's query names, `all` for none, or `null` for one that is not a part. */
 function partOf(value: string | null): PagePart | "all" | null {
@@ -501,6 +511,8 @@ function partOf(value: string | null): PagePart | "all" | null {
       return 34;
     case "ladder":
       return "ladder";
+    case "casters":
+      return "casters";
     default:
       return null;
   }
@@ -563,7 +575,7 @@ async function run(
     setupError,
   });
   if (part === null) {
-    return failed("the part asked for is not 1 to 34, ladder or all");
+    return failed("the part asked for is not 1 to 34, ladder, casters or all");
   }
   if (part === "ladder" && ladderSetting === null) {
     return failed("the ladder's part runs at a setting, high or low, and none was given");
@@ -1030,6 +1042,12 @@ async function run(
       shared.dispose();
     }
   });
+  // In its own named part, on the page's engine, whose variant decides the cascades' capability
+  // path: the rocks cast into the cascades (plan R14, R14.T6.c), a high pass and a low one streamed
+  // about a grounded craft.
+  await group("casters", "R14.T6.c the rocks' casters on the cluster cull", () =>
+    checkMeshCasters(engine, checks),
+  );
   await group(10, "R08.T7 several suns, and the sky through the air", () =>
     checkSeveralSuns(engine, checks, twins),
   );

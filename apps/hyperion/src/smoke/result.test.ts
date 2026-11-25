@@ -337,6 +337,16 @@ describe.runIf(process.platform !== "win32")("testRender.sh's parts", () => {
     expect(parts).toBe(["1", ...LATER_PARTS].join(" "));
   });
 
+  it("takes the named part casters, and runs it after the numbered parts when none is asked for (plan R14, R14.T6.c)", () => {
+    expect(runScriptAtScale("1", ["--part=casters"]).stderr).not.toContain("unknown argument");
+    expect(script()).toMatch(/^ {4}parts=\([\d ]+\)\n {4}ladder=1\n {4}parts\+=\(casters\)$/mu);
+    const refused = runScriptAtScale("1", ["--part=caster"]);
+    expect([refused.status, refused.stderr]).toEqual([
+      2,
+      "testRender.sh: unknown argument --part=caster\n",
+    ]);
+  });
+
   it("runs the ladder after the parts when none is asked for (plan R12, R12.T7.a)", () => {
     expect(script()).toMatch(/^ {4}parts=\([\d ]+\)\n {4}ladder=1$/mu);
     expect(scriptArray("units")).toEqual(['${parts[@]+"${parts[@]}"}']);
@@ -449,6 +459,13 @@ describe.runIf(process.platform === "linux")("testRender.sh's launch", () => {
   it("launches the ladder at the setting asked alone", () => {
     expect(asked(["--part=ladder", "--setting=low", "--variant=no-subgroups"])).toEqual([
       "ladder low no-subgroups",
+    ]);
+  });
+
+  it("launches the named part casters once per variant at no setting (plan R14, R14.T6.c)", () => {
+    expect(asked(["--part=casters", "--setting=high"])).toEqual([
+      "casters none default",
+      "casters none no-subgroups",
     ]);
   });
 
