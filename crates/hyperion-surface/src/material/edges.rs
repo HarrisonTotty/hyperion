@@ -14,7 +14,7 @@
 //!
 //! # The warp
 //!
-//! Under [`ClassEdgeRule::Warped`] the record is the one of the cell holding the point moved along
+//! The record is the one of the cell holding the point moved along
 //! the sphere by w, a sum over [`WARP_OCTAVES`] octaves of R05's gradient noise ([`noise`]) on the
 //! unit sphere of each one's gradient in its lattice's units, octave m of spacing
 //! [`BASE_SPACING_CELLS`] cells ÷ 2ᵐ and amplitude [`WARP_GAIN`]ᵐ, scaled to [`WARP_RMS_CELLS`] of a
@@ -34,11 +34,10 @@
 //! which the terrain's morph blends in; the class map's texels at band 0 read no octave, and its
 //! refined cells' corners at band L − 6 the first.
 //!
-//! # The hold
+//! # The version
 //!
-//! Held at [`CLASS_EDGES_VERSION`]: before it ([`ClassEdgeRule::Cells`]) every point reads its own
-//! cell, as before, bit for bit, and no word of the warp's stream is drawn.
-//! `the_warped_class_edges_wait_for_their_version` is the tripwire, which the bump to 34 fails.
+//! On the record from generator version 34 (train 34), which retired its hold: at 31 to 33 every
+//! point read its own cell and no word of the warp's stream was drawn.
 //!
 //! # Streams
 //!
@@ -52,10 +51,6 @@ use crate::cube::{PatchKey, unit_dir};
 use crate::field::{FieldHeader, FieldView, SynthesisCell};
 use crate::noise::{self, LatticeCache, NoiseKey, Octave, gradient_noise};
 use crate::synth::{BandLevel, QueryHeightError, SynthCache, Synthesiser};
-
-/// The generator version from which the classifier reads a point's site through the warp (lane
-/// fix-jagged-biome-edges): 34, trains 32 and 33 having been cut without it.
-pub(crate) const CLASS_EDGES_VERSION: u32 = 34;
 
 /// The warp's octaves: from [`BASE_SPACING_CELLS`] cells to 2⁻⁵ of that, a sixteenth of a cell,
 /// 2.4 km at a level-8 field on an Earth-sized body. Below it a boundary is the warp's smooth
@@ -96,36 +91,10 @@ const OFFSET_DRAW_BASE: u64 = 1 << 40;
 /// pinned (`the_noise_gradient_s_rms_is_pinned` re-measures it to 2%).
 pub(crate) const GRADIENT_RMS: f64 = 0.715;
 
-/// Which cell's record the classifier reads at a point.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) enum ClassEdgeRule {
-    /// The cell holding the point: generator versions before [`CLASS_EDGES_VERSION`].
-    Cells,
-    /// The cell holding the point moved by the class edges' warp (the module's remarks).
-    Warped,
-}
-
-impl ClassEdgeRule {
-    /// The rule of generator version `version`.
-    #[must_use]
-    pub(crate) const fn of_version(version: u32) -> Self {
-        if version >= CLASS_EDGES_VERSION {
-            Self::Warped
-        } else {
-            Self::Cells
-        }
-    }
-}
-
-/// A body's class edges: the cells themselves, or its warp.
+/// A body's class edges: the warp a point is moved by before the classifier reads its cell's
+/// record (the module's remarks), boxed, its six octaves riding the synthesiser's parts.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) enum ClassEdges {
-    /// Every point reads its own cell ([`ClassEdgeRule::Cells`]).
-    Cells,
-    /// A point reads the cell under it moved by the warp ([`ClassEdgeRule::Warped`]), boxed: six
-    /// octaves outweigh the rule's no-data variant many times over.
-    Warped(Box<Warp>),
-}
+pub(crate) struct ClassEdges(Box<Warp>);
 
 /// A body's class edges' warp: its field's level and cell, its octaves and their scale.
 #[derive(Debug, Clone, PartialEq)]
@@ -141,28 +110,21 @@ pub(crate) struct Warp {
 }
 
 impl ClassEdges {
-    /// The class edges of a body of field header `header` and detail seed `seed` under `rule`.
+    /// The class edges of a body of field header `header` and detail seed `seed`.
     #[must_use]
-    pub(crate) fn new(header: &FieldHeader, seed: DetailSeed, rule: ClassEdgeRule) -> Self {
-        match rule {
-            ClassEdgeRule::Cells => Self::Cells,
-            ClassEdgeRule::Warped => Self::Warped(Box::new(Warp::new(header, seed))),
-        }
+    pub(crate) fn new(header: &FieldHeader, seed: DetailSeed) -> Self {
+        Self(Box::new(Warp::new(header, seed)))
     }
 
-    /// Its rule.
+    /// Its warp.
     #[cfg(test)]
     #[must_use]
-    pub(crate) const fn rule(&self) -> ClassEdgeRule {
-        match self {
-            Self::Cells => ClassEdgeRule::Cells,
-            Self::Warped(_) => ClassEdgeRule::Warped,
-        }
+    pub(crate) fn warp(&self) -> &Warp {
+        &self.0
     }
 
     /// The unit direction `dir` moved by the warp at band level `level`, through `lattice`:
-    /// `dir` itself under [`ClassEdgeRule::Cells`] or where the level draws no octave.
-    #[cfg(test)]
+    /// `dir` itself where the level draws no octave.
     #[must_use]
     pub(crate) fn warped(
         &self,
@@ -170,16 +132,12 @@ impl ClassEdges {
         level: BandLevel,
         lattice: &mut LatticeCache,
     ) -> [f64; 3] {
-        match self {
-            Self::Cells => dir,
-            Self::Warped(warp) => warp.warped(dir, level, lattice),
-        }
+        self.0.warped(dir, level, lattice)
     }
 
     /// Covers the warp's octaves drawn at band level `level` in `lattice` within `radius` of the
     /// unit direction `centre`, on the unit sphere: the points the warp is asked at, which it reads
-    /// its noise at before it moves them; nothing under [`ClassEdgeRule::Cells`]. No value depends
-    /// on it.
+    /// its noise at before it moves them. No value depends on it.
     pub(crate) fn cover(
         &self,
         centre: [f64; 3],
@@ -187,13 +145,9 @@ impl ClassEdges {
         level: BandLevel,
         lattice: &mut LatticeCache,
     ) {
-        match self {
-            Self::Cells => {}
-            Self::Warped(warp) => {
-                for octave in &warp.octaves[..warp.drawn(level)] {
-                    lattice.cover(octave, centre, radius);
-                }
-            }
+        let warp = &self.0;
+        for octave in &warp.octaves[..warp.drawn(level)] {
+            lattice.cover(octave, centre, radius);
         }
     }
 }
@@ -278,9 +232,34 @@ fn octave(seed: DetailSeed, m: u8, cell: f64) -> Octave {
     Octave::new(m, spacing, noise::rotation(m), offset, key)
 }
 
+impl<'a, F: FieldView> Synthesiser<'a, F> {
+    /// The cell whose record the classifier reads at the unit direction `dir`, and its record: the
+    /// cell holding `dir` moved by the class edges' warp at the classifier's band, R05's finest
+    /// level (the module's remarks), where [`cell_at`](Self::cell_at) gives the point's own. Its
+    /// rules' inputs from the record (the water's surface, the climate, the crust, the closed
+    /// basin and the ice's share and entry) are this cell's; the heights, the channels and the
+    /// ice cut's grid stay the point's own cell's.
+    ///
+    /// # Errors
+    ///
+    /// [`QueryHeightError::NotSurveyed`] naming the cell the view does not hold.
+    ///
+    /// # Panics
+    ///
+    /// As [`cell_at`](Self::cell_at).
+    pub fn site_cell_at(
+        &self,
+        cache: &mut SynthCache,
+        dir: [f64; 3],
+    ) -> Result<(PatchKey, &'a SynthesisCell), QueryHeightError> {
+        let level = super::classify::finest_band(self.field().header());
+        site_cell_at(self, cache, dir, level)
+    }
+}
+
 /// The cell whose record the classifier reads at the unit direction `dir` and band level `level`
 /// under `synth`'s class edges, and its record: the cell holding `dir` moved by the warp
-/// ([`Warp`]), or holding `dir` itself under [`ClassEdgeRule::Cells`].
+/// ([`Warp`]).
 ///
 /// # Errors
 ///
@@ -291,10 +270,11 @@ pub(crate) fn site_cell_at<'a, F: FieldView>(
     dir: [f64; 3],
     level: BandLevel,
 ) -> Result<(PatchKey, &'a SynthesisCell), QueryHeightError> {
-    match synth.class_edges() {
-        ClassEdges::Cells => synth.cell_at(dir),
-        ClassEdges::Warped(warp) => synth.cell_at(warp.warped(dir, level, cache.class_edges_mut())),
-    }
+    synth.cell_at(
+        synth
+            .class_edges()
+            .warped(dir, level, cache.class_edges_mut()),
+    )
 }
 
 #[cfg(test)]

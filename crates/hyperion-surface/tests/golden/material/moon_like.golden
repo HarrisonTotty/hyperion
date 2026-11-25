@@ -1,4 +1,4 @@
-# generator_version = 33
+# generator_version = 34
 3 0x3ff0000000000000 0x3ff0000000000000 1 Regolith 0
 2 0x3ff0000000000000 0x3ff0000000000000 1 Regolith 0
 1 0x3ff0000000000000 0xbff0000000000000 1 Regolith 0
@@ -349,7 +349,7 @@
 4 0xbfe05013437717af 0x3fee916e351d6224 1 Regolith 1
 5 0xbf9105b28807e29f 0x3fe87a80cf550703 1 Regolith 0
 1 0xbfe8e36a824b59ce 0xbfdd3098284a3854 1 Regolith 0
-0 0xbfd7ebc1aa425d7b 0x3fd7008449752495 1 Regolith 1
+0 0xbfd7ebc1aa425d7b 0x3fd7008449752495 1 Regolith 0
 3 0x3fb38e5f909326d3 0x3fe4cb11c0959f75 1 Regolith 0
 2 0xbfe91d3dd5df1dd5 0xbfc69e82ee6c6599 1 Regolith 0
 2 0x3febda6061b7b3f4 0xbfe4be095f30cb93 1 Regolith 0
@@ -602,7 +602,7 @@
 3 0xbfddaef3709629c3 0x3fec9f697a86b1eb 1 Regolith 0
 1 0xbfea91aa080095d2 0xbfd60e6eb1602deb 1 Regolith 0
 3 0x3fe7334553e4aca7 0xbfe4b415d6cbd6a7 1 Regolith 0
-0 0xbfe6f5ec566ad53f 0x3fd7d3adec93ff70 1 Regolith 0
+0 0xbfe6f5ec566ad53f 0x3fd7d3adec93ff70 1 Regolith 1
 1 0x3fc778e294c45cf6 0x3fe103ab42dcb6ac 1 Regolith 0
 0 0x3fe18ff5f6e0e769 0xbfc51354b09bd554 1 Regolith 0
 2 0x3fc30cb1e6610172 0xbfb262fc6d25d923 1 Regolith 0
@@ -849,7 +849,7 @@
 1 0xbfdf83af182c9f1d 0x3fd0f107e5104825 1 Regolith 1
 1 0x3fca9dc4ff57bada 0x3fe52478d726e2ad 1 Regolith 0
 5 0x3f82ee0a12250bbf 0x3feb52be0bcebe11 1 Regolith 0
-4 0xbfee97408fc90af0 0x3fe7e04ddd3a0a5f 1 Regolith 1
+4 0xbfee97408fc90af0 0x3fe7e04ddd3a0a5f 1 Regolith 0
 5 0x3fd992631f448044 0xbfec85ff0047e8b9 1 Regolith 0
 4 0x3fe28aa0580d2662 0xbfda115c5476f6c4 1 Regolith 0
 5 0xbfed252188e027e5 0xbfc383ce3082cbef 1 Regolith 0
@@ -956,7 +956,7 @@
 3 0x3fbd7db5d333cb53 0x3fea9902a18d7bbd 1 Regolith 0
 0 0x3fee2f6c4bf595d6 0x3fc14e6aca1d9e83 1 Regolith 0
 5 0xbfd1187050eb881e 0x3fbccf5f3ea14dfe 1 Regolith 0
-4 0x3fa5883d0788dcf3 0x3fe2fbac3c4d381d 1 Regolith 1
+4 0x3fa5883d0788dcf3 0x3fe2fbac3c4d381d 1 Regolith 0
 4 0xbfe65e5f997f1148 0x3fe5a756094eb82b 1 Regolith 1
 1 0x3fca03a8c8baa5c7 0xbfc034a63ac661af 1 Regolith 0
 0 0x3fbed4c4048212aa 0x3fe6ec05351a2bec 1 Regolith 0

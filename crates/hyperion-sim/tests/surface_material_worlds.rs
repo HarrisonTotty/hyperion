@@ -8,8 +8,9 @@
 //! Earth, Mars, Moon and Ceres, the icy moon `europa_like` and the locked `locked_earth_like`, each
 //! run through the whole coarse pass under `reference::SEED`, behind the sim's `testing` feature.
 //!
-//! **The material's ice is the field's, cell by cell.** At each point the test reads the point's
-//! coarse cell, as the classifier does (`Synthesiser::cell_at`), and its ice share in 255ths. The
+//! **The material's ice is the field's, cell by cell.** At each point the test reads the coarse
+//! cell whose record the classifier reads, the point's moved by the class edges' warp
+//! (`Synthesiser::site_cell_at`, from generator version 34), and its ice share in 255ths. The
 //! ice rule is the classifier's sea-ice and land-ice rules: `SeaIce`, `Glacier`, `Frost`, and on an
 //! airless world `Regolith` of an `Ice`-role entry, which no other rule names (`Snow` is a rule of
 //! its own).
@@ -477,10 +478,11 @@ fn assert_the_material_holds(world: &SampleWorld) {
         let site = format!("{name} {dir:?}");
         let at = xyz_to_face_uv(dir);
         let ground = material_at(&synth, &mut cache, at).unwrap_or_else(|e| panic!("{site}: {e}"));
-        // The classifier's own direction of `at`, whose cell and height it reads.
+        // The classifier's own direction of `at`, whose height it reads, and the cell whose record
+        // it reads there: the point's moved by the class edges' warp (from generator version 34).
         let read = unit_dir(face_uv_to_xyz(at));
         let (key, cell) = synth
-            .cell_at(read)
+            .site_cell_at(&mut cache, read)
             .unwrap_or_else(|e| panic!("{site}: {e}"));
         let h_m = synth
             .height_at(&mut cache, read, finest)

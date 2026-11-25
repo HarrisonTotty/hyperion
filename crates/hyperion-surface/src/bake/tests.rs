@@ -1273,33 +1273,6 @@ fn coast_patch(extra: u8) -> (PatchKey, BTreeSet<PatchKey>) {
 }
 
 #[test]
-fn bake_under_the_class_edges_warp_moves_only_the_weights() {
-    // Lane fix-jagged-biome-edges: from generator version 34 a bake's weights read the warped
-    // point's cell's record; its heights, normals and survey do not move.
-    for extra in [2, 4] {
-        let (key, cells) = coast_patch(extra);
-        let view = client(SyntheticWorld::EarthLike, &cells, |_| code(20.0));
-        let cells_rule =
-            Synthesiser::with_class_edge_rule(&view, SEED, crate::material::ClassEdgeRule::Cells);
-        let warped =
-            Synthesiser::with_class_edge_rule(&view, SEED, crate::material::ClassEdgeRule::Warped);
-        let own = bake_terrain(&cells_rule, &mut SynthCache::new(), key, &MESH, &[]).unwrap();
-        let moved = bake_terrain(&warped, &mut SynthCache::new(), key, &MESH, &[]).unwrap();
-        assert_eq!(own.patch().heights, moved.patch().heights, "{key:?}");
-        assert_eq!(own.patch().normals, moved.patch().normals, "{key:?}");
-        assert_eq!(
-            own.layers().survey_mask(),
-            moved.layers().survey_mask(),
-            "{key:?}"
-        );
-        let changed = (0..65 * 65)
-            .filter(|&n| vertex_weights(own.layers(), n) != vertex_weights(moved.layers(), n))
-            .count();
-        assert!(changed > 0, "{key:?}: the warp moves some vertex's weights");
-    }
-}
-
-#[test]
 fn bake_under_the_class_edges_warp_is_the_same_bytes_in_any_order_and_from_any_cache() {
     // Lane fix-jagged-biome-edges: the site's, the ice cuts' and the warp's caches are keyed by
     // the warped cell; a bake is the same bytes whichever patches one cache baked before it.
@@ -1309,8 +1282,7 @@ fn bake_under_the_class_edges_warp_is_the_same_bytes_in_any_order_and_from_any_c
         .flat_map(|extra| coast_patch(extra).1)
         .collect();
     let view = client(SyntheticWorld::EarthLike, &cells, |_| code(20.0));
-    let synth =
-        Synthesiser::with_class_edge_rule(&view, SEED, crate::material::ClassEdgeRule::Warped);
+    let synth = Synthesiser::new(&view, SEED);
     let warm = RefCell::new(SynthCache::new());
     assert_order_independent(&keys, |&k| {
         bake_bits(&bake_terrain(&synth, &mut warm.borrow_mut(), k, &MESH, &[]).unwrap())
@@ -1339,8 +1311,7 @@ fn bake_under_the_class_edges_warp_reads_no_cell_past_a_partial_ice_survey_s_mar
         .expect("the cold-trapped field has partial ice beside partial ice");
     let key = patch_in(icy, level.get() + 2);
     let view = client_of(field, &cells_under(field, key), |_| code(20.0));
-    let synth =
-        Synthesiser::with_class_edge_rule(&view, SEED, crate::material::ClassEdgeRule::Warped);
+    let synth = Synthesiser::new(&view, SEED);
     let baked = bake_terrain(&synth, &mut SynthCache::new(), key, &MESH, &[]);
     assert!(baked.is_ok(), "{key:?}: {:?}", baked.err());
 }

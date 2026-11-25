@@ -407,15 +407,20 @@ fn material_seabed_lies_exactly_below_the_water_surface() {
     let shallow: Vec<PatchKey> = sea.into_iter().take(24).map(|(_, key)| key).collect();
     assert!(!shallow.is_empty(), "the Earth-like world has shallow seas");
     for key in shallow {
-        let cell = field.cell(key).expect("held");
         for dir in random_points_in(key, 12, &mut rng) {
             let h = synth
                 .height_at(&mut SynthCache::new(), dir, level)
                 .expect("whole")
                 .height_m;
             let m = material(&synth, dir).expect("the Earth-like palette names its floor");
+            // The record the classifier reads: the point's moved by the class edges' warp.
+            let (_, cell) =
+                super::super::edges::site_cell_at(&synth, &mut SynthCache::new(), dir, level)
+                    .expect("held");
             let surface = cell.water_surface().value();
-            if h < surface {
+            // Below the surface of a cell under water: a land cell's record, which the warp reads
+            // near a coast, puts no point under water.
+            if cell.is_under_water() && h < surface {
                 below += 1;
                 assert!(
                     matches!(m.class(), MaterialClass::Seabed | MaterialClass::SeaIce),
@@ -743,8 +748,21 @@ fn material_an_arid_filled_basin_is_evaporite() {
         let field = basin_field(salt, precipitation_mm, centre);
         let synth = Synthesiser::new(&field, DetailSeed::new(3));
         let floor = basin_floor(&field);
+        let level = finest_band(field.header());
         let mut rng = Lcg::new(0x6261_7369_6e00_0001);
-        for dir in random_points_in(floor, 16, &mut rng) {
+        // The floor's points whose record the classifier reads is the floor's own: the class edges'
+        // warp moves a point near the cell's edge onto its neighbour's.
+        let on_floor: Vec<[f64; 3]> = random_points_in(floor, 16, &mut rng)
+            .into_iter()
+            .filter(|&dir| {
+                super::super::edges::site_cell_at(&synth, &mut SynthCache::new(), dir, level)
+                    .expect("held")
+                    .0
+                    == floor
+            })
+            .collect();
+        assert!(on_floor.len() >= 4, "{} of 16 on the floor", on_floor.len());
+        for dir in on_floor {
             let f = facts(&synth, dir);
             assert!(f.closed_basin, "the floor's cell");
             assert_eq!(

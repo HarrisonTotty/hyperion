@@ -49,48 +49,31 @@ fn band(level: u8) -> BandLevel {
 }
 
 #[test]
-fn the_warped_class_edges_wait_for_their_version() {
-    // The tripwire of the hold at 34: the bump to 34 fails it. Then re-bless the class map's, the
-    // bakes' and the materials' goldens at 34, the warp's own tests becoming the version's, and
-    // retire `ClassEdgeRule::Cells` with this test.
-    assert_eq!(
-        ClassEdgeRule::of_version(crate::generator_version()),
-        ClassEdgeRule::Cells,
-        "generator version {} reads the class edges' warp: retire its hold",
-        crate::generator_version()
-    );
-    assert!(crate::generator_version() < CLASS_EDGES_VERSION);
-}
-
-#[test]
-fn the_rule_turns_at_its_version() {
-    assert_eq!(ClassEdgeRule::of_version(31), ClassEdgeRule::Cells);
-    assert_eq!(ClassEdgeRule::of_version(32), ClassEdgeRule::Cells);
-    assert_eq!(ClassEdgeRule::of_version(33), ClassEdgeRule::Cells);
-    assert_eq!(ClassEdgeRule::of_version(34), ClassEdgeRule::Warped);
-    assert_eq!(ClassEdgeRule::of_version(40), ClassEdgeRule::Warped);
-}
-
-#[test]
-fn before_its_version_every_point_reads_its_own_cell() {
+fn the_generator_version_reads_the_warped_class_edges() {
+    // On the record from 34 (train 34): a point's site is read through the warp at a band level
+    // that draws its octaves.
     let field = earth();
     let synth = Synthesiser::new(field, SEED);
-    assert_eq!(synth.class_edges().rule(), ClassEdgeRule::Cells);
     let mut cache = SynthCache::new();
+    let mut lattice = LatticeCache::new();
     let mut rng = Lcg::new(0x6564_6765);
-    for dir in directions(400, &mut rng) {
-        for level in [0, 2, 9, 14] {
-            let (own, _) = synth.cell_at(dir).expect("a whole field");
-            let (read, _) = site_cell_at(&synth, &mut cache, dir, band(level)).expect("held");
-            assert_eq!(read, own);
-        }
-    }
+    let moved = directions(400, &mut rng)
+        .into_iter()
+        .filter(|&dir| {
+            let warped = synth.class_edges().warped(dir, band(14), &mut lattice);
+            let (read, _) = site_cell_at(&synth, &mut cache, dir, band(14)).expect("held");
+            let (under, _) = synth.cell_at(warped).expect("a whole field");
+            assert_eq!(read, under, "{dir:?}");
+            synth.cell_at(dir).expect("a whole field").0 != read
+        })
+        .count();
+    assert!(moved > 0, "the warp moves some point's cell");
 }
 
 #[test]
 fn the_warp_stays_on_the_sphere_within_its_reach() {
     let field = earth();
-    let synth = Synthesiser::with_class_edge_rule(field, SEED, ClassEdgeRule::Warped);
+    let synth = Synthesiser::new(field, SEED);
     let edges = synth.class_edges();
     let cell = SMALLEST_CELL_SIDE / f64::from(1_u32 << field.header().level().get());
     let mut lattice = LatticeCache::new();
@@ -118,7 +101,7 @@ fn the_warp_stays_on_the_sphere_within_its_reach() {
 fn the_warp_is_band_limited_to_the_level_asked() {
     let field = earth();
     let level = field.header().level().get();
-    let synth = Synthesiser::with_class_edge_rule(field, SEED, ClassEdgeRule::Warped);
+    let synth = Synthesiser::new(field, SEED);
     let edges = synth.class_edges();
     let mut lattice = LatticeCache::new();
     let mut rng = Lcg::new(0x6261_6e64);
@@ -128,9 +111,7 @@ fn the_warp_is_band_limited_to_the_level_asked() {
             assert_eq!(edges.warped(dir, band(n), &mut lattice), dir);
         }
     }
-    let ClassEdges::Warped(warp) = edges else {
-        panic!("the warp's rule makes a warp");
-    };
+    let warp = edges.warp();
     assert_eq!(warp.drawn(band(level - 6)), 1);
     assert_eq!(warp.drawn(band(level - 5)), 2);
     assert_eq!(warp.drawn(band(20)), WARP_OCTAVES);
@@ -140,10 +121,8 @@ fn the_warp_is_band_limited_to_the_level_asked() {
 fn the_noise_gradient_s_rms_is_pinned() {
     // One component of an octave's gradient per lattice unit, over 2¹⁶ points of a box 64 units on
     // a side, against GRADIENT_RMS, to 2%.
-    let synth = Synthesiser::with_class_edge_rule(earth(), SEED, ClassEdgeRule::Warped);
-    let ClassEdges::Warped(warp) = synth.class_edges() else {
-        panic!("the warp's rule makes a warp");
-    };
+    let synth = Synthesiser::new(earth(), SEED);
+    let warp = synth.class_edges().warp();
     let octave = warp.octaves[0];
     let mut lattice = LatticeCache::new();
     let mut squares = 0.0;
@@ -166,7 +145,7 @@ fn the_noise_gradient_s_rms_is_pinned() {
 #[test]
 fn the_warp_is_the_same_whatever_its_cache_holds() {
     let field = earth();
-    let synth = Synthesiser::with_class_edge_rule(field, SEED, ClassEdgeRule::Warped);
+    let synth = Synthesiser::new(field, SEED);
     let edges = synth.class_edges();
     let mut rng = Lcg::new(0x0063_6163_6865);
     let points = directions(300, &mut rng);
@@ -219,8 +198,7 @@ fn across(a: PatchKey, b: PatchKey, steps: u32) -> Vec<[f64; 3]> {
 #[test]
 fn the_warp_moves_a_record_s_boundary_off_the_cells_edge() {
     let field = earth();
-    let cells = Synthesiser::new(field, SEED);
-    let warped = Synthesiser::with_class_edge_rule(field, SEED, ClassEdgeRule::Warped);
+    let synth = Synthesiser::new(field, SEED);
     let mut cache = SynthCache::new();
     let pairs = coasts(field, 24);
     assert!(pairs.len() >= 12, "{} coasts", pairs.len());
@@ -228,21 +206,22 @@ fn the_warp_moves_a_record_s_boundary_off_the_cells_edge() {
     let mut switches = Vec::new();
     for &(sea, land) in &pairs {
         let points = across(sea, land, 200);
-        // Where along the line the record read first holds no water, by step.
-        let turn = |synth: &Synthesiser<'_, CoarseField>, cache: &mut SynthCache| {
-            points
-                .iter()
-                .position(|&p| {
-                    !site_cell_at(synth, cache, p, band(14))
-                        .expect("held")
-                        .1
-                        .is_under_water()
-                })
-                // Under the warp the land's centre itself may read a sea's cell.
-                .unwrap_or(points.len())
-        };
-        let own = turn(&cells, &mut cache);
-        let moved = turn(&warped, &mut cache);
+        // Where along the line the record read first holds no water, by step: the point's own
+        // cell's, and the one the classifier reads through the warp.
+        let own = points
+            .iter()
+            .position(|&p| !synth.cell_at(p).expect("held").1.is_under_water())
+            .unwrap_or(points.len());
+        let moved = points
+            .iter()
+            .position(|&p| {
+                !site_cell_at(&synth, &mut cache, p, band(14))
+                    .expect("held")
+                    .1
+                    .is_under_water()
+            })
+            // Under the warp the land's centre itself may read a sea's cell.
+            .unwrap_or(points.len());
         switches.push(moved);
         if moved.abs_diff(own) > 4 {
             off_edge += 1;
@@ -269,7 +248,7 @@ fn the_warp_moves_a_record_s_boundary_off_the_cells_edge() {
 #[test]
 fn the_warped_material_is_the_finest_weights_largest() {
     let field = earth();
-    let synth = Synthesiser::with_class_edge_rule(field, SEED, ClassEdgeRule::Warped);
+    let synth = Synthesiser::new(field, SEED);
     let mut cache = SynthCache::new();
     let finest = super::super::classify::finest_band(field.header());
     for (sea, land) in coasts(field, 8) {
@@ -283,11 +262,11 @@ fn the_warped_material_is_the_finest_weights_largest() {
 }
 
 /// The golden text of the warp (lane fix-jagged-biome-edges), `material/class_edges`: on the
-/// Earth-like and Mars-like worlds under [`ClassEdgeRule::Warped`], 200 random directions'
+/// Earth-like and Mars-like worlds, 200 random directions'
 /// warped directions at band levels L − 6, 9 and 14 (`w <face> <u> <v> <level> <x> <y> <z>`, each
 /// float its IEEE 754 bits), then [`material_at`] at 21 points along each of 12 coasts' lines from
 /// a sea's cell's centre to its land's (`m <face> <u> <v> <code> <class> <entry>`), so that the
-/// targets agree on the warp bit for bit and the bump to 34 sees what it changes.
+/// targets agree on the warp bit for bit.
 fn class_edges_text() -> String {
     use std::fmt::Write as _;
 
@@ -301,7 +280,7 @@ fn class_edges_text() -> String {
     for w in [SyntheticWorld::EarthLike, SyntheticWorld::MarsLike] {
         let field = world(w);
         let level = field.header().level().get();
-        let synth = Synthesiser::with_class_edge_rule(field, SEED, ClassEdgeRule::Warped);
+        let synth = Synthesiser::new(field, SEED);
         let mut cache = SynthCache::new();
         let mut lattice = LatticeCache::new();
         out.line(&format!("world {w:?}"));
@@ -362,7 +341,7 @@ fn the_warp_matches_its_golden() {
 fn a_warped_point_reads_its_own_cell_or_one_a_king_move_away() {
     let field = earth();
     let level = field.header().level().get();
-    let synth = Synthesiser::with_class_edge_rule(field, SEED, ClassEdgeRule::Warped);
+    let synth = Synthesiser::new(field, SEED);
     let mut lattice = LatticeCache::new();
     let mut rng = Lcg::new(0x6b69_6e67);
     for dir in directions(4_000, &mut rng) {
@@ -384,8 +363,8 @@ fn a_warped_point_reads_its_own_cell_or_one_a_king_move_away() {
 #[test]
 fn the_warp_is_the_same_from_two_synthesisers_of_one_seed() {
     let field = earth();
-    let a = Synthesiser::with_class_edge_rule(field, SEED, ClassEdgeRule::Warped);
-    let b = Synthesiser::with_class_edge_rule(field, SEED, ClassEdgeRule::Warped);
+    let a = Synthesiser::new(field, SEED);
+    let b = Synthesiser::new(field, SEED);
     let mut rng = Lcg::new(0x0074_7769_6365);
     for dir in directions(300, &mut rng) {
         let one = a
@@ -405,7 +384,7 @@ fn the_warped_classifier_answers_alike_in_any_order() {
     use crate::cube::xyz_to_face_uv;
 
     let field = earth();
-    let synth = Synthesiser::with_class_edge_rule(field, SEED, ClassEdgeRule::Warped);
+    let synth = Synthesiser::new(field, SEED);
     let finest = super::super::classify::finest_band(field.header());
     let points: Vec<[f64; 3]> = coasts(field, 6)
         .into_iter()

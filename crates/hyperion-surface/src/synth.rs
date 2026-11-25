@@ -110,26 +110,6 @@ impl SynthesisParts {
     /// As [`CraterOctaves::new`], which no header a field holds reaches.
     #[must_use]
     pub(crate) fn new(header: &FieldHeader, seed: DetailSeed) -> Self {
-        Self::with_class_edges(
-            header,
-            seed,
-            crate::material::ClassEdgeRule::of_version(crate::generator_version()),
-        )
-    }
-
-    /// [`new`](Self::new)'s parts with the class edges of `rule` in place of the generator
-    /// version's (lane fix-jagged-biome-edges): the tests' switch of the hold at
-    /// `CLASS_EDGES_VERSION`.
-    ///
-    /// # Panics
-    ///
-    /// As [`new`](Self::new).
-    #[must_use]
-    pub(crate) fn with_class_edges(
-        header: &FieldHeader,
-        seed: DetailSeed,
-        rule: crate::material::ClassEdgeRule,
-    ) -> Self {
         let craters = SmallCraters::new(header, seed);
         let bounds = LevelBounds::of(header, craters.octaves());
         Self {
@@ -140,7 +120,7 @@ impl SynthesisParts {
             craters,
             rims: CoarseRims::new(header),
             bounds,
-            class_edges: crate::material::ClassEdges::new(header, seed, rule),
+            class_edges: crate::material::ClassEdges::new(header, seed),
         }
     }
 
@@ -218,26 +198,6 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
         Self {
             field,
             parts: Cow::Owned(SynthesisParts::new(field.header(), seed)),
-        }
-    }
-
-    /// [`new`](Self::new)'s synthesis with the class edges of `rule` in place of the generator
-    /// version's (lane fix-jagged-biome-edges): the tests' switch of the hold at
-    /// `CLASS_EDGES_VERSION`.
-    ///
-    /// # Panics
-    ///
-    /// As [`new`](Self::new).
-    #[cfg(test)]
-    #[must_use]
-    pub(crate) fn with_class_edge_rule(
-        field: &'a F,
-        seed: DetailSeed,
-        rule: crate::material::ClassEdgeRule,
-    ) -> Self {
-        Self {
-            field,
-            parts: Cow::Owned(SynthesisParts::with_class_edges(field.header(), seed, rule)),
         }
     }
 
