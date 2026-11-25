@@ -37,7 +37,8 @@
  *   terrain pass can compare them as its cascades' caster inputs (plan R14, R14.T6.a) before it
  *   knows which cascades it renders; {@link RockView.cull} writes and culls them; then
  *   {@link RockView.draws} and {@link RockView.casterDraws} draw the cull's buckets.
- *   {@link RockView.frame} takes the three steps at once, with no cascade.
+ *   {@link RockView.frame} takes the three steps at once, its cascades where `input.cascades`
+ *   names any.
  */
 
 import type { Vec3 } from "../../../geometry/vec3";

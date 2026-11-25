@@ -1677,7 +1677,10 @@ function withCasterRocks(near: Xyz): (bake: BakedPatch) => BakedPatch {
   };
 }
 
-/** `lane` with each bake laid by `lay` before the pass takes it. */
+/**
+ * `lane` with each bake laid by `lay` before the pass takes it, its drafts' refinement passed on
+ * as the lane gives it (R10.T6.a's progressive bake, which the high setting takes).
+ */
 function layingLane(lane: HeightWorkerLane, lay: (bake: BakedPatch) => BakedPatch): TerrainPool {
   return {
     reprioritise: (demand) => {
@@ -1693,6 +1696,16 @@ function layingLane(lane: HeightWorkerLane, lay: (bake: BakedPatch) => BakedPatc
     },
     get unavailable(): boolean {
       return lane.unavailable;
+    },
+    refine: (request) => {
+      lane.refine(request);
+    },
+    dropRefinement: (keyString) => {
+      lane.dropRefinement(keyString);
+    },
+    onRefined: (cb) => lane.onRefined(cb),
+    get refiningCount(): number {
+      return lane.refiningCount;
     },
   };
 }
@@ -1874,11 +1887,17 @@ export async function checkMeshCasters(engine: RenderEngine, checks: Checks): Pr
       const streaming = `${setting} settled ${String(settled)} in ${((performance.now() - started) / 1_000).toFixed(1)} s, ${String(frame.patches.interior)} interior and ${String(frame.patches.edge)} edge patches, missing ${String(frame.missing)}, standing in ${String(frame.standingIn)}; ${String(tally.laid)} of ${String(tally.landed)} bakes laid with rocks; selection ${String(selection?.patches.size)} patches, limited ${String(selection?.limited)}`;
       return { pass, passView, settled, streaming };
     };
-    /** Draws `pass`'s view, without its cascades, until its rocks draw and hold their count. */
-    const rocksDrawn = async (pass: TerrainPass, passView: TerrainPassView): Promise<number> => {
+    /**
+     * Draws `pass`'s view, without its cascades, until its rocks draw and hold their count: the
+     * count, and whether it held.
+     */
+    const rocksDrawn = async (
+      pass: TerrainPass,
+      passView: TerrainPassView,
+    ): Promise<{ readonly count: number; readonly held: boolean }> => {
       let count = 0;
       let polls = 0;
-      await until(() => {
+      const steady = await until(() => {
         pass.step({ views: [passView], grounded: [craft] });
         const frame = pass.drawFor(passView.id, frameInput(view, light, false, performance.now()));
         const now = frame.rocks?.rocks ?? 0;
@@ -1886,7 +1905,7 @@ export async function checkMeshCasters(engine: RenderEngine, checks: Checks): Pr
         count = now;
         return polls >= CASTERS_HELD_POLLS;
       }, CASTERS_ROCKS_MS);
-      return count;
+      return { count, held: steady };
     };
     const high = await passOn("high");
     const { pass, passView } = high;
@@ -1919,7 +1938,8 @@ export async function checkMeshCasters(engine: RenderEngine, checks: Checks): Pr
     checks.check(
       "R14.T6.c the rocks cast into each cascade their patches are admitted to through their consumer's cascade passes, by their caster after the terrain's casters, counted in the nearest",
       high.settled &&
-        rocks > 0 &&
+        rocks.held &&
+        rocks.count > 0 &&
         (castCascades?.passes.length ?? 0) === 4 &&
         rockCasters[0] > 0 &&
         (rockDraws[0] ?? 0) > 0 &&
@@ -1927,7 +1947,7 @@ export async function checkMeshCasters(engine: RenderEngine, checks: Checks): Pr
         afterTerrain &&
         castRockStats !== null &&
         (castRockStats[ROCK_CASCADE_PASS]?.clusters ?? 0) > 0,
-      `${path}; ${high.streaming}; ${String(rocks)} rocks drawn in ${JSON.stringify(cast.rocks ?? null)}; rock instances cast by cascade ${rockCasters.join(", ")}, their caster draws ${rockDraws.join(", ")}; caster triangles by cascade, the terrain's ${terrainCast.join(", ")}, the rocks' ${rocksCast.join(", ")} (clusters ${clustersOf(castRockStats)})`,
+      `${path}; ${high.streaming}; ${String(rocks.count)} rocks drawn${rocks.held ? "" : ", their count not held"} in ${JSON.stringify(cast.rocks ?? null)}; rock instances cast by cascade ${rockCasters.join(", ")}, their caster draws ${rockDraws.join(", ")}; caster triangles by cascade, the terrain's ${terrainCast.join(", ")}, the rocks' ${rocksCast.join(", ")} (clusters ${clustersOf(castRockStats)})`,
     );
     // R14.T6.a with the rocks cast: the same frame again, of a still camera with time paused.
     const again = pass.drawFor(passView.id, frameInput(view, light, true, performance.now()));
@@ -2003,11 +2023,12 @@ export async function checkMeshCasters(engine: RenderEngine, checks: Checks): Pr
     checks.check(
       "R14.T6.c the low setting draws no cascade and casts no rock, its rocks drawn by the camera's passes alone",
       low.settled &&
-        lowRocks > 0 &&
+        lowRocks.held &&
+        lowRocks.count > 0 &&
         lowFrame.cascades === null &&
         low.pass.counts(low.passView.id)?.casterTriangles === null &&
         (lowRockStats === null || lowRockStats.length === ROCK_CASCADE_PASS),
-      `${low.streaming}; ${String(lowRocks)} rocks drawn in ${JSON.stringify(lowFrame.rocks ?? null)}; cascades ${lowFrame.cascades === null ? "none" : "drawn"}; the rocks' counters' passes ${lowRockStats === null ? "not back" : lowRockStats.map((each) => `${each.label} ${String(each.clusters)}`).join(", ")}`,
+      `${low.streaming}; ${String(lowRocks.count)} rocks drawn${lowRocks.held ? "" : ", their count not held"} in ${JSON.stringify(lowFrame.rocks ?? null)}; cascades ${lowFrame.cascades === null ? "none" : "drawn"}; the rocks' counters' passes ${lowRockStats === null ? "not back" : lowRockStats.map((each) => `${each.label} ${String(each.clusters)}`).join(", ")}`,
     );
   } finally {
     for (const each of made) {

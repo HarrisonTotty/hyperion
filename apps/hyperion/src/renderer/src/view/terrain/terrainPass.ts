@@ -1853,12 +1853,15 @@ export function appendCasterRecord(
   }
 }
 
+/** What the rocks' caster inputs read of a frame's {@link RockCast}. */
+export type RockCastInputs = Pick<RockCast, "pack" | "into" | "revision">;
+
 /**
  * Appends the rocks' caster inputs every cascade shares to `reuse` (plan R14, R14.T6.c): none
  * cast, or the rocks' revision, which rises wherever the pool's pages or records change, and their
  * instances as laid out, each about the camera with its pool slot, page and terrain slot.
  */
-function appendRockInputs(reuse: CascadeReuse, cast: RockCast | null): void {
+export function appendRockInputs(reuse: CascadeReuse, cast: RockCastInputs | null): void {
   if (cast === null) {
     reuse.word(0);
     return;
@@ -1870,7 +1873,11 @@ function appendRockInputs(reuse: CascadeReuse, cast: RockCast | null): void {
 }
 
 /** Appends the rock instances that enter cascade `index` to `reuse`, each by its index, and their count. */
-function appendRockCascade(reuse: CascadeReuse, cast: RockCast | null, index: CascadeIndex): void {
+export function appendRockCascade(
+  reuse: CascadeReuse,
+  cast: RockCastInputs | null,
+  index: CascadeIndex,
+): void {
   if (cast === null) {
     reuse.word(0);
     return;
@@ -3783,7 +3790,8 @@ export class TerrainPass {
     if (this.#measuring && rockView.passes > 0) {
       let stats = device.rockStats.get(state.id);
       if (stats === undefined) {
-        stats = new ClusterStats(this.#engine, `terrain rocks (${state.id})`);
+        // Under the terrain's counters' prefix, whose budget row it takes (`PASS_ROW_PREFIXES`).
+        stats = new ClusterStats(this.#engine, `terrain clusters (${state.id}) rocks`);
         device.rockStats.set(state.id, stats);
       }
       rockView.sample(stats);

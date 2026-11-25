@@ -103,7 +103,7 @@ export function createShadowPlaceholder(
 
 /**
  * A source of one cascade's draws of casters that are not terrain (decision-r10-t9b-design D9):
- * craft, R11's rocks. Its draws are camera-relative, as the eye's, through a material made for
+ * craft (R11's rocks cast on the cluster cull, plan R14, R14.T6.c). Its draws are camera-relative, as the eye's, through a material made for
  * `depth-only`; they read the cascade's own `Frame`, its light rotation and projection.
  *
  * @param set - The view's cascades this frame, with their light axes (z_L the top edge of star 0's

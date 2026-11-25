@@ -141,6 +141,9 @@ import { CascadeReuse, SHADOW_PLACEHOLDER_NAME, TerrainShadows } from "./shadows
 import type { TerrainLighting } from "./terrainMaterial";
 import {
   appendCasterRecord,
+  appendRockCascade,
+  appendRockInputs,
+  type RockCastInputs,
   cascadeHorizonTexelM,
   BAND_SLEW_PER_STEP,
   castsInto,
@@ -4029,7 +4032,60 @@ function slotsRead(parent: number, fades: number): number[] {
   });
 }
 
+/**
+ * Two rock instances of 12 words each as a frame casts them (plan R14, R14.T6.c): the first's sixth
+ * word `word`, the second's passes `second`, at the rocks' `revision`.
+ */
+function rockCastOf(revision: number, word: number, second: number): RockCastInputs {
+  const instances = new Uint32Array(24).fill(7);
+  instances[5] = word;
+  const inputs = Uint32Array.of(0b0100_01, 0x3f80_0000, second, 0x3f80_0000);
+  const into = [0, 1, 2, 3].map((k) =>
+    [inputs[0] ?? 0, inputs[2] ?? 0].reduce((n, bits) => n + ((bits >>> (2 + k)) & 1), 0),
+  );
+  return {
+    pack: {
+      instances: instances.buffer,
+      inputs,
+      count: 2,
+      records: new Uint8Array(),
+      counts: { patches: 1, instances: 2, rocks: 3, triangles: 4 },
+    },
+    into: [into[0] ?? 0, into[1] ?? 0, into[2] ?? 0, into[3] ?? 0],
+    revision,
+  };
+}
+
 describe("a cascade's caster inputs (plan R14, R14.T6.a)", () => {
+  it("takes the rocks' revision, their instances as laid out and the ones entering each cascade, any change of them a change (plan R14, R14.T6.c)", () => {
+    const reuse = new CascadeReuse();
+    /** Whether cascade `index`'s inputs with `rocks` cast are its last render's, then rendered. */
+    const unchanged = (rocks: RockCastInputs | null, index: CascadeIndex): boolean => {
+      reuse.start();
+      appendRockInputs(reuse, rocks);
+      appendRockCascade(reuse, rocks, index);
+      const same = reuse.unchanged(index);
+      reuse.rendered(index);
+      return same;
+    };
+    const base = rockCastOf(4, 9, 0b0011_10);
+    expect([
+      unchanged(null, 0),
+      unchanged(null, 0),
+      unchanged(base, 0),
+      unchanged(rockCastOf(4, 9, 0b0011_10), 0),
+      // The pool's pages rewritten, the instances' words alike.
+      unchanged(rockCastOf(5, 9, 0b0011_10), 0),
+      // An instance's word.
+      unchanged(rockCastOf(5, 8, 0b0011_10), 0),
+      // The second instance entering cascades 0 and 2, no longer 1: cascade 0's own entries are as
+      // before, cascade 1's not.
+      unchanged(rockCastOf(5, 8, 0b0101_10), 0),
+      unchanged(rockCastOf(5, 8, 0b0011_10), 1),
+      unchanged(rockCastOf(5, 8, 0b0101_10), 1),
+    ]).toEqual([false, true, false, true, false, false, true, false, false]);
+  });
+
   it("is unchanged where its words equal its last render's, one for one, and changed by any word", () => {
     const reuse = new CascadeReuse();
     const write = (words: number[]): void => {
@@ -4497,7 +4553,8 @@ describe("the authoritative rocks in the lit pass (plan R11, R11.T4.b; plan R14,
     made.pass.drawFor(PRIMARY, frameOf(movedNorth(LOW_VIEW, 1e-3), true));
     const reductions = made.engine.dispatched.filter(
       (d) =>
-        d.kernel === "cluster stats reduction" && d.pass === `terrain rocks (${PRIMARY}) stats`,
+        d.kernel === "cluster stats reduction" &&
+        d.pass === `terrain clusters (${PRIMARY}) rocks stats`,
     );
     await settle();
     const stats = made.pass.rockClusterStats(PRIMARY);
@@ -4509,6 +4566,68 @@ describe("the authoritative rocks in the lit pass (plan R11, R11.T4.b; plan R14,
     ]);
     // The fake device reads back zeros: every count there, the cascades' too.
     expect(made.pass.counts(PRIMARY)?.casterTriangles?.length).toBe(4);
+  });
+
+  it("renders every cascade once again where the rocks' meshes arrive on a still camera with time paused, and none after (plan R14, R14.T6.a and T6.c)", async () => {
+    // A builder whose builds wait until the test lets them go.
+    const waiting: Array<() => void> = [];
+    const inThread = new InThreadRockPageBuilder();
+    const held: RockPageBuilder = {
+      build: (input) =>
+        new Promise((resolve) => {
+          waiting.push(() => {
+            resolve(inThread.build(input));
+          });
+        }),
+      dispose: () => {
+        inThread.dispose();
+      },
+    };
+    const made = await litPass("high", undefined, () => 8_000, {
+      rocks: { createBuilder: () => held },
+    });
+    made.pass.setGeometry({ ...SETTINGS.high.geometry, strides: "off", farCascadeRate: 1 });
+    made.pass.setReducedMotion(true);
+    await streamRocks(made, "high", []);
+    const still = frameOf(LOW_VIEW, true);
+    const draw = (): readonly [number[], number] => {
+      const frame = made.pass.drawFor(PRIMARY, still);
+      return [layersOf(frame), cascadesOf(frame).rockCasters.reduce((a, b) => a + b, 0)];
+    };
+    const before = [draw(), draw()];
+    for (const build of waiting.splice(0)) {
+      build();
+    }
+    await settle();
+    const [arrived, after] = [draw(), draw()];
+    expect([before, arrived[0], arrived[1] > 0, after]).toEqual([
+      [
+        [[], 0],
+        [[], 0],
+      ],
+      [0, 1, 2, 3],
+      true,
+      [[], 0],
+    ]);
+  });
+
+  it("draws the rocks but casts none where the device refuses their caster, and says so (plan R14, R14.T6.c)", async () => {
+    const engine = await countingRenderEngine({
+      maxStorageBufferBindingSize: MAX_REQUESTED_BUFFER_BYTES,
+      maxBufferSize: MAX_REQUESTED_BUFFER_BYTES,
+    });
+    engine.failMaterials((name) => name === "rock-caster");
+    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const made = await rockyPass("high", [], engine);
+    const frame = made.pass.drawFor(PRIMARY, frameOf(movedNorth(LOW_VIEW, 1e-3), true));
+    const said = errors.mock.calls.some((call) => String(call[0]).includes("none casts"));
+    errors.mockRestore();
+    expect([
+      frame.draws.filter(isRock).map((draw) => draw.material.name),
+      cascadesOf(frame).rockCasters,
+      rockCastsOf(frame).flatMap(([, names]) => names),
+      said,
+    ]).toEqual([["rock-lit", "rock-lit"], [0, 0, 0, 0], [], true]);
   });
 
   it("has a view streamed only once the rocks' meshes of the finest patches it sees are built (plan R11, R11.T10.e)", async () => {

@@ -65,12 +65,14 @@ export function isPassKey(value: string): value is PassKey {
 
 /**
  * The passes both styles submit (R12.T0's record): the terrain's and the bodies' cluster culls and
- * the terrain's compaction (plan R14), and R06's star bake with its splat, at a bake.
+ * the terrain's compaction (plan R14), R11's rocks' cull (plan R14, R14.T5.c and T6.c), and R06's
+ * star bake with its splat, at a bake.
  */
 const SHARED_PASSES = [
   "terrain cluster cull",
   "terrain cluster compact",
   "body cluster cull",
+  "rock cull",
   "sky bake",
   "sky:bakeSplat",
 ] as const;
@@ -133,6 +135,7 @@ export const PASS_ROWS: Readonly<Record<PassKey, BudgetRow>> = {
   "primary:terrain cluster cull": "terrain",
   "primary:terrain cluster compact": "terrain",
   "primary:body cluster cull": "terrain",
+  "primary:rock cull": "terrain",
   "primary:decoration": "terrain",
   "primary:atmosphere tables": "atmosphere-tables",
   "primary:atmosphere view": "atmosphere-frame",

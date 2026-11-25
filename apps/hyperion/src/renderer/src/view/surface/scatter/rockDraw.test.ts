@@ -326,6 +326,21 @@ describe("a view's rock draw (R11.T4.b, R14.T5.c)", () => {
       true,
       true,
     ]);
+    // With cascades culled too (plan R14, R14.T6.c), the range stays the camera's two passes'.
+    const cast = view.frame({
+      ...input,
+      patches: [
+        { keyString: keys[0], terrainSlot: 7, rule: "pixel", cascades: 0b0011 },
+        { keyString: keys[1], terrainSlot: 9, rule: "region", cascades: 0b0011 },
+      ],
+      cascades: [cascadeBox(500), cascadeBox(1_000)],
+    }).byIds;
+    const castLists = Array.from(cast?.resolve[0]?.uniforms["resolveLists"] ?? []);
+    expect([view.passes, cast?.entries, castLists[2]]).toEqual([
+      4,
+      2 * (castLists[0] ?? 0),
+      2 * (castLists[0] ?? 0),
+    ]);
     view.dispose();
     meshes.dispose();
   });

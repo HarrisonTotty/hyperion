@@ -32,6 +32,7 @@ import { SPIKE_MAIN_VIEW_ID } from "../spike/spikeRun";
 import { DETAIL_PASS_LABEL } from "../surface/decoration/detailTextureBake";
 import { TERRAIN_PASS_LABEL, TERRAIN_SHADOW_PASS_LABEL } from "../terrain/gpu/material";
 import { TERRAIN_CLUSTER_COMPACT_LABEL, TERRAIN_CLUSTER_CULL_LABEL } from "../terrain/terrainPass";
+import { ROCK_CULL_LABEL } from "../surface/scatter/rockDraw";
 import {
   HULL_CLUSTER_CULL_LABEL,
   MESH_OCCLUDER_CULL_LABEL,
@@ -97,6 +98,9 @@ const TIMED_PASSES: ReadonlyArray<readonly [string, PassStyle]> = [
   [SKY_BAKE_PASS, "both"],
   [BAKE_SPLAT.name, "both"],
   [`terrain clusters (${SPIKE_MAIN_VIEW_ID}) stats`, "both"],
+  // R11's rocks' cull (plan R14, R14.T5.c) and their counters (R14.T6.c).
+  [ROCK_CULL_LABEL, "both"],
+  [`terrain clusters (${SPIKE_MAIN_VIEW_ID}) rocks stats`, "both"],
   [`terrain clusters (${SPIKE_MAIN_VIEW_ID}) over counts`, "both"],
 ];
 
