@@ -1275,8 +1275,11 @@ mod milky_way {
 
     /// The streams' names, specifications and tracers, and the fixture halo's mean system mass;
     /// and [`EPOCH_PER_ARM`] tracers an arm of `pal5_like` stripped over 20 Myr, a few hundred
-    /// steps, so that its last release falls on the epoch's boundary (P10.T6.a).
+    /// steps, so that its last release falls on the epoch's boundary (P10.T6.a); and the tables
+    /// and the spray table they were sprayed in.
     struct Sprayed {
+        tables: PotentialTables,
+        force: SprayForce,
         mean_mass: SolarMasses,
         streams: Vec<(&'static str, StreamSpec, Vec<Tracer>)>,
         epoch: (StreamSpec, Vec<Tracer>),
@@ -1321,12 +1324,55 @@ mod milky_way {
                 steps,
                 "the last release is on the epoch's boundary"
             );
+            let epoch = (epoch, sprayed.tracers());
             Sprayed {
                 mean_mass: params.mean_system_mass(crate::galaxy::Population::Halo),
                 streams,
-                epoch: (epoch, sprayed.tracers()),
+                epoch,
+                tables,
+                force,
             }
         })
+    }
+
+    /// Every tracer of the tube tests' sprays, each stream's and the epoch's, stepped side by
+    /// side in lanes ([`Spray::tracers`], four bodies to each of the lanes' groups), is
+    /// [`Spray::tracer`]'s, stepped alone by the scalar path, bit for bit: its position, velocity,
+    /// ψ, energy offset, weight, release and arm. On each target the sim's tests run on, with the
+    /// lanes' arithmetic packed into its vector unit or not (perf-spray-step).
+    #[test]
+    fn the_tube_streams_tracers_in_lanes_are_the_scalar_path_s() {
+        let Sprayed {
+            tables,
+            force,
+            streams,
+            epoch,
+            ..
+        } = sprayed();
+        let bits = |t: &Tracer| {
+            let mut v = t.position().metres().to_vec();
+            v.extend(t.velocity().metres_per_second());
+            v.extend([
+                t.psi().value(),
+                t.energy_offset_j_kg(),
+                t.weight().value(),
+                t.released().value(),
+            ]);
+            (t.arm(), t.release_step(), f64_digest(&v))
+        };
+        let per_arm = |n| SprayParams::new(NonZeroU32::new(n).expect("not zero"));
+        let sprays = streams
+            .iter()
+            .map(|(name, spec, tracers)| (*name, spec, per_arm(TRACERS_PER_ARM), tracers))
+            .chain([("epoch", &epoch.0, per_arm(EPOCH_PER_ARM), &epoch.1)]);
+        for (name, spec, params, tracers) in sprays {
+            let spray =
+                Spray::new(SEED, force, tables, spec, &params).expect("a finite stripping time");
+            assert_eq!(tracers.len(), index(spray.tracer_count()), "{name}");
+            for (i, lanes) in (0_u32..).zip(tracers) {
+                assert_eq!(bits(lanes), bits(&spray.tracer(i)), "{name}: tracer {i}");
+            }
+        }
     }
 
     fn tube(stream: usize) -> TubeTable {

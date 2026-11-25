@@ -66,6 +66,7 @@
 use std::error::Error;
 use std::fmt;
 use std::num::NonZeroU32;
+use std::ops::{Add, Mul, Sub};
 
 use crate::coords::{GalacticDisplacement, GalacticVelocity};
 use crate::galaxy::potential::{GRID_EDGE_LY, PotentialTables};
@@ -749,15 +750,22 @@ impl Turns {
     }
 }
 
-/// The dot product of two vectors.
+/// The dot product of two vectors: of `f64`s, or of [`F64x4`](math::lanes::F64x4)s, four lanes'
+/// vectors side by side, each lane's the same bits as its `f64`s'.
 #[must_use]
-pub(super) fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
+pub(super) fn dot<T>(a: [T; 3], b: [T; 3]) -> T
+where
+    T: Copy + Add<Output = T> + Mul<Output = T>,
+{
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 }
 
-/// The cross product `a × b`.
+/// The cross product `a × b`, of `f64`s or of four lanes' vectors, as [`dot`] takes them.
 #[must_use]
-pub(super) fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+pub(super) fn cross<T>(a: [T; 3], b: [T; 3]) -> [T; 3]
+where
+    T: Copy + Sub<Output = T> + Mul<Output = T>,
+{
     [
         a[1] * b[2] - a[2] * b[1],
         a[2] * b[0] - a[0] * b[2],

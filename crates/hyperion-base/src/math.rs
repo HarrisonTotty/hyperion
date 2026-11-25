@@ -36,7 +36,13 @@
 //! logarithm of the base taken once: `libm`'s `pow` transcribed line for line and split where its
 //! logarithm stage ends, which reads the base alone (R09.T16.a). Every input outside the shared
 //! stage's domain is `libm`'s `pow` itself.
+//!
+//! [`lanes`] holds four values side by side, [`lanes::F64x4`], for loops that step several
+//! independent bodies at once: each lane's arithmetic is the scalar operations', and its
+//! [`lanes::ln`] and [`lanes::atan2`] are [`ln`]'s and [`atan2`]'s lane by lane, bit for bit, from
+//! `libm`'s `log` and `atan2` transcribed over the lanes (the spray's tracers, plan 10).
 
+pub mod lanes;
 mod pow_base;
 
 pub use pow_base::PowBase;

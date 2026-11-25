@@ -34,6 +34,12 @@
 //! [`SprayForce::potential_j_kg`]): no closed form and no `powf` is left in the spray's inner
 //! loop. Like the leapfrog's, it uses `+ − × ÷`, `sqrt` and [`math`] only (P10.T2.c's source
 //! check reads this file).
+//!
+//! **Four lookups side by side** ([`SprayForce::locate_x4`], [`LocatedX4::logs`] and
+//! [`SprayForce::acceleration_at_x4`]): the lookup's three parts over four bodies at once, a lane
+//! of [`F64x4`] each, for the spray's lanes (`spray::step_in_lanes`). Each lane is the lookup's
+//! own, bit for bit: the same operations in the same order, [`lanes::ln`] for [`math::ln`], and
+//! each lane's own lookup wherever a lane lies beyond the table's box.
 
 use crate::coords::GalacticDisplacement;
 use crate::galaxy::global_list::orbit::{
@@ -43,6 +49,7 @@ use crate::galaxy::potential::{
     GRID_FIRST_LY, GRID_LN_FIRST, GRID_LN_STEP, PotentialTables, grid_point, hermite, hermite_slope,
 };
 use crate::math;
+use crate::math::lanes::{self, F64x4, Mask4};
 use crate::units::consts::METRES_PER_LIGHT_YEAR;
 
 /// Nodes per axis of the spray's table: the potential tables' 64, and six more at their spacing,
@@ -249,6 +256,75 @@ impl SprayForce {
     }
 }
 
+impl SprayForce {
+    /// [`locate`](Self::locate) of four positions, a lane each, `position_m` (m) by axis.
+    ///
+    /// `locate`'s two branches give the same point of the table lane by lane: inside the box
+    /// neither distance is NaN or beyond the last node, so its floor at the first node is the
+    /// clamp to the box there.
+    #[must_use]
+    #[expect(clippy::inline_always, reason = "measured: see `SprayForce::locate`")]
+    #[inline(always)]
+    pub(super) fn locate_x4(&self, position_m: [F64x4; 3]) -> LocatedX4 {
+        let ly = F64x4::splat(METRES_PER_LIGHT_YEAR);
+        let p = [position_m[0] / ly, position_m[1] / ly, position_m[2] / ly];
+        let r = (p[0] * p[0] + p[1] * p[1]).sqrt();
+        let height = p[2].abs();
+        let (first, last) = (F64x4::splat(GRID_FIRST_LY), F64x4::splat(self.last));
+        LocatedX4 {
+            p_ly: p,
+            r_ly: r,
+            height_ly: height,
+            inside: r.le(last) & height.le(last),
+            point_ly: [
+                r.at_least(first).at_most(last),
+                height.at_least(first).at_most(last),
+            ],
+        }
+    }
+
+    /// [`acceleration_at`](Self::acceleration_at) of four lookups, a lane each, m/s² by axis:
+    /// side by side where every lane lies inside the table's box, else each lane's own.
+    #[must_use]
+    #[expect(clippy::inline_always, reason = "measured: see `SprayForce::locate`")]
+    #[inline(always)]
+    pub(super) fn acceleration_at_x4(&self, at: &LocatedX4, logs: [F64x4; 2]) -> [F64x4; 3] {
+        if !at.inside.all() {
+            return self.acceleration_lane_by_lane(at, logs);
+        }
+        let p = at.p_ly;
+        let [by_ln_r, by_ln_z] = PatchX4::new(&self.nodes, logs).slopes();
+        let (horizontal, by_height) = within_x4(at.r_ly, at.height_ly, by_ln_r, by_ln_z);
+        let vertical = p[2].lt(F64x4::splat(0.0)).select(-by_height, by_height);
+        let force = F64x4::splat(FORCE_IN_SI);
+        [
+            -horizontal * p[0] * force,
+            -horizontal * p[1] * force,
+            -vertical * force,
+        ]
+    }
+
+    /// [`acceleration_at`](Self::acceleration_at) of each of four lookups alone, for lanes
+    /// beyond the table's box.
+    #[must_use]
+    #[cold]
+    #[inline(never)]
+    fn acceleration_lane_by_lane(&self, at: &LocatedX4, logs: [F64x4; 2]) -> [F64x4; 3] {
+        let lane = |v: F64x4, k: usize| v.to_array()[k];
+        let lanes: [[f64; 3]; 4] = core::array::from_fn(|k| {
+            let located = Located {
+                p_ly: at.p_ly.map(|c| lane(c, k)),
+                r_ly: lane(at.r_ly, k),
+                height_ly: lane(at.height_ly, k),
+                inside: at.inside.to_array()[k],
+                point_ly: at.point_ly.map(|c| lane(c, k)),
+            };
+            self.acceleration_at(&located, logs.map(|c| lane(c, k)))
+        });
+        core::array::from_fn(|c| F64x4::new(lanes.map(|a| a[c])))
+    }
+}
+
 #[cfg(test)]
 impl SprayForce {
     /// The acceleration at `position`, m/s², from
@@ -293,6 +369,32 @@ impl Located {
     #[inline(always)]
     pub(super) fn logs(&self) -> [f64; 2] {
         self.point_ly.map(math::ln)
+    }
+}
+
+/// Four lookups' first parts side by side, [`Located`]'s a lane each
+/// ([`SprayForce::locate_x4`]).
+#[derive(Debug, Clone, Copy, Default)]
+pub(super) struct LocatedX4 {
+    /// The points.
+    p_ly: [F64x4; 3],
+    /// Their distances from the axis.
+    r_ly: F64x4,
+    /// Their distances from the plane.
+    height_ly: F64x4,
+    /// Whether each lies inside the table's box.
+    inside: Mask4,
+    /// The points of the table they read, `(R, |z|)`.
+    point_ly: [F64x4; 2],
+}
+
+impl LocatedX4 {
+    /// The lookups' middle part: [`Located::logs`] of each lane.
+    #[must_use]
+    #[expect(clippy::inline_always, reason = "measured: see `SprayForce::locate`")]
+    #[inline(always)]
+    pub(super) fn logs(&self) -> [F64x4; 2] {
+        [lanes::ln(self.point_ly[0]), lanes::ln(self.point_ly[1])]
     }
 }
 
@@ -401,6 +503,168 @@ fn cell(ln_x: f64) -> (usize, f64) {
     )]
     let index = position as u8;
     (usize::from(index), position - f64::from(index))
+}
+
+/// [`within`] of four lanes.
+#[must_use]
+#[expect(clippy::inline_always, reason = "measured: see `SprayForce::locate`")]
+#[inline(always)]
+fn within_x4(r: F64x4, height: F64x4, by_ln_r: F64x4, by_ln_z: F64x4) -> (F64x4, F64x4) {
+    let (first, zero) = (F64x4::splat(GRID_FIRST_LY), F64x4::splat(0.0));
+    (
+        r.gt(first).select(by_ln_r / (r * r), zero),
+        height.gt(first).select(by_ln_z / height, zero),
+    )
+}
+
+/// Four [`Patch`]es side by side, a lane each: each value of the four nodes of each lane's cell,
+/// and the bases at each lane's point.
+struct PatchX4 {
+    /// The nodes at `(i, j)`, `(i, j + 1)`, `(i + 1, j)` and `(i + 1, j + 1)` of each lane's
+    /// cell, as [`Patch`]'s, each of their four values a lane each.
+    nodes: [[F64x4; 4]; 4],
+    radial: [F64x4; 4],
+    radial_rate: [F64x4; 4],
+    vertical: [F64x4; 4],
+    vertical_rate: [F64x4; 4],
+}
+
+impl PatchX4 {
+    /// [`Patch::new`] of four points, a lane each.
+    #[must_use]
+    #[expect(clippy::inline_always, reason = "measured: see `SprayForce::locate`")]
+    #[inline(always)]
+    fn new(nodes: &[[f64; 4]], [ln_r, ln_z]: [F64x4; 2]) -> Self {
+        let (rows, across) = cell_x4(ln_r);
+        let (columns, up) = cell_x4(ln_z);
+        let cell = |k: usize| {
+            let corner = rows[k] * NODES + columns[k];
+            &nodes[corner..corner + NODES + 2]
+        };
+        let cells = [cell(0), cell(1), cell(2), cell(3)];
+        let value = |at: usize, value: usize| {
+            F64x4::new([
+                cells[0][at][value],
+                cells[1][at][value],
+                cells[2][at][value],
+                cells[3][at][value],
+            ])
+        };
+        let node = |at: usize| [value(at, 0), value(at, 1), value(at, 2), value(at, 3)];
+        Self {
+            nodes: [node(0), node(1), node(NODES), node(NODES + 1)],
+            radial: hermite_x4(across),
+            radial_rate: hermite_slope_x4(across),
+            vertical: hermite_x4(up),
+            vertical_rate: hermite_slope_x4(up),
+        }
+    }
+
+    /// [`Patch::slopes`] of each lane.
+    #[must_use]
+    #[expect(clippy::inline_always, reason = "measured: see `SprayForce::locate`")]
+    #[inline(always)]
+    fn slopes(&self) -> [F64x4; 2] {
+        let step = F64x4::splat(GRID_LN_STEP);
+        [
+            self.sum(self.radial_rate, self.vertical) / step,
+            self.sum(self.radial, self.vertical_rate) / step,
+        ]
+    }
+
+    /// [`Patch::sum`] of each lane, in node order.
+    #[must_use]
+    #[expect(clippy::inline_always, reason = "measured: see `SprayForce::locate`")]
+    #[inline(always)]
+    fn sum(&self, radial: [F64x4; 4], vertical: [F64x4; 4]) -> F64x4 {
+        let weights = |basis: [F64x4; 4], k: usize| [basis[k], basis[k + 2]];
+        // `Patch::sum`'s `GRID_LN_STEP * GRID_LN_STEP * …` multiplies the two constants first.
+        let (step, step_squared) = (
+            F64x4::splat(GRID_LN_STEP),
+            F64x4::splat(GRID_LN_STEP * GRID_LN_STEP),
+        );
+        let mut total = F64x4::splat(0.0);
+        for (n, &[value, by_r, by_z, by_both]) in self.nodes.iter().enumerate() {
+            let ([r_value, r_slope], [z_value, z_slope]) =
+                (weights(radial, n / 2), weights(vertical, n % 2));
+            total = total
+                + (r_value * z_value * value
+                    + step * (r_slope * z_value * by_r + r_value * z_slope * by_z)
+                    + step_squared * r_slope * z_slope * by_both);
+        }
+        total
+    }
+}
+
+/// [`cell`] of four lanes: each lane's cell, and the positions in them.
+#[must_use]
+#[expect(clippy::inline_always, reason = "measured: see `SprayForce::locate`")]
+#[inline(always)]
+fn cell_x4(ln_x: F64x4) -> ([usize; 4], F64x4) {
+    let position = ((ln_x - F64x4::splat(GRID_LN_FIRST)) / F64x4::splat(GRID_LN_STEP))
+        .at_least(F64x4::splat(0.0))
+        .at_most(F64x4::splat(LAST_CELL));
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "truncates a position clamped to 0–68.999999999, as `cell` does"
+    )]
+    let index = {
+        let p = position.to_array();
+        [p[0] as u8, p[1] as u8, p[2] as u8, p[3] as u8]
+    };
+    (
+        [
+            usize::from(index[0]),
+            usize::from(index[1]),
+            usize::from(index[2]),
+            usize::from(index[3]),
+        ],
+        position
+            - F64x4::new([
+                f64::from(index[0]),
+                f64::from(index[1]),
+                f64::from(index[2]),
+                f64::from(index[3]),
+            ]),
+    )
+}
+
+/// [`hermite`] of four lanes.
+#[must_use]
+#[expect(clippy::inline_always, reason = "measured: see `SprayForce::locate`")]
+#[inline(always)]
+fn hermite_x4(t: F64x4) -> [F64x4; 4] {
+    let (one, two, three, minus_two) = (
+        F64x4::splat(1.0),
+        F64x4::splat(2.0),
+        F64x4::splat(3.0),
+        F64x4::splat(-2.0),
+    );
+    let t2 = t * t;
+    let t3 = t2 * t;
+    [
+        two * t3 - three * t2 + one,
+        minus_two * t3 + three * t2,
+        t3 - two * t2 + t,
+        t3 - t2,
+    ]
+}
+
+/// [`hermite_slope`] of four lanes.
+#[must_use]
+#[expect(clippy::inline_always, reason = "measured: see `SprayForce::locate`")]
+#[inline(always)]
+fn hermite_slope_x4(t: F64x4) -> [F64x4; 4] {
+    let (one, two, three) = (F64x4::splat(1.0), F64x4::splat(2.0), F64x4::splat(3.0));
+    let (four, six, minus_six) = (F64x4::splat(4.0), F64x4::splat(6.0), F64x4::splat(-6.0));
+    let t2 = t * t;
+    [
+        six * t2 - six * t,
+        minus_six * t2 + six * t,
+        three * t2 - four * t + one,
+        three * t2 - two * t,
+    ]
 }
 
 #[cfg(test)]

@@ -340,6 +340,19 @@ same constants, the same operations in the same order and the same reinterpretat
 written with Rust's cast_signed, cast_unsigned and From in place of `as` where those give the same
 value.
 
+Ported from src/math/log.rs (log), src/math/atan2.rs (atan2) and src/math/atan.rs (atan, its
+constants and its first interval), libm 0.2.16 as published on crates.io, into:
+
+  crates/hyperion-base/src/math/lanes.rs
+
+Changes: each is computed over four lanes side by side. log's main path, for positive normal finite
+arguments, and the path atan2 and atan take for a positive x and y / x in [2^-27, 7/16) are
+transcribed line for line, the same constants and the same operations in the same order, log's
+32-bit word operations done in place in the double's 64 bits and its k as f64 as the difference of
+two exact doubles; every other input is passed to libm itself. The file keeps the notices of the
+FreeBSD sources the three files port: e_log.c's and e_atan2.c's, the 1993 notice quoted below with
+"SunSoft", and s_atan.c's, with "SunPro".
+
 Ported from src/math/exp.rs, log.rs, log2.rs, log1p.rs, expm1.rs, sin.rs, cos.rs, tan.rs, k_sin.rs,
 k_cos.rs, k_tan.rs, rem_pio2.rs, rem_pio2_large.rs, asin.rs, acos.rs, atan.rs, atan2.rs, cbrt.rs,
 pow.rs, generic/scalbn.rs and mod.rs (the word helpers), libm 0.2.16 as published on crates.io,

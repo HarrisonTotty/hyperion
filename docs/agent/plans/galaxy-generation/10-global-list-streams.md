@@ -2521,3 +2521,14 @@ has_class_members}`; `BoundingShell::{new, inner, outer, is_empty, contains, tou
     interactive queue's 64 places: 40 at eight workers, 56 at sixteen.
   - _Left._ No job is split. A build's job still waiting for room in the bulk queue when its
     class is raised waits for that room, then is queued at interactive.
+- **P10.T5.b's spray step, four-wide (lane `perf-spray-step`, 2026-11-20; no output moved).**
+  `spray::step_in_lanes` steps `LANES` = 4 bodies as one `Group` of
+  `hyperion_base::math::lanes::F64x4` (with `Mask4`, `lanes::ln` and `lanes::atan2`, each lane
+  the scalar's bits); the force has `locate_x4`, `LocatedX4::logs` and `acceleration_at_x4`, and
+  `Lane` takes a group's `stepped`.
+  - _No `core::arch` intrinsics (lean, 2026-11-20)._ On x86-64 and aarch64 a call needs
+    `#[target_feature]` on its caller or `unsafe`, which the workspace forbids. The lanes are
+    arrays that the compiler packs into SSE2, NEON or simd128.
+  - _If the scalar step changes,_ change the four-wide one with it.
+    `the_tube_streams_tracers_in_lanes_are_the_scalar_path_s` (tube) and
+    `the_lanes_give_every_tracer_s_bits_alone` (spray) hold the two together.

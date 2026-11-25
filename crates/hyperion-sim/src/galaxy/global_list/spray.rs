@@ -141,7 +141,9 @@
 //! ([`Spray::with_plan`]). [`Spray::tracers`] runs them all on one thread, side by side in lanes,
 //! as the global list's shell orbits are run, and gives them in index order, each with
 //! [`Spray::tracer`]'s bits. The kick–drift–kick steps are the leapfrog's, with `+ − × ÷`, `sqrt`
-//! and [`math`] only (P10.T2.c's source check reads this file too).
+//! and [`math`] only (P10.T2.c's source check reads this file too); in lanes, the same operations
+//! four bodies at a time, a lane of [`F64x4`] each, with [`lanes::ln`] and [`lanes::atan2`] for
+//! [`math::ln`] and [`math::atan2`].
 
 use std::borrow::Cow;
 use std::num::NonZeroU32;
@@ -150,6 +152,7 @@ use crate::coords::{GalacticDisplacement, GalacticVelocity};
 use crate::galaxy::potential::PotentialTables;
 use crate::galaxy::{Galaxy, PointLy};
 use crate::math;
+use crate::math::lanes::{self, F64x4};
 use crate::rng::{ObjectKey, Seed, Stream, tags};
 use crate::units::consts::{METRES_PER_LIGHT_YEAR, SECONDS_PER_JULIAN_YEAR};
 use crate::units::{LightYears, Radians, Seconds, SolarMasses, Years};
@@ -1397,9 +1400,17 @@ impl Leg {
 /// overlap: 58 ns a step with 2 lanes, 49.6 with 4, 49.5 with 8 and 49.8 with 16 (P10.T4's list
 /// bench, pod, 16 vCPU). A spray's tracer, which also sums its swept angle, took 103 ns a step
 /// alone, and 62.0, 61.5, 62.2 and 62.7 in 4, 8, 12 and 16 lanes, over the 6,000 tracers of three
-/// of the fixture's streams (P10.T5.b, the same pod). Eight leaves room for a core with a deeper
-/// pipeline.
-const LANES: usize = 8;
+/// of the fixture's streams (P10.T5.b, the same pod). In lanes the core runs near its issue
+/// limit, so the lanes' arithmetic is four-wide, an [`F64x4`]'s four lanes, which the compiler
+/// packs two lanes an instruction, a step's chains of two halves overlapping: `pal5_like`'s tube
+/// built in 752 ms with one such group of four lanes, and in 820, 820 and 804 ms with two, three
+/// and four groups stepped pass by pass, against 1,281 ms with eight scalar lanes
+/// (`benches/global_list.rs`, perf-spray-step, pod, 16 vCPU, an EPYC 7R13).
+const LANES: usize = 4;
+
+/// What a lane sums over its steps ([`Lane::stepped`]): a tracer its swept angle, a shell orbit
+/// its least and greatest squared distances.
+const SUMS: usize = 2;
 
 /// The least and greatest distances from the galactic centre, ly, over the step boundaries of each
 /// leg, in order: the body that starts at its position and velocity and takes its steps in
@@ -1449,66 +1460,169 @@ trait Lane {
     #[must_use]
     fn walker_mut(&mut self) -> &mut Walker;
 
-    /// Takes in a step that moved the body from `before_m` to its new position.
-    fn stepped(&mut self, before_m: [f64; 3]);
+    /// What the lane has summed of its steps so far ([`SUMS`]).
+    #[must_use]
+    fn sums(&self) -> [f64; SUMS];
+
+    /// Keeps `sums`, what the lane has summed of its steps.
+    fn set_sums(&mut self, sums: [f64; SUMS]);
+
+    /// Takes into each lane's `sums` a step that moved its body from `before_m` to `after_m`, by
+    /// axis, four lanes side by side.
+    fn stepped(sums: &mut [F64x4; SUMS], before_m: [F64x4; 3], after_m: [F64x4; 3]);
+}
+
+/// The bodies [`step_in_lanes`] steps, a lane each, by axis.
+#[derive(Debug, Default)]
+struct Group {
+    position_m: [F64x4; 3],
+    velocity_m_s: [F64x4; 3],
+    acceleration_m_s2: [F64x4; 3],
+    step_s: F64x4,
+    /// Each lane's [`Lane::sums`].
+    sums: [F64x4; SUMS],
+}
+
+impl Group {
+    /// Puts `lane`'s body in lane `k`, and gives its steps left.
+    fn load<L: Lane>(&mut self, k: usize, lane: &mut L) -> u32 {
+        let sums = lane.sums();
+        let walker = lane.walker_mut();
+        let (position, velocity) = walker.body;
+        for (to, from) in [
+            (&mut self.position_m, position),
+            (&mut self.velocity_m_s, velocity),
+            (&mut self.acceleration_m_s2, walker.acceleration_m_s2),
+        ] {
+            for (axis, value) in to.iter_mut().zip(from) {
+                set_lane(axis, k, value);
+            }
+        }
+        set_lane(&mut self.step_s, k, walker.step_s);
+        for (sum, value) in self.sums.iter_mut().zip(sums) {
+            set_lane(sum, k, value);
+        }
+        walker.left
+    }
+
+    /// Gives lane `k`'s body back to `lane`, which has taken its last step.
+    fn store<L: Lane>(&self, k: usize, lane: &mut L) {
+        let at = |axes: [F64x4; 3]| axes.map(|axis| axis.to_array()[k]);
+        lane.set_sums(self.sums.map(|sum| sum.to_array()[k]));
+        let walker = lane.walker_mut();
+        walker.body = (at(self.position_m), at(self.velocity_m_s));
+        walker.acceleration_m_s2 = at(self.acceleration_m_s2);
+        walker.left = 0;
+    }
+
+    /// Copies lane `from`'s body into lane `to`.
+    fn copy_lane(&mut self, from: usize, to: usize) {
+        let copy = |v: &mut F64x4| set_lane(v, to, v.to_array()[from]);
+        for v in self
+            .position_m
+            .iter_mut()
+            .chain(&mut self.velocity_m_s)
+            .chain(&mut self.acceleration_m_s2)
+            .chain([&mut self.step_s])
+            .chain(&mut self.sums)
+        {
+            copy(v);
+        }
+    }
+
+    /// A step's first half ([`kick_drift`]) of each lane, then where each lane's lookup reads
+    /// the table.
+    #[inline]
+    fn kick_drift(&mut self, force: &SprayForce) -> force::LocatedX4 {
+        let (h, x, v, a) = (
+            self.step_s,
+            &mut self.position_m,
+            &mut self.velocity_m_s,
+            self.acceleration_m_s2,
+        );
+        let half = F64x4::splat(0.5) * h;
+        for axis in 0..3 {
+            v[axis] = v[axis] + a[axis] * half;
+        }
+        for axis in 0..3 {
+            x[axis] = x[axis] + v[axis] * h;
+        }
+        force.locate_x4(*x)
+    }
+
+    /// A step's last half ([`kick`]) of each lane, by its acceleration at its new position.
+    #[inline]
+    fn kick(&mut self, acceleration_m_s2: [F64x4; 3]) {
+        self.acceleration_m_s2 = acceleration_m_s2;
+        let half = F64x4::splat(0.5) * self.step_s;
+        let v = &mut self.velocity_m_s;
+        for axis in 0..3 {
+            v[axis] = v[axis] + acceleration_m_s2[axis] * half;
+        }
+    }
+}
+
+/// `v` with lane `k` set to `value`.
+fn set_lane(v: &mut F64x4, k: usize, value: f64) {
+    let mut lanes = v.to_array();
+    lanes[k] = value;
+    *v = F64x4::new(lanes);
 }
 
 /// Steps every body of `queue` to its last step in `force`'s field, [`LANES`] at a time in
 /// lockstep, and hands each to `done` once it has taken its last.
 ///
-/// Each takes the spray's own kick–drift–kick steps ([`kick_drift_kick`]), with the force's
-/// lookup split in three passes over the lanes ([`SprayForce::locate`],
-/// [`Located::logs`](force::Located::logs) and [`SprayForce::acceleration_at`]) so that the
-/// lanes' logarithms are taken together. A body's bits are the same however the bodies are
-/// grouped; only the order in which `done` sees them depends on the queue. The passes are as
-/// measured (pod, 16 vCPU): taking the logarithms in the lookup's first pass cost a shell step 65
-/// ns against 49.5 (P10.T4's list bench) and a tracer's step 77 against 61.5 (P10.T5.b, 6,000
-/// tracers of the fixture), and taking [`Lane::stepped`] in a fourth pass 50.5 and 61.7.
+/// Each takes the spray's own kick–drift–kick steps ([`kick_drift_kick`]), the lanes of a
+/// [`Group`] side by side, with the force's lookup in its three parts
+/// ([`SprayForce::locate_x4`], [`LocatedX4::logs`](force::LocatedX4::logs) and
+/// [`SprayForce::acceleration_at_x4`]). Every operation of a lane is its scalar step's, in the
+/// same order, so a body's bits are the same however the bodies are grouped; only the order in
+/// which `done` sees them depends on the queue. A lane with no body to step holds a copy of
+/// another body, or the last it stepped, which it steps on and never hands back, so that every
+/// lane reads the table where a body does and the lanes' main paths hold.
 fn step_in_lanes<L: Lane>(
     force: &SprayForce,
-    mut queue: impl Iterator<Item = L>,
+    queue: impl Iterator<Item = L>,
     mut done: impl FnMut(L),
 ) {
-    let mut lanes: Vec<L> = queue.by_ref().take(LANES).collect();
-    let mut located = [force::Located::default(); LANES];
-    let mut logarithms = [[0.0; 2]; LANES];
-    let mut before_m = [[0.0; 3]; LANES];
+    let mut queue = queue.fuse();
+    let mut lanes: [Option<L>; LANES] = core::array::from_fn(|_| None);
+    let mut left = [0_u32; LANES];
+    let mut group = Group::default();
+    let mut first = true;
     loop {
-        let mut n = 0;
-        while n < lanes.len() {
-            if lanes[n].walker_mut().left > 0 {
-                n += 1;
-                continue;
+        for (k, (lane, left)) in lanes.iter_mut().zip(&mut left).enumerate() {
+            while *left == 0 {
+                if let Some(mut finished) = lane.take() {
+                    group.store(k, &mut finished);
+                    done(finished);
+                }
+                let Some(mut next) = queue.next() else {
+                    break;
+                };
+                *left = group.load(k, &mut next);
+                *lane = Some(next);
             }
-            let finished = match queue.next() {
-                Some(next) => core::mem::replace(&mut lanes[n], next),
-                None => lanes.swap_remove(n),
-            };
-            done(finished);
         }
-        if lanes.is_empty() {
+        let Some(from) = lanes.iter().position(Option::is_some) else {
             return;
+        };
+        if first {
+            // Lanes the queue left empty from the start copy a body.
+            first = false;
+            for to in (0..LANES).filter(|&to| lanes[to].is_none()) {
+                group.copy_lane(from, to);
+            }
         }
-        for ((lane, at), before) in lanes.iter_mut().zip(&mut located).zip(&mut before_m) {
-            let walker = lane.walker_mut();
-            *before = walker.body.0;
-            kick_drift(&mut walker.body, walker.acceleration_m_s2, walker.step_s);
-            *at = force.locate(walker.body.0);
-        }
-        for (at, logs) in located.iter().zip(&mut logarithms).take(lanes.len()) {
-            *logs = at.logs();
-        }
-        for (((lane, at), logs), before) in lanes
-            .iter_mut()
-            .zip(&located)
-            .zip(&logarithms)
-            .zip(before_m)
-        {
-            let walker = lane.walker_mut();
-            walker.acceleration_m_s2 = force.acceleration_at(at, *logs);
-            kick(&mut walker.body, walker.acceleration_m_s2, walker.step_s);
-            walker.left -= 1;
-            lane.stepped(before);
+        let before_m = group.position_m;
+        let at = group.kick_drift(force);
+        let logs = at.logs();
+        group.kick(force.acceleration_at_x4(&at, logs));
+        L::stepped(&mut group.sums, before_m, group.position_m);
+        for (left, lane) in left.iter_mut().zip(&lanes) {
+            if lane.is_some() {
+                *left -= 1;
+            }
         }
     }
 }
@@ -1554,17 +1668,25 @@ impl Lane for ShellLane {
         &mut self.walker
     }
 
-    /// Takes the body's distance at its new boundary into the least and greatest.
-    fn stepped(&mut self, _before_m: [f64; 3]) {
-        let position = self.walker.body.0;
-        let r2 = dot(position, position);
+    /// The least and greatest squared distances so far.
+    fn sums(&self) -> [f64; SUMS] {
+        [self.least_m2, self.greatest_m2]
+    }
+
+    fn set_sums(&mut self, [least, greatest]: [f64; SUMS]) {
+        (self.least_m2, self.greatest_m2) = (least, greatest);
+    }
+
+    /// Takes each body's distance at its new boundary into its least and greatest, as
+    /// [`radii_over_ly_alone`] does.
+    fn stepped(sums: &mut [F64x4; SUMS], _before_m: [F64x4; 3], after_m: [F64x4; 3]) {
+        let r2 = dot(after_m, after_m);
+        let [least, greatest] = *sums;
         // Squared distances are never NaN or a negative zero, so the comparisons are exact.
-        if r2 < self.least_m2 {
-            self.least_m2 = r2;
-        }
-        if r2 > self.greatest_m2 {
-            self.greatest_m2 = r2;
-        }
+        *sums = [
+            r2.lt(least).select(r2, least),
+            r2.gt(greatest).select(r2, greatest),
+        ];
     }
 }
 
@@ -1587,9 +1709,19 @@ impl Lane for TracerLane {
         &mut self.walker
     }
 
-    /// Adds the step's swept angle.
-    fn stepped(&mut self, before_m: [f64; 3]) {
-        self.angle_rad += swept(before_m, self.walker.body.0);
+    /// The angle swept so far.
+    fn sums(&self) -> [f64; SUMS] {
+        [self.angle_rad, 0.0]
+    }
+
+    fn set_sums(&mut self, [angle_rad, _]: [f64; SUMS]) {
+        self.angle_rad = angle_rad;
+    }
+
+    /// Adds each step's swept angle, as [`Spray::tracer`] does ([`swept`]).
+    fn stepped(sums: &mut [F64x4; SUMS], before_m: [F64x4; 3], after_m: [F64x4; 3]) {
+        let normal = cross(before_m, after_m);
+        sums[0] = sums[0] + lanes::atan2(dot(normal, normal).sqrt(), dot(before_m, after_m));
     }
 }
 

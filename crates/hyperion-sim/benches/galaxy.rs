@@ -27,7 +27,9 @@
 //! - `Spray::tracers` of the fixture's stream 0, a living globular's, and stream 4, the first
 //!   orphan's, 2,000 tracers each (plan 10, P10.T5.b), under P10.T6.c's 0.2 s of parallel wall time
 //!   for a tube: 3.28 and 2.24 s, then 1.96 and 1.33 s with the tracers stepped side by side,
-//!   bit for bit (pod, 16 vCPU).
+//!   bit for bit (pod, 16 vCPU); 1.14 and 0.79 s with the lanes four-wide, against 1.96 and 1.34 s
+//!   before on the same pod, and the list with the centre's model held 453 against 593 ms
+//!   (perf-spray-step, pod, 16 vCPU, an EPYC 7R13, 2026-11-25).
 
 use std::hint::black_box;
 use std::time::Duration;

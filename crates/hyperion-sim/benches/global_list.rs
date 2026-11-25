@@ -7,7 +7,9 @@
 //!   index (ruling 146.3), as `TubeTable::build (pool)` does on `HYPERION_WORKERS` threads, else
 //!   the machine's threads less one. Measured (pod, 16 vCPU, 2026-10-30, the release profile):
 //!   2.12 s alone and 0.138 s on 16 threads, so the pool meets 0.2 s and ruling 146.3's fallback,
-//!   `τ_p ÷ 32`, is not applied; the table holds 90,256 bytes, its 512 knots 86,016.
+//!   `τ_p ÷ 32`, is not applied; the table holds 90,256 bytes, its 512 knots 86,016. With the
+//!   spray's lanes four-wide (perf-spray-step, pod, 16 vCPU, an EPYC 7R13, 2026-11-25): 1.28 s
+//!   alone before and 0.75 s after.
 //! - `TubeTable::from_tracers`, the reduction of those tracers alone: 1.67 ms (pod, 16 vCPU,
 //!   2026-10-31), against 1.33 ms before its centre line was fitted in the orbital plane, one
 //!   `atan2` a kernel tracer (P10.T6.a's tips); the pool's build took 91 ms then, against 96 ms

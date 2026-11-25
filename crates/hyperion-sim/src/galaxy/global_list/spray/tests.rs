@@ -338,6 +338,7 @@ mod milky_way {
         golden_sprays();
         the_table_is_its_potential_s_gradient_and_near_the_leapfrog_s();
         the_force_inside_the_table_is_the_full_lookup_s_gradient_bit_for_bit();
+        the_four_wide_lookup_is_each_lane_s_own_bit_for_bit();
         tracers_are_pure_functions_of_their_index_and_weigh_the_tube();
         the_lanes_give_every_tracer_s_bits_alone();
         a_spray_and_shell_orbits_split_at_every_unit_boundary_are_the_whole_s();
@@ -551,6 +552,67 @@ mod milky_way {
                 [x, y, z]
             );
         }
+    }
+
+    /// The lookup four bodies at a time ([`SprayForce::locate_x4`], [`force::LocatedX4::logs`]
+    /// and [`SprayForce::acceleration_at_x4`]) gives each lane its own lookup's logarithms and
+    /// acceleration, bit for bit, in every group of four of a ring of points: inside the table,
+    /// above and below the plane, within the slabs about the plane and the axis, at the centre, on
+    /// the box's face, and beyond it in `R`, in `|z|` and in both, so that groups wholly inside take
+    /// the lanes' main path and the others mix lanes inside and beyond the box.
+    fn the_four_wide_lookup_is_each_lane_s_own_bit_for_bit() {
+        let force = &fixture().force;
+        let face = crate::galaxy::potential::grid_point(NODES - 1);
+        let points_ly = [
+            [26_000.0, 0.0, 30.0],
+            [26_000.0, 0.0, -30.0],
+            [-60_000.0, 40_000.0, 90_000.0],
+            [8_000.0, 3_000.0, 0.01],
+            [0.01, 0.02, -500.0],
+            [0.0, 0.0, 0.0],
+            [3e-3, -2e-3, 1e-3],
+            [face, 0.0, 1_000.0],
+            [face * 1.001, 0.0, 1_000.0],
+            [2e5, -1e5, 1.4e6],
+            [-1.3e6, 9e5, -1.6e6],
+            [1.5e6, 2e5, 3e5],
+        ];
+        let positions = points_ly.map(|p| p.map(m));
+        let n = positions.len();
+        let (mut main_path, mut mixed) = (0, 0);
+        for start in 0..n {
+            let group: [[f64; 3]; 4] = core::array::from_fn(|k| positions[(start + k) % n]);
+            let axes: [F64x4; 3] = core::array::from_fn(|axis| F64x4::new(group.map(|p| p[axis])));
+            let at = force.locate_x4(axes);
+            let logs = at.logs();
+            let acceleration = force.acceleration_at_x4(&at, logs);
+            let inside = group.map(|p| {
+                let ly = p.map(|c| c / METRES_PER_LIGHT_YEAR);
+                (ly[0] * ly[0] + ly[1] * ly[1]).sqrt() <= face && ly[2].abs() <= face
+            });
+            if inside.iter().all(|&i| i) {
+                main_path += 1;
+            } else if inside.iter().any(|&i| i) {
+                mixed += 1;
+            }
+            for (k, p) in group.iter().enumerate() {
+                let alone = force.locate(*p);
+                let lane_logs = logs.map(|l| l.to_array()[k]);
+                assert_eq!(
+                    f64_digest(&lane_logs),
+                    f64_digest(&alone.logs()),
+                    "group {start}, lane {k}: the logarithms"
+                );
+                let lane: Vec<f64> = acceleration.iter().map(|a| a.to_array()[k]).collect();
+                let alone = force.acceleration_m_s2(&GalacticDisplacement::new(*p));
+                assert_eq!(
+                    f64_digest(&lane),
+                    f64_digest(&alone),
+                    "group {start}, lane {k}: {lane:?} against {alone:?}"
+                );
+            }
+        }
+        assert!(main_path > 0 && mixed > 0, "{main_path} and {mixed} groups");
     }
 
     /// Stepped side by side in lanes ([`Spray::tracers`]), every tracer of the three test
