@@ -8849,6 +8849,9 @@ Each is labelled "not yet modelled" where a console could show it:
   Scaillet 2014 and Ortenzi et al. 2020, from memory); it replaces T24.f's insolation rule for the
   carbon carrier with ΔIW's outgassing speciation, keeping Titan's methane and the Solar System's
   carriers (science-p14-t24f §5);
+  - _Split_ in three (lean, 2026-11-25): a, the heavy-secondary equilibrium; b, the vent's gas by
+    ΔIW; c, the carriers on the snapshot path, held. _Built_ b, 2026-11-25, with no hold: Risks,
+    "P14.T55.a.b's vent gas, as built".
 - **P14.T55.b** silicate-vapour atmospheres (`silicate_vapour`; Schaefer and Fegley 2009; Ito et
   al. 2015; Kite et al. 2016; Zilinskas et al. 2022).
   - It fills `BodySurfaceDto.silicate_vapour` (P14.T35.f): `null` on a surface with no melt, a
@@ -34689,3 +34692,31 @@ ACTIVE HOST · HOST LEAVING MAIN SEQUENCE · EXTRAPOLATED ZONE · FROZEN SURFACE
   the deck census now compare against every other 35 hold with their own held, not the version's:
   the tenuous air's hold moves some 17,000 airless residues of its own. The tenuous census's
   published arm runs under the union. At the bump, those held halves read the version's rules.
+- **P14.T55.a.b's vent gas, as built (lane `p14-t55ab-vent-redox`, 2026-11-25).**
+  `planetary::chem::outgassing`, which nothing calls until P14.T55.a.c, so it has no hold, and the
+  new golden `planetary/outgassing` is extended only.
+  - _Provides:_ `VentGas::speciate`, of `VentInputs` (ΔIW, temperature, pressure) and
+    `VentElements`, gives the shares of H₂, H₂O, CH₄, N₂, O₂, CO₂, CO, SO₂ and H₂S (`fraction`),
+    the four ratios and `budget()` (`VentBudget::oxygen_against_carriers_mol`). It also gives
+    `log10_carbon_monoxide_formation_constant` and `carbon_monoxide_at_graphite` for c's graphite
+    cap (research-leans-58).
+  - _Also provides:_ `VentElements::of_exchangeable` and `vent_temperature`.
+  - _Lean (2026-11-25):_ the vent's temperature is its lid's eruption temperature. Ice, `graphite`
+    and `feldspathic` lids, which are not lavas, take the basaltic 1,473.15 K
+    (`DEFAULT_VENT_TEMPERATURE`).
+  - _Lean (2026-11-25):_ the pressure is the caller's, the surface pressure (Tian and Heng 2024),
+    but an ice shell's vent sits on its seafloor. Its gas crossing the ocean is not modelled
+    (for c).
+  - _Lean (2026-11-25):_ N₂ is inert. NH₃ is not modelled, at 0.2–0.6 of N₂ at 1,000–1,200 K,
+    IW−4 and 100 bar.
+  - _Not modelled:_ S₂, which has no registry row, so a reduced gas's sulphur is H₂S. Also not
+    modelled is the degassing gas's drift to FMQ−2 ± 0.5 (Gaillard and Scaillet 2014).
+  - _Deviation:_ CO carries over 95% of the carbon from IW−2, not from IW itself. Guimond et al.
+    2021's "almost all … CO" adds the melt's carbonate solubility. At IW−0.01 CO₂ is 25% of the
+    carbon.
+  - _For c:_ Mars's table mantle (IW+0.015) vents CO-led, with CO₂/CO 0.34 at 1,473.15 K and
+    1 bar. The shares apply to what the vent outgasses, not to the whole water inventory.
+    `OxygenFugacity` refuses a vent whose f(O₂) reaches its pressure.
+  - _Recorded for later:_ `sulphur_dioxide_to_hydrogen_sulphide` is the deck base's input for a
+    reducing air's sulphur.
+  - _Accept:_ `cargo test -p hyperion-sim --lib planetary::chem::outgassing`.

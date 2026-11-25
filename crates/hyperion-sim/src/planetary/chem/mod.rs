@@ -88,6 +88,7 @@ pub mod envelope_abundances;
 pub mod equilibrium;
 pub mod escape;
 pub mod inventory;
+pub mod outgassing;
 pub mod partition;
 pub mod photochem;
 pub mod quench;
