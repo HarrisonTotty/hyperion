@@ -164,8 +164,30 @@ describe("the Mac batch's matrix", () => {
     ]);
   });
 
-  it("leaves the decked air's ground, the ring's shadow and the rocks out of the defaults, whose body has no deck or ring and whose pose stands off its ground, and runs each when named (R08, R11.T9.a, R11.T4)", () => {
-    expect(MAC_PROFILE_BODY_LEVERS).toEqual(["decked-air-surface", "ring-shadow-on-body", "rocks"]);
+  it("pairs the rocks cast into the cascades (A) against none cast (B) at DPR 1, out of the defaults (plan R14, R14.T6.c)", () => {
+    expect(leverNamed("mesh-casters")).toMatchObject({
+      a: [],
+      b: ["--geometry", "meshCasters=off"],
+      ratios: [1],
+      countSides: false,
+    });
+    expect(MAC_PROFILE_DEFAULTS.levers).not.toContain("mesh-casters");
+    const named = macProfileMatrix({ ...MAC_PROFILE_DEFAULTS, levers: ["mesh-casters"] });
+    expect(named.filter((run) => run.place.kind === "pair").map((run) => run.id)).toEqual([
+      "mesh-casters-high-dpr1-a1",
+      "mesh-casters-high-dpr1-b1",
+      "mesh-casters-high-dpr1-a2",
+      "mesh-casters-high-dpr1-b2",
+    ]);
+  });
+
+  it("leaves the decked air's ground, the ring's shadow, the rocks and their casters out of the defaults, whose body has no deck or ring and whose pose stands off its ground, and runs each when named (R08, R11.T9.a, R11.T4, R14.T6.c)", () => {
+    expect(MAC_PROFILE_BODY_LEVERS).toEqual([
+      "decked-air-surface",
+      "ring-shadow-on-body",
+      "rocks",
+      "mesh-casters",
+    ]);
     expect(MAC_PROFILE_DEFAULTS.levers).toEqual(
       MAC_PROFILE_LEVERS.map((lever) => lever.name).filter(
         (name) => !MAC_PROFILE_BODY_LEVERS.includes(name),
