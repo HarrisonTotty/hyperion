@@ -2968,3 +2968,38 @@ pages are assets and presentation; collision never reads them. No domain tag is 
     `scatter` category's bytes (the rocks' pool, ½ of `pageBytes`: 64 MiB high, 16 MiB low) against
     Design note 15, which has no row for it. NOT RUN: the owner's Mac pair `rocks` and RTX runs;
     Windows.
+- **R14.T6.c** (built; `r14-t6c-mesh-casters`, 2026-11-25): no `ShadowCasters` provider existed
+  (`add` had no caller), so none moved and the rocks' casting is the feature (lean, 2026-11-25):
+  the rocks' one cull (`RockView.cull`) takes each cascade the frame renders after its two camera
+  passes (`ROCK_CASCADE_PASS` + c). `ShadowCasters` stays for craft, drawn without a cull; none
+  casts yet.
+  - A drawn patch's instances, whatever their rule, enter the cascades its
+    `RockDrawnPatch.casterSphere` (bounding sphere widened by its largest rock) is admitted to by
+    `castsInto` and T1.c's `receiversRefuse`; each cluster then by the cascade's box and receivers;
+    the DAG cut at the texel, so a rock casts where it is wider than the cascade's texel (lean).
+  - `RockView` steps: `pack` (CPU, laid out before the casters, T6.a's inputs) → `cull(pack, input)`
+    → `draws` and `casterDraws(index, mesh, base)`; `frame` is all three. In the pass: `#rockPlan`
+    before `#writeOrNone`, the cull in `#drawCasters` once reuse is decided, `#rockFrame` drawing
+    that cull's buckets (culling them itself on a frame without casters).
+  - The caster: `rockCasterMaterialSpec(unclippedDepth)` (`rockCaster.wgsl`, `rock-caster`,
+    depth-only, the terrain casters' states and bias), made with the rocks' forms where the pass is
+    lit and draws cascades, its base the view's caster uniforms; in `ROCK_ENTRIES` (part 33).
+  - `GeometrySettings.meshCasters` (`cast` | `off`; `cast` on both settings, `off` in
+    `GEOMETRY_BEFORE_R14`; lean): a T6.a shared input; `--geometry meshCasters=off` is the Mac pair
+    `mesh-casters`' B (a body lever, out of the defaults); a results file without it reads `off`.
+    Design note 17's table and R12.T0's inventory are to take it.
+  - T6.a and T6.b: `RockMeshes.revision` (a mesh held or let go), the rocks' instance words and
+    each cascade's entering instances are caster inputs; no rock change cuts a held far cascade, as
+    no draw-set change does. T6.a's lean closed: a provider with a revision may be held, and a
+    provider added or removed, or a revision changed, cuts the holds (`ViewState.otherCasters`): a
+    removal now renders all four once (T6.b's test, `[4, 2]`).
+  - Counts: `TerrainCascadeFrame.rockCasters` (instances a cascade), `TerrainPass.rockClusterStats`
+    (`ROCK_PASS_NAMES`, under `terrain clusters (<view>) rocks`, so the terrain's prefix row times
+    it); `counts().casterTriangles` adds the rocks' (`null` until their sample is back). The rocks'
+    visibility range stays their camera passes' lists. `casterHeightM` stays 0.
+  - `PASS_ROWS` takes `rock cull` (R14.T5.c's label, which had no row) in `terrain` on a primary and
+    the wireframe's rows elsewhere. Verification's exactness holds for the terrain alone: frames
+    with rocks under the high setting's cascades move where the rocks now cast.
+  - Smoke: the named part `--part=casters` (`checkMeshCasters`, `smoke/sharedPass.ts`, a 256 MiB
+    cache for the craft's forced region), run after the numbered parts. NOT RUN: the owner's Mac pair
+    `mesh-casters` and RTX caster passes timed (pending: the owner's RTX run); Windows.
