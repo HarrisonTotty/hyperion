@@ -728,16 +728,25 @@ export async function checkOceanPass(engine: RenderEngine, checks: Checks): Prom
 const CLOUD_CHECK_HEIGHT_M = 200_000;
 
 /**
- * The cloud check's shadow: what the volume's map holds wherever it holds the sea, a share of the
- * beam scattered down among it, which the airless tables' sky of none leaves the sky's alone.
+ * The cloud check's shadows, each what the volume's map holds wherever it holds the sea: one that
+ * scatters none of the beam down, under which every pixel is dimmer than the plain sea's, and one
+ * that scatters a share down, which lights a wave's facet turned from the sun more than the beam
+ * it took, so that only its twin judges it. The airless tables have no sky for the sky's factor.
  */
-const CLOUD_CHECK_SHADOW: CloudGroundLight = { direct: 0.25, sky: 1, diffuse: 0.2 };
+const CLOUD_CHECK_SHADOWS: ReadonlyArray<{
+  readonly light: CloudGroundLight;
+  readonly dims: boolean;
+}> = [
+  { light: { direct: 0.25, sky: 1, diffuse: 0 }, dims: true },
+  { light: { direct: 0.25, sky: 1, diffuse: 0.2 }, dims: false },
+];
 
 /**
  * R11.T7.c: the far sea's cloudy form dims each source's light by the volume's shadow map where it
- * holds the sea, and leaves the clear sea's light off it, as its twin does: the sea from 200 km over
- * +x, its clouds' layer below the sea, so that its tap is the clear sky's, and a shadow map about
- * the camera's nadir that holds {@link CLOUD_CHECK_SHADOW} on both its levels.
+ * holds the sea, adds the light the shadow scatters down to the sky's, and leaves the clear sea's
+ * light off the map, as its twin does: the sea from 200 km over +x, its clouds' layer below the
+ * sea, so that its tap is the clear sky's, and a shadow map about the camera's nadir that holds
+ * each of {@link CLOUD_CHECK_SHADOWS} on both its levels in turn.
  */
 export async function checkOceanCloudShadow(engine: RenderEngine, checks: Checks): Promise<void> {
   const world = oceanWorld();
@@ -816,7 +825,6 @@ export async function checkOceanCloudShadow(engine: RenderEngine, checks: Checks
   const layerRows = new Float32Array(4 * CLOUD_LAYER_ROWS);
   layerRows.set([0.5 * R, 0.5 * R, 0, 0], 0);
   layerRows.set([0, R, 0, 0], 12);
-  const s = CLOUD_CHECK_SHADOW;
   const clouds: CloudBodyGpu = {
     layer: buffer("smoke ocean clouds rows", layerRows),
     coverage: texture(
@@ -826,12 +834,13 @@ export async function checkOceanCloudShadow(engine: RenderEngine, checks: Checks
       Uint16Array.from([0, 0, 0, 0], (v) => toHalfBits(v)),
     ),
     noise: texture("smoke ocean clouds noise", "r8unorm", "3d", new Uint8Array(1)),
-    // One texel of the shadow, which every read of the map's two levels samples alike.
+    // One texel of the shadow, which every read of the map's two levels samples alike, written
+    // before each draw.
     shadowMap: texture(
       "smoke ocean clouds shadow map",
       "rgba16float",
       "2d",
-      Uint16Array.from([s.direct, s.sky, s.diffuse, 1], (v) => toHalfBits(v)),
+      Uint16Array.from([1, 1, 0, 1], (v) => toHalfBits(v)),
     ),
     shadowRows: buffer(
       "smoke ocean clouds shadow rows",
@@ -839,89 +848,104 @@ export async function checkOceanCloudShadow(engine: RenderEngine, checks: Checks
     ),
   };
   const eclipseRows = buffer("smoke ocean clouds eclipse", packOceanEclipse(null));
+  // Each pixel's twin: the plain sea's, its source's light through the cloud's factors at the hit
+  // (`oceanCloudedLight`); through the airless tables the sky's light is the cloud's alone.
+  const e = view.exposureScale;
+  const light = view.suns[0]?.illuminanceLx ?? [0, 0, 0];
+  const optics = onProbeInputs({
+    ...oceanDrawOptics(view),
+    glintCapCdM2: view.thresholdPreExposed,
+    sunLux: [light[0] * e, light[1] * e, light[2] * e],
+    skyLux: [0, 0, 0],
+  });
+  const f = Math.fround;
+  const o = view.camera.positionM;
+  const origin = vec3(f(o.x), f(o.y), f(o.z));
+  const size = { widthPx: PASS_SIDE_PX, heightPx: PASS_SIDE_PX };
+  const pixels = PASS_SIDE_PX * PASS_SIDE_PX;
   try {
-    target.render(
-      frameOf("smoke ocean clouds", [
-        oceanPassDraw(
-          triangle,
-          material,
-          oceanMap,
-          airless,
-          eclipseRows,
-          oceanPassUniforms(view),
-          clouds,
-        ),
-      ]),
-    );
-    const sea = halfTexels(await engine.readTexture(target.colour));
-    // Each pixel's twin: the plain sea's, its source's light through the cloud's factors at the
-    // hit (`oceanCloudedLight`); through the airless tables the sky's light is the cloud's alone.
-    const e = view.exposureScale;
-    const light = view.suns[0]?.illuminanceLx ?? [0, 0, 0];
-    const optics = onProbeInputs({
-      ...oceanDrawOptics(view),
-      glintCapCdM2: view.thresholdPreExposed,
-      sunLux: [light[0] * e, light[1] * e, light[2] * e],
-      skyLux: [0, 0, 0],
-    });
-    const f = Math.fround;
-    const o = view.camera.positionM;
-    const origin = vec3(f(o.x), f(o.y), f(o.z));
-    const size = { widthPx: PASS_SIDE_PX, heightPx: PASS_SIDE_PX };
-    const read: ShadowLevelRead = () => s;
-    let shaded = 0;
-    let clear = 0;
-    let unlike = 0;
-    let dimmer = 0;
-    let first: string | null = null;
-    for (let p = 0; p < PASS_SIDE_PX * PASS_SIDE_PX; p += 1) {
-      const ray = oceanPassRay(
-        p % PASS_SIDE_PX,
-        Math.floor(p / PASS_SIDE_PX),
-        size,
-        projection(1),
-        view.camera.orientation,
+    for (const { light: s, dims } of CLOUD_CHECK_SHADOWS) {
+      engine.writeTexture(
+        clouds.shadowMap,
+        { x: 0, y: 0, z: 0 },
+        { width: 1, height: 1, depthOrArrayLayers: 1 },
+        Uint16Array.from([s.direct, s.sky, s.diffuse, 1], (v) => toHalfBits(v)),
       );
-      const d = ray.direction;
-      const direction = vec3(f(d.x), f(d.y), f(d.z));
-      const plain = oceanFarSample(optics, view.sea.map.texels, origin, direction);
-      if (plain === null) {
-        continue;
-      }
-      const cloud = cloudGroundLightAt(shadow, plain.hit.point, sun, CLEAR_GROUND, read);
-      const lit = oceanCloudedLight(optics, cloud, dot(plain.hit.normal, sun));
-      const twin = oceanFarSample(
-        { ...optics, sunLux: lit.sunLux, skyLux: lit.skyLux },
-        view.sea.map.texels,
-        origin,
-        direction,
-      );
-      const expected = twin?.light.radiance ?? [0, 0, 0];
-      const brightest = Math.max(1e-30, ...plain.light.radiance);
-      const off = [0, 1, 2].some(
-        (k) =>
-          !(
-            Math.abs((sea[4 * p + k] ?? Number.NaN) - (expected[k] ?? 0)) <=
-            2e-3 * brightest + 2e-3 * (expected[k] ?? 0)
+      target.render(
+        frameOf("smoke ocean clouds", [
+          oceanPassDraw(
+            triangle,
+            material,
+            oceanMap,
+            airless,
+            eclipseRows,
+            oceanPassUniforms(view),
+            clouds,
           ),
+        ]),
       );
-      if (off) {
-        unlike += 1;
-        first ??= `pixel ${p}: (${[0, 1, 2].map((k) => sea[4 * p + k]).join(", ")}) against (${expected.join(", ")}), the cloud's direct ${cloud.direct}`;
+      // Each shadow's draw read back before the next shadow is written over its texel.
+      // oxlint-disable-next-line no-await-in-loop
+      const sea = halfTexels(await engine.readTexture(target.colour));
+      const read: ShadowLevelRead = () => s;
+      let shaded = 0;
+      let clear = 0;
+      let unlike = 0;
+      let dimmer = 0;
+      let first: string | null = null;
+      for (let p = 0; p < pixels; p += 1) {
+        const ray = oceanPassRay(
+          p % PASS_SIDE_PX,
+          Math.floor(p / PASS_SIDE_PX),
+          size,
+          projection(1),
+          view.camera.orientation,
+        );
+        const d = ray.direction;
+        const direction = vec3(f(d.x), f(d.y), f(d.z));
+        const plain = oceanFarSample(optics, view.sea.map.texels, origin, direction);
+        if (plain === null) {
+          continue;
+        }
+        const cloud = cloudGroundLightAt(shadow, plain.hit.point, sun, CLEAR_GROUND, read);
+        const lit = oceanCloudedLight(optics, cloud, dot(plain.hit.normal, sun));
+        const twin = oceanFarSample(
+          { ...optics, sunLux: lit.sunLux, skyLux: lit.skyLux },
+          view.sea.map.texels,
+          origin,
+          direction,
+        );
+        const expected = twin?.light.radiance ?? [0, 0, 0];
+        const brightest = Math.max(1e-30, ...plain.light.radiance);
+        const off = [0, 1, 2].some(
+          (k) =>
+            !(
+              Math.abs((sea[4 * p + k] ?? Number.NaN) - (expected[k] ?? 0)) <=
+              2e-3 * brightest + 2e-3 * (expected[k] ?? 0)
+            ),
+        );
+        if (off) {
+          unlike += 1;
+          first ??= `pixel ${p}: (${[0, 1, 2].map((k) => sea[4 * p + k]).join(", ")}) against (${expected.join(", ")}), the cloud's direct ${cloud.direct}`;
+        }
+        if (cloud.direct <= s.direct + 1e-6) {
+          shaded += 1;
+          dimmer += (sea[4 * p + 1] ?? Number.NaN) < plain.light.radiance[1] ? 1 : 0;
+        } else if (cloud.direct >= 1 - 1e-6) {
+          clear += 1;
+        }
       }
-      if (cloud.direct <= s.direct + 1e-6) {
-        shaded += 1;
-        dimmer += (sea[4 * p + 1] ?? Number.NaN) < plain.light.radiance[1] ? 1 : 0;
-      } else if (cloud.direct >= 1 - 1e-6) {
-        clear += 1;
-      }
+      checks.check(
+        dims
+          ? "R11.T7.c the sea's cloudy form dims its sun's light where the volume's shadow map holds the sea, as its twin does"
+          : "R11.T7.c the sea's cloudy form adds the light the shadow map scatters down to its sky's, as its twin does",
+        shaded > 20 &&
+          (!dims || dimmer === shaded) &&
+          clear > 20 &&
+          unlike <= PASS_EDGE_SHARE * pixels,
+        `the shadow (${s.direct}, ${s.sky}, ${s.diffuse}): ${shaded} pixels under it, ${dimmer} of them dimmer than the plain sea, ${clear} off the map, ${unlike} unlike the twin${first === null ? "" : `; first ${first}`}`,
+      );
     }
-    const pixels = PASS_SIDE_PX * PASS_SIDE_PX;
-    checks.check(
-      "R11.T7.c the sea's cloudy form dims its sun's light where the volume's shadow map holds the sea, as its twin does",
-      shaded > 20 && dimmer === shaded && clear > 20 && unlike <= PASS_EDGE_SHARE * pixels,
-      `${shaded} pixels under the map's shadow, ${dimmer} of them dimmer than the plain sea, ${clear} off the map, ${unlike} unlike the twin${first === null ? "" : `; first ${first}`}`,
-    );
   } finally {
     target.dispose();
     engine.releaseMaterial(material);
