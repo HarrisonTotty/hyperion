@@ -6,16 +6,18 @@
 //!
 //! Gas-phase CH₄ ⇌ CO conversion freezes below a quench temperature `T_q(p)` that falls with the
 //! pressure: by Zahnle and Marley's harmonic time (2014, ApJ 797, 41, eq. 14 of eqs. 12–13, as
-//! `chem::quench` holds them, at solar metallicity; fitted on near-solar H₂ gas, extrapolated to a
-//! secondary air), 907–1,043 K at 1 bar and 683–781 K at 100 bar over 10⁶–10⁴ yr, eq. 13's p⁻²
-//! path leading above about 10 bar (computed). So a cool air keeps the carbon shares its vent
+//! `chem::quench` holds them, at solar metallicity; fitted on near-solar H₂ gas at quench
+//! temperatures of about 1,050–2,170 K, extrapolated to a secondary air and below them),
+//! 907–1,043 K at 1 bar and 683–781 K at 100 bar over 10⁶–10⁴ yr, eq. 13's p⁻² path leading from
+//! about 0.4–1.6 bar over 10⁶–10⁴ yr and nearly alone above about 10 bar (computed). So a cool air
+//! keeps the carbon shares its vent
 //! quenched, and is not re-equilibrated at its surface: Woitke et al.'s types (2021, A&A 646, A43)
 //! are equilibrium's answer, which the census names from each air's elements (`chem::secondary`),
 //! not an air's. Every bulk air above the quench is a hot air, which keeps P14.T24.f's carriers
 //! whole (ruling 4): no vent, no shift and no vent hydrogen. That holds while `T_q` at 10⁶ yr stays
-//! above rule 6's 647 K, up to about 277 bar (computed; research-leans-60's "about 250 bar"); the
-//! census lists any vented air at or above its own `T_q(p_s)`. A body takes the route where it is
-//! none of:
+//! above rule 6's threshold (water's saturation temperature at `p_s`, at most 647.096 K), up to
+//! about 276 bar (computed; research-leans-60's "about 250 bar"); the census lists any vented air
+//! at or above its own `T_q(p_s)`. A body takes the route where it is none of:
 //!
 //! - **on P14.T24.f's methane arm** (formed beyond the snow line, beyond the maximum-greenhouse
 //!   limit, with a solid crust): Titan's, Triton's and Pluto's carbon is their ices', not a melt's;
@@ -65,15 +67,17 @@
 //!    pressure and the cap do (research-leans-60 ruling A): the vent's CO, its ratios applying to
 //!    all the degassed carbon, times the division's least airborne share. The carbon the
 //!    thermostat stores is its carbonate, drawn as carbon dioxide, and its CO pays no debit, its
-//!    oxygen the drawn carbon dioxide's by mass as a dry air's CO's is; so a thermostat-held air,
-//!    whose route share is 6 × 10⁻⁶, is never dried by carbon it does not hold. Off the thermostat
+//!    oxygen the drawn carbon dioxide's by mass as a dry air's CO's is; so a thermostat-held air's
+//!    shift, its route share 6 × 10⁻⁶, never takes water for carbon it does not hold (its methane's
+//!    debit, step 3, stays under the drawn water by its element balance, 4 CH₄ ≤ 2 H₂O). Off the thermostat
 //!    (share 1) the shift reads the whole kept carbon. Where a frozen thermostat's solve leaves more
 //!    of the carbon airborne than the route's least share, the airborne CO above that share stays
 //!    unshifted on the stand-in, a lower bound the CO follow-up reads at the solve's share. A dry
 //!    air keeps its CO, published as P14.T24.f's CO₂ stand-in until the CO row (ruling 4), and
 //!    counted; where the airborne CO outnumbers the water, the shift takes all of it, and the air
-//!    is dried: a dry, CO-rich end state (Zahnle et al. 2008, JGR 113, E11004, recalled), reached
-//!    only where all the carbon is airborne, which keeps its class.
+//!    is dried: a dry, CO-rich end state, as photochemistry reaches one in a dry CO₂ air (Zahnle et
+//!    al. 2008, JGR 113, E11004, recalled), here only where all the carbon is airborne, which keeps
+//!    its class.
 //! 5. **The shift's hydrogen to escape**: none where Jeans's test does not retain hydrogen, and
 //!    otherwise what the diffusion limit through nitrogen leaves over the age, on
 //!    `methane_outcome`'s pattern ([`diffusion_limited_flux_per_m2_s`], Hunten 1973, J. Atmos. Sci.
@@ -233,6 +237,15 @@ impl Outgassed {
         let methane_moles = self.methane.value() / Gas::Methane.molar_mass_g_per_mol();
         let water_moles = self.water_debit.value() / Gas::Water.molar_mass_g_per_mol();
         Kilograms::new((2.0 * methane_moles + water_moles) * oxygen)
+    }
+
+    /// The vent's CO, mol: the shifted, the dry and the stored CO together, each as the carbon
+    /// dioxide it is published as.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn monoxide_moles(&self) -> f64 {
+        (self.shifted.value() + self.dry_monoxide.value() + self.stored_monoxide.value())
+            / Gas::CarbonDioxide.molar_mass_g_per_mol()
     }
 
     /// The drawn carbon dioxide of the carbon graphite's cap left in the crust.
@@ -504,6 +517,8 @@ pub(crate) fn outgassed(
         methane_share: if gas > 0.0 { methane / gas } else { 0.0 },
         shifted: Kilograms::new(shifted * carbon_dioxide * 1e-3),
         dry_monoxide: Kilograms::new(dry * carbon_dioxide * 1e-3),
+        // A difference, not `vent_monoxide × (1 − share)`: at a share of 1 it is zero only because
+        // the product above is the CO to the bit, which the tests pin.
         stored_monoxide: Kilograms::new((vent_monoxide - monoxide) * carbon_dioxide * 1e-3),
         water_debit: Kilograms::new(water - air.water),
         dried: water > 0.0 && air.water <= 0.0,

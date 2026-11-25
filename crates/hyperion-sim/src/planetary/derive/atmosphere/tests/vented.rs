@@ -210,8 +210,9 @@ fn earth_s_carbon_is_unchanged_its_co_shifted_by_its_water_and_its_hydrogen_lost
 }
 
 /// Ruling 2 on the table's Mars: its vent at its model mantle is CO-led, near ¾ of its carbon,
-/// and its water's OH shifts all of it back to CO₂, so it is CO₂-led with no dry CO and its carbon
-/// unchanged; its hydrogen is lost.
+/// and its water's OH shifts its airborne CO, the thermostat's share of it (research-leans-60
+/// ruling A), back to CO₂, the rest its stored carbon's, published as CO₂ on the stand-in: so it is
+/// CO₂-led with no dry CO and its carbon unchanged; its hydrogen is lost.
 #[test]
 fn mars_s_vent_is_co_led_and_its_water_makes_it_carbon_dioxide() {
     let held = table();
@@ -292,17 +293,11 @@ fn held_twin(inputs: &AtmosphereInputs) -> Atmosphere {
     with_every_36_hold(|| with_outgassing_speciation(OutgassingRules::Held, || atmosphere(inputs)))
 }
 
-/// The miss of `out`'s water debit against `expected` mol, relative to its kept water: the debit
-/// is the kept water less the water left, so its rounding is the kept water's, not its own.
-fn debit_miss(out: &Outgassed, expected: f64) -> f64 {
+/// The miss of `out`'s water debit against `expected_moles`, relative to its kept water: the
+/// debit is the kept water less the water left, so its rounding is the kept water's, not its own.
+fn debit_miss(out: &Outgassed, expected_moles: f64) -> f64 {
     let water = Gas::Water.molar_mass_g_per_mol();
-    (out.water_debit.value() / water - expected).abs() / (out.water.value() / water)
-}
-
-/// The vent's CO of `out`, mol: the shifted, the dry and the stored CO, each as carbon dioxide.
-fn monoxide_moles(out: &Outgassed) -> f64 {
-    (out.shifted.value() + out.dry_monoxide.value() + out.stored_monoxide.value())
-        / Gas::CarbonDioxide.molar_mass_g_per_mol()
+    (out.water_debit.value() / water - expected_moles).abs() / (out.water.value() / water)
 }
 
 /// research-leans-60 ruling A: a temperate Earth with twenty times the carbon per mass, a quarter
@@ -330,7 +325,7 @@ fn a_thermostat_s_shift_never_dries_its_air() {
         "a carbon-rich reduced Earth: {out:?}\n  {}",
         air_line("", &air)
     );
-    let monoxide = monoxide_moles(&out);
+    let monoxide = out.monoxide_moles();
     let water = out.water.value() / Gas::Water.molar_mass_g_per_mol();
     assert!(
         monoxide > water,
@@ -384,9 +379,10 @@ fn a_cold_air_s_shift_may_dry_it_and_keeps_its_class() {
     let out = vented_of("a cold dry-vent Earth", &air);
     eprintln!("a cold dry-vent Earth: {out:?}\n  {}", air_line("", &air));
     assert_same_bits(out.airborne_share, 1.0);
-    assert_eq!(out.stored_monoxide, Kilograms::ZERO);
+    // Zero to the bit: off the thermostat the shift reads the CO itself.
+    assert_same_bits(out.stored_monoxide.value(), 0.0);
     assert_eq!(out.graphite, Kilograms::ZERO);
-    let monoxide = monoxide_moles(&out);
+    let monoxide = out.monoxide_moles();
     let water = out.water.value() / Gas::Water.molar_mass_g_per_mol();
     assert!(
         monoxide > water,
