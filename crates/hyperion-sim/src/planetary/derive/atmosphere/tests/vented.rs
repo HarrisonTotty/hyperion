@@ -134,10 +134,11 @@ fn the_ruling_s_vent_figures_hold_on_the_registry_s_records() {
 }
 
 /// Ruling 1 on the table's Earth: its vent, at its own air's weight, is CO₂-led at its mantle's
-/// CO₂/CO; its CO shifts back to CO₂ with its water, so its carbon is unchanged (to 10⁻⁹), no
-/// graphite, a methane share under 10⁻⁹, no dry CO; its water pays the shift mole for mole and its
-/// hydrogen is lost; and its measured state (the table's inputs at Earth's measured Bond albedo)
-/// stays 288 ± 2 K.
+/// CO₂/CO; its airborne CO, the thermostat's share of it (research-leans-60 ruling A), shifts back
+/// to CO₂ with its water, the stored carbon's CO its carbonate's, so its carbon is unchanged (to
+/// 10⁻⁹), no graphite, a methane share under 10⁻⁹, no dry CO; its water pays the shift mole for
+/// mole and its hydrogen is lost; and its measured state (the table's inputs at Earth's measured
+/// Bond albedo) stays 288 ± 2 K.
 #[test]
 fn earth_s_carbon_is_unchanged_its_co_shifted_by_its_water_and_its_hydrogen_lost() {
     let held = table();
@@ -179,12 +180,16 @@ fn earth_s_carbon_is_unchanged_its_co_shifted_by_its_water_and_its_hydrogen_lost
     // The shift's water, mole for mole with the CO it shifted, and the methane's two.
     let shifted = out.shifted.value() / Gas::CarbonDioxide.molar_mass_g_per_mol();
     let methane = out.methane.value() / Gas::Methane.molar_mass_g_per_mol();
-    let debit = out.water_debit.value() / Gas::Water.molar_mass_g_per_mol();
-    assert!(relative(debit, shifted + 2.0 * methane) < 1e-12);
+    let miss = debit_miss(&out, shifted + 2.0 * methane);
+    assert!(miss < 1e-12, "{miss}");
     let carbon =
         before.inventory().carbon_dioxide().value() / Gas::CarbonDioxide.molar_mass_g_per_mol();
+    assert_same_bits(out.airborne_share, TEMPERATE_AIRBORNE_CARBON);
     assert!(
-        relative(shifted, shares.carbon_monoxide * carbon) < 1e-9,
+        relative(
+            shifted,
+            shares.carbon_monoxide * carbon * TEMPERATE_AIRBORNE_CARBON
+        ) < 1e-9,
         "{shifted} of {carbon}"
     );
     let ((co2, ch4), (co2_held, _)) = (carbon_moles(air), carbon_moles(before.atmosphere()));
@@ -279,6 +284,127 @@ fn a_dry_air_keeps_its_co_as_the_carbon_dioxide_stand_in() {
     assert_eq!(out.water_debit, Kilograms::ZERO);
     assert!(out.dry_monoxide > Kilograms::ZERO);
     assert!(same_air(&held, &dry), "{held:?}\n{dry:?}");
+}
+
+/// The air of `inputs` under every other 36 hold, this one held: its held twin, as the census
+/// compares it.
+fn held_twin(inputs: &AtmosphereInputs) -> Atmosphere {
+    with_every_36_hold(|| with_outgassing_speciation(OutgassingRules::Held, || atmosphere(inputs)))
+}
+
+/// The miss of `out`'s water debit against `expected` mol, relative to its kept water: the debit
+/// is the kept water less the water left, so its rounding is the kept water's, not its own.
+fn debit_miss(out: &Outgassed, expected: f64) -> f64 {
+    let water = Gas::Water.molar_mass_g_per_mol();
+    (out.water_debit.value() / water - expected).abs() / (out.water.value() / water)
+}
+
+/// The vent's CO of `out`, mol: the shifted, the dry and the stored CO, each as carbon dioxide.
+fn monoxide_moles(out: &Outgassed) -> f64 {
+    (out.shifted.value() + out.dry_monoxide.value() + out.stored_monoxide.value())
+        / Gas::CarbonDioxide.molar_mass_g_per_mol()
+}
+
+/// research-leans-60 ruling A: a temperate Earth with twenty times the carbon per mass, a quarter
+/// of the water and a reduced (IW−3), CO-led vent, whose CO outnumbers its water by moles, shifts
+/// only its airborne CO, the thermostat's share of it: it is not dried, its water debit is that
+/// share of the CO by moles (with its methane's two waters), its stored carbon's CO is counted
+/// with no debit, and it publishes Temperate as its held twin does.
+#[test]
+fn a_thermostat_s_shift_never_dries_its_air() {
+    let (inputs, _, air) = vented_earth_at(
+        255.0,
+        Insolation::Habitable,
+        |drawn| {
+            VolatileInventory::new(
+                Kilograms::new(0.25 * drawn.water().value()),
+                Kilograms::new(20.0 * drawn.carbon_dioxide().value()),
+                drawn.nitrogen(),
+                drawn.argon(),
+            )
+        },
+        VentConditions::basaltic(Dex::new(-3.0)),
+    );
+    let out = vented_of("a carbon-rich reduced Earth", &air);
+    eprintln!(
+        "a carbon-rich reduced Earth: {out:?}\n  {}",
+        air_line("", &air)
+    );
+    let monoxide = monoxide_moles(&out);
+    let water = out.water.value() / Gas::Water.molar_mass_g_per_mol();
+    assert!(
+        monoxide > water,
+        "{monoxide} mol of CO against {water} of water"
+    );
+    assert_same_bits(out.airborne_share, TEMPERATE_AIRBORNE_CARBON);
+    assert!(out.holds_water && !out.dried, "{out:?}");
+    assert_eq!(out.dry_monoxide, Kilograms::ZERO);
+    let airborne = out.airborne_share * monoxide;
+    let shifted = out.shifted.value() / Gas::CarbonDioxide.molar_mass_g_per_mol();
+    assert!(
+        relative(shifted, airborne) < 1e-12,
+        "{shifted} against {airborne}"
+    );
+    let stored = out.stored_monoxide.value() / Gas::CarbonDioxide.molar_mass_g_per_mol();
+    assert!(
+        relative(stored, (1.0 - out.airborne_share) * monoxide) < 1e-12,
+        "{stored} of {monoxide}"
+    );
+    let methane = out.methane.value() / Gas::Methane.molar_mass_g_per_mol();
+    let miss = debit_miss(&out, airborne + 2.0 * methane);
+    assert!(miss < 1e-12, "{out:?}: {miss}");
+    let twin = held_twin(&inputs);
+    assert_eq!(twin.published_state(), SurfaceState::Temperate, "{twin:?}");
+    assert_eq!(
+        (air.state(), air.published_state()),
+        (twin.state(), twin.published_state())
+    );
+}
+
+/// Ruling A's other arm: an Earth beyond the maximum-greenhouse limit, formed inside the snow line,
+/// its carbon all airborne (share 1), with a hundredth of its carbon, 10⁻⁴ of its water and
+/// a CO-led vent (IW+0.01, Mars's model mantle), its CO outnumbering its water: the shift takes all
+/// the water and dries it, a dry, CO-rich end state that keeps its held twin's class, its carbon
+/// unchanged (to 10⁻⁹) and none of it stored.
+#[test]
+fn a_cold_air_s_shift_may_dry_it_and_keeps_its_class() {
+    let (inputs, _, air) = vented_earth_at(
+        230.0,
+        Insolation::BeyondMaximumGreenhouse,
+        |drawn| {
+            VolatileInventory::new(
+                Kilograms::new(1e-4 * drawn.water().value()),
+                Kilograms::new(1e-2 * drawn.carbon_dioxide().value()),
+                drawn.nitrogen(),
+                drawn.argon(),
+            )
+        },
+        VentConditions::basaltic(Dex::new(0.01)),
+    );
+    let out = vented_of("a cold dry-vent Earth", &air);
+    eprintln!("a cold dry-vent Earth: {out:?}\n  {}", air_line("", &air));
+    assert_same_bits(out.airborne_share, 1.0);
+    assert_eq!(out.stored_monoxide, Kilograms::ZERO);
+    assert_eq!(out.graphite, Kilograms::ZERO);
+    let monoxide = monoxide_moles(&out);
+    let water = out.water.value() / Gas::Water.molar_mass_g_per_mol();
+    assert!(
+        monoxide > water,
+        "{monoxide} mol of CO against {water} of water"
+    );
+    assert!(out.dried && out.dry_monoxide > Kilograms::ZERO, "{out:?}");
+    let twin = held_twin(&inputs);
+    eprintln!("  its held twin: {}", air_line("", &twin));
+    assert_eq!(
+        (air.state(), air.published_state()),
+        (twin.state(), twin.published_state())
+    );
+    let carbon = |air: &Atmosphere| {
+        let (co2, ch4) = carbon_moles(air);
+        co2 + ch4
+    };
+    let (vented, held) = (carbon(&air), carbon(&twin));
+    assert!(relative(vented, held) < 1e-9, "{vented} against {held}");
 }
 
 /// Ruling 5: an Earth beyond the maximum-greenhouse limit, formed inside the snow line, its carbon
@@ -584,11 +710,14 @@ fn a_vent_its_gas_refuses_keeps_its_carriers() {
 }
 
 /// Step 5 where Jeans's test retains hydrogen and the age is short against the diffusion limit: a
-/// young (10⁴ yr), cold (100 K irradiation) super-Earth of 5 M⊕ keeps most of its shift's H₂,
-/// which its air publishes beside the CO₂, each element's outcome still summing to its inventory.
+/// young (10⁴ yr), cold (100 K irradiation) super-Earth of 5 M⊕, beyond the maximum-greenhouse
+/// limit so that its carbon is all airborne and its shift reads all of it (research-leans-60
+/// ruling A: a thermostat's air shifts too little CO to keep any H₂ against the diffusion limit at
+/// this age), keeps some of its shift's H₂, which its air publishes beside the CO₂, each element's
+/// outcome still summing to its inventory.
 #[test]
 fn a_young_cold_super_earth_keeps_its_shift_s_hydrogen() {
-    let mut inputs = earth_inputs(255.0, Insolation::Habitable);
+    let mut inputs = earth_inputs(230.0, Insolation::BeyondMaximumGreenhouse);
     inputs.mass = Kilograms::new(5.0 * inputs.mass.value());
     inputs.radius = Metres::new(1.5 * inputs.radius.value());
     inputs.irradiation_temperature = Kelvin::new(100.0);
@@ -597,6 +726,7 @@ fn a_young_cold_super_earth_keeps_its_shift_s_hydrogen() {
     let air = with_every_36_hold(|| atmosphere(&inputs));
     let out = vented_of("a young cold super-Earth", &air);
     eprintln!("a young cold super-Earth: {out:?}");
+    assert_same_bits(out.airborne_share, 1.0);
     assert!(air.retention().retains(Gas::Hydrogen));
     assert!(out.hydrogen_kept > Kilograms::ZERO && out.hydrogen_kept < out.hydrogen);
     assert!(air.partial_pressures().of(Gas::Hydrogen) > Pascals::ZERO);
