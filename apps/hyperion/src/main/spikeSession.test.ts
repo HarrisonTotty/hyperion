@@ -279,6 +279,7 @@ const GEOMETRY_SETTINGS = {
   figureShading: "screen",
   terrainPlanetshine: "record",
   decorationSets: "generated",
+  scatter: "drawn",
   selectionScale: "presented",
   classEdges: "shaped",
   meshCasters: "cast",

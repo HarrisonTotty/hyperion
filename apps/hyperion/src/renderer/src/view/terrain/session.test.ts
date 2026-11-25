@@ -976,7 +976,15 @@ describe("the terrain session's pool, memory and teardown (R10.T16.a)", () => {
 
     it("releases the class maps before the masks", async () => {
       const { destroyed } = await disposedHolding();
-      expect(destroyed).toEqual([`class map ${MOON}`, `coverage mask ${MOON}`]);
+      // The decorative scatter's templates' mesh goes with the session's handles (R11.T6.a).
+      expect(destroyed.filter((name) => !name.startsWith("pebble templates"))).toEqual([
+        `class map ${MOON}`,
+        `coverage mask ${MOON}`,
+      ]);
+      expect(destroyed.filter((name) => name.startsWith("pebble templates"))).toEqual([
+        "pebble templates:position",
+        "pebble templates:indices",
+      ]);
     });
 
     it("releases the fields before the workers stop", async () => {

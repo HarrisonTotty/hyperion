@@ -422,6 +422,22 @@ export interface WasmSurfaceFields {
    */
   photometry(system: bigint, body: number, palette: Uint8Array): Float32Array | undefined;
   /**
+   * The rock abundance k of each slot of a bake's palette at the patch (`face`, `level`, `i`,
+   * `j`)'s centre (plan R11, R11.T6.a; `TerrainLayers.rockAbundances`), 8; `undefined` where no
+   * field of the body is held.
+   *
+   * @throws Error as {@link photometry} does, and for a key that names no patch.
+   */
+  rockAbundances(
+    system: bigint,
+    body: number,
+    palette: Uint8Array,
+    face: number,
+    level: number,
+    i: number,
+    j: number,
+  ): Float32Array | undefined;
+  /**
    * The albedo nodes of each slot of a bake's palette at band level `level` and at its parent's
    * (R10.T1.c's client half; `TerrainMaturity.nodes`), 8 × 2 × K × 3; each node repeating the
    * slot's photometry albedo where the body's header carries no maturity; `undefined` where no
@@ -812,6 +828,19 @@ export class WorkerFields {
       if (photometry === undefined) {
         throw new Error(`the field of ${source.body} went before its bake's photometry`);
       }
+      // Each slot's rock abundance at the patch's centre, the decorative scatter's law (plan R11,
+      // R11.T6.a), from the same field.
+      const rockAbundances = this.#module.rockAbundances(
+        ...bodyArgs(source.body),
+        palette,
+        key.face,
+        key.level,
+        key.i,
+        key.j,
+      );
+      if (rockAbundances === undefined) {
+        throw new Error(`the field of ${source.body} went before its bake's rock abundances`);
+      }
       // The maturity layer's codes, and only with them its palette's nodes at the patch's level
       // and its parent's (R10.T1.c's client half), from the same field.
       const codes = baked.maturity();
@@ -835,6 +864,7 @@ export class WorkerFields {
         unsurveyedCells: baked.unsurveyedCells(),
         photometry,
         edgeSeed: edgeSeedOf(source.detailSeed),
+        rockAbundances,
         horizonNear: baked.horizonNear(),
         horizonFar: baked.horizonFar(),
         horizonComplete: baked.horizonComplete,

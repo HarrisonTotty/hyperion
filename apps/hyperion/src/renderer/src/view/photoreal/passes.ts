@@ -5,7 +5,9 @@
  * @remarks
  * In order: R06's sky; the small discs' cells and the larger discs' limbs' and their faces'
  * near-limb bands' (R07.T8.d–g, a compute pass, a dispatch a set of bound textures, whose sums the
- * bodies' draws read); R10's terrain shadows (R10.T9.b, the shadow cascades' four caster passes, depth
+ * bodies' draws read); R11's decorative scatter on the high setting (R11.T6.a, its pebbles'
+ * placement and their instance cull, two dispatches, the pebbles drawn in the bodies pass after the
+ * terrain's draws that never discard); R10's terrain shadows (R10.T9.b, the shadow cascades' four caster passes, depth
  * alone into the engine's layers, which the terrain's draws read); mesh bodies (opaque, depth);
  * R10's terrain; or, by plan R14's visibility buffer (R14.T2.c to T2.e), in the bodies pass's place,
  * the terrain's ID raster and the resolve's pass, the figures after its shading; with plan R14's
@@ -48,6 +50,8 @@ import {
 import type { QualitySetting } from "../quality/qualitySetting";
 import { RING_PARTICLES_PASS_LABEL } from "../rings/ringParticles";
 import { RINGS_PASS_LABEL } from "../rings/ringSlab";
+import { SCATTER_PASS_LABEL } from "../surface/scatter/pebblePlace";
+import { SCATTER_CULL_LABEL } from "../surface/scatter/scatterPass";
 import { TERRAIN_PASS_LABEL, TERRAIN_SHADOW_PASS_LABEL } from "../terrain/gpu/material";
 import { BLOOM_PASS } from "../post/bloomChain";
 import { HISTOGRAM_PASS } from "../post/histogram";
@@ -174,6 +178,9 @@ export function photorealisticPasses(setting: QualitySetting): PassList {
       slot(SKY_PASS_LABEL, "R06", true),
       // Before the mesh bodies' figures, which read its sums as the discs' draws do.
       own(PHOTOREAL_PASS_LABELS.discCells),
+      // R11's decorative scatter (R11.T6.a): its pebbles' placement and cull, dispatched as the
+      // terrain's draws are made, before its cascades; the pebbles are drawn in the bodies pass.
+      slot(SCATTER_PASS_LABEL, "R11", true, [SCATTER_PASS_LABEL, SCATTER_CULL_LABEL]),
       // Before the bodies, whose resolve times them, and the terrain, which reads the layers.
       slot(TERRAIN_SHADOW_PASS_LABEL, "R10", true),
       own(PHOTOREAL_PASS_LABELS.bodies),

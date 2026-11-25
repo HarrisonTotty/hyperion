@@ -134,6 +134,9 @@ import { BLOOM_DOWN_MATERIAL, BLOOM_UP_MATERIAL } from "../post/bloomChain";
 import { HISTOGRAM_KERNEL } from "../post/histogram";
 import { DECORATION_TWIN_KERNEL } from "../surface/decoration/decorationTwin";
 import { DETAIL_KERNELS } from "../surface/decoration/detailTextureBake";
+import { PEBBLE_MATERIALS } from "../surface/scatter/pebbleMaterial";
+import { PEBBLE_KERNELS } from "../surface/scatter/pebblePlace";
+import { SCATTER_CULL_TWIN_KERNEL } from "../surface/scatter/scatterCull";
 import { OVERLAY_SCENE_DEPTH_MATERIAL } from "../photoreal/overlayDepth";
 import { TONEMAP_MATERIAL } from "../post/tonemap";
 import { STILL_TILE_FIRST_MATERIAL } from "../stills/stillAccumulate";
@@ -778,6 +781,28 @@ export const ROCK_ENTRIES: ReadonlyArray<CatalogueEntry> = [
   { kind: "material", spec: rockCasterMaterialSpec(false), targets: ["depth-only"] },
 ];
 
+/**
+ * Plan R11's decorative scatter (R11.T6.a): the pebbles' placement on each vertex path, the cull's
+ * twin, and the pebbles' materials with their table-only twins (R08.T9.b's lever, which
+ * `SourceTableEngine` makes beside a lit material at its first one-band draw). The smoke page
+ * compiles them in its `scatter` part, alone, beside their group's checks.
+ */
+export const SCATTER_ENTRIES: ReadonlyArray<CatalogueEntry> = [
+  ...[...Object.values(PEBBLE_KERNELS), SCATTER_CULL_TWIN_KERNEL].map((spec): CatalogueEntry => ({
+    kind: "compute",
+    spec,
+  })),
+  ...Object.values(PEBBLE_MATERIALS).flatMap((spec): ReadonlyArray<CatalogueEntry> => {
+    const tableOnly = tableOnlyMaterial(spec);
+    return tableOnly === null
+      ? [{ kind: "material", spec }]
+      : [
+          { kind: "material", spec },
+          { kind: "material", spec: { ...tableOnly, displayName: `${spec.displayName} TABLE` } },
+        ];
+  }),
+];
+
 /** Every shader the engine can create; later plans add theirs here. */
 export const WGSL_CATALOGUE: ReadonlyArray<CatalogueEntry> = [
   ...TWIN_ENTRIES,
@@ -810,4 +835,5 @@ export const WGSL_CATALOGUE: ReadonlyArray<CatalogueEntry> = [
   ...OCEAN_ENTRIES,
   ...INSTANCE_ENTRIES,
   ...ROCK_ENTRIES,
+  ...SCATTER_ENTRIES,
 ];

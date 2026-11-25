@@ -257,6 +257,8 @@ function fakeModule(
     material: () => undefined,
     photometry: (system, body) =>
       bake !== undefined && held.has(key(system, body)) ? new Float32Array(40) : undefined,
+    rockAbundances: (system, body) =>
+      bake !== undefined && held.has(key(system, body)) ? new Float32Array(8) : undefined,
     maturityNodes: (system, body, palette, level) => {
       bake?.nodesAsked.push({ level, palette });
       return held.has(key(system, body)) ? new Float32Array(8 * 2 * 16 * 3) : undefined;

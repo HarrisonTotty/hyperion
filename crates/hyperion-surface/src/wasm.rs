@@ -236,14 +236,16 @@ use crate::material::{MATURITY_NODES, MAX_CLASSES, Material, MaterialClass, Mate
 use crate::noise::LatticeCache;
 use crate::patch::{BakeOptions, NormalScale, PatchBake, VertexPath};
 use crate::reading::{LineOfSight, SlantRange, SurveyedReading};
-use crate::scatter::{ExtraLayer, ROCK_WORDS, Rock, rock_words};
+use crate::scatter::{
+    AUTHORITATIVE_ROCK_DIAMETER, ExtraLayer, ROCK_WORDS, Rock, RockAbundance, rock_words,
+};
 use crate::synth::BandLevel;
 use crate::test_planet::{Ridges, TEST_PLANET};
 use crate::worker::{
     BodyBake, CLASS_MAP_LEVEL, ClassMap, DrawnPhotometry, FineLattice, FineTexel, GroundAtSight,
     GroundProperties, GroundReadout, GroundReadoutQuery, LEVEL_TABLE_ROWS, NormalMap,
-    OCEAN_MAP_MONTHS, OceanMap, QueryBodyError, RefinedTexel, SeasonAnomaly, SigmaSurvey,
-    SlopeBaseline, SurveyChange, SurveyedMaterial, WorkerFields,
+    OCEAN_MAP_MONTHS, OceanMap, QueryBodyError, RefinedTexel, ResolveAbundanceError, SeasonAnomaly,
+    SigmaSurvey, SlopeBaseline, SurveyChange, SurveyedMaterial, WorkerFields,
 };
 
 /// A refined texel's readings as `map`'s lattice holds them: its cells' at their centres, or its
@@ -278,6 +280,38 @@ pub fn band_limit_m() -> f64 {
 #[must_use]
 pub fn finest_spacing_m() -> f64 {
     FINEST_SPACING_M
+}
+
+/// The diameter from which every rock is authoritative, metres
+/// ([`AUTHORITATIVE_ROCK_DIAMETER`]): R11's decorative scatter owns only the narrower ones (plan
+/// R11, R11.T6.a).
+#[wasm_bindgen(js_name = authoritativeRockDiameterM)]
+#[must_use]
+pub fn authoritative_rock_diameter_m() -> f64 {
+    AUTHORITATIVE_ROCK_DIAMETER.value()
+}
+
+/// The number of rocks per square metre with diameters from `low_m` up to `high_m` at the rock
+/// abundance `k` ([`RockAbundance::number_between_per_m2`], k clamped by [`RockAbundance::new`]),
+/// for the client's decorative scatter's continuity test against the authoritative rocks' law
+/// (plan R11, R11.T6.b).
+///
+/// # Errors
+///
+/// A `JsError` for a k that is a NaN, or diameters that are not positive and finite or are
+/// reversed.
+#[wasm_bindgen(js_name = rockNumberBetweenPerM2)]
+pub fn rock_number_between_per_m2(k: f64, low_m: f64, high_m: f64) -> Result<f64, JsError> {
+    if k.is_nan() {
+        return Err(JsError::new("a rock abundance must not be a NaN"));
+    }
+    let positive = |d: f64| d.is_finite() && d > 0.0;
+    if !positive(low_m) || !positive(high_m) || high_m < low_m {
+        return Err(JsError::new(&format!(
+            "a diameter range from {low_m} m to {high_m} m is not one"
+        )));
+    }
+    Ok(RockAbundance::new(k).number_between_per_m2(Metres::new(low_m), Metres::new(high_m)))
 }
 
 /// The test planet's version, `TEST_PLANET_VERSION` (see the module documentation).
@@ -1876,6 +1910,70 @@ impl JsSurfaceFields {
         Ok(GroundReadoutAnswer::from(
             unless_unsurveyed(answer).unwrap_or(GroundReadout::NotSurveyed),
         ))
+    }
+
+    /// The rock abundance k of each slot of a bake's `palette` on the body at the centre of the
+    /// patch (`face`, `level`, `i`, `j`), narrowed to `f32` (plan R11, R11.T6.a;
+    /// `WorkerFields::rock_abundance`): 0 for an empty slot, a slot of no named substance, and every
+    /// slot where the field does not hold the centre's coarse cell, whose ground draws no pebbles;
+    /// `undefined` where no field of the body is held.
+    ///
+    /// # Errors
+    ///
+    /// A `JsError` naming the problem if the body index is above 65,535, the key names no patch,
+    /// the palette is not 8 × 2 bytes, or a slot's class code names no class or its entry is one no
+    /// palette holds.
+    #[wasm_bindgen(js_name = rockAbundances)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the patch key's four parts, as every keyed export takes them"
+    )]
+    pub fn rock_abundances(
+        &self,
+        system: u64,
+        body: u32,
+        palette: &[u8],
+        face: u32,
+        level: u32,
+        i: u32,
+        j: u32,
+    ) -> Result<Option<Vec<f32>>, JsError> {
+        let body = body_ref(system, body)?;
+        let key = patch_key(face, level, i, j)?;
+        if palette.len() != 2 * MAX_CLASSES {
+            return Err(JsError::new(&format!(
+                "a palette of {} bytes, not {MAX_CLASSES} slots of 2",
+                palette.len()
+            )));
+        }
+        // Checked first, so that a palette of empty slots alone answers `undefined` too.
+        if self.fields.field(body).is_none() {
+            return Ok(None);
+        }
+        let mut out = vec![0.0_f32; MAX_CLASSES];
+        for (k, &[class, entry]) in out.iter_mut().zip(palette.as_chunks::<2>().0) {
+            if entry == NONE_BYTE {
+                continue;
+            }
+            let class = MaterialClass::try_from(class)
+                .map_err(|_| JsError::new(&format!("class code {class} names no class")))?;
+            let material = Material::new(class, entry)
+                .ok_or_else(|| JsError::new(&format!("entry {entry} is one no palette holds")))?;
+            match self.fields.rock_abundance(body, material, key) {
+                #[expect(
+                    clippy::cast_possible_truncation,
+                    reason = "the shader reads f32; an abundance in [0, 0.40] narrows far inside \
+                              its range"
+                )]
+                Ok(abundance) => *k = abundance.k() as f32,
+                // The centre's coarse cell not held: its ground is not surveyed and draws none.
+                Err(ResolveAbundanceError::NotSurveyed(_)) => {}
+                Err(e @ ResolveAbundanceError::NotStarted(_)) => {
+                    return Err(JsError::new(&e.to_string()));
+                }
+            }
+        }
+        Ok(Some(out))
     }
 
     /// The photometry of each slot of a bake's `palette` on the body (see the module

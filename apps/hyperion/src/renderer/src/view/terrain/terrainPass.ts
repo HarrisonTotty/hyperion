@@ -330,6 +330,16 @@ import { draftVertexBits, mergeRefinedNormals } from "./workers/draftNormals";
 import type { RefinedDraft, RefineRequest } from "./workers/pool";
 import { needsRebake, type RebakeLayers } from "./workers/rebake";
 import { DetailSetBake, type DetailSetSource } from "../surface/decoration/detailTextureBake";
+import { decorationPxPerRad, decorationSeed } from "../surface/decoration/decorationLattice";
+import {
+  PEBBLE_FADE_PX,
+  PEBBLE_LARGEST_DIAMETER_M,
+  pebbleLatticeLevels,
+} from "../surface/scatter/pebbleLaw";
+import type { ScatterPatchRecord } from "../surface/scatter/pebblePlace";
+import type { ScatterBox } from "../surface/scatter/scatterCull";
+import type { ScatterKernelSource } from "../surface/scatter/scatterKernels";
+import { ScatterPass, scatterDrawn } from "../surface/scatter/scatterPass";
 
 export { DEFAULT_TERRAIN_VIEW } from "./gpu/resources";
 
@@ -563,6 +573,12 @@ export interface TerrainFrameInput {
    * setting alone; absent, it does not, and the body has the horizon map alone.
    */
   readonly takesCascades?: boolean;
+  /**
+   * Whether the frame may draw decoration (plan R11's `decorationAllowed`): `false` while its
+   * view's frame-rate floor has stepped it down, which sheds the decorative scatter first; absent,
+   * it may. A lit pass whose setting draws no scatter draws none whatever it says.
+   */
+  readonly decoration?: boolean;
   /** A monotonic time for the annunciation's debounce, milliseconds. */
   readonly nowMs: number;
   /**
@@ -671,6 +687,9 @@ export interface TerrainDrawnPatches {
 /** No patches drawn. */
 const NO_PATCHES: TerrainDrawnPatches = { interior: 0, edge: 0, fins: 0, edgeStandIns: 0 };
 
+/** An instance's class sets where it takes none: no ancestor, no place, no fade, no flags. */
+const NO_CELLS: readonly [number, number, number, number] = [NO_PARENT_SLOT, 0, 0, 0];
+
 /**
  * The error unit an edge patch's record takes on the cluster path (plan R14, R14.T1.g), m: past any
  * cascade's texel, so that its clusters cast at stride 1, as its lit mesh does.
@@ -743,6 +762,12 @@ export interface TerrainStepInput {
   readonly views: ReadonlyArray<TerrainPassView>;
   /** Grounded and descending bodies, body-fixed (Design note 9). */
   readonly grounded: ReadonlyArray<GroundContact>;
+  /**
+   * The bodies whose bounding boxes come within 0.2 m of the ground, body-fixed, against which the
+   * decorative scatter is culled (plan R11, R11.T6.a; Design note 7; `scatterCull.ts`'
+   * `nearGround`); absent, none.
+   */
+  readonly scatterBodies?: ReadonlyArray<ScatterBox>;
 }
 
 /** One step's outcome, which every view's draw of the frame reads. */
@@ -816,7 +841,8 @@ export interface TerrainViewFrame {
   readonly visibility: TerrainVisibility | null;
   /**
    * Whether its draws carry decoration (plan R11, R11.T1; Design note 2), for the view's
-   * `DECORATION ON`: what was drawn, not what the setting allows; none is drawn yet.
+   * `DECORATION ON`: what was drawn, not what the setting allows: the decorative scatter's pebbles
+   * where it placed them over a patch whose palette bears any (R11.T6.a).
    */
   readonly decorated: boolean;
   /**
@@ -990,6 +1016,18 @@ export interface TerrainPassOptions {
    */
   readonly detailSets?: DetailSetSource;
   /**
+   * The decorative scatter's density on a lit pass (plan R11, R11.T6.a; `R11Ladder.scatterDensity`),
+   * [0, 1]; absent, its setting's (`SETTINGS[setting].scatterDensity`). At 0, and wherever the
+   * setting draws no decoration, the pass makes no scatter, no kernel and no material of it.
+   */
+  readonly scatterDensity?: number;
+  /**
+   * The decorative scatter's compiled handles (plan R11, R11.T6.a): the session's
+   * `ScatterKernelSet`, made only where its setting draws scatter, on a lit pass of a body. Absent,
+   * the pass makes no scatter; it compiles none of its own (R10.T14.d's rule).
+   */
+  readonly scatter?: ScatterKernelSource;
+  /**
    * Where the pass's finest patches' authoritative rocks are built (plan R11, R11.T4.b; plan R14,
    * R14.T5.c): the procedural builder, in its worker or on this thread. Absent, the pass draws no
    * rock; with it, a lit or wireframe pass on the cluster path with a page pool draws them.
@@ -1122,6 +1160,11 @@ interface Resident {
   readonly opaqueBlocks: TerrainOpaqueBlocks | null;
   /** Its bake's sizes, which the time morph's spans read (R10.T16.i). */
   readonly sizes: BakeSizes;
+  /**
+   * Whether a palette slot of its bake bears pebbles, its rock abundance above 0
+   * (`TerrainLayers.rockAbundances`; plan R11, R11.T6.a): only such a patch is scattered over.
+   */
+  readonly bearsPebbles: boolean;
   /**
    * Its bake's clusters' measured errors (`BakedPatch.clusterErrors`, plan R14, R14.T3.b), which its
    * strides' shared bands take (T3.c), and their largest e₂, e₄ and e₈, m, which an edge beside a
@@ -2374,6 +2417,19 @@ export class TerrainPass {
   readonly #detailSource: DetailSetSource | null;
   /** The body's detail sets on the current device (plan R11, R11.T2.c), or `null` for none. */
   #detailSets: DetailSetBake | null = null;
+  /** The decorative scatter's density ({@link TerrainPassOptions.scatterDensity}). */
+  readonly #scatterDensity: number;
+  /** The decorative scatter's handles ({@link TerrainPassOptions.scatter}), or `null`. */
+  readonly #scatterSource: ScatterKernelSource | null;
+  /** The body's decorative scatter on the current device (plan R11, R11.T6.a), or `null` for none. */
+  #scatter: ScatterPass | null = null;
+  /** The bodies the last step's scatter is culled against, body-fixed ({@link TerrainStepInput}). */
+  #scatterBodies: ReadonlyArray<ScatterBox> = [];
+  /** A view-frame's patches the scatter takes, gathered by `#write`, and their nearest distances. */
+  readonly #scatterPatches: ScatterPatchRecord[] = [];
+  readonly #scatterNearestM: number[] = [];
+  /** Whether the view-frame `#write` last wrote drew the scatter over a patch. */
+  #scattered = false;
   /** Whether it is the occlusion's variant, which binds the pyramid and the visibility (R14.T3.d). */
   readonly #cullOccludes: boolean;
   /** Why the cluster path was refused on the current device, `null` while it stands. */
@@ -2466,6 +2522,8 @@ export class TerrainPass {
     this.#detailSource = this.#shading === "lit" ? (options.detailSets ?? null) : null;
     this.#rockSource =
       this.#shading === "lit" || this.#shading === "wire" ? (options.rocks ?? null) : null;
+    this.#scatterDensity = options.scatterDensity ?? SETTINGS[options.setting].scatterDensity;
+    this.#scatterSource = options.scatter ?? null;
     if (this.#shading === "lit") {
       this.#ownShadows = options.shadows === undefined;
       this.#shadows =
@@ -2487,9 +2545,42 @@ export class TerrainPass {
       }
     }
     this.#detailSets = this.#makeDetailSets();
+    this.#scatter = this.#makeScatter();
     this.#offRestored = this.#device.resources.onRebuilt(() => {
       this.#rebuild();
     });
+  }
+
+  /**
+   * The body's decorative scatter (plan R11, R11.T6.a) on the current device: on a lit pass of a
+   * body given the session's handles, whose setting draws scatter at a density above 0 and whose
+   * geometry does not turn it off (`scatterDrawn`); `null` elsewhere, when no buffer of it is made.
+   */
+  #makeScatter(): ScatterPass | null {
+    const ladder = SETTINGS[this.#setting];
+    const source = this.#scatterSource;
+    if (
+      source === null ||
+      this.#shading !== "lit" ||
+      this.#source.kind !== "body" ||
+      !scatterDrawn(
+        { decoration: ladder.decoration, scatterDensity: this.#scatterDensity },
+        this.#geometry,
+      )
+    ) {
+      return null;
+    }
+    return new ScatterPass(
+      this.#engine,
+      `terrain ${this.#source.body}`,
+      source,
+      this.#scatterDensity,
+    );
+  }
+
+  /** The body's decorative scatter (plan R11, R11.T6.a), or `null` where the pass makes none. */
+  get scatter(): ScatterPass | null {
+    return this.#scatter;
   }
 
   /** A bake of the body's detail sets from {@link TerrainPassOptions.detailSets}, or `null`. */
@@ -2547,8 +2638,14 @@ export class TerrainPass {
    * ways and holds them byte for byte, and a run measures both on one build.
    */
   setGeometry(geometry: GeometrySettings): void {
+    const scattered = geometry.scatter !== this.#geometry.scatter;
     this.#geometry = geometry;
     this.#device.resources.setClassEdges(geometry.classEdges);
+    if (scattered && !this.#disposed) {
+      // The Mac pair's B side, `scatter` `off`, lets the scatter go; its A side makes it again.
+      this.#scatter?.dispose();
+      this.#scatter = this.#makeScatter();
+    }
     // A change of the settings is a cut of the far cascades' holds (plan R14, R14.T6.b).
     for (const state of this.#views.values()) {
       state.farHolds.cut();
@@ -3461,6 +3558,7 @@ export class TerrainPass {
    * @throws RangeError for more than {@link MAX_SELECTION_VIEWS} views.
    */
   step(input: TerrainStepInput): TerrainStep {
+    this.#scatterBodies = input.scatterBodies ?? [];
     return this.#step(input.views, input);
   }
 
@@ -3593,6 +3691,7 @@ export class TerrainPass {
     const set = this.#cascadesFor(state, input);
     // The rocks laid out before the casters, which cull them with the cascades they render.
     const rockPlan = this.#rockPlan(input, mask);
+    this.#scattered = false;
     const {
       draws,
       patches,
@@ -3658,7 +3757,7 @@ export class TerrainPass {
       cascades: set === null ? null : { set, received: state.farPlan?.received ?? set, ...cast },
       overlayDepth,
       visibility: byIds,
-      decorated: false,
+      decorated: this.#scattered,
       ...(rocks.counts === null ? {} : { rocks: rocks.counts }),
     };
   }
@@ -4305,6 +4404,8 @@ export class TerrainPass {
       this.#rocks.clear();
       this.#detailSets?.dispose();
       this.#detailSets = null;
+      this.#scatter?.dispose();
+      this.#scatter = null;
       try {
         device.resources.dispose();
       } finally {
@@ -4543,7 +4644,11 @@ export class TerrainPass {
     // The lost device's sets went with it; the patches that land again name their materials again.
     this.#detailSets?.dispose();
     this.#detailSets = this.#makeDetailSets();
+    // The lost device's scatter went with it too; the new device's is made after it.
+    this.#scatter?.dispose();
+    this.#scatter = null;
     this.#device = this.#makeDevice(old.resources);
+    this.#scatter = this.#makeScatter();
     // The new device's cluster path is made again, and refused again only if its compiler says so.
     this.#clusterRefusal = null;
     // Each view's records sized to the new layout's slots, its debounce kept; its cascades'
@@ -4671,6 +4776,7 @@ export class TerrainPass {
       interior: isInteriorBake(layers),
       opaqueBlocks: upload.opaqueBlocks,
       sizes,
+      bearsPebbles: layers?.rockAbundances?.some((k) => k > 0) === true,
       strideErrors:
         bake.clusterErrors === undefined
           ? null
@@ -5578,6 +5684,16 @@ export class TerrainPass {
     const classSets = lit ? input.classSets : undefined;
     const edgeWeight = lit ? Math.min(Math.max(input.edgeWeight ?? 0, 0), 1) : 0;
     const patchM = finestPatchSizeM(this.#planet);
+    const finestLevel = this.#planet.finestLevel;
+    // The decorative scatter's reach (plan R11, R11.T6.a): where its largest pebble spans more than
+    // its fade's footprint, on a lit pass that scatters and a frame that may draw decoration; 0
+    // for none.
+    this.#scatterPatches.length = 0;
+    this.#scatterNearestM.length = 0;
+    const scatterReachM =
+      lit && this.#scatter?.ready === true && input.decoration !== false
+        ? (PEBBLE_LARGEST_DIAMETER_M * decorationPxPerRad(input.view)) / PEBBLE_FADE_PX
+        : 0;
     if (strides && drawSet !== undefined) {
       this.#sharedStridesOf(device, state, input, drawSet, mask, holds);
     }
@@ -5740,6 +5856,7 @@ export class TerrainPass {
             edgeFades === 0 &&
             cornerFades === 0,
         );
+        let cells: readonly [number, number, number, number] = NO_CELLS;
         if (classSets !== undefined) {
           // The ancestor of the field's cells' level: the patch itself at that level, none coarser.
           const cellsLevel = this.#surveyedFloorLevel;
@@ -5748,12 +5865,44 @@ export class TerrainPass {
             cellsLevel > 0 && levels >= 0 && levels <= MAX_CELL_ANCESTOR_LEVELS
               ? device.cache.residentOver(patch.key, cellsLevel)
               : undefined;
-          target.setCells(
-            ancestor?.slot ?? NO_PARENT_SLOT,
-            ancestor === undefined ? 0 : cellAncestorPlace(levels, patch.key.i, patch.key.j),
-            Math.min(Math.max(classSets.cellFade, 0), 1),
-            classSets.morph ? CLASS_MORPH : 0,
+          const ancestorSlot = ancestor?.slot ?? NO_PARENT_SLOT;
+          const place =
+            ancestor === undefined ? 0 : cellAncestorPlace(levels, patch.key.i, patch.key.j);
+          const fade = Math.min(Math.max(classSets.cellFade, 0), 1);
+          const flags = classSets.morph ? CLASS_MORPH : 0;
+          target.setCells(ancestorSlot, place, fade, flags);
+          cells = [ancestorSlot, place, f32Bits(fade), flags];
+        }
+        if (
+          scatterReachM > 0 &&
+          within === null &&
+          !drawn.standIn &&
+          level + 2 >= finestLevel &&
+          resident?.bearsPebbles === true
+        ) {
+          // A whole patch of the finest levels near enough to show a pebble (plan R11, R11.T6.a).
+          const originM = {
+            x: r0.x * o.x + r0.y * o.y + r0.z * o.z - cameraM.x,
+            y: r1.x * o.x + r1.y * o.y + r1.z * o.z - cameraM.y,
+            z: r2.x * o.x + r2.y * o.y + r2.z * o.z - cameraM.z,
+          };
+          const nearestM = Math.max(
+            Math.hypot(originM.x, originM.y, originM.z) - patch.boundingRadiusM,
+            0,
           );
+          if (nearestM < scatterReachM) {
+            this.#scatterPatches.push({
+              originM,
+              slot: patch.slot,
+              morphStartM: morph[2 * level] ?? 0,
+              morphEndM: morph[2 * level + 1] ?? 0,
+              parentSlot,
+              parentQuadrant: parentQuadrant(patch.key),
+              key: patch.key,
+              cells,
+            });
+            this.#scatterNearestM.push(nearestM);
+          }
         }
         if (edgeWeight > 0) {
           target.setEdgeWeight(edgeWeight);
@@ -5871,6 +6020,9 @@ export class TerrainPass {
             ...edge,
           ]
         : draws;
+    // The decorative scatter's pebbles over the lit draw's bindings (plan R11, R11.T6.a), placed and
+    // culled now and drawn after every draw of the terrain's that never discards.
+    const pebbles = lit && draws.length > 0 ? this.#scatterDraws(device, state, input) : NO_DRAWS;
     // The draws that never discard lead (plan R14, R14.T2.e): the lit pass's opaque buckets on the
     // cluster path, else the interior patches' draw.
     const opaqueDraws =
@@ -5918,6 +6070,7 @@ export class TerrainPass {
                     finLitBase,
                   )),
               ...edge,
+              ...pebbles,
             ],
             entries: clusters.buckets.passes * clusters.buckets.passEntries,
           }
@@ -5978,7 +6131,7 @@ export class TerrainPass {
     state.lateStill = !mixes && device.stills.size > 0;
     if (!state.lateStill) {
       return {
-        draws: drawn,
+        draws: pebbles.length === 0 ? drawn : [...drawn, ...pebbles],
         patches,
         count,
         cast,
@@ -5998,7 +6151,7 @@ export class TerrainPass {
       passes.push({ ...pass, draws: pass.draws.map(still) });
     }
     return {
-      draws: drawn.map(still),
+      draws: [...drawn, ...pebbles].map(still),
       patches,
       count,
       cast: cast === NO_CASTERS ? cast : { ...cast, passes },
@@ -6366,6 +6519,92 @@ export class TerrainPass {
     const draws =
       interior === null ? [draw] : state.instances.count > 0 ? [interior, draw] : [interior];
     return { draws, live };
+  }
+
+  /**
+   * View `state`'s decorative scatter this frame (plan R11, R11.T6.a; `ScatterPass.frame`): the
+   * patches `#write` gathered, nearest first, placed and culled over the lit draw's bindings, the
+   * body's craft near the ground in the passes' frame culling them, and their draws; none without
+   * a scatter, a lit draw or a patch near enough. Notes whether it drew (`#scattered`).
+   */
+  #scatterDraws(
+    device: Device,
+    state: ViewState,
+    input: TerrainViewFrameInput,
+  ): ReadonlyArray<DrawItem> {
+    const scatter = this.#scatter;
+    const lit = state.draw;
+    const { resources } = device;
+    const vertices = resources.field(
+      resources.layout.vertexPath === "baked-offsets" ? "offsets" : "heights",
+    );
+    const classLayers = resources.field("class-layers");
+    if (
+      scatter === null ||
+      lit === null ||
+      // The session's handles are of its lit layout's path, which a pass's own resolves alike.
+      this.#scatterSource?.kernels?.path !== resources.layout.vertexPath ||
+      vertices === null ||
+      classLayers === null ||
+      this.#scatterPatches.length === 0 ||
+      this.#source.kind !== "body"
+    ) {
+      return NO_DRAWS;
+    }
+    const { view } = input;
+    const { cameraM } = view;
+    const rows = view.rotation.rows;
+    const order = this.#scatterNearestM
+      .map((nearestM, n) => ({ nearestM, n }))
+      .toSorted((a, b) => a.nearestM - b.nearestM);
+    const patches = order.flatMap(({ n }) => this.#scatterPatches[n] ?? []);
+    const [r0, r1, r2] = rows;
+    const toPasses = (v: Vec3): Vec3 => ({
+      x: r0.x * v.x + r0.y * v.y + r0.z * v.z,
+      y: r1.x * v.x + r1.y * v.y + r1.z * v.z,
+      z: r2.x * v.x + r2.y * v.y + r2.z * v.z,
+    });
+    const bodies = this.#scatterBodies
+      .map((box): ScatterBox => {
+        const c = toPasses(box.centreM);
+        return {
+          centreM: { x: c.x - cameraM.x, y: c.y - cameraM.y, z: c.z - cameraM.z },
+          axes: [toPasses(box.axes[0]), toPasses(box.axes[1]), toPasses(box.axes[2])],
+          halfExtentsM: box.halfExtentsM,
+        };
+      })
+      .toSorted((a, b) => norm(a.centreM) - norm(b.centreM));
+    const pxPerRad = decorationPxPerRad(view);
+    const frustum = frustumOf(
+      { orientation: view.orientation, fovXRad: view.fovXRad, viewport: view.viewport },
+      OVERLAY_CULL_MARGIN_RAD,
+    );
+    const { occluderRadiusM } = horizonCone(
+      this.#planet,
+      rotateToBodyFixed(view.rotation, cameraM),
+    );
+    const frame = scatter.frame({
+      patches,
+      nearestM: order.map(({ nearestM }) => nearestM),
+      levels: pebbleLatticeLevels(this.#planet.finestLevel, finestPatchSizeM(this.#planet)),
+      rotationRows: [rows[0], rows[1], rows[2]],
+      pxPerRad,
+      seed: decorationSeed(this.#source.detailSeed),
+      bodies,
+      cull: {
+        kind: "camera",
+        planes: frustum.planes,
+        horizon: cullHorizonOf(cameraM, occluderRadiusM),
+        order: "appended",
+        toleranceRad: this.#terrain.tauPx / pxPerRad,
+        strideCap: 1,
+      },
+      viewAxis: viewAxisOf(view.orientation),
+      ground: { vertices, slots: resources.slotRecords, classLayers },
+      base: lit,
+    });
+    this.#scattered = frame.entries > 0;
+    return frame.draws;
   }
 
   /**

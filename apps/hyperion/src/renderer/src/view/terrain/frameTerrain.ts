@@ -431,6 +431,12 @@ export interface LiveFrameTerrainInput {
    * clusters culled by the tile's frustum; absent, the view's whole.
    */
   readonly tile?: TerrainViewFrameInput["tile"];
+  /**
+   * Whether the view's frame-rate floor has stepped it down (`BudgetedScale.airStepped`), which
+   * sheds its decoration, the decorative scatter first (plan R11, R11.T6.a; `decorationAllowed`);
+   * `false` where absent.
+   */
+  readonly floorStepped?: boolean | undefined;
 }
 
 /** No body's first index: a frame drawn forward. */
@@ -595,6 +601,7 @@ export class LiveFrameTerrain implements FrameTerrain {
         exposureScale,
         takesCascades: index === cascades,
         nowMs,
+        decoration: this.#input.floorStepped !== true,
         ...(occlusion === undefined ? {} : { occlusion }),
         ...(tile === undefined ? {} : { tile }),
       });

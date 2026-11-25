@@ -2099,6 +2099,9 @@ describe("the terrain session's materials (R10.T14.d; decision-r10-t14a §1)", (
   /** {@link HIGH}, then their still forms (R10.T16.i), compiled after them. */
   const HIGH_FORMS = [...HIGH, ...HIGH.map((name) => `${name}-still`)];
 
+  /** The high setting's decorative scatter's material, compiled after its forms (R11.T6.a). */
+  const SCATTER = ["scatter-pebbles-baked-offsets"];
+
   /**
    * What the moon's passes draw with on the high setting ({@link drawnWith}): its patches by the
    * survey's edge last by the edge patches' fin form on the cluster path (R14.T1.g), each by its
@@ -2126,25 +2129,32 @@ describe("the terrain session's materials (R10.T14.d; decision-r10-t14a §1)", (
 
   it("compiles its setting's lit, depth, caster and wireframe materials as it is made", async () => {
     const h = await harness();
-    expect([await h.session.compiled, compiled(h)]).toEqual([HIGH_FORMS.length, HIGH_FORMS]);
+    expect([await h.session.compiled, await h.session.scatterKernels?.ready, compiled(h)]).toEqual([
+      HIGH_FORMS.length,
+      true,
+      [...HIGH_FORMS, ...SCATTER],
+    ]);
   });
 
   it("compiles the low setting's on face differences", async () => {
     const h = await harness("low");
     await h.session.compiled;
     expect(compiled(h)).toEqual(LOW_FORMS);
+    // The low setting draws no scatter, and compiles none (R11.T6.b).
+    expect(h.session.scatterKernels).toBeNull();
   });
 
   it("compiles nothing at a hand-over in either style, its passes drawing its materials", async () => {
     const h = await harness();
     await h.session.compiled;
+    await h.session.scatterKernels?.ready;
     await handedOverBy(h, BOTH);
     await streamBakesOf(h, 4, BOTH_OVER_FIRST_CELLS);
-    expect([compiled(h, HIGH_FORMS.length), drawnWith(h), h.engine.live.materials]).toEqual([
-      [],
-      HIGH_DRAWN,
-      HIGH_FORMS.length,
-    ]);
+    expect([
+      compiled(h, HIGH_FORMS.length + SCATTER.length),
+      drawnWith(h),
+      h.engine.live.materials,
+    ]).toEqual([[], HIGH_DRAWN, HIGH_FORMS.length + SCATTER.length]);
   });
 
   it("compiles nothing at a hand-over on the low setting either", async () => {
@@ -2169,17 +2179,26 @@ describe("the terrain session's materials (R10.T14.d; decision-r10-t14a §1)", (
   it("compiles its materials once again after a device loss, and its passes none", async () => {
     const h = await harness();
     await h.session.compiled;
+    await h.session.scatterKernels?.ready;
     await handedOverBy(h, BOTH);
     await streamBakesOf(h, 4, BOTH_OVER_FIRST_CELLS);
     h.engine.loseDevice();
     h.engine.restore();
     await settle();
     await streamBakesOf(h, 4, BOTH_OVER_FIRST_CELLS);
+    await h.session.scatterKernels?.ready;
+    // The scatter's material once again (R11.T6.a), whenever its restore asks it among the rest.
+    const again = compiled(h, HIGH_FORMS.length + SCATTER.length);
+    expect(again.filter((name) => SCATTER.includes(name))).toEqual(SCATTER);
     // The setting's again, two at a time, but for the wireframe's material, which the instrument's
     // pass, made again at the restore, waits for its first frame on and asks ahead of the rest; and
     // their still forms after them, which no pass's ask hurries.
     const wire = "terrain-wire-baked-offsets";
-    expect([compiled(h, HIGH_FORMS.length), drawnWith(h), h.engine.live.materials]).toEqual([
+    expect([
+      again.filter((name) => !SCATTER.includes(name)),
+      drawnWith(h),
+      h.engine.live.materials,
+    ]).toEqual([
       [
         ...HIGH.slice(0, 2),
         wire,
@@ -2187,20 +2206,21 @@ describe("the terrain session's materials (R10.T14.d; decision-r10-t14a §1)", (
         ...HIGH.map((name) => `${name}-still`),
       ],
       HIGH_DRAWN,
-      HIGH_FORMS.length,
+      HIGH_FORMS.length + SCATTER.length,
     ]);
   });
 
   it("releases its materials only at its teardown, not with a pass", async () => {
     const h = await harness();
     await h.session.compiled;
+    await h.session.scatterKernels?.ready;
     await handedOverBy(h, BOTH);
     h.session.noteView(PRIMARY, notHanding(7e7));
     h.session.noteView(INSTRUMENT, wireAt(7e7, { streamPriority: "secondary" }));
     h.session.step();
     const kept = [h.session.passBodies.size, h.engine.live.materials];
     h.session.dispose();
-    expect([kept, h.engine.live.materials]).toEqual([[0, HIGH_FORMS.length], 0]);
+    expect([kept, h.engine.live.materials]).toEqual([[0, HIGH_FORMS.length + SCATTER.length], 0]);
   });
 });
 

@@ -55,6 +55,8 @@ export function queryOverride(parameters: URLSearchParams): GeometryOverride {
     planetshineText === "record" || planetshineText === "brightest" ? planetshineText : undefined;
   const setsText = parameters.get("geometry-decorationSets");
   const decorationSets = setsText === "generated" || setsText === "off" ? setsText : undefined;
+  const scatterText = parameters.get("geometry-scatter");
+  const scatter = scatterText === "drawn" || scatterText === "off" ? scatterText : undefined;
   const selectionText = parameters.get("geometry-selectionScale");
   const selectionScale =
     selectionText === "presented" || selectionText === "rendered" ? selectionText : undefined;
@@ -97,6 +99,7 @@ export function queryOverride(parameters: URLSearchParams): GeometryOverride {
     ...(figureShading === undefined ? {} : { figureShading }),
     ...(terrainPlanetshine === undefined ? {} : { terrainPlanetshine }),
     ...(decorationSets === undefined ? {} : { decorationSets }),
+    ...(scatter === undefined ? {} : { scatter }),
     ...(selectionScale === undefined ? {} : { selectionScale }),
     ...(classEdges === undefined ? {} : { classEdges }),
     ...(meshCasters === undefined ? {} : { meshCasters }),

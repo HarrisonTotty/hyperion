@@ -177,6 +177,14 @@ export interface TerrainLayers {
    */
   readonly photometry: Float32Array;
   /**
+   * Each palette slot's rock abundance k at the patch's centre (plan R11, R11.T6.a; `src/wasm.rs`'s
+   * `rockAbundances`, `WorkerFields::rock_abundance`), 8 values in [0, 0.40], 0 for an empty slot
+   * or one that bears no rocks: the law the decorative scatter's pebbles take, the authoritative
+   * rocks' own (`gpu/resources.ts` writes it into each slot's law). Absent where a bake carries
+   * none, as a fixture's: its ground draws no pebbles.
+   */
+  readonly rockAbundances?: Float32Array;
+  /**
    * The ground's maturity at the patch's band level and its parent's, with the albedo nodes it is
    * drawn through (R10.T1.c's client half); absent where the bake has no maturity layer: a body
    * whose header carries no maturity, or a bake without weights.
@@ -837,13 +845,16 @@ export function bakeTransferables(bake: BakedPatch): Transferable[] {
       horizonFar.buffer,
       horizonRefusedCells.buffer,
     );
-    const { maturity } = bake.layers;
+    const { maturity, rockAbundances } = bake.layers;
     if (maturity !== undefined) {
       buffers.push(maturity.codes.buffer, maturity.nodes.buffer);
     }
     const { rocks } = bake.layers;
     if (rocks !== undefined) {
       buffers.push(rocks.words.buffer);
+    }
+    if (rockAbundances !== undefined) {
+      buffers.push(rockAbundances.buffer);
     }
   }
   return buffers;

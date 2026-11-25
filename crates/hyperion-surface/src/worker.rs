@@ -147,7 +147,8 @@ use crate::reading::{
     surveyed_reading,
 };
 use crate::scatter::{
-    FindRocksError, Rock, RockBakeHook, RockCache, rocks_near, surface_height_with_rocks,
+    FindRocksError, Rock, RockAbundance, RockBakeHook, RockCache, material_site, rock_abundance,
+    rocks_near, surface_height_with_rocks,
 };
 use crate::synth::craters::CraterOctaves;
 use crate::synth::levels::HeldChannels;
@@ -156,6 +157,9 @@ use crate::synth::{
     omitted_variance_in,
 };
 use crate::wire::{DecodeBlockError, DecodedBlock, decode_block};
+
+/// A patch's centre vertex along each side: vertex 32 of 65.
+const PATCH_CENTRE_VERTEX: u8 = 32;
 
 /// The values a level's row of a [level table](WorkerFields::level_table) holds: 4.
 pub const LEVEL_TABLE_STRIDE: usize = 4;
@@ -746,6 +750,31 @@ pub enum ResolvePhotometryError {
     /// The material's entry is past the body's palette.
     Properties(ResolvePropertiesError),
 }
+
+/// Why [`WorkerFields::rock_abundance`] gave no abundance.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ResolveAbundanceError {
+    /// No field of the body is held.
+    NotStarted(BodyRef),
+    /// The field does not hold the coarse cell the site reads ([`material_site`]).
+    NotSurveyed(QueryHeightError),
+}
+
+impl std::fmt::Display for ResolveAbundanceError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotStarted(body) => write!(
+                f,
+                "no field of body {} of system {:#x} is held",
+                body.body_index(),
+                body.raw_system_id()
+            ),
+            Self::NotSurveyed(e) => write!(f, "{e}"),
+        }
+    }
+}
+
+impl std::error::Error for ResolveAbundanceError {}
 
 impl std::fmt::Display for ResolvePhotometryError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -2708,6 +2737,37 @@ impl WorkerFields {
             })),
             None => GroundReadout::NotSurveyed,
         })
+    }
+
+    /// The rock abundance k of the ground of `material` on `body` at the centre of the patch
+    /// `key` (plan R11, R11.T6.a): [`rock_abundance`] of its [`material_site`] at the patch's centre
+    /// vertex, so that R11's decorative pebbles there take the size–frequency law the authoritative
+    /// rocks take (Design note 4), the palette entry's family, the header's surface age and
+    /// atmosphere and the coarse crater whose ejecta add the most at the patch's centre.
+    ///
+    /// The ejecta's term is read at the centre alone: a coarse crater's rim radius is many times a
+    /// finest patch's width, so it changes little over one (R11.T6.a's lean, 2026-11-18).
+    ///
+    /// # Errors
+    ///
+    /// [`ResolveAbundanceError::NotStarted`] where no field of `body` is held, and
+    /// [`ResolveAbundanceError::NotSurveyed`] where the field does not hold the centre's coarse
+    /// cell.
+    pub fn rock_abundance(
+        &self,
+        body: BodyRef,
+        material: Material,
+        key: PatchKey,
+    ) -> Result<RockAbundance, ResolveAbundanceError> {
+        let field = &self
+            .bodies
+            .get(&body)
+            .ok_or(ResolveAbundanceError::NotStarted(body))?
+            .field;
+        let centre = key.vertex_dir(PATCH_CENTRE_VERTEX, PATCH_CENTRE_VERTEX);
+        let site = material_site(field, material.class(), Some(material.entry()), centre)
+            .map_err(ResolveAbundanceError::NotSurveyed)?;
+        Ok(rock_abundance(&site))
     }
 
     /// The photometry `material` is drawn with on `body` ([`DrawnPhotometry`]).

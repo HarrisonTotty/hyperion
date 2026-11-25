@@ -17,13 +17,14 @@
  *   at most the path's, camera passes and cascades as the cluster cull takes them (`cullPass.ts`),
  *   each instance entering those its pass mask sets.
  * - **Memory**: the instances, 32 B each, the count, the lists, 4 B an entry, `passes × templates ×
- *   capacity` of them, and the arguments, all `geometry-clusters` (R11's `scatter` category is its
- *   producer's own buffers'). The lists are within `buckets.ts`' 2²⁴ entries: at four templates and
+ *   capacity` of them, and the arguments, all `geometry-clusters` but the instances and the count
+ *   where the consumer names its own category (R11's pebbles, `scatter`). The lists are within `buckets.ts`' 2²⁴ entries: at four templates and
  *   one pass, 4,194,304 instances.
  */
 
 import type { Vec3 } from "../../geometry/vec3";
 import { BUFFER_USAGE } from "../engine/gpuFlags";
+import type { MemoryCategory } from "../engine/memory";
 import type {
   BufferHandle,
   ComputeHandle,
@@ -83,6 +84,8 @@ export class ParticlePath {
   #disposed = false;
 
   /**
+   * @param category - The instances' and the count's memory category: `geometry-clusters`, or
+   *   its consumer's own (R11's `scatter`); the buckets are `geometry-clusters` whatever it is.
    * @throws RangeError for a capacity that is not a whole number from 1, passes not 1 to
    *   {@link MAX_CULL_PASSES}, or lists past `buckets.ts`' most entries.
    */
@@ -92,6 +95,7 @@ export class ParticlePath {
     templates: ParticleTemplates,
     capacity: number,
     passes: number,
+    category: MemoryCategory = "geometry-clusters",
   ) {
     if (!Number.isInteger(capacity) || capacity < 1) {
       throw new RangeError(
@@ -118,13 +122,13 @@ export class ParticlePath {
       name: `${name} instances`,
       bytes: capacity * PARTICLE_INSTANCE_BYTES,
       usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST | BUFFER_USAGE.COPY_SRC,
-      category: "geometry-clusters",
+      category,
     });
     this.count = engine.createBuffer({
       name: `${name} count`,
       bytes: COUNT_BYTES,
       usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST | BUFFER_USAGE.COPY_SRC,
-      category: "geometry-clusters",
+      category,
     });
   }
 

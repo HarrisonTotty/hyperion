@@ -462,12 +462,35 @@ pub(crate) fn site_at<F: FieldView>(
     cache: &mut SynthCache,
     dir: [f64; 3],
 ) -> Result<RockSite, QueryHeightError> {
-    let field = synth.field();
+    let material = material_at(synth, cache, xyz_to_face_uv(dir))?;
+    material_site(synth.field(), material.class(), material.entry(), dir)
+}
+
+/// The site of the ground of the form `class` of the palette entry `entry` (`None` where the palette
+/// names none) at the unit direction `dir` of a point's foot on `field`'s body: [`rock_site`]'s,
+/// for a material already classified there. The palette entry's family, the header's surface age
+/// and atmosphere class, and the coarse crater of the foot's coarse cell whose ejecta add the most
+/// there (see the [module documentation](self)).
+///
+/// R11.T6.a's decorative scatter reads it at a patch's centre for each material of the patch's
+/// palette (`WorkerFields::rock_abundances`), so that its pebbles take the law the rocks do.
+///
+/// # Errors
+///
+/// [`QueryHeightError::NotSurveyed`] naming the foot's coarse cell where `field` does not hold it.
+///
+/// # Panics
+///
+/// If `dir` is not a finite direction, or if a crater's term is not finite (a bug).
+pub fn material_site<F: FieldView>(
+    field: &F,
+    class: MaterialClass,
+    entry: Option<u8>,
+    dir: [f64; 3],
+) -> Result<RockSite, QueryHeightError> {
     let header = field.header();
     let figure = header.figure();
-    let material = material_at(synth, cache, xyz_to_face_uv(dir))?;
-    let mechanics = material
-        .entry()
+    let mechanics = entry
         .and_then(|entry| header.palette().get(entry))
         .map(|entry| entry.mechanics);
     let surface_age = header.surface_age();
@@ -501,7 +524,7 @@ pub(crate) fn site_at<F: FieldView>(
         }
     }
     Ok(RockSite::new(
-        material.class(),
+        class,
         mechanics,
         surface_age,
         atmosphere,

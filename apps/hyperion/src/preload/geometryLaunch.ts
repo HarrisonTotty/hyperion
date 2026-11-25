@@ -13,8 +13,8 @@
  * `standInStrides` `off`, `own-grids` or `all`, `hiddenMarks` `drawn` or `culled`, `edgeStandIns`
  * `off`, `surveyed` or `masks`, `discCells` `per-cell` or `packed`, `figureShading` `forward`
  * or `screen`, `terrainPlanetshine` `record` or `brightest`, `decorationSets` `generated` or
- * `off`, `selectionScale` `presented` or `rendered`, `classEdges` `shaped` or `off`, and
- * `meshCasters` `cast` or `off` (plan R14, R14.T6.c). As
+ * `off`, `scatter` `drawn` or `off`, `selectionScale` `presented` or `rendered`, `classEdges`
+ * `shaped` or `off`, and `meshCasters` `cast` or `off` (plan R14, R14.T6.c). As
  * `qualityLaunch.ts` does for the setting, it rides in the renderer's own `argv` as an extra
  * switch, `--hyperion-geometry=<override>`, present only when the launch gave one, in the
  * canonical form {@link geometryText} writes, and the preload gives it to
@@ -54,6 +54,7 @@ const FIELDS = [
   "figureShading",
   "terrainPlanetshine",
   "decorationSets",
+  "scatter",
   "selectionScale",
   "classEdges",
   "meshCasters",
@@ -84,6 +85,7 @@ const VALUES: Readonly<Record<(typeof FIELDS)[number], string>> = {
   figureShading: "forward or screen",
   terrainPlanetshine: "record or brightest",
   decorationSets: "generated or off",
+  scatter: "drawn or off",
   selectionScale: "presented or rendered",
   classEdges: "shaped or off",
   meshCasters: "cast or off",
@@ -215,6 +217,12 @@ function readField(out: OverrideBeingRead, field: (typeof FIELDS)[number], text:
         throw refused(field, text);
       }
       out.decorationSets = text;
+      break;
+    case "scatter":
+      if (text !== "drawn" && text !== "off") {
+        throw refused(field, text);
+      }
+      out.scatter = text;
       break;
     case "selectionScale":
       if (text !== "presented" && text !== "rendered") {

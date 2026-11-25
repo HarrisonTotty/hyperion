@@ -35,8 +35,11 @@
  *   its depth, level and month-blended wind (R11.T8.b, `ocean/oceanMap.ts`).
  * - `rings`: plan R11's rings (its Design note 18): the shadowing table's two textures, each
  *   ring's radial profile and the slabs' records (R11.T9.c, `rings/ringSlabs.ts`).
- * - `scatter`: plan R11's scatter: the authoritative rocks' page pool, their pages and records,
- *   and each view's rock instances and records (R11.T4.b; plan R14, R14.T5.c).
+ * - `scatter`: plan R11's scatter (its Design note 18): the authoritative rocks' page pool, their
+ *   pages and records, and each view's rock instances and records (R11.T4.b; plan R14, R14.T5.c);
+ *   and the decorative scatter, each lit terrain pass's pebbles, their particle path's instances
+ *   and count and their placement's records (R11.T6.a, `surface/scatter/scatterPass.ts`), the
+ *   path's buckets staying `geometry-clusters`.
  * - `shadows`: the terrain's shadow cascades, one set of four 2,048² `depth32float` layers for the
  *   engine, 64 MiB (R10.T9.b; R12's name, plan 12's `MemoryItem`).
  * - `sky-cube`: R06's baked star cube and the buffer of its scale (R06.T13.g).

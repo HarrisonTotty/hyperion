@@ -4708,3 +4708,59 @@ fn worker_ocean_map_is_complete_after_every_block() {
         assert_eq!(partial.cells().len(), surveyed, "block {k}");
     }
 }
+
+/// R11.T6.a: a material's rock abundance at a patch's centre is the authoritative rocks' own law
+/// there (`rock_site`'s k for the ground `material_at` classifies at the centre, the same law for
+/// every other form), none on a form that bears no rocks; a body not held is refused, and a patch
+/// whose centre's coarse cell is not held answers `NotSurveyed`.
+#[test]
+fn worker_rock_abundance_is_the_rocks_site_law_at_the_patch_centre() {
+    let f = fixture();
+    let fields = f.worker();
+    let field = fields.field(f.body).unwrap();
+    let level = field.header().level().get();
+    let first = *f.first.first().unwrap();
+    let key = PatchKey::containing(level + 6, first.vertex_dir(32, 32)).unwrap();
+    let centre = key.vertex_dir(32, 32);
+    let synth = Synthesiser::new(field, SEED);
+    let mut cache = SynthCache::new();
+    let ground = material_at(&synth, &mut cache, crate::cube::xyz_to_face_uv(centre)).unwrap();
+    let entry = ground
+        .entry()
+        .expect("the Moon-like ground names its substance");
+    let figure = field.header().figure();
+    let rocks = crate::scatter::rock_site(&synth, &mut cache, &figure.point(centre)).unwrap();
+    let drawn = fields
+        .rock_abundance(f.body, Material::new(ground.class(), entry).unwrap(), key)
+        .unwrap();
+    assert_eq!(bits(drawn.k()), bits(rock_abundance(&rocks).k()));
+    assert!(!drawn.is_none(), "the Moon-like ground bears rocks");
+    for class in [
+        MaterialClass::Bedrock,
+        MaterialClass::Regolith,
+        MaterialClass::Dust,
+        MaterialClass::Sand,
+        MaterialClass::Seabed,
+    ] {
+        let site = material_site(field, class, Some(entry), centre).unwrap();
+        let k = fields
+            .rock_abundance(f.body, Material::new(class, entry).unwrap(), key)
+            .unwrap();
+        assert_eq!(bits(k.k()), bits(rock_abundance(&site).k()), "{class:?}");
+        if matches!(class, MaterialClass::Sand | MaterialClass::Seabed) {
+            assert!(k.is_none(), "{class:?} bears no rocks");
+        }
+    }
+    let other = BodyRef::new(f.body.raw_system_id(), f.body.body_index() ^ 1);
+    let material = Material::new(MaterialClass::Bedrock, entry).unwrap();
+    assert_eq!(
+        fields.rock_abundance(other, material, key),
+        Err(ResolveAbundanceError::NotStarted(other))
+    );
+    // A patch far from the surveyed cells: its centre's coarse cell is not held.
+    let far = PatchKey::containing(level + 6, unit_dir([-1.0, -0.2, 0.3])).unwrap();
+    assert!(matches!(
+        fields.rock_abundance(f.body, material, far),
+        Err(ResolveAbundanceError::NotSurveyed(_))
+    ));
+}

@@ -104,7 +104,8 @@ function wireframeRows(
  * A photorealistic view is a `primary`: R06's sky and its bake are the star field's row; R07's disc
  * cells, discs and symbology `other`, with the culls of the hulls and mesh occluders its symbology
  * draws through R02's wireframe list (`VIEW`'s own ship, R12.T4.c); R10's cascades `shadows`; the bodies' passes, the terrain's
- * and plan R14's visibility buffer, pyramid and culls, and R11's detail sets, `terrain`; R08's
+ * and plan R14's visibility buffer, pyramid and culls, and R11's detail sets, `terrain`; R11's
+ * decorative scatter's placement and cull `scatter` (its pebbles' draws ride the bodies pass); R08's
  * tables, its per-frame passes, R07's histogram and its bloom and tone mapping their own rows;
  * R05's own `spike display`, the test planet's, `other`. A wireframe view's passes, the shared ones
  * among them, are `cockpit-instruments` on an `instrument` and `station-wireframe` on a `station`.
@@ -138,6 +139,8 @@ export const PASS_ROWS: Readonly<Record<PassKey, BudgetRow>> = {
   "primary:body cluster cull": "terrain",
   "primary:rock cull": "terrain",
   "primary:decoration": "terrain",
+  "primary:scatter": "scatter",
+  "primary:scatter cull": "scatter",
   "primary:atmosphere tables": "atmosphere-tables",
   "primary:atmosphere view": "atmosphere-frame",
   "primary:atmosphere behind": "atmosphere-frame",

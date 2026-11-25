@@ -479,11 +479,15 @@ function fakeSource(
   };
 }
 
-/** A frame terrain of `VIEW` over `source`, presented at `presentedPx`, selecting at `selectionPx`. */
+/**
+ * A frame terrain of `VIEW` over `source`, presented at `presentedPx`, selecting at `selectionPx`,
+ * its frame-rate floor stepped where `floorStepped`.
+ */
 function frameTerrain(
   source: ViewTerrainSource,
   presentedPx: ViewSize = VIEWPORT,
   selectionPx?: ViewSize,
+  floorStepped?: boolean,
 ): LiveFrameTerrain {
   return new LiveFrameTerrain(source, {
     view: VIEW,
@@ -493,6 +497,7 @@ function frameTerrain(
     exposureScale: EXPOSURE,
     occluderSlopePx: 3,
     nowMs: 1_234,
+    floorStepped,
   });
 }
 
@@ -581,6 +586,8 @@ describe("a view's frame terrain (R10.T16.c)", () => {
           // The one body handed over takes the view's cascades (R10.T9.b, D3).
           takesCascades: true,
           nowMs: 1_234,
+          // Its frame-rate floor calm: its decoration, the decorative scatter, may be drawn.
+          decoration: true,
         },
       },
     ]);
@@ -617,6 +624,15 @@ describe("a view's frame terrain (R10.T16.c)", () => {
     const { source, drawn } = fakeSource();
     frameTerrain(source, RETINA_VIEWPORT, VIEWPORT).draws(plan, [body]);
     expect(drawn.map(({ input }) => input.view)).toEqual([terrainViewOf(body, CAMERA, VIEWPORT)]);
+  });
+
+  it("draws no decoration while the view's frame-rate floor has stepped it down, the scatter shed first (R11.T6.a)", () => {
+    const near = bodyAt(3 * A);
+    const plan = planOf(near);
+    const { source, drawn } = fakeSource();
+    frameTerrain(source, VIEWPORT, undefined, true).draws(plan, [near]);
+    frameTerrain(source).draws(plan, [near]);
+    expect(drawn.map(({ input }) => input.decoration)).toEqual([false, true]);
   });
 
   it("gives the view's cascades to the body over whose datum the camera stands lowest, and not the other (R10.T9.b, D3)", () => {

@@ -214,6 +214,7 @@ describe("the spike report's check", () => {
         figureShading: "forward",
         terrainPlanetshine: "record",
         decorationSets: "generated",
+        scatter: "drawn",
         selectionScale: "presented",
         classEdges: "shaped",
         meshCasters: "off",

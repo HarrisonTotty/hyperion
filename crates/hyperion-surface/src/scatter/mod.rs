@@ -53,8 +53,8 @@ pub use place::{
 };
 pub use shape::{MAX_REACH_SHARE, ROCK_ASPECT, ROCK_EXPONENT, Rock, RockShape};
 pub use site::{
-    AIRLESS_PRESSURE, AtmosphereClass, CraterEjecta, RockSite, atmosphere_class, rock_abundance,
-    rock_site,
+    AIRLESS_PRESSURE, AtmosphereClass, CraterEjecta, RockSite, atmosphere_class, material_site,
+    rock_abundance, rock_site,
 };
 
 /// The height at and above which a rigid instance must be authoritative: 0.2 m.

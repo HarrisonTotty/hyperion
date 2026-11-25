@@ -817,6 +817,7 @@ export class ViewFrameDrawer {
             exposureScale: exposed,
             occluderSlopePx: list.occluderSlopePx,
             nowMs: inputs.terrain.nowMs,
+            floorStepped: inputs.floorStepped,
           });
     try {
       if (sky !== null && sky !== this.#bandFor) {

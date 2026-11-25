@@ -298,6 +298,12 @@ export interface GeometrySettings {
    */
   readonly decorationSets: "generated" | "off";
   /**
+   * Whether a lit terrain draws its decorative scatter where its setting does (plan R11,
+   * R11.T6.a): `drawn`, or `off`, none, the Mac pair `scatter`'s B side, which measures what the
+   * pebbles cost. `drawn` on both settings; the low setting draws no scatter, and makes none.
+   */
+  readonly scatter: "drawn" | "off";
+  /**
    * The pixel the lit terrain's τ is counted in (perf-terrain-selection-scale, the owner's Mac):
    * `presented`, as before, the presented size's CSS px (`selectionViewport`); `rendered`, the
    * larger of that and the pixel its photorealistic image is rendered at, the render resolution
@@ -363,6 +369,7 @@ export const GEOMETRY_BEFORE_R14: GeometrySettings = {
   figureShading: "forward",
   terrainPlanetshine: "record",
   decorationSets: "generated",
+  scatter: "drawn",
   selectionScale: "presented",
   classEdges: "shaped",
   meshCasters: "off",
@@ -553,6 +560,7 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       figureShading: "forward",
       terrainPlanetshine: "record",
       decorationSets: "generated",
+      scatter: "drawn",
       selectionScale: "presented",
       classEdges: "shaped",
       meshCasters: "cast",
@@ -613,6 +621,7 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       figureShading: "forward",
       terrainPlanetshine: "record",
       decorationSets: "generated",
+      scatter: "drawn",
       selectionScale: "presented",
       classEdges: "shaped",
       meshCasters: "cast",

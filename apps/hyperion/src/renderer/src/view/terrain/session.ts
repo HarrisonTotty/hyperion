@@ -136,6 +136,7 @@ import type { Viewport } from "../camera/projection";
 import { type RenderStyle, sceneFrameFor, type ViewId } from "../camera/state";
 import { differenceM, type ViewPosition } from "../coords/position";
 import { relativeToCamera } from "../coords/relative";
+import { rotate } from "../camera/quaternion";
 import { rotateToBodyFixed } from "../coords/rotation";
 import { type MemoryCategory, textureBytes, type TextureSpec } from "../engine/memory";
 import { EngineUnavailable } from "../engine/resilientEngine";
@@ -145,6 +146,7 @@ import {
   type GeometrySettings,
   type QualitySetting,
   SETTINGS,
+  TERRAIN_SETTINGS,
   type TerrainSettings,
 } from "../quality/qualitySetting";
 import { decorationLevel } from "../surface/decoration/decorationLattice";
@@ -177,6 +179,7 @@ import {
   type FieldStatus,
 } from "./coarseFieldStore";
 import { CoverageMask, type CoverageView } from "./coverage";
+import { fittedTerrainLayout } from "./gpu/resources";
 import { MAX_CONTACTS } from "./gpu/uniforms";
 import {
   craftContact,
@@ -217,6 +220,8 @@ import {
 import { wireframeTerrainSettings } from "./terrainWire";
 import type { RockSource } from "./terrainPass";
 import { hullBoundingRadiusM } from "../wireframe/hulls";
+import { craftBox, hullBox, nearGround, type ScatterBox } from "../surface/scatter/scatterCull";
+import { ScatterKernelSet } from "../surface/scatter/scatterKernels";
 import type { BakeSettings, SlopeBaselineM, SurfaceGroundReadout } from "./workers/messages";
 import {
   defaultHeightWorkers,
@@ -964,6 +969,49 @@ export function sceneSweeps(
   return swept;
 }
 
+/**
+ * The scene's craft over `body` whose boxes come within 0.2 m of the ground (plan R11, R11.T6.a;
+ * Design note 7), body-fixed, against which the body's decorative scatter is culled
+ * (`scatterCull.ts`): each craft's hull box (`hullBox`) placed at its position against the body and
+ * turned by its attitude into the body's fixed axes, kept where `nearGround` over `ground` holds;
+ * none for a body whose rotation is not known, and none for a craft the scene cannot place against
+ * it.
+ *
+ * @param ground - The ground under a body-fixed point, as {@link sceneContacts} takes it.
+ */
+export function sceneScatterBoxes(
+  scene: ViewScene,
+  body: ViewBody,
+  ground: GroundUnderFunction,
+): ScatterBox[] {
+  const rotation = body.rotation;
+  if (rotation === null) {
+    return [];
+  }
+  const origins = cameraSceneOf(scene).origins;
+  const boxes: ScatterBox[] = [];
+  for (const craft of scene.craft) {
+    if (!placeableAgainst(craft.pose.position, body, scene)) {
+      continue;
+    }
+    const fromCentreM = differenceM(
+      craft.pose.position,
+      { kind: "body", body: body.id, m: vec3(0, 0, 0) },
+      origins,
+    );
+    const { attitude } = craft.pose;
+    const box = craftBox(
+      rotateToBodyFixed(rotation, fromCentreM),
+      (v) => rotateToBodyFixed(rotation, rotate(attitude, v)),
+      hullBox(craft.hull),
+    );
+    if (nearGround(box, ground)) {
+      boxes.push(box);
+    }
+  }
+  return boxes;
+}
+
 /** What the session's masks and maps make on its engine. */
 type TextureEngine = Pick<
   RenderEngine,
@@ -1154,6 +1202,8 @@ export class TerrainSession {
    * that draws decoration, so that a hand-over compiles none; `null` on the others.
    */
   readonly #detailKernels: DetailKernelSet | null;
+  /** The decorative scatter's handles (plan R11, R11.T6.a), on a setting that draws it, or `null`. */
+  readonly #scatterKernels: ScatterKernelSet | null;
   /** The shadow cascades every lit pass draws with, on the high setting (R10.T9.b). */
   readonly #shadows: TerrainShadows;
   readonly #bodies = new Map<BodyIdHex, SessionBody>();
@@ -1290,6 +1340,23 @@ export class TerrainSession {
     this.#materials = new TerrainMaterialSet(options.engine, options.setting);
     // Cannot throw: its compile is asynchronous, and none is made on the low setting (R11.T2.c).
     this.#detailKernels = DetailKernelSet.forSetting(SETTINGS[options.setting], options.engine);
+    // The decorative scatter's, on the lit layout's path, compiled after the terrain's materials,
+    // which a hand-over's first frame waits for; none on the low setting (R11.T6.a–b).
+    const litPath = fittedTerrainLayout(
+      TERRAIN_SETTINGS[options.setting],
+      options.engine.capabilities,
+      "lit",
+    )?.vertexPath;
+    this.#scatterKernels =
+      litPath === undefined
+        ? null
+        : ScatterKernelSet.forSetting(
+            SETTINGS[options.setting],
+            this.#geometry ?? SETTINGS[options.setting].geometry,
+            litPath,
+            options.engine,
+            this.#materials.compiled,
+          );
   }
 
   /**
@@ -1387,6 +1454,14 @@ export class TerrainSession {
    */
   get compiled(): Promise<number> {
     return this.#materials.compiled;
+  }
+
+  /**
+   * The decorative scatter's handles (plan R11, R11.T6.a), compiled after its materials on a
+   * setting that draws scatter, or `null`: none on the low setting.
+   */
+  get scatterKernels(): ScatterKernelSet | null {
+    return this.#scatterKernels;
   }
 
   /** When its materials' compile began, as it was made, `performance.now()` ms (R10.T14.d). */
@@ -2111,6 +2186,7 @@ export class TerrainSession {
     this.#wirePasses.clear();
     this.#materials.dispose();
     this.#detailKernels?.dispose();
+    this.#scatterKernels?.dispose();
     this.#shadows.dispose();
     this.#wireHanded.clear();
     this.#faultListeners.clear();
@@ -2328,6 +2404,7 @@ export class TerrainSession {
       .slice(0, MAX_SELECTION_VIEWS);
     const seen = this.#sceneWith(body);
     let grounded: GroundContact[] = [];
+    let scatterBodies: ScatterBox[] = [];
     if (seen !== null) {
       const ground = heldGroundUnder(pass.planet.figure, pass.heights);
       const patchSizeM = finestPatchSizeM(pass.planet);
@@ -2344,8 +2421,12 @@ export class TerrainSession {
         },
       );
       grounded = [...own, ...swept].slice(0, MAX_CONTACTS);
+      // The decorative scatter's culling bodies, those at the ground (R11.T6.a), beside them.
+      if (pass.scatter !== null) {
+        scatterBodies = sceneScatterBoxes(seen.scene, seen.body, ground);
+      }
     }
-    pass.step({ views: passViews, grounded });
+    pass.step({ views: passViews, grounded, scatterBodies });
   }
 
   /**
@@ -2524,6 +2605,11 @@ export class TerrainSession {
         ...(detailSets === null ? {} : { detailSets }),
         // The finest patches' rocks, lit or in the wireframe (plan R11, R11.T4.b).
         ...(this.#rockSource === null ? {} : { rocks: this.#rockSource }),
+        // The decorative scatter's handles, compiled with the session's, where it draws scatter
+        // (R11.T6.a): only a lit pass takes them.
+        ...(shading === "lit" && this.#scatterKernels !== null
+          ? { scatter: this.#scatterKernels }
+          : {}),
       });
     } catch (error: unknown) {
       if (error instanceof EngineUnavailable) {
