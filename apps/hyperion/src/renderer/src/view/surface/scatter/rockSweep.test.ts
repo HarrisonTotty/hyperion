@@ -9,6 +9,8 @@ import { describe, expect, it } from "vitest";
 
 import { add, cross, norm, normalise, scale, sub, type Vec3, vec3 } from "../../../geometry/vec3";
 import { goldenLevelTable } from "../../../test/terrainFixtures";
+import { SETTINGS } from "../../quality/qualitySetting";
+import { patchBounds } from "../../terrain/bounds";
 import { xyzToFaceUv, uvToSt, vertexDir } from "../../terrain/cube";
 import {
   datumGroundUnder,
@@ -16,10 +18,17 @@ import {
   finestPatchSizeM,
   forcedRadiusM,
   type GroundContact,
+  inForcedRegion,
   isDescending,
 } from "../../terrain/grounded";
 import { type PatchKey, patchKeyString } from "../../terrain/patchKey";
-import { type BodyFigure, planetGeometry, surfacePoint } from "../../terrain/planet";
+import {
+  type BodyFigure,
+  type PlanetGeometry,
+  planetGeometry,
+  surfacePoint,
+} from "../../terrain/planet";
+import { terrainSlotLayout } from "../../terrain/slotLayout";
 import { RECORD_SEED, SETTING_VIEWS } from "../../spike/demandRecord";
 import {
   datumDirection,
@@ -60,6 +69,12 @@ const MOON: BodyFigure = { equatorialRadiusM: 1_737_400, polarRadiusM: 1_737_400
 
 /** WGS 84's rotation rate, rad/s (NIMA TR8350.2, 3rd ed., 2000, Table 3.1). */
 const EARTH_SPIN_RAD_S = 7.292_115e-5;
+
+/**
+ * The Moon's rotation rate, rad/s: its prime meridian's 13.176 358 15° a day (Archinal et al. 2018,
+ * _CMDA_ 130, 22, Table 2), 2.661 70 × 10⁻⁶ rad/s.
+ */
+const MOON_SPIN_RAD_S = (13.176_358_15 * Math.PI) / 180 / 86_400;
 
 /** A finest patch of the test planet, inside face 2, which the sweeps start over. */
 const SITE: PatchKey = { face: 2, level: PLANET.finestLevel, i: 200_011, j: 300_007 };
@@ -138,7 +153,17 @@ function sweptPoints(body: SweptBody, surface: SweptSurface): Vec3[] {
     if (under.heightM - fallM > reachM || under.heightM < -reachM) {
       continue;
     }
-    const widening = g === null ? 0 : sweptWideningM(surface.figure, g, tS, norm(move));
+    const widening =
+      g === null
+        ? 0
+        : sweptWideningM(
+            surface.figure,
+            g,
+            tS,
+            norm(move),
+            surface.spinRadPerS ?? 0,
+            norm(path.velocityMps),
+          );
     points.push(...discPoints(under.groundPointM, body.radiusM, widening));
   }
   return points;
@@ -173,10 +198,15 @@ describe("the swept region (R11.T4.d)", () => {
   it.each([2, 20, 300])(
     "forces every could-touch region over the horizon of a descent at %d m/s",
     (speedMps) => {
-      for (const gravity of [null, EARTH_G_MPS2]) {
+      const turning = { ...EARTH_SURFACE, spinRadPerS: EARTH_SPIN_RAD_S };
+      for (const [gravity, surface] of [
+        [null, EARTH_SURFACE],
+        [EARTH_G_MPS2, EARTH_SURFACE],
+        [EARTH_G_MPS2, turning],
+      ] as const) {
         const body = descent(speedMps, gravity);
-        const contacts = couldTouchContacts([body], FORCED_REGION_RESIDENCY_S, EARTH_SURFACE);
-        const points = sweptPoints(body, EARTH_SURFACE);
+        const contacts = couldTouchContacts([body], FORCED_REGION_RESIDENCY_S, surface);
+        const points = sweptPoints(body, surface);
         expect(points.length).toBeGreaterThan(100);
         expect(points.filter((p) => !forced(p, contacts))).toEqual([]);
         // Each contact stands on the ground beneath the path.
@@ -191,6 +221,7 @@ describe("the swept region (R11.T4.d)", () => {
 
   it.each([
     ["a Moon", MOON, MOON_GM_M3_S2, 0],
+    ["a Moon in its turning frame", MOON, MOON_GM_M3_S2, MOON_SPIN_RAD_S],
     ["an Earth", TEST_PLANET_FIGURE, EARTH_GM_M3_S2, 0],
     ["an Earth in its turning frame", TEST_PLANET_FIGURE, EARTH_GM_M3_S2, EARTH_SPIN_RAD_S],
   ])(
@@ -274,6 +305,62 @@ describe("the swept region (R11.T4.d)", () => {
     expect(capped).toEqual(whole.slice(0, capped.length));
   });
 
+  it.each([
+    ["an Earth", TEST_PLANET_FIGURE, EARTH_GM_M3_S2, EARTH_SPIN_RAD_S],
+    ["a Moon", MOON, MOON_GM_M3_S2, MOON_SPIN_RAD_S],
+  ] as const)(
+    "keeps a descent over %s, widened by its gravity and spin, within the cap by the chain's count and within the selection's budget by the forced rule's",
+    (_, figure, gm, spin) => {
+      const planet = planetGeometry(figure, goldenLevelTable("off"));
+      const patchSizeM = finestPatchSizeM(planet);
+      const site: PatchKey = {
+        face: 2,
+        level: planet.finestLevel,
+        i: Math.floor(0.45 * 2 ** planet.finestLevel),
+        j: Math.floor(0.55 * 2 ** planet.finestLevel),
+      };
+      const gravity = gm / Math.min(figure.equatorialRadiusM, figure.polarRadiusM) ** 2;
+      for (const setting of ["low", "high"] as const) {
+        // The session's budget and cap: half the lit cache's slots, and half that.
+        const maxPatches = Math.floor(
+          terrainSlotLayout(SETTINGS[setting].terrain, "lit").slotCount / 2,
+        );
+        const surface: SweptSurface = {
+          figure,
+          ground: datumGroundUnder(figure),
+          patchSizeM,
+          spinRadPerS: spin,
+          maxForcedPatches: Math.floor(maxPatches / 2),
+        };
+        for (const [speedMps, heightM, downDeg] of [
+          [60, 600, 15],
+          [300, 2_000, 15],
+        ] as const) {
+          const p0 = pointOver(figure, site, heightM);
+          const { east, up } = localFrame(p0);
+          const glide = (downDeg * Math.PI) / 180;
+          const velocityMps = scale(
+            add(scale(east, Math.cos(glide)), scale(up, -Math.sin(glide))),
+            speedMps,
+          );
+          const body: SweptBody = {
+            radiusM: 20,
+            path: { kind: "extrapolated", positionM: p0, velocityMps, gravityMps2: gravity },
+          };
+          const whole = couldTouchContacts([body], FORCED_REGION_RESIDENCY_S, {
+            ...surface,
+            maxForcedPatches: Infinity,
+          });
+          const capped = couldTouchContacts([body], FORCED_REGION_RESIDENCY_S, surface);
+          // Where the cap binds, it cuts the chain in time order.
+          expect(capped.length).toBeGreaterThan(0);
+          expect(capped).toEqual(whole.slice(0, capped.length));
+          expect(forcedBy(planet, capped, patchSizeM)).toBeLessThanOrEqual(maxPatches);
+        }
+      }
+    },
+  );
+
   it("sweeps a planned path whole, through its poses, without widening", () => {
     const start = pointOver(TEST_PLANET_FIGURE, SITE, 20);
     const { east, north, up } = localFrame(start);
@@ -299,6 +386,39 @@ describe("the swept region (R11.T4.d)", () => {
     }
   });
 });
+
+/**
+ * The finest patches of `planet` the forced region about `contacts` holds, by the forced rule
+ * (`inForcedRegion`), each contact's neighbourhood searched on its face.
+ */
+function forcedBy(
+  planet: PlanetGeometry,
+  contacts: ReadonlyArray<GroundContact>,
+  patchSizeM: number,
+): number {
+  const side = 2 ** planet.finestLevel;
+  const index = (w: number): number =>
+    Math.min(side - 1, Math.max(0, Math.floor(uvToSt(w) * side)));
+  const seen = new Set<string>();
+  for (const contact of contacts) {
+    const dir = datumDirection(planet.figure, contact.positionM);
+    const { face, u, v } = xyzToFaceUv([dir.x, dir.y, dir.z]);
+    const reach = Math.ceil(forcedRadiusM(contact, patchSizeM) / patchSizeM) + 2;
+    for (let di = -reach; di <= reach; di += 1) {
+      for (let dj = -reach; dj <= reach; dj += 1) {
+        const key = { face, level: planet.finestLevel, i: index(u) + di, j: index(v) + dj };
+        const keyString = patchKeyString(key);
+        if (
+          !seen.has(keyString) &&
+          inForcedRegion(patchBounds(planet, key), contacts, patchSizeM)
+        ) {
+          seen.add(keyString);
+        }
+      }
+    }
+  }
+  return seen.size;
+}
 
 /** The finest patch of the test planet holding the unit direction `dir`. */
 function finestHolding(dir: Vec3): PatchKey {

@@ -126,6 +126,7 @@ import type {
   WetEpoch,
   Zone,
 } from "./model";
+import { spinRateAt } from "./rotation";
 import { bodyDesignation, modelled, pending, toKeplerOrbit, toSystemModel } from "./wire";
 
 /**
@@ -214,6 +215,28 @@ export function bodyRecordSurfaceGravity(record: Pick<BodyRecordDto, "bulk">): n
   }
   const gravity = bulk.value.surface_gravity_m_s2;
   return gravity > 0 && Number.isFinite(gravity) ? gravity : null;
+}
+
+/**
+ * A body record's spin rate at `time`, rad/s, without reading the rest of the record: its rotation
+ * law's rate (`spinRateAt`), as the atmosphere's normal gravity turns at (plan R11, R11.T4.d: the
+ * rocks' sweep in the body's turning frame); `null` where the section is absent or not `ok`, or
+ * its law is not usable.
+ */
+export function bodyRecordSpinRate(
+  record: Pick<BodyRecordDto, "rotation">,
+  time: UniverseTime,
+): number | null {
+  const { rotation } = record;
+  if (rotation?.state !== "ok") {
+    return null;
+  }
+  const law = faultOf(() => toRotation(rotation.value));
+  if (!("ok" in law)) {
+    return null;
+  }
+  const rate = Math.abs(spinRateAt(law.ok, time));
+  return Number.isFinite(rate) ? rate : null;
 }
 
 /**

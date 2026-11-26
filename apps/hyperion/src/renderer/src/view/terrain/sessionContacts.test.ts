@@ -1175,8 +1175,8 @@ describe("the scene's descending craft as the rocks' sweep (R11.T4.d)", () => {
     };
   }
 
-  it("sweeps a descending craft with no plan along its pose's line, unwidened", () => {
-    const swept = sceneSweeps(withCraft(300, vec3(40, 0, -20)), moon, ground);
+  it("sweeps a descending craft with no plan along its pose's line, unwidened before its body's gravity is known", () => {
+    const swept = sceneSweeps(withCraft(300, vec3(40, 0, -20)), moon, ground, null);
     expect(swept).toEqual([
       {
         radiusM: hullBoundingRadiusM(TEST_HULL),
@@ -1190,6 +1190,18 @@ describe("the scene's descending craft as the rocks' sweep (R11.T4.d)", () => {
     ]);
   });
 
+  it("widens that line by the body's gravity once its record gives it (R11.T4.d)", () => {
+    const swept = sceneSweeps(withCraft(300, vec3(40, 0, -20)), moon, ground, 1.62);
+    expect(swept.map(({ path }) => path)).toEqual([
+      {
+        kind: "extrapolated",
+        positionM: add(pole, vec3(0, 0, 300)),
+        velocityMps: vec3(40, 0, -20),
+        gravityMps2: 1.62,
+      },
+    ]);
+  });
+
   it("sweeps a craft with a plan along the plan's poses", () => {
     const at = (x: number, z: number): ViewCraft["pose"] => ({
       position: { kind: "body", body: MOON, m: add(pole, vec3(x, 0, z)) },
@@ -1199,6 +1211,7 @@ describe("the scene's descending craft as the rocks' sweep (R11.T4.d)", () => {
       withCraft(300, vec3(40, 0, -20), [at(0, 300), at(400, 50)]),
       moon,
       ground,
+      1.62,
     );
     expect(swept.map(({ path }) => path)).toEqual([
       { kind: "planned", positionsM: [add(pole, vec3(0, 0, 300)), add(pole, vec3(400, 0, 50))] },
@@ -1206,7 +1219,7 @@ describe("the scene's descending craft as the rocks' sweep (R11.T4.d)", () => {
   });
 
   it("sweeps neither a climbing craft nor one at rest", () => {
-    expect(sceneSweeps(withCraft(300, vec3(40, 0, 20)), moon, ground)).toEqual([]);
-    expect(sceneSweeps(withCraft(0, vec3(0, 0, 0)), moon, ground)).toEqual([]);
+    expect(sceneSweeps(withCraft(300, vec3(40, 0, 20)), moon, ground, 1.62)).toEqual([]);
+    expect(sceneSweeps(withCraft(0, vec3(0, 0, 0)), moon, ground, 1.62)).toEqual([]);
   });
 });

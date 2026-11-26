@@ -122,6 +122,7 @@ import {
   bodyDetailSeed,
   bodyRecordOrbit,
   bodyRecordSeasons,
+  bodyRecordSpinRate,
   bodyRecordSurfaceGravity,
   type RecordSeasons,
   toBodyDetailRequest,
@@ -923,14 +924,17 @@ export function sceneContacts(
  * it has one, else the straight line of its pose at its velocity against the body, body-fixed.
  *
  * @remarks
- * The line is not widened: the view's bodies hold no mass, so no gravity bounds the arc (lean,
- * 2026-11-18). The velocity is {@link craftVelocityAgainst}'s, which for a craft held in the
- * body's non-rotating frame carries the ground's own ω × r, its rotation's rate not being held.
+ * The line is widened by `gravityMps2`, the body's bulk surface gravity from its record
+ * ({@link TerrainSession.sweepPull}), the most the arc's pull reaches near the ground; `null`,
+ * before the record or for a kept scene's body, leaves it unwidened. The velocity is
+ * {@link craftVelocityAgainst}'s, which for a craft held in the body's non-rotating frame carries
+ * the ground's own ω × r.
  */
 export function sceneSweeps(
   scene: ViewScene,
   body: ViewBody,
   ground: GroundUnderFunction,
+  gravityMps2: number | null,
 ): SweptBody[] {
   const rotation = body.rotation;
   if (rotation === null) {
@@ -962,7 +966,7 @@ export function sceneSweeps(
       radiusM: hullBoundingRadiusM(craft.hull),
       path:
         planned === null
-          ? { kind: "extrapolated", positionM, velocityMps, gravityMps2: null }
+          ? { kind: "extrapolated", positionM, velocityMps, gravityMps2 }
           : { kind: "planned", positionsM: planned.map((pose) => bodyFixed(pose.position)) },
     });
   }
@@ -1101,6 +1105,14 @@ type SeasonState =
    */
   | { readonly kind: "none" };
 
+/** What the rocks' sweep over a body takes of its record ({@link TerrainSession.sweepPull}). */
+export interface SweepPull {
+  /** Its bulk surface gravity, m/s², or `null` where not known. */
+  readonly gravityMps2: number | null;
+  /** Its spin rate, rad/s, or `null` where not known. */
+  readonly spinRadPerS: number | null;
+}
+
 /** A wanted body as the session holds it. */
 interface SessionBody {
   /** Its survey's GPU coverage mask. */
@@ -1112,9 +1124,15 @@ interface SessionBody {
   season: SeasonState;
   /**
    * Its bulk surface gravity, m/s², from the same record (plan R11, R11.T8.b), its sea's where its
-   * air is not drawn; `null` before the record, or for a kept scene's body.
+   * air is not drawn, and the rocks' sweep's (R11.T4.d); `null` before the record, or for a kept
+   * scene's body.
    */
   surfaceGravityMps2: number | null;
+  /**
+   * Its spin rate, rad/s, from the same record at its time (plan R11, R11.T4.d), the rocks' sweep's
+   * turning frame; `null` before the record, for a kept scene's body, or where it holds no rotation.
+   */
+  spinRadPerS: number | null;
   /**
    * The store's latest coverage held back from the mask while its pass's rebakes are due, with the
    * blocks posted when it came, which the workers must take first.
@@ -2042,6 +2060,21 @@ export class TerrainSession {
     return this.#bodies.get(body)?.mask.whole ?? false;
   }
 
+  /**
+   * What the rocks' sweep over a wanted body takes of its record (plan R11, R11.T4.d): its bulk
+   * surface gravity, which widens a descent's straight line by its arc's fall, and its spin rate,
+   * by its turning frame's Coriolis and centrifugal drift (`rockSelection.ts`' `sweptWideningM`);
+   * each `null` before the record, for a kept scene's body or one not wanted, or where the record
+   * holds none.
+   */
+  sweepPull(body: BodyIdHex): SweepPull {
+    const held = this.#bodies.get(body);
+    return {
+      gravityMps2: held?.surfaceGravityMps2 ?? null,
+      spinRadPerS: held?.spinRadPerS ?? null,
+    };
+  }
+
   /** A wanted body's detail seed, once held; `null` before, for a body without hooks or not wanted. */
   detailSeed(body: BodyIdHex): DetailSeedHex | null {
     const seed = this.#bodies.get(body)?.seed;
@@ -2409,15 +2442,18 @@ export class TerrainSession {
       const ground = heldGroundUnder(pass.planet.figure, pass.heights);
       const patchSizeM = finestPatchSizeM(pass.planet);
       const own = sceneContacts(seen.scene, seen.body, ground, patchSizeM);
-      // The rocks' sweep beside them (R11.T4.d), its forced patches held to half the budget's.
+      // The rocks' sweep beside them (R11.T4.d), widened by the record's gravity and spin, its
+      // forced patches held to half the budget's.
+      const pull = this.sweepPull(body);
       const swept = couldTouchContacts(
-        sceneSweeps(seen.scene, seen.body, ground),
+        sceneSweeps(seen.scene, seen.body, ground, pull.gravityMps2),
         FORCED_REGION_RESIDENCY_S,
         {
           figure: pass.planet.figure,
           ground,
           patchSizeM,
           maxForcedPatches: Math.floor(pass.maxPatches / 2),
+          ...(pull.spinRadPerS === null ? {} : { spinRadPerS: pull.spinRadPerS }),
         },
       );
       grounded = [...own, ...swept].slice(0, MAX_CONTACTS);
@@ -2654,6 +2690,7 @@ export class TerrainSession {
       seed: { kind: "none" },
       season: { kind: "none" },
       surfaceGravityMps2: null,
+      spinRadPerS: null,
       pendingCoverage: null,
       epoch: 0,
     };
@@ -2737,6 +2774,7 @@ export class TerrainSession {
       if (outcome.ok) {
         const { record } = outcome.response;
         held.surfaceGravityMps2 = bodyRecordSurfaceGravity(record);
+        held.spinRadPerS = bodyRecordSpinRate(record, outcome.response.time);
         const seed = bodyDetailSeed(record);
         if (seed === null) {
           held.seed = { kind: "none" };

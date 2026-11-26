@@ -59,6 +59,7 @@ import {
   bodyDetailSeed,
   bodyRecordOrbit,
   bodyRecordSeasons,
+  bodyRecordSpinRate,
   bodyRecordSurfaceGravity,
   EARTH_MASS_KG,
   toBodiesRequest,
@@ -756,6 +757,25 @@ describe("toBodyDetail", () => {
       }),
     ]).toEqual([bulk.value.surface_gravity_m_s2, null, null]);
     expect(bodyRecordSurfaceGravity(record)).toBeGreaterThan(9);
+  });
+
+  it("reads a record's spin rate at a time alone, null without a usable rotation (plan R11, R11.T4.d)", () => {
+    const { record, time } = earthDetail();
+    const { rotation } = record;
+    if (rotation?.state !== "ok") {
+      throw new Error("the fixture's Earth has a rotation");
+    }
+    expect([
+      bodyRecordSpinRate({ rotation: { state: "not_modelled" } }, time),
+      // An older server's record, with no rotation section.
+      bodyRecordSpinRate({}, time),
+      bodyRecordSpinRate(
+        { rotation: { state: "ok", value: { ...rotation.value, pole: [0, 0, 0] } } },
+        time,
+      ),
+    ]).toEqual([null, null, null]);
+    // A sidereal day's 7.292 × 10⁻⁵ rad/s.
+    expect(bodyRecordSpinRate(record, time)).toBeCloseTo(7.292e-5, 8);
   });
 
   it("takes a moon's seasons from its planet, and every other body's from its own orbit", () => {

@@ -578,6 +578,19 @@ describe("the terrain session's detail seeds and class maps (R10.T16.a)", () => 
     expect([asked, h.session.detailSeed(MOON)]).toEqual([[[MOON, SEED]], SEED]);
   });
 
+  it("takes the record's bulk gravity and spin rate for the rocks' sweep, neither before it (plan R11, R11.T4.d)", async () => {
+    const h = await harness();
+    await holdMoon(h);
+    const before = h.session.sweepPull(MOON);
+    h.socket().serverAnswers("body_detail", () => detailWithSeed(SEED));
+    await settle();
+    const after = h.session.sweepPull(MOON);
+    expect(before).toEqual({ gravityMps2: null, spinRadPerS: null });
+    // The fixture's Earth: 9.8 m/s² and a sidereal day's 7.292 × 10⁻⁵ rad/s.
+    expect(after.gravityMps2).toBeCloseTo(9.8, 1);
+    expect(after.spinRadPerS).toBeCloseTo(7.292e-5, 8);
+  });
+
   it("asks no class map of a body whose hooks are not modelled", async () => {
     const h = await harness();
     await holdMoon(h);
