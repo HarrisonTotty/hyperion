@@ -32,6 +32,7 @@ import { patchKeyString, type Face, type PatchKey, unreachable } from "../patchK
 import { type BodyFigure, planetGeometry } from "../planet";
 import { vec3 } from "../../../geometry/vec3";
 import { clusterErrors, packClusterErrors } from "../../clusters/errors";
+import { oceanMaskOf } from "../../ocean/oceanCells";
 import { rockLayerOf } from "../../surface/scatter/rockLayer";
 import type {
   BakedPatch,
@@ -1418,8 +1419,9 @@ function answerClassMap(
 }
 
 /**
- * Answers an ocean-map query: the map, `null` where no payload field of the body is held, or the
- * module's refusal; a trap is rethrown, as a bake's is.
+ * Answers an ocean-map query: the map with its mask (`oceanMaskOf`, decided here rather than on the
+ * page's thread), `null` where no payload field of the body is held, or the module's refusal, or
+ * the mask's of a map it cannot decide; a trap is rethrown, as a bake's is.
  */
 function answerOceanMap(
   request: Extract<HeightWorkerRequest, { kind: "ocean-map" }>,
@@ -1428,7 +1430,9 @@ function answerOceanMap(
   const { id, body } = request;
   try {
     const map = fields.oceanMap(body);
-    return { reply: { kind: "ocean-map", id, body, map }, transfer: oceanMapTransferables(map) };
+    // Its open water decided here, off the page's thread (perf-long-tasks-5).
+    const sea = map === null ? null : { map, mask: oceanMaskOf(map) };
+    return { reply: { kind: "ocean-map", id, body, sea }, transfer: oceanMapTransferables(sea) };
   } catch (error: unknown) {
     if (isTrap(error)) {
       throw error;

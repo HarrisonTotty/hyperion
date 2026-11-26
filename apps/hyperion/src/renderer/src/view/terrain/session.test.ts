@@ -55,6 +55,7 @@ import {
 import { IDENTITY_ROTATION } from "../coords/rotation";
 import type { ClassMapDiscSurface } from "../appearance/bodyAppearance";
 import type { AllocationEvent } from "../engine/memory";
+import { oceanMaskOf } from "../ocean/oceanMask";
 import type { ViewBody, ViewScene } from "../scene/model";
 import { TERRAIN_COMPUTATION_FAILED, TERRAIN_NOT_AVAILABLE } from "./annunciation";
 import { CLASS_MAP_LEVEL, ClassMapStore } from "./classMap";
@@ -1356,11 +1357,12 @@ describe("the terrain session's seas (plan R11, R11.T8.b)", () => {
     await answerWaterField(h);
     h.session.step();
     const [query] = oceanQueries(h);
+    const map = oceanAnswerOf([{ face: 0, i: 0, j: 0, depthM: 3000, levelM: 0, ice: 0 }]);
     query?.w.reply({
       kind: "ocean-map",
       id: query.id,
       body: MOON,
-      map: oceanAnswerOf([{ face: 0, i: 0, j: 0, depthM: 3000, levelM: 0, ice: 0 }]),
+      sea: { map, mask: oceanMaskOf(map) },
     });
     await settle();
     expect(h.session.oceans.oceanOf(MOON)).toBeNull();
@@ -1393,11 +1395,12 @@ describe("the terrain session's seas (plan R11, R11.T8.b)", () => {
     await answerWaterField(h);
     h.session.step();
     const [query] = oceanQueries(h);
+    const map = oceanAnswerOf([{ face: 0, i: 0, j: 0, depthM: 3000, levelM: 0, ice: 0 }]);
     query?.w.reply({
       kind: "ocean-map",
       id: query.id,
       body: MOON,
-      map: oceanAnswerOf([{ face: 0, i: 0, j: 0, depthM: 3000, levelM: 0, ice: 0 }]),
+      sea: { map, mask: oceanMaskOf(map) },
     });
     await settle();
     tickingPerformance();

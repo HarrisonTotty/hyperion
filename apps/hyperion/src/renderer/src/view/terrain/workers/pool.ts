@@ -62,7 +62,7 @@ import type {
   HeightWorkerMessage,
   HeightWorkerReply,
   HeightWorkerRequest,
-  OceanMapAnswer,
+  OceanMapReplied,
   SigmaSurveySetting,
   SurfaceGroundReadout,
   TerrainLayers,
@@ -340,7 +340,7 @@ type PendingQuery =
   | {
       readonly kind: "ocean-map";
       readonly body: BodyIdHex;
-      readonly resolve: (map: OceanMapAnswer | null) => void;
+      readonly resolve: (map: OceanMapReplied | null) => void;
       readonly reject: (error: Error) => void;
     }
   | {
@@ -1004,12 +1004,13 @@ export class HeightWorkerPool {
    * worker, posted after every block posted so far, and asked again of a failed worker's
    * replacement.
    *
-   * @returns The map, or `null` where the pool keeps no field of `body`, no worker runs, the worker
-   *   holds no payload field of it, or the pool is terminated before the answer; rejected with the
-   *   module's message where the module refused the query.
+   * @returns The map with its mask, decided in the worker (perf-long-tasks-5), or `null` where the
+   *   pool keeps no field of `body`, no worker runs, the worker holds no payload field of it, or the
+   *   pool is terminated before the answer; rejected with the module's message where the module
+   *   refused the query or the worker could not decide its mask.
    * @throws Error once the pool is terminated.
    */
-  oceanMap(body: BodyIdHex): Promise<OceanMapAnswer | null> {
+  oceanMap(body: BodyIdHex): Promise<OceanMapReplied | null> {
     this.assertLive();
     if (!this.fields.has(body)) {
       return Promise.resolve(null);
@@ -1532,7 +1533,7 @@ export class HeightWorkerPool {
       case "ocean-map": {
         const query = this.answered(slot, reply);
         if (query?.kind === "ocean-map") {
-          query.resolve(reply.map);
+          query.resolve(reply.sea);
         }
         return;
       }

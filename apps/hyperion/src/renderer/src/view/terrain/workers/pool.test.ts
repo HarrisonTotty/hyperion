@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { oceanMaskOf } from "../../ocean/oceanMask";
 import { keptBody } from "../../scenes/kept";
 import { bakeOf, ScriptedHeightWorker } from "../../../test/scriptedHeightWorker";
 import { SELECTION_RULE, sigmaSurveyOf } from "../levelBounds";
@@ -819,8 +820,12 @@ describe("the height-worker pool's ocean maps (R11.T8.b)", () => {
       throw new Error("no ocean map is asked");
     }
     const map = emptyOcean();
-    second.reply({ kind: "ocean-map", id: query.id, body: MOON, map });
-    await expect(asked).resolves.toBe(map);
+    const mask = oceanMaskOf(map);
+    second.reply({ kind: "ocean-map", id: query.id, body: MOON, sea: { map, mask } });
+    // The map with the mask its worker decided beside it, as they came (perf-long-tasks-5).
+    const replied = await asked;
+    expect(replied?.map).toBe(map);
+    expect(replied?.mask).toBe(mask);
     const refused = pool.oceanMap(MOON);
     const again = workerAt(created, 0).pendingOceanMaps[0] ?? second.pendingOceanMaps[0];
     if (again === undefined) {
@@ -844,7 +849,7 @@ describe("the height-worker pool's ocean maps (R11.T8.b)", () => {
     if (query === undefined) {
       throw new Error("no ocean map is asked of the replacement");
     }
-    replacement.reply({ kind: "ocean-map", id: query.id, body: MOON, map: null });
+    replacement.reply({ kind: "ocean-map", id: query.id, body: MOON, sea: null });
     await expect(asked).resolves.toBeNull();
   });
 });

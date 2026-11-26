@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { oceanAnswerOf, oceanCellCentre } from "../../test/oceanFixtures";
+import { fieldCellAt, fieldCellCount } from "../terrain/coverage";
 import {
   OPEN_WATER_MAX_ICE,
   oceanCellKindAt,
@@ -46,6 +47,31 @@ describe("the ocean mask (R11.T8.b)", () => {
     );
     // The coverage mask's layout: (face · n + j) · n + i.
     expect(oceanMaskIndexAt(mask, oceanCellCentre(1, 3, 4))).toBe((1 * 32 + 4) * 32 + 3);
+  });
+
+  it("lays each cell out where its cell's (face, i, j) put it, at every level (perf-long-tasks-5)", () => {
+    for (const level of [5, 6, 7, 8]) {
+      const count = fieldCellCount(level);
+      const n = 2 ** level;
+      // Every third cell surveyed, rising, its kind from a hash of its index.
+      const cells = Uint32Array.from({ length: Math.ceil(count / 3) }, (_, k) => 3 * k);
+      const depthM = Float32Array.from(cells, (c) => (((c * 2654435761) >>> 0) % 5 < 3 ? 40 : 0));
+      const ice = Uint8Array.from(cells, (c) => (c % 7 === 0 ? 200 : c % 11));
+      const mask = oceanMaskOf({ level, cells, depthM, ice });
+      // The mask as it was made with each cell's key, `(face · n + j) · n + i`.
+      const places = new Int32Array(count).fill(-1);
+      const open = new Uint8Array(count);
+      cells.forEach((index, k) => {
+        const cell = fieldCellAt(level, index);
+        const at = (cell.face * n + cell.j) * n + cell.i;
+        places[at] = k;
+        open[at] = oceanCellKindOf(depthM[k] ?? 0, ice[k] ?? 0) === "open-water" ? 1 : 0;
+      });
+      expect(mask.places).toEqual(places);
+      expect(mask.open).toEqual(open);
+      expect(mask.openCells).toBe(open.reduce((sum, v) => sum + v, 0));
+      expect(mask.openCells).toBeGreaterThan(0);
+    }
   });
 
   it("is empty for an answer of no cell, an unsurveyed body", () => {

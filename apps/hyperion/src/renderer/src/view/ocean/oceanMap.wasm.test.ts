@@ -16,6 +16,7 @@ import {
 } from "../../generated/surface/hyperion_surface";
 import wasmDataUrl from "../../generated/surface/hyperion_surface_bg.wasm?inline";
 import { moonLikeFixture, type WorkerFixture } from "../../test/moonLikeFixture";
+import { fieldCellAt, fieldCellCount } from "../terrain/coverage";
 import { answerRequest, type HeightModule, WorkerFields } from "../terrain/workers/heightBake";
 import type { OceanMapAnswer } from "../terrain/workers/messages";
 import { monthBlend } from "./monthBlend";
@@ -56,9 +57,20 @@ function oceanOf(fixture: WorkerFixture): {
     );
   });
   const answer = answerRequest(module, { kind: "ocean-map", id: 99, body: fixture.body }, fields);
-  if (answer.reply.kind !== "ocean-map" || answer.reply.map === null) {
+  if (answer.reply.kind !== "ocean-map" || answer.reply.sea === null) {
     throw new Error(`no ocean map: ${JSON.stringify(answer.reply)}`);
   }
+  const { map, mask } = answer.reply.sea;
+  // The worker's mask, decided beside its answer (perf-long-tasks-5), lays each cell out where its
+  // cell's key put it as the page did before, `(face · n + j) · n + i`.
+  const n = 2 ** map.level;
+  const places = new Int32Array(fieldCellCount(map.level)).fill(-1);
+  map.cells.forEach((index, k) => {
+    const cell = fieldCellAt(map.level, index);
+    places[(cell.face * n + cell.j) * n + cell.i] = k;
+  });
+  expect(mask.places).toEqual(places);
+  expect(mask).toEqual(oceanMaskOf(map));
   const normals = answerRequest(
     module,
     { kind: "class-map", id: 100, body: fixture.body, detailSeed: "617373656d626c79" },
@@ -67,7 +79,7 @@ function oceanOf(fixture: WorkerFixture): {
   if (normals.reply.kind !== "class-map" || normals.reply.map === null) {
     throw new Error("no class map");
   }
-  return { map: answer.reply.map, surveyed: [...normals.reply.map.normalCells] };
+  return { map, surveyed: [...normals.reply.map.normalCells] };
 }
 
 describe("the ocean's data on the real module (R11.T8.b)", () => {

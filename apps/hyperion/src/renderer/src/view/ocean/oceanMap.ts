@@ -1,7 +1,7 @@
 /**
  * A body's sea on the GPU (plan R11, R11.T8.b; Design notes 11 and 19): the height workers' ocean
- * map, decided into open water by {@link oceanMaskOf}, with its depth, its level and its
- * month-blended wind packed a texel a coarse cell, and the store that keeps one a body.
+ * map, decided into open water by `oceanMaskOf` in the worker beside it, with its depth, its level
+ * and its month-blended wind packed a texel a coarse cell, and the store that keeps one a body.
  *
  * @remarks
  * - **The texels** are a 2D array of six 2ᴸ × 2ᴸ layers, a face a layer, in the coverage mask's
@@ -40,7 +40,7 @@ import {
   type OceanMapAnswer,
 } from "../terrain/workers/messages";
 import { type MonthBlend, monthBlend } from "./monthBlend";
-import { type OceanMask, oceanMaskIndexAt, oceanMaskOf } from "./oceanMask";
+import { type OceanMask, oceanMaskIndexAt } from "./oceanMask";
 
 /** The ocean map's texel format: depth, level, wind east and north, four half floats. */
 export const OCEAN_MAP_FORMAT = "rgba16float" satisfies GPUTextureFormat;
@@ -489,9 +489,9 @@ export class OceanMapStore {
   /** Asks the pool for `body`'s map and, if `held` is still the body's, takes the answer. */
   async #query(body: BodyIdHex, held: HeldBody): Promise<void> {
     try {
-      const answer = await this.#pool.oceanMap(body);
-      if (this.#bodies.get(body) === held && !this.#disposed && answer !== null) {
-        this.#take(body, held, answer);
+      const replied = await this.#pool.oceanMap(body);
+      if (this.#bodies.get(body) === held && !this.#disposed && replied !== null) {
+        this.#take(body, held, replied.map, replied.mask);
       }
     } catch (error: unknown) {
       // A refusal of a body released, asked for afresh or disposed since is not its to report.
@@ -505,9 +505,11 @@ export class OceanMapStore {
     }
   }
 
-  /** Takes an answer for `body`: decides its mask and queues its texels' packing. */
-  #take(body: BodyIdHex, held: HeldBody, answer: OceanMapAnswer): void {
-    const mask = oceanMaskOf(answer);
+  /**
+   * Takes an answer for `body` with its mask, decided in the worker (`oceanMaskOf`;
+   * perf-long-tasks-5), and queues its texels' packing.
+   */
+  #take(body: BodyIdHex, held: HeldBody, answer: OceanMapAnswer, mask: OceanMask): void {
     const blend = this.#blendOf(body, answer, held.meanAnomalyRad);
     if (blend === null) {
       return;

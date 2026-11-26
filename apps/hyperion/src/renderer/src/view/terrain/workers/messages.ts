@@ -27,6 +27,7 @@
 
 import type { BodyIdHex, DetailSeedHex } from "@hyperion/protocol";
 
+import type { OceanMask } from "../../ocean/oceanCells";
 import type { TerrainNormals, TerrainVertexPath } from "../../quality/terrainKinds";
 import type { RockLayer } from "../../surface/scatter/rockLayer";
 import type { Face, PatchKey } from "../patchKey";
@@ -489,6 +490,16 @@ export interface OceanMapAnswer {
   readonly complete: boolean;
 }
 
+/**
+ * A body's sea as the pool hands it out: a worker's answer and its open water decided beside it, in
+ * the worker, by `oceanMaskOf` (perf-long-tasks-5), so that the page's thread decides none of its
+ * 6 · 4ᴸ cells.
+ */
+export interface OceanMapReplied {
+  readonly map: OceanMapAnswer;
+  readonly mask: OceanMask;
+}
+
 /** A point of a face, in the cube's face coordinates (`hyperion_surface::cube::FaceUv`). */
 export interface FacePoint {
   readonly face: Face;
@@ -757,14 +768,14 @@ export type HeightWorkerReply =
       readonly message: string;
     }
   /**
-   * Ocean-map query `id`'s answer: `body`'s sea, or `null` where the worker holds no payload field
-   * of it.
+   * Ocean-map query `id`'s answer: `body`'s sea with its mask, made beside it (`oceanMaskOf`), or
+   * `null` where the worker holds no payload field of it.
    */
   | {
       readonly kind: "ocean-map";
       readonly id: number;
       readonly body: BodyIdHex;
-      readonly map: OceanMapAnswer | null;
+      readonly sea: OceanMapReplied | null;
     }
   /** Ocean-map query `id` was refused by the module, which names why. */
   | {
@@ -888,16 +899,20 @@ export function classMapTransferables(map: ClassMapAnswer | null): Transferable[
   return buffers;
 }
 
-/** The buffers a worker transfers with an ocean map. */
-export function oceanMapTransferables(map: OceanMapAnswer | null): Transferable[] {
-  return map === null
-    ? []
-    : [
-        map.cells.buffer,
-        map.depthM.buffer,
-        map.levelM.buffer,
-        map.ice.buffer,
-        map.winds.buffer,
-        map.windSpeedsMps.buffer,
-      ];
+/** The buffers a worker transfers with an ocean map and its mask. */
+export function oceanMapTransferables(sea: OceanMapReplied | null): Transferable[] {
+  if (sea === null) {
+    return [];
+  }
+  const { map, mask } = sea;
+  return [
+    map.cells.buffer,
+    map.depthM.buffer,
+    map.levelM.buffer,
+    map.ice.buffer,
+    map.winds.buffer,
+    map.windSpeedsMps.buffer,
+    mask.places.buffer,
+    mask.open.buffer,
+  ];
 }

@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { countingRenderEngine } from "../../test/countingRenderEngine";
 import { oceanAnswerOf, oceanCellCentre, WIND_SPEEDS_MPS } from "../../test/oceanFixtures";
 import type { AllocationEvent } from "../engine/memory";
-import type { OceanMapAnswer } from "../terrain/workers/messages";
+import type { OceanMapAnswer, OceanMapReplied } from "../terrain/workers/messages";
 import type { FieldChange } from "../terrain/workers/pool";
 import { monthBlend } from "./monthBlend";
 import {
@@ -106,18 +106,30 @@ describe("the ocean map's texels (R11.T8.b)", () => {
   });
 });
 
-/** A pool that holds each ocean-map query for the test to answer. */
+/**
+ * A pool that holds each ocean-map query for the test to answer, deciding each answer's mask as a
+ * worker does, beside it (perf-long-tasks-5).
+ */
 class ScriptedOceanPool implements OceanMapPool {
   readonly asked: Array<{
     readonly body: string;
     readonly resolve: (map: OceanMapAnswer | null) => void;
+    /** Answers with the worker's reply as it is, its mask the test's. */
+    readonly replied: (replied: OceanMapReplied | null) => void;
     readonly reject: (error: Error) => void;
   }> = [];
   readonly #listeners = new Set<(change: FieldChange) => void>();
 
-  oceanMap(body: string): Promise<OceanMapAnswer | null> {
+  oceanMap(body: string): Promise<OceanMapReplied | null> {
     return new Promise((resolve, reject) => {
-      this.asked.push({ body, resolve, reject });
+      this.asked.push({
+        body,
+        resolve: (map) => {
+          resolve(map === null ? null : { map, mask: oceanMaskOf(map) });
+        },
+        replied: resolve,
+        reject,
+      });
     });
   }
 
@@ -318,6 +330,22 @@ describe("the ocean-map store (R11.T8.b)", () => {
     pool.asked[1]?.resolve(seaAnswer());
     await settle(store);
     expect(engine.textureSpecs).toEqual([]);
+  });
+
+  it("takes the mask the worker decided beside its answer, deciding none itself (perf-long-tasks-5)", async () => {
+    const { pool, store } = await wanted();
+    const map = seaAnswer();
+    const mask = oceanMaskOf(map);
+    pool.asked[0]?.replied({ map, mask });
+    await settle(store);
+    const held = store.oceanMapOf(MOON);
+    const blend = monthBlend(12, 0.0167, 0);
+    if (held === null || blend === null) {
+      throw new Error("no sea held");
+    }
+    expect(held.answer).toBe(map);
+    expect(held.mask).toBe(mask);
+    expect(held.texels).toEqual(packOceanTexels(map, mask, blend));
   });
 
   it("makes its texture afresh for an answer at another field level", async () => {

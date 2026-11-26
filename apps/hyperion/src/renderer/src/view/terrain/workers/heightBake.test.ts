@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { oceanMaskOf } from "../../ocean/oceanMask";
 import { keptBody } from "../../scenes/kept";
 import {
   answerRequest,
@@ -275,13 +276,17 @@ function fakeModule(
     // A held body's normal map of the class map's cell; seed 0xbeef, a broken module's, none.
     normalMap: (system, body, seed) =>
       held.has(key(system, body)) && seed !== 0xbeefn ? oneCellNormals(freed) : undefined,
-    // A held body's sea of two cells; body 3 the module's refusal, body 4 a trap.
+    // A held body's sea of two cells; body 3 the module's refusal, body 4 a trap, body 5 a broken
+    // module's map at a level R09 does not serve.
     oceanMap: (system, body) => {
       if (body === 3) {
         throw new Error("a body index above 65,535");
       }
       if (body === 4) {
         throw new WebAssembly.RuntimeError("unreachable");
+      }
+      if (body === 5) {
+        return { ...twoCellOcean(freed), level: 4 };
       }
       return held.has(key(system, body)) ? twoCellOcean(freed) : undefined;
     },
@@ -756,10 +761,10 @@ describe("a height worker's fields", () => {
 
     it("answers the module's map, copied out, its arrays transferred and the answer freed", () => {
       const { reply, transfer, freed } = askOceanMap([[MOON, "payload"]], MOON);
-      if (reply.kind !== "ocean-map" || reply.map === null) {
+      if (reply.kind !== "ocean-map" || reply.sea === null) {
         throw new Error(`no ocean map: ${JSON.stringify(reply)}`);
       }
-      const map = reply.map;
+      const { map, mask } = reply.sea;
       expect([map.level, map.seaLevelM, map.months, map.seasonEccentricity, map.complete]).toEqual([
         6,
         -2.5,
@@ -775,6 +780,8 @@ describe("a height worker's fields", () => {
       ]);
       expect(map.winds.length).toBe(48);
       expect(map.windSpeedsMps.length).toBe(256);
+      // Its mask decided beside it, as the page decided it before (perf-long-tasks-5).
+      expect(mask).toEqual(oceanMaskOf(map));
       expect(transfer).toEqual([
         map.cells.buffer,
         map.depthM.buffer,
@@ -782,6 +789,8 @@ describe("a height worker's fields", () => {
         map.ice.buffer,
         map.winds.buffer,
         map.windSpeedsMps.buffer,
+        mask.places.buffer,
+        mask.open.buffer,
       ]);
       expect(freed).toEqual(["ocean map"]);
     });
@@ -791,11 +800,11 @@ describe("a height worker's fields", () => {
         kind: "ocean-map",
         id: 5,
         body: MOON,
-        map: null,
+        sea: null,
       });
       expect(askOceanMap([[PLANET, "stand-in"]], PLANET).reply).toMatchObject({
         kind: "ocean-map",
-        map: null,
+        sea: null,
       });
     });
 
@@ -809,6 +818,16 @@ describe("a height worker's fields", () => {
       });
       const trapped = keptBody(4);
       expect(() => askOceanMap([[trapped, "payload"]], trapped)).toThrow(WebAssembly.RuntimeError);
+    });
+
+    it("answers a map whose mask cannot be decided as ocean-map-failed (perf-long-tasks-5)", () => {
+      const broken = keptBody(5);
+      expect(askOceanMap([[broken, "payload"]], broken).reply).toEqual({
+        kind: "ocean-map-failed",
+        id: 5,
+        body: broken,
+        message: "a coarse field is at level 5 to 8, not 4",
+      });
     });
   });
 
