@@ -299,27 +299,10 @@ fn class_drawn(k : u32) -> bool {
 // The disc's laws at a point: each one's share, and where the record carries its texels' maturity
 // (`matured`, R10.T1.c) each one's A there, its law's own but for a class drawn from its maturity
 // nodes. Without it `albedo` is left unwritten, and each law's A is its own (`surface_law`).
-// `held` lists the `held_count` laws of a share above 0 in ascending order, which the point's
-// light is formed over (perf-bodies-pass-2): the same laws in the same order as a pass over every
-// law that skips the rest, in as many passes as the point holds laws, since SwiftShader, the checks'
-// adapter, runs every pass of a loop that any lane is in and every branch under its lanes' mask.
 struct SurfaceAt {
   shares : array<f32, SURFACE_LAWS>,
   albedo : array<vec3f, SURFACE_LAWS>,
   matured : bool,
-  held : array<u32, SURFACE_LAWS>,
-  held_count : u32,
-}
-
-// Lists `surface`'s laws, `count` + 1 of them, of a share above 0 (`SurfaceAt.held`).
-fn hold_laws(surface : ptr<function, SurfaceAt>, count : u32) {
-  (*surface).held_count = 0u;
-  for (var m = 0u; m <= count; m = m + 1u) {
-    if ((*surface).shares[m] > 0.0) {
-      (*surface).held[(*surface).held_count] = m;
-      (*surface).held_count = (*surface).held_count + 1u;
-    }
-  }
 }
 
 // A class map's layout, as `surface_at` reads it (`discSurface.ts`): its classes and their layers'
@@ -372,9 +355,8 @@ fn fine_tile(texel : vec2u, face : u32, map_layout : ClassMapLayout) -> FineTile
 }
 
 // The survey-masked reconstruction's running sums at a point: each law's share by its term's
-// weight, the weights' sum, and each term's weight, its stored texel and code's layer, and under a
-// maturity its code's segment, at most 16 terms (four corners, each a refined texel's four cells);
-// and the purity of each term's classes by
+// weight, the weights' sum, and under a maturity each term's weight and code's segment, at most 16
+// terms (four corners, each a refined texel's four cells); and the purity of each term's classes by
 // its weight, over the terms that hold a class, with those terms' weights' sum (`edge_shape_disc`'s
 // gate, lane fix-jagged-biome-edges).
 struct SurfaceSums {
@@ -385,10 +367,6 @@ struct SurfaceSums {
   segment : array<MaturitySegment, 16>,
   purity : f32,
   purity_norm : f32,
-  // Each term's stored texel and its code's layer, whose code `surface_at` reads under a maturity
-  // alone (perf-bodies-pass-2).
-  texel : array<vec2u, 16>,
-  code_layer : array<u32, 16>,
 }
 
 // Adds the texel stored at `texel`, its weights read as `texel_total` reads them and summing to
@@ -427,10 +405,10 @@ fn add_term(
     (*sums).purity = (*sums).purity + b * squares / (classes * classes);
     (*sums).purity_norm = (*sums).purity_norm + b;
   }
-  // Its code is read after the sums, under a maturity alone (`surface_at`).
-  (*sums).b[(*sums).terms] = b;
-  (*sums).texel[(*sums).terms] = texel;
-  (*sums).code_layer[(*sums).terms] = code_layer;
+  if (map_layout.maturity) {
+    (*sums).b[(*sums).terms] = b;
+    (*sums).segment[(*sums).terms] = maturity_segment(class_map_maturity(texel, code_layer));
+  }
   (*sums).terms = (*sums).terms + 1u;
 }
 
@@ -540,18 +518,11 @@ fn edge_shape_disc(
   var kept = 0.0;
   var classes = 0.0;
   var squares = 0.0;
-  // The keyed classes of a share above 0, in ascending order, `keyed` of them, which each pass
-  // below takes alone (`SurfaceAt.held`'s note): the same classes in the same order.
-  var keyed_classes : array<u32, SURFACE_LAWS>;
-  var keys : array<u32, SURFACE_LAWS>;
   for (var m = 1u; m <= count; m = m + 1u) {
     let s = (*surface).shares[m];
     classes = classes + s;
     squares = squares + s * s;
-    let key = edge_key_of(m - 1u);
-    if (s > 0.0 && key != 0u) {
-      keyed_classes[keyed] = m;
-      keys[keyed] = key;
+    if (s > 0.0 && edge_key_of(m - 1u) != 0u) {
       keyed = keyed + 1u;
       kept = kept + s;
     }
@@ -567,20 +538,26 @@ fn edge_shape_disc(
   let q = edge_sharpness(lattice_rad / footprint_rad, plan);
   var logits : array<f32, SURFACE_LAWS>;
   var largest = -3.4e38;
-  for (var i = 0u; i < keyed; i = i + 1u) {
-    let m = keyed_classes[i];
-    logits[m] = edge_logit((*surface).shares[m] / kept, gate, q, edge_noise(p, keys[i], plan));
+  for (var m = 1u; m <= count; m = m + 1u) {
+    let s = (*surface).shares[m];
+    let key = edge_key_of(m - 1u);
+    if (!(s > 0.0) || key == 0u) {
+      continue;
+    }
+    logits[m] = edge_logit(s / kept, gate, q, edge_noise(p, key, plan));
     largest = max(largest, logits[m]);
   }
   var sum = 0.0;
-  for (var i = 0u; i < keyed; i = i + 1u) {
-    let m = keyed_classes[i];
-    logits[m] = exp(logits[m] - largest);
-    sum = sum + logits[m];
+  for (var m = 1u; m <= count; m = m + 1u) {
+    if ((*surface).shares[m] > 0.0 && edge_key_of(m - 1u) != 0u) {
+      logits[m] = exp(logits[m] - largest);
+      sum = sum + logits[m];
+    }
   }
-  for (var i = 0u; i < keyed; i = i + 1u) {
-    let m = keyed_classes[i];
-    (*surface).shares[m] = kept * logits[m] / sum;
+  for (var m = 1u; m <= count; m = m + 1u) {
+    if ((*surface).shares[m] > 0.0 && edge_key_of(m - 1u) != 0u) {
+      (*surface).shares[m] = kept * logits[m] / sum;
+    }
   }
 }
 
@@ -614,8 +591,6 @@ fn surface_at(body : Body, q : vec3f, classes : u32, footprint : f32) -> Surface
     }
   }
   out.shares[0] = 1.0;
-  // Law 0 alone, as every early return leaves it.
-  out.held_count = 1u;
   if (classes == 0u) {
     return out;
   }
@@ -706,26 +681,12 @@ fn surface_at(body : Body, q : vec3f, classes : u32, footprint : f32) -> Surface
   if (sums.purity_norm > 0.0 && edge_weight > 0.0) {
     edge_shape_disc(&out, count, p, footprint, edge_lattice_rad(lattice_st), sums.purity / sums.purity_norm, edge_weight);
   }
-  hold_laws(&out, count);
   if (!body.maturity) {
     return out;
   }
-  // Each term's code, read here rather than as each term is added (perf-bodies-pass-2): SwiftShader,
-  // the checks' adapter, runs every branch under its lanes' mask, and a loop's first pass whether or
-  // not a lane is in it, so that a read under the term's `if` cost each term its read on a map of no
-  // maturity, and this loop costs such a map one pass.
-  for (var t = 0u; t < sums.terms; t = t + 1u) {
-    sums.segment[t] = maturity_segment(class_map_maturity(sums.texel[t], sums.code_layer[t]));
-  }
-  // Over the classes of a share above 0 alone, in ascending order: a class of no share reads none
-  // of its nodes, as the terrain skips a zero-share slot.
-  for (var i = 0u; i < out.held_count; i = i + 1u) {
-    let m = out.held[i];
-    if (m == 0u) {
-      continue;
-    }
-    let k = m - 1u;
-    if (!class_drawn(k)) {
+  for (var k = 0u; k < count; k = k + 1u) {
+    // A class of no share reads none of its nodes, as the terrain skips a zero-share slot.
+    if (!(out.shares[k + 1u] > 0.0) || !class_drawn(k)) {
       continue;
     }
     var albedo = vec3f(0.0);
@@ -876,11 +837,11 @@ fn light_annuli(j : u32, c : u32, count : u32) -> DiscAnnuli {
 }
 
 // The reflectance I/F of the surface's laws by their shares at a point lit by one source of
-// irradiance factor `h` (`lit_disc_term`), at phase `alpha`, over the laws the point holds
-// (`SurfaceAt.held`), each law's A its own, or under the record's maturity the point's
+// irradiance factor `h` (`lit_disc_term`), at phase `alpha`, each law's A the point's
 // (`surface_at`'s albedo, R10.T1.c).
 fn surface_reflectance(
   surface : ptr<function, SurfaceAt>,
+  laws : u32,
   h : f32,
   mu0 : f32,
   mu : f32,
@@ -888,10 +849,11 @@ fn surface_reflectance(
   source_radius : f32,
 ) -> vec3f {
   var reflectance = vec3f(0.0);
-  // Over the laws of a share above 0 alone, in ascending order (`SurfaceAt.held`).
-  for (var i = 0u; i < (*surface).held_count; i = i + 1u) {
-    let m = (*surface).held[i];
+  for (var m = 0u; m < laws; m = m + 1u) {
     let share = (*surface).shares[m];
+    if (!(share > 0.0)) {
+      continue;
+    }
     let law = surface_law(m);
     // The law's own A, or the point's under the record's maturity.
     var albedo = law.a;
@@ -948,13 +910,14 @@ fn shade(body : Body, q : vec3f, ray : vec3f) -> Shaded {
   var surface = surface_at(body, q, laws - 1u, footprint);
   // The surface's mean A, for R08's sky light on the Lambert share's flat term.
   var mean_a = vec3f(0.0);
-  for (var i = 0u; i < surface.held_count; i = i + 1u) {
-    let m = surface.held[i];
-    var albedo = surface_law(m).a;
-    if (surface.matured) {
-      albedo = surface.albedo[m];
+  for (var m = 0u; m < laws; m = m + 1u) {
+    if (surface.shares[m] > 0.0) {
+      var albedo = surface_law(m).a;
+      if (surface.matured) {
+        albedo = surface.albedo[m];
+      }
+      mean_a = mean_a + surface.shares[m] * albedo;
     }
-    mean_a = mean_a + surface.shares[m] * albedo;
   }
   // R08's lookups (R08.T9.b): the point's geodetic latitude and its north, its geodetic height 0 on
   // the figure at zero height.
@@ -1041,7 +1004,7 @@ fn shade(body : Body, q : vec3f, ray : vec3f) -> Shaded {
       let alpha = acos(clamp(dot(towards, -ray), -1.0, 1.0));
       // `body_brdf` with the disc's μ₀ factor replaced by the horizon term (`lit_disc_term`), each
       // of the surface's laws by its share.
-      let reflectance = surface_reflectance(&surface, horizon, mu0, mu, alpha, star_radius);
+      let reflectance = surface_reflectance(&surface, laws, horizon, mu0, mu, alpha, star_radius);
       // R08's transmittance to the star's centre (R08.T9.b; Design note 7: a star's disc is under
       // about 1°), its light slot j's, 0 where the ground hides it, at the datum's cosine.
       let transmitted = atmosphere_sun_transmittance(
@@ -1086,7 +1049,7 @@ fn shade(body : Body, q : vec3f, ray : vec3f) -> Shaded {
     }
     let alpha = acos(clamp(dot(towards, -ray), -1.0, 1.0));
     let source_radius = asin(min(1.0, source.w / distance));
-    let reflectance = surface_reflectance(&surface, irradiance, mu0, mu, alpha, source_radius);
+    let reflectance = surface_reflectance(&surface, laws, irradiance, mu0, mu, alpha, source_radius);
     let transmitted = atmosphere_source_transmittance(
       0.0, mu0_datum, local.latitude, local_azimuth(local, towards), source_radius, 0u
     );

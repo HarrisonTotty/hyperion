@@ -204,10 +204,10 @@ function digestOf(source: string): string {
  * rays take M's off-axis terms, 0 for a frame's on-axis projection, so every value is as before.
  */
 const PLAIN_DIGESTS: ReadonlyArray<readonly [string, string, string]> = [
-  ["the disc's interior", BODY_DISC_MATERIALS.interior.fragmentWgsl, "d6f4d0334b6f8fdc"],
-  ["the disc's limb", BODY_DISC_MATERIALS.limb.fragmentWgsl, "d6f4d0334b6f8fdc"],
-  ["the mesh regime's figure", SMOOTH_MESH_MATERIAL.fragmentWgsl, "b4ca8c77d0eb4258"],
-  ["the disc cells", BODY_DISC_CELLS_KERNEL.reference, "c3e598d7960b5a13"],
+  ["the disc's interior", BODY_DISC_MATERIALS.interior.fragmentWgsl, "35dcf54d3ff824e7"],
+  ["the disc's limb", BODY_DISC_MATERIALS.limb.fragmentWgsl, "35dcf54d3ff824e7"],
+  ["the mesh regime's figure", SMOOTH_MESH_MATERIAL.fragmentWgsl, "26b3fbb599acf6d"],
+  ["the disc cells", BODY_DISC_CELLS_KERNEL.reference, "6395a450b64c75b6"],
   // Re-pinned by plan R14's `@invariant` clip position (terrainLit.wgsl's `LitVertexOut`), which
   // holds every pipeline that places a patch's vertex to the same bits; the arithmetic is as before.
   // And by the seamless lane's sub-patches (R10.T16.h): the instance record's `sub` and a
@@ -221,19 +221,19 @@ const PLAIN_DIGESTS: ReadonlyArray<readonly [string, string, string]> = [
   // stands, are the texel's own place, map and normal, bit for bit; the depth and the casters
   // compose the shared module alone.
   ...[
-    ["terrain-lit-baked-offsets", "6d10ca54d4341af"],
-    ["terrain-lit-face-differences", "7763d91ce892df2a"],
+    ["terrain-lit-baked-offsets", "c998602761177e34"],
+    ["terrain-lit-face-differences", "4a74063830199d1d"],
     // Re-pinned by R10.T16.c's grazing fix, whose depth is pushed by its constant fraction alone.
-    ["terrain-depth-baked-offsets", "598657d3651c9236"],
-    ["terrain-depth-face-differences", "47f90c36f79f0207"],
-    ["terrain-shadow-baked-offsets", "24256f7ca85c9116"],
-    ["terrain-shadow-face-differences", "4068b01e7f2d6727"],
-    ["terrain-lit-baked-offsets-still", "a02ea8669be3d040"],
-    ["terrain-lit-face-differences-still", "527788e7a4a30199"],
-    ["terrain-depth-baked-offsets-still", "b956395383e3d8d3"],
-    ["terrain-depth-face-differences-still", "41f5ab31601d40fe"],
-    ["terrain-shadow-baked-offsets-still", "7f750a4b48316fd1"],
-    ["terrain-shadow-face-differences-still", "81b6c96e54f9334"],
+    ["terrain-depth-baked-offsets", "5929891b87bf05f7"],
+    ["terrain-depth-face-differences", "b287cc3e8fea2f22"],
+    ["terrain-shadow-baked-offsets", "2cd8c661b4301755"],
+    ["terrain-shadow-face-differences", "817350bf7d7ff2f8"],
+    ["terrain-lit-baked-offsets-still", "fdbbca01c702d405"],
+    ["terrain-lit-face-differences-still", "f1f592f1d951828"],
+    ["terrain-depth-baked-offsets-still", "4ae0f118ed4211ac"],
+    ["terrain-depth-face-differences-still", "9b77db2e019555a5"],
+    ["terrain-shadow-baked-offsets-still", "6686db6d53b34e78"],
+    ["terrain-shadow-face-differences-still", "d12bac121c68a901"],
   ].map(([name = "", digest = ""]): readonly [string, string, string] => {
     const still = name.endsWith("-still");
     const spec = [
@@ -247,7 +247,8 @@ const PLAIN_DIGESTS: ReadonlyArray<readonly [string, string, string]> = [
 ];
 
 /** The line `withDiscEmission` adds to `shade`. */
-const EMISSION_LINE = "  out.radiance = out.radiance + disc_emission(body, normal, &surface);\n";
+const EMISSION_LINE =
+  "  out.radiance = out.radiance + disc_emission(body, normal, &surface, laws);\n";
 
 /** The emissive form undone: its added line and its appended modules taken out. */
 function plainOf(emissive: string): string {

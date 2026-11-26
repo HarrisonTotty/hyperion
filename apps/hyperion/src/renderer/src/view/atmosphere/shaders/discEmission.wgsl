@@ -13,10 +13,15 @@ const EMISSION_ROWS : u32 = 3u;
 
 // The light a sample emits, pre-exposed: the field's temperature at its datum normal `normal`, from
 // the star's cosine and the latitude's sine about the disc's pole; its laws by their shares at the
-// sample (`surface`, those it holds) split into the ground's and the `Melt` classes', each through
+// sample (`surface`, `laws` of them) split into the ground's and the `Melt` classes', each through
 // `thermal_luminance` with its laws' A summed by their shares, the melt's at no less than its least
 // temperature; times the exposure scale.
-fn disc_emission(body : Body, normal : vec3f, surface : ptr<function, SurfaceAt>) -> vec3f {
+fn disc_emission(
+  body : Body,
+  normal : vec3f,
+  surface : ptr<function, SurfaceAt>,
+  laws : u32,
+) -> vec3f {
   let first = u32(disc_row(SECONDARY_COUNT_ROW).y);
   if (first == 0u) {
     return vec3f(0.0);
@@ -35,10 +40,11 @@ fn disc_emission(body : Body, normal : vec3f, surface : ptr<function, SurfaceAt>
   var ground = 0.0;
   var melt_a = vec3f(0.0);
   var melt = 0.0;
-  // Over the laws of a share above 0 alone, in ascending order (`SurfaceAt.held`).
-  for (var i = 0u; i < (*surface).held_count; i = i + 1u) {
-    let m = (*surface).held[i];
+  for (var m = 0u; m < laws; m = m + 1u) {
     let share = (*surface).shares[m];
+    if (!(share > 0.0)) {
+      continue;
+    }
     // The law's own A, or the point's under the record's maturity (`SurfaceAt`).
     var albedo = surface_law(m).a;
     if ((*surface).matured) {

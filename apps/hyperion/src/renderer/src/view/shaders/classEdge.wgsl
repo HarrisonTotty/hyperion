@@ -94,14 +94,10 @@ fn edge_gradient_noise(x : vec3f, key : u32) -> f32 {
   );
 }
 
-// The octaves a footprint draws (`EdgePlan`): each one's weight, and the sum's slope a pixel; and
-// the octaves up to the last of a weight above 0, past which the noise adds nothing, so that its
-// loop takes no pass for them (perf-bodies-pass-2: SwiftShader, the checks' adapter, runs every
-// pass of a loop that any lane is in, and every branch under its lanes' mask).
+// The octaves a footprint draws (`EdgePlan`): each one's weight, and the sum's slope a pixel.
 struct EdgePlan {
   weights : array<f32, EDGE_OCTAVES>,
   slope_per_px : f32,
-  octaves : u32,
 }
 
 // The octaves drawn at a pixel of footprint `footprint_rad` on the unit sphere (`edgePlan`).
@@ -114,9 +110,6 @@ fn edge_plan(footprint_rad : f32) -> EdgePlan {
     let wavelength_px = wavelength / footprint_rad;
     let weight = smoothstep(EDGE_FADE_FROM_PX, EDGE_FADE_TO_PX, wavelength_px);
     plan.weights[o] = weight;
-    if (weight > 0.0) {
-      plan.octaves = o + 1u;
-    }
     slope = slope + weight * amplitude * EDGE_NOISE_SLOPE_RMS / wavelength_px;
     amplitude = amplitude * EDGE_OCTAVE_GAIN;
     wavelength = wavelength * 0.5;
@@ -130,7 +123,7 @@ fn edge_noise(d : vec3f, key : u32, plan : EdgePlan) -> f32 {
   var sum = 0.0;
   var amplitude = 1.0;
   var frequency = 1.0 / EDGE_BASE_WAVELENGTH_RAD;
-  for (var o = 0u; o < plan.octaves; o = o + 1u) {
+  for (var o = 0u; o < EDGE_OCTAVES; o = o + 1u) {
     let weight = plan.weights[o];
     if (weight > 0.0) {
       let octave_key = edge_mix32(key ^ ((o + 1u) * 0x9e3779b9u));

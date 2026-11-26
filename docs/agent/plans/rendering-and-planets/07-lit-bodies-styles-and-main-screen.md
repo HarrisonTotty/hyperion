@@ -10289,4 +10289,4 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
   may be drawn by (`catalogue.test.ts` fails on one left out): the clouds', the seas', the lit
   terrain's cloudy forms and the rocks'; `smoke/airlessPasses.ts`' `byAirlessTwins` draws a frame's
   draws by their twins, for a byte check.
-- **`surface_at` rewritten bit for bit (2026-11-26, perf-bodies-pass-2):** `texel_shares` is gone (`add_term` forms each share from `texel_total`'s sum); `SurfaceAt` adds `matured` (`albedo` filled only then, else `surface_law`'s A) and `held`/`held_count`, which `surface_reflectance(&surface, …)` and `disc_emission(body, normal, &surface)` loop over; `EdgePlan.octaves` bounds `edge_noise`; a term's maturity code is read after the sums.
+- **`surface_at` rewritten bit for bit (2026-11-26, perf-bodies-pass-2):** `texel_shares` is gone (`add_term` forms each share from `texel_total`'s sum); `SurfaceAt` adds `matured` (`albedo` filled only then, else `surface_law`'s A); `surface_reflectance(&surface, laws, …)` and `disc_emission(body, normal, &surface, laws)` take it by pointer.

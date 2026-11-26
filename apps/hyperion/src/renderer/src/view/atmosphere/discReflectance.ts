@@ -194,7 +194,7 @@ const SHADE_END =
 
 /** {@link SHADE_END} with the emission added before the return. */
 const EMISSIVE_SHADE_END =
-  "    out.radiance = out.radiance + source.xyz * misc.z * reflectance * transmitted;\n  }\n  out.radiance = out.radiance + disc_emission(body, normal, &surface);\n  return out;\n}";
+  "    out.radiance = out.radiance + source.xyz * misc.z * reflectance * transmitted;\n  }\n  out.radiance = out.radiance + disc_emission(body, normal, &surface, laws);\n  return out;\n}";
 
 /**
  * A disc kernel's emissive form (the module's remarks): `source`, a composition of `bodyDisc.wgsl`,
@@ -219,7 +219,7 @@ export function withDiscEmission(source: string): string {
  * (R08.T18.b).
  */
 const EMISSIVE_AIR_SHADE_END =
-  "    out.radiance = out.radiance + source.xyz * misc.z * reflectance * transmitted;\n  }\n  out.radiance = out.radiance + disc_emission(body, normal, &surface);\n  out.radiance = disc_air(body, q, ray, out.radiance);\n  return out;\n}";
+  "    out.radiance = out.radiance + source.xyz * misc.z * reflectance * transmitted;\n  }\n  out.radiance = out.radiance + disc_emission(body, normal, &surface, laws);\n  out.radiance = disc_air(body, q, ray, out.radiance);\n  return out;\n}";
 
 /**
  * A disc kernel's form for emission and air together (the module's remarks; R08.T18.b): `source`
