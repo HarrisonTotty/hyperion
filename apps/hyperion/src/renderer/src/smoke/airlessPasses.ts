@@ -12,7 +12,8 @@
  * made in their modules' places from the start, on the engine the page's wraps, so that each check's
  * every draw is by its twin and the two runs differ in their modules alone. A frame's own draws can
  * be swapped so too ({@link byAirlessTwins}): the rocks' frames, forward and by the visibility
- * buffer, are (`terrainFrame.ts`' `checkRocksByIds`).
+ * buffer, are (`terrainFrame.ts`' `checkRocksByIds`), and the decorative scatter's through a lit
+ * pass (`checkScatterThroughPass`, test-render's `scatter` part).
  */
 
 import { SourceTableEngine } from "../view/atmosphere/sourceTableEngine";

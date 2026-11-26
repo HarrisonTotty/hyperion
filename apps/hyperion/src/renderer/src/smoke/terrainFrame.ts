@@ -3098,6 +3098,11 @@ interface ScatterRun {
   readonly last: boolean;
   readonly placed: number;
   readonly decorated: boolean;
+  /**
+   * The frame against its draws by their airless twins (plan R07, perf-bodies-pass), where it drew
+   * pebbles; `null` where it drew none.
+   */
+  readonly twins: TwinFrames | null;
 }
 
 /** A {@link ScatterRun} as the check's details state it. */
@@ -3113,6 +3118,9 @@ function scatterRunText(name: string, r: ScatterRun): string {
  * Once its selection has streamed with nothing missing, the pass's view-frame draws the pebbles
  * after its own draws, has placed some, and states its decoration (`TerrainViewFrame.decorated`);
  * the low setting's pass, given the same handles and settled, makes no scatter and states none.
+ * The high frame's ground and pebbles are drawn again on the engine the page's wraps, as written
+ * and by their modules' airless twins over the Moon-like body's airless tables (plan R07,
+ * perf-bodies-pass): the same bytes, the pebbles' twin among those drawn.
  */
 export async function checkScatterThroughPass(engine: RenderEngine, checks: Checks): Promise<void> {
   const kernels = new ScatterKernelSet(engine, TERRAIN_SETTINGS.high.vertexPath);
@@ -3177,6 +3185,13 @@ export async function checkScatterThroughPass(engine: RenderEngine, checks: Chec
       hold?.hold();
       const material = kernels.kernels?.material;
       const scatter = pass.scatter;
+      const pebbles = frame.draws.filter((draw) => draw.material === material).length;
+      // Plan R07's airless twins: the frame drawn again as written and by its modules' twins.
+      const inner = engine instanceof SourceTableEngine ? engine.inner : engine;
+      const twins =
+        pebbles === 0
+          ? null
+          : await framesByTwins(inner, frame.draws, (draws) => drawnScene(inner, pose, draws));
       const placed =
         scatter === null
           ? 0
@@ -3188,10 +3203,11 @@ export async function checkScatterThroughPass(engine: RenderEngine, checks: Chec
         done,
         made: scatter !== null,
         draws: frame.draws.length,
-        pebbles: frame.draws.filter((draw) => draw.material === material).length,
+        pebbles,
         last: frame.draws.at(-1)?.material === material,
         placed,
         decorated: frame.decorated,
+        twins,
       };
     } finally {
       world.release();
@@ -3218,6 +3234,12 @@ export async function checkScatterThroughPass(engine: RenderEngine, checks: Chec
         low.pebbles === 0 &&
         !low.decorated,
       `${scatterRunText("high", high)}; ${scatterRunText("low", low)}`,
+    );
+    const twin = `${kernels.kernels?.material.name ?? "scatter-pebbles"} (airless)`;
+    checks.check(
+      "plan R07: a lit pass's ground and pebbles drawn by their airless twins draw their modules' bytes",
+      high.twins !== null && high.twins.apart === 0 && high.twins.names.includes(twin),
+      twinWords("high", high.twins),
     );
   } finally {
     kernels.dispose();

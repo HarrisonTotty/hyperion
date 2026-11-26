@@ -3158,6 +3158,8 @@ describe("the schema check", () => {
       [],
       malformed,
       [],
+      malformed,
+      [],
     ]);
     expect(summaryMarkdown(results)).toContain(
       "the lit pass's interior patches by clusters, far cascades every frame, the mesh bodies' figures by their instanced draws, the hulls' faces by their instanced draws, the wireframe's interior patches by the lit mesh, no mesh page pool, meshes cut at 0 px in the camera and 0 px as the wireframe's occluders, the lit pass's edge patches by the lit mesh, the camera's strides off, occlusion off, the lit pass's interior patches shaded forward, the lit selection's budget its patches, the stand-ins at stride 1, the overlay's marks the ground hides drawn, the edge bakes' stand-ins by the lit mesh, the disc cells a cell an invocation, the mesh bodies' figures shaded forward, the terrain lit by every planetshine source, the detail sets generated, the decorative scatter drawn, the lit terrain's τ of a CSS pixel, the classes' edges shaped, the rocks cast nothing.",

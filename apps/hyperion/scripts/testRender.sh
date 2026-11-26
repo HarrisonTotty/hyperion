@@ -104,16 +104,16 @@
 # `litTerrain.ts` and `airlessPasses.ts`): their catalogue, and the checks that the lit modules drawn
 # by them (the bodies, the lit terrain and its cloudy forms, the clouds and the seas) draw their
 # modules' bytes on an airless body, a run per variant as a numbered part's; the rocks' twins are
-# checked in their own frames, part 34's. It runs after the numbered parts, before the ladder, when
-# no part is asked for.
+# checked in their own frames, part 34's, and the pebbles' in the scatter part's. It runs after the
+# numbered parts, before the scatter and the ladder, when no part is asked for.
 #
 # --part=scatter runs plan R11's decorative scatter (R11.T6.a–b; `src/renderer/src/smoke/scatter.ts`),
 # a part of its own by name, as the ladder is, rather than a number (it landed beside the rocks'
 # parts 33 and 34, its lane's part 31 being the stills'): its kernels' and materials' catalogue, its
 # cull against its twin, its placement against its twin over the Moon-like fixture's finest patches
-# on both vertex paths, and the scatter through a lit pass at the surface, each variant side by
-# side, about 150 s on a pod. It runs after the parts and the twins, before the ladder, when no part
-# is asked for.
+# on both vertex paths, and the scatter through a lit pass at the surface, drawn again by its airless
+# twins, each variant side by side, about 150 s on a pod. It runs after the parts and the twins,
+# before the ladder, when no part is asked for.
 #
 # --part=ladder runs plan R12's ladder (R12.T7.a; `src/renderer/src/smoke/ladder.ts`): once per
 # quality setting and variant, side by side, each run making and drawing what its setting makes, so

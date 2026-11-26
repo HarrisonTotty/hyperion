@@ -197,6 +197,9 @@ describe("the airless twins (plan R07, perf-bodies-pass)", () => {
         "bodies:smoothMeshLean (airless)",
         "bodies:discEmissiveLean (airless)",
         "BODY DISC CELLS, packed, lean (airless)",
+        // Plan R11's decorative scatter, on each vertex path.
+        "scatter-pebbles-baked-offsets (airless)",
+        "scatter-pebbles-face-differences (airless)",
       ]),
     );
     expect(names.some((name) => name.startsWith("terrain"))).toBe(true);
@@ -207,13 +210,15 @@ describe("the airless twins (plan R07, perf-bodies-pass)", () => {
   it("twins every lit material of the catalogue that a body without air may be drawn by", () => {
     // Every material the engine would draw by its airless twin where a body's airless tables are
     // bound: all but the air forms, whose records carry their air, and the table-only twins, bound
-    // to a body of one band's sources' table.
+    // to a body of one band's sources' table, wherever the catalogue holds them (the decorative
+    // scatter's beside its pebbles): the engine twins a material as written, never a twin.
     const twinned = new Set(AIRLESS_ENTRIES.map((entry) => entry.spec.name));
     const missing = WGSL_CATALOGUE.flatMap((entry) => {
       if (
         entry.kind !== "material" ||
         AIRLESS_ENTRIES.includes(entry) ||
         TABLE_ONLY_ENTRIES.includes(entry) ||
+        entry.spec.name.endsWith(" (table only)") ||
         entry.spec.name.includes("Air")
       ) {
         return [];
