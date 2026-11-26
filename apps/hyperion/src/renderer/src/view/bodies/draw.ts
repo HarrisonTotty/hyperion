@@ -106,6 +106,7 @@ import { packPhaseFactorRows } from "../appearance/litBodyProbe";
 import { BUFFER_USAGE, TEXTURE_USAGE } from "../engine/gpuFlags";
 import type { KernelPair } from "../engine/kernels";
 import { EngineUnavailable } from "../engine/resilientEngine";
+import { untilNextTask } from "../../lib/nextTask";
 import type {
   BufferHandle,
   ComputeHandle,
@@ -2255,6 +2256,8 @@ interface DeviceResources {
    */
   lean: FormMaterials | null;
   emissiveLean: FormMaterials | null;
+  /** The lean forms asked for on this device, each made in a task after its asking plan's. */
+  readonly leanAsked: Set<"lean" | "emissiveLean">;
 }
 
 /**
@@ -2677,6 +2680,7 @@ export class LitBodyRenderer {
       emissiveAir: null,
       lean: null,
       emissiveLean: null,
+      leanAsked: new Set(),
     };
   }
 
@@ -2690,6 +2694,38 @@ export class LitBodyRenderer {
   #formMaterials(kind: FormKind): FormMaterials | null {
     const made = this.#formMade(kind);
     return made.ready ? made : null;
+  }
+
+  /**
+   * A lean form, prepared, or `null` (perf-bodies-pass-2): asked at a plan, it is made in a task after
+   * that plan's (`untilNextTask`), as the airless twins are (lane perf-long-tasks-4: their shaders'
+   * making held the frame that asked for them), and its pipelines prepared off the frame; until then
+   * its records are drawn by their full forms, the same bytes.
+   */
+  #leanMaterials(kind: "lean" | "emissiveLean"): FormMaterials | null {
+    const resources = this.#resources;
+    const held = resources[kind];
+    if (held !== null) {
+      return held.ready ? held : null;
+    }
+    if (!resources.leanAsked.has(kind)) {
+      resources.leanAsked.add(kind);
+      void this.#leanLater(kind, resources).catch((error: unknown) => {
+        // A loss meanwhile is no failure: the restore asks for them again at their next record.
+        if (!(error instanceof EngineUnavailable)) {
+          console.error(`the ${kind} forms of the lit bodies could not be made:`, error);
+        }
+      });
+    }
+    return null;
+  }
+
+  /** Makes a lean form in a task after this one, unless its device's resources are gone. */
+  async #leanLater(kind: "lean" | "emissiveLean", resources: DeviceResources): Promise<void> {
+    await untilNextTask();
+    if (!this.#disposed && this.#resources === resources) {
+      this.#formMade(kind);
+    }
   }
 
   /** A form, made at the first call on a device with its pipelines' preparing begun. */
@@ -2842,9 +2878,9 @@ export class LitBodyRenderer {
           (record.emission !== undefined) === emitting &&
           isLeanRecord(record),
       );
-    const lean = this.#leanForms && leanOf(false) ? this.#formMaterials("lean") : null;
+    const lean = this.#leanForms && leanOf(false) ? this.#leanMaterials("lean") : null;
     const emissiveLean =
-      this.#leanForms && leanOf(true) ? this.#formMaterials("emissiveLean") : null;
+      this.#leanForms && leanOf(true) ? this.#leanMaterials("emissiveLean") : null;
     this.#drawn = { plan, records, emissive, air, emissiveAir, lean, emissiveLean };
     return this.#drawn;
   }

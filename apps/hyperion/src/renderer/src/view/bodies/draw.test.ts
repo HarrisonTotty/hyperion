@@ -75,6 +75,7 @@ import type { DiscSurface } from "../appearance/bodyAppearance";
 import { IDENTITY_ROTATION, rotation3FromRows } from "../coords/rotation";
 import { countingRenderEngine } from "../../test/countingRenderEngine";
 import { microtasks } from "../../test/opticsFakes";
+import { untilNextTask } from "../../lib/nextTask";
 import { WIREFRAME_MATERIALS } from "../wireframe/submit";
 import type { DrawItem, TextureHandle } from "../engine/types";
 import bodyDiscWgsl from "../shaders/bodyDisc.wgsl?raw";
@@ -2373,6 +2374,19 @@ describe("the lean forms (perf-bodies-pass-2)", () => {
       "bodies:disc 1",
       "bodies:discLimb 1",
     ]);
+    renderer.dispose();
+  });
+
+  it("makes the lean forms in a task after the plan that asks for them, none in its own", async () => {
+    const engine = await countingRenderEngine();
+    const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
+    const before = engine.counts.materials;
+    renderer.draws(planOfTwo());
+    renderer.draws(planOfTwo());
+    expect(engine.counts.materials).toBe(before);
+    await untilNextTask();
+    // The disc's interior and limb and the figure's two, once.
+    expect(engine.counts.materials).toBe(before + 4);
     renderer.dispose();
   });
 
