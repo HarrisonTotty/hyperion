@@ -1,7 +1,7 @@
 /**
  * Plan R07's airless twins over plan R11's lit passes (perf-bodies-pass; the catalogue's
- * `AIRLESS_ENTRIES`): the clouds' layer and volume (R11.T7.b–c) and the far and near seas
- * (R11.T8.b–c), each drawn by its own check through a body's airless tables (`clouds.ts`,
+ * `AIRLESS_ENTRIES`): the clouds' layer and volume (R11.T7.b–c), the far and near seas
+ * (R11.T8.b–c) and the far sea's cloudy form (R11.T7.c), each drawn by its own check through a body's airless tables (`clouds.ts`,
  * `ocean.ts`), run once by their modules as written and once with each material that has an airless
  * twin made as its twin; every texture either run reads back, the same bytes.
  *
@@ -30,7 +30,7 @@ import type {
 } from "../view/engine/types";
 import { checkCloudLayerDraw, checkCloudVolumeDraw } from "./clouds";
 import { Checks } from "./harness";
-import { checkOceanNear, checkOceanPass } from "./ocean";
+import { checkOceanCloudShadow, checkOceanNear, checkOceanPass } from "./ocean";
 
 /** An engine's run of a check: the textures it read back, in order, and the twins it made. */
 interface Recording {
@@ -105,6 +105,8 @@ const PASSES: ReadonlyArray<{
   { what: "the cloud volume", check: checkCloudVolumeDraw },
   { what: "the ocean pass's far sea", check: checkOceanPass },
   { what: "the near sea", check: checkOceanNear },
+  // The far sea's cloudy form under the volume's shadow map (R11.T7.c).
+  { what: "the far sea beneath the clouds", check: checkOceanCloudShadow },
 ];
 
 /**

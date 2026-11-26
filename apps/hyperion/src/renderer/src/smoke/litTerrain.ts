@@ -834,12 +834,21 @@ async function renderInto(
           [DISC_NORMALS_TEXTURE]: resources.normals,
           ...(clouds === undefined
             ? {}
-            : { [CLOUD_TEXTURES.coverage]: clouds.coverage, [CLOUD_TEXTURES.noise]: clouds.noise }),
+            : {
+                [CLOUD_TEXTURES.coverage]: clouds.coverage,
+                [CLOUD_TEXTURES.noise]: clouds.noise,
+                // The volume's shadow map, here the one that holds nothing (R11.T7.c).
+                [CLOUD_TEXTURES.shadowMap]: clouds.shadowMap,
+              }),
         },
         storageBuffers:
           clouds === undefined
             ? storageBuffers
-            : { ...storageBuffers, [CLOUD_TEXTURES.layer]: clouds.layer },
+            : {
+                ...storageBuffers,
+                [CLOUD_TEXTURES.layer]: clouds.layer,
+                [CLOUD_TEXTURES.shadowRows]: clouds.shadowRows,
+              },
         indirect: { buffer: resources.indirect, offsetBytes: 0 },
       },
     ],

@@ -1253,6 +1253,7 @@ export async function checkCloudVolumeDraw(engine: RenderEngine, checks: Checks)
       engine.releaseMaterial(materials.resolve);
       engine.releaseMaterial(materials.composite);
       engine.releaseMaterial(materials.map);
+      engine.releaseMaterial(materials.shadow);
       engine.releaseMesh(materials.triangle);
     }
   } finally {
