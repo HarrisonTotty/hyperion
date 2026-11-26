@@ -22,6 +22,7 @@ import { PLANETSHINE_SOURCES_HIGH, planetshineIrradiance } from "../lighting/pla
 import { JUPITER_EQUATORIAL_RADIUS_M } from "../../test/giantFixtures";
 import type { Rgb } from "../photometry/toneCurve";
 import { AU_M } from "../scenes/kept";
+import discEmissionWgsl from "../atmosphere/shaders/discEmission.wgsl?raw";
 import bodyDiscWgsl from "../shaders/bodyDisc.wgsl?raw";
 import maturityNodesWgsl from "../shaders/maturityNodes.wgsl?raw";
 import {
@@ -929,10 +930,10 @@ describe("a disc under its class map's maturity (R10.T1.c)", () => {
     const surface = wgslFunction(bodyDiscWgsl, "surface_at");
     expect(surface).toContain("map_layout.groups = (count + 3u) / 4u;");
     expect(surface).toContain(
-      "add_term(&sums, one, b, map_layout, stored, at.face + 6u * map_layout.groups);",
+      "add_term(&sums, stored, at.face, 6u, total, b, map_layout, at.face + 6u * map_layout.groups);",
     );
     expect(surface).toContain(
-      "add_term(&sums, one, b, map_layout, stored, own.layer + map_layout.groups);",
+      "add_term(&sums, stored, own.layer, 1u, total, b, map_layout, own.layer + map_layout.groups);",
     );
     expect([
       wgslConstant(bodyDiscWgsl, "UNORM8_MAX"),
@@ -953,9 +954,18 @@ describe("a disc under its class map's maturity (R10.T1.c)", () => {
   it("takes a corner's code only under the record's flag, through the nodes' library and never its own formula", () => {
     const body = wgslFunction(bodyDiscWgsl, "surface_at");
     expect(body).toContain("map_layout.maturity = body.maturity;");
+    // Each term's texel and code's layer kept as it is added, its code read after the sums under
+    // the record's flag alone (perf-bodies-pass-2).
     expect(wgslFunction(bodyDiscWgsl, "add_term")).toContain(
-      "if (map_layout.maturity) { (*sums).b[(*sums).terms] = b; (*sums).segment[(*sums).terms] = maturity_segment(class_map_maturity(texel, code_layer)); }",
+      "(*sums).b[(*sums).terms] = b; (*sums).texel[(*sums).terms] = texel; (*sums).code_layer[(*sums).terms] = code_layer;",
     );
+    expect(wgslFunction(bodyDiscWgsl, "add_term")).not.toContain("class_map_maturity");
+    const flag = body.indexOf("if (!body.maturity) { return out; }");
+    const codes = body.indexOf(
+      "for (var t = 0u; t < sums.terms; t = t + 1u) { sums.segment[t] = maturity_segment(class_map_maturity(sums.texel[t], sums.code_layer[t])); }",
+    );
+    expect(flag).toBeGreaterThan(0);
+    expect(codes).toBeGreaterThan(flag);
     expect(body).toContain("maturity_mix(lo, hi, segment.fraction)");
     expect(bodyDiscWgsl).not.toMatch(/fn maturity_segment|fn maturity_mix|pow\(/u);
     expect(wgslFunction(bodyDiscWgsl, "body_of")).toContain("body.maturity = y_row.w > 0.5;");
@@ -963,8 +973,12 @@ describe("a disc under its class map's maturity (R10.T1.c)", () => {
 
   it("skips a class of no share before it reads a node, and renormalises its albedo as the shares", () => {
     const body = wgslFunction(bodyDiscWgsl, "surface_at");
-    const skip = body.indexOf("if (!(out.shares[k + 1u] > 0.0) || !class_drawn(k)) { continue; }");
-    expect(skip).toBeGreaterThan(0);
+    // Over the classes it holds alone (`SurfaceAt.held`, perf-bodies-pass-2), law 0 passed over.
+    const skip = body.indexOf(
+      "for (var i = 0u; i < out.held_count; i = i + 1u) { let m = out.held[i]; " +
+        "if (m == 0u) { continue; } let k = m - 1u; if (!class_drawn(k)) { continue; }",
+    );
+    expect(skip).toBeGreaterThan(body.indexOf("hold_laws(&out, count);"));
     expect(skip).toBeLessThan(body.indexOf("class_node(k, segment.node)"));
     expect(body.indexOf("class_node(")).toBe(body.indexOf("class_node(k, segment.node)"));
     expect(body).toContain("out.albedo[k + 1u] = albedo / sums.norm;");
@@ -998,17 +1012,68 @@ describe("a disc under its class map's maturity (R10.T1.c)", () => {
   });
 
   it("shades each law by its albedo at the point, in the reflectance and the sky's mean A", () => {
-    expect(wgslFunction(bodyDiscWgsl, "surface_reflectance")).toContain(
-      "reflectance = reflectance + share * surface.albedo[m] * row.rgb * disc_term;",
+    // The point's A under the record's maturity, the law's own without it (perf-bodies-pass-2).
+    const albedo = "if (surface.matured) { albedo = surface.albedo[m]; }";
+    const pointed = "if ((*surface).matured) { albedo = (*surface).albedo[m]; }";
+    const reflectance = wgslFunction(bodyDiscWgsl, "surface_reflectance");
+    expect(reflectance).toContain(`var albedo = law.a; ${pointed}`);
+    expect(reflectance).toContain(
+      "reflectance = reflectance + share * albedo * row.rgb * disc_term;",
     );
-    expect(wgslFunction(bodyDiscWgsl, "surface_reflectance")).not.toContain("law.a");
     const shade = wgslFunction(bodyDiscWgsl, "shade");
-    expect(shade).toContain("mean_a = mean_a + surface.shares[m] * surface.albedo[m];");
-    expect(shade.match(/surface_reflectance\(surface, laws,/gu)).toHaveLength(2);
-    // Each law's own A where nothing else is drawn.
+    expect(shade).toContain(`var albedo = surface_law(m).a; ${albedo}`);
+    expect(shade).toContain("mean_a = mean_a + surface.shares[m] * albedo;");
+    expect(shade.match(/surface_reflectance\(&surface, /gu)).toHaveLength(2);
+    const emission = wgslFunction(discEmissionWgsl, "disc_emission");
+    expect(emission).toContain(`var albedo = surface_law(m).a; ${pointed}`);
+    expect(emission.match(/share \* albedo;/gu)).toHaveLength(2);
+    // Each law's own A filled in only under the record's maturity, where the nodes may replace it.
     expect(wgslFunction(bodyDiscWgsl, "surface_at")).toContain(
-      "for (var m = 0u; m <= count; m = m + 1u) { out.albedo[m] = surface_law(m).a; }",
+      "out.matured = body.maturity; if (body.maturity) { " +
+        "for (var m = 0u; m <= count; m = m + 1u) { out.albedo[m] = surface_law(m).a; } }",
     );
+  });
+
+  it("forms the point's light over the laws it holds alone, in ascending order, as a pass over every law that skips the rest", () => {
+    // perf-bodies-pass-2: SwiftShader runs every pass of a loop that any lane is in and every
+    // branch under its lanes' mask, so each loop takes as many passes as the point holds laws.
+    expect(wgslFunction(bodyDiscWgsl, "hold_laws")).toBe(
+      "{ (*surface).held_count = 0u; for (var m = 0u; m <= count; m = m + 1u) { " +
+        "if ((*surface).shares[m] > 0.0) { (*surface).held[(*surface).held_count] = m; " +
+        "(*surface).held_count = (*surface).held_count + 1u; } } }",
+    );
+    const surface = wgslFunction(bodyDiscWgsl, "surface_at");
+    // Law 0 alone at every early return, and the list taken after the edges are shaped.
+    expect(surface.indexOf("out.held_count = 1u;")).toBeLessThan(surface.indexOf("return out;"));
+    expect(surface.indexOf("hold_laws(&out, count);")).toBeGreaterThan(
+      surface.indexOf("edge_shape_disc(&out,"),
+    );
+    const over = "let m = (*surface).held[i]; let share = (*surface).shares[m];";
+    expect(wgslFunction(bodyDiscWgsl, "surface_reflectance")).toContain(
+      `for (var i = 0u; i < (*surface).held_count; i = i + 1u) { ${over}`,
+    );
+    expect(wgslFunction(discEmissionWgsl, "disc_emission")).toContain(
+      `for (var i = 0u; i < (*surface).held_count; i = i + 1u) { ${over}`,
+    );
+    expect(wgslFunction(bodyDiscWgsl, "shade")).toContain(
+      "for (var i = 0u; i < surface.held_count; i = i + 1u) { let m = surface.held[i];",
+    );
+    // No pass over every law is left in the light's sums.
+    for (const name of ["surface_reflectance", "shade"]) {
+      expect(wgslFunction(bodyDiscWgsl, name)).not.toMatch(/for \(var m = 0u; m < laws;/u);
+    }
+  });
+
+  it("shapes the classes' edges over the keyed classes that hold a share alone, in ascending order", () => {
+    const edges = wgslFunction(bodyDiscWgsl, "edge_shape_disc");
+    expect(edges).toContain(
+      "if (s > 0.0 && key != 0u) { keyed_classes[keyed] = m; keys[keyed] = key; keyed = keyed + 1u; kept = kept + s; }",
+    );
+    expect(
+      edges.match(/for \(var i = 0u; i < keyed; i = i \+ 1u\) \{ let m = keyed_classes\[i\];/gu),
+    ).toHaveLength(3);
+    expect(edges).toContain("edge_noise(p, keys[i], plan)");
+    expect(edges.match(/for \(var m = 1u; m <= count;/gu)).toHaveLength(1);
   });
 
   it("composes the nodes' library before the disc's shading in every module that draws it", () => {

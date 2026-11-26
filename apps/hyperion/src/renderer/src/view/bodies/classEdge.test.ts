@@ -145,6 +145,24 @@ describe("the edge noise (lane fix-jagged-biome-edges)", () => {
     expect(edgePlan(1).slopePerPx).toBe(0);
   });
 
+  it("leaves the shader's noise at its plan's last octave of a weight above 0, past which none is drawn", () => {
+    // perf-bodies-pass-2: the shader's octave loop stops at `plan.octaves`, the last octave of a
+    // weight above 0, its sum the same, since every later octave is skipped by its weight of 0.
+    expect(collapse(wgslFunction(classEdgeWgsl, "edge_plan"))).toContain(
+      "plan.weights[o] = weight; if (weight > 0.0) { plan.octaves = o + 1u; }",
+    );
+    expect(collapse(wgslFunction(classEdgeWgsl, "edge_noise"))).toContain(
+      "for (var o = 0u; o < plan.octaves; o = o + 1u) { let weight = plan.weights[o]; if (weight > 0.0) {",
+    );
+    // An octave's wavelength halves with each, so its weight never rises again once 0.
+    for (let k = -2; k <= 24; k += 1) {
+      const weights = edgePlan(EDGE_BASE_WAVELENGTH_RAD * 2 ** (-k / 2)).weights;
+      const last = weights.findLastIndex((w) => w > 0);
+      expect(weights.slice(last + 1).every((w) => w === 0)).toBe(true);
+      expect(weights.slice(0, last + 1).every((w) => w > 0)).toBe(true);
+    }
+  });
+
   it("is the same at a point for one key", () => {
     const d = unit(0.3, -0.7, 0.2);
     expect(edgeNoise(d, 5, edgePlan(1e-6))).toBe(edgeNoise(d, 5, edgePlan(1e-6)));

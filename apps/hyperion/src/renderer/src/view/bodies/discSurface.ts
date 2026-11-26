@@ -1186,7 +1186,7 @@ export function classWeightsAt(map: ClassMapTexels, direction: Xyz): number[] {
 /**
  * The share of each of {@link discSurfaceLaws}' laws at a point, from its classes' weights: the
  * weights, scaled down to sum to 1 where they sum to more, after `elsewhere`'s share 1 − Σ w (0
- * where they sum to 1 or more), as `texel_shares` does.
+ * where they sum to 1 or more), as `add_term` takes them.
  */
 export function surfaceShares(weights: ReadonlyArray<number>): number[] {
   const total = weights.reduce((sum, w) => sum + w, 0);

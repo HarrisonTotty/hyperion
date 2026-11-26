@@ -331,7 +331,7 @@ function names(renderer: LitBodyRenderer, plan: BodyFramePlan): string[] {
 
 describe("the disc's kernels' forms for emission and air together (R08.T18.b)", () => {
   const BOTH_LINES =
-    "  out.radiance = out.radiance + disc_emission(body, normal, surface, laws);\n" +
+    "  out.radiance = out.radiance + disc_emission(body, normal, &surface);\n" +
     "  out.radiance = disc_air(body, q, ray, out.radiance);\n";
 
   it.each([
