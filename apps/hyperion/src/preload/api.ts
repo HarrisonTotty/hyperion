@@ -1690,6 +1690,17 @@ export type CompositeProbeName =
 export type MarchProbeName = "centre" | "depth-zero" | "one-source" | "no-lobes";
 
 /**
+ * How a frame profile's primary's frame-rate floor steps its air (lane perf-air-mac;
+ * `view/budget/floorAir.ts`): `low`, the floor's own, from high's own air straight to the low
+ * setting's sizes; `middle`, the lever, to the floor's middle step first (`hillaire.ts`'s
+ * `FLOOR_MIDDLE_SIZES`), then to low's, and back the same way; or a probe of the air's cost, its
+ * air held whatever its frames, the scale still the floor's: `held-own` at high's own sizes,
+ * `held-middle` at the middle step's, `held-low` at low's. A probe's picture is a player's at
+ * those sizes, which a player's floor would not hold.
+ */
+export type FloorAirName = "low" | "middle" | "held-own" | "held-middle" | "held-low";
+
+/**
  * The atmosphere's levers a frame profile draws with over its setting's (plan R08, R08.T8.d): the
  * march's cover (`area`, or `tiles`, the exact tile cull), its far limb's node rays (`per-texel`,
  * or `packed`), and since R08.T8.e's table its step's sources (`table`, from the sources' table, or
@@ -1701,6 +1712,11 @@ export type MarchProbeName = "centre" | "depth-zero" | "one-source" | "no-lobes"
  * the bit on a fallback adapter.
  */
 export interface AtmosphereLeversOverride {
+  /**
+   * How the primary's frame-rate floor steps its air (lane perf-air-mac; `floorAir.ts`): a lever,
+   * or a probe that holds it ({@link FloorAirName}); the floor's own, `low`, where absent.
+   */
+  readonly floorAir?: FloorAirName;
   readonly marchCover?: "area" | "tiles";
   readonly limbRays?: "per-texel" | "packed";
   readonly marchSourceTransmittance?: "table" | "per-step";
@@ -2967,9 +2983,9 @@ export interface InspectionTimingWindow {
   readonly clusters: InspectionTimingClusters | null;
   /**
    * The samples a ray of the atmosphere's march takes at the sizes its air was drawn at
-   * (`TableSizes.rayMarchSamples`: the setting's, or the low setting's while `IMAGE: DETAIL LIMITED`
-   * stands), by which its time a texel is read a step: nominal, the high setting's depth steps
-   * aside.
+   * (`TableSizes.rayMarchSamples`): its census's ({@link InspectionTimingMarchCensus.air}), or
+   * where it has none the setting's, the low setting's while `IMAGE: DETAIL LIMITED` stands; by
+   * which its time a texel is read a step: nominal, the high setting's depth steps aside.
    */
   readonly marchSamples: number;
   /** The primary's `POSITION` line as the window ended, or `null`. */
@@ -3007,6 +3023,22 @@ export interface InspectionTimingMarchCensus {
    * taken.
    */
   readonly composite: InspectionTimingCompositeCensus | null;
+  /**
+   * The air the same frame's march was drawn at, from its view's uniforms (lane perf-air-mac), or
+   * `null` where they were not read, a record from before them included.
+   */
+  readonly air: InspectionTimingMarchAir | null;
+}
+
+/**
+ * The air a march was drawn at (lane perf-air-mac; `view/atmosphere/marchProbe.ts`'s
+ * `MarchCensusAir`): its samples a ray at most and its resolution as a share of the output's
+ * (`TableSizes.rayMarchSamples` and `rayMarchScale`): high's own 36 and 1, the frame-rate floor's
+ * middle step's 36 and 0.5, the low setting's 16 and 0.5.
+ */
+export interface InspectionTimingMarchAir {
+  readonly samples: number;
+  readonly scale: number;
 }
 
 /**

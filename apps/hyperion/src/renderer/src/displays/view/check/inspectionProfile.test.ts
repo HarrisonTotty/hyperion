@@ -9,6 +9,7 @@ import {
   INSPECTION_PROFILE_TIMING,
   type InspectionProfileDeps,
   InspectionProfiler,
+  type ProfiledPlate,
 } from "./inspectionProfile";
 import type { WindowFigures } from "./viewsProbe";
 
@@ -39,6 +40,9 @@ function figures(startMs: number, endMs: number): WindowFigures {
   };
 }
 
+/** The plate of a primary whose image is stated limited, with no position. */
+const LIMITED = (): ProfiledPlate => ({ position: null, statements: [IMAGE_DETAIL_LIMITED] });
+
 /** A march's census as the views probe would read it back (R08.T8.d). */
 const CENSUS: MarchCensus = {
   kernel: "atmosphere ray march",
@@ -50,6 +54,7 @@ const CENSUS: MarchCensus = {
   rays: 63,
   laneRays: 704,
   composite: null,
+  air: null,
 };
 
 /**
@@ -67,6 +72,7 @@ function profiler(
   react: InspectionProfileDeps["react"] = null,
   probe: Partial<InspectionProfileDeps["views"]> = {},
   longTasks: InspectionProfileDeps["longTasks"] = null,
+  floorAir?: InspectionProfileDeps["floorAir"],
 ): {
   readonly profile: InspectionProfiler;
   readonly calls: string[];
@@ -153,6 +159,7 @@ function profiler(
     },
     devicePixelRatio: 1,
     setting: "high",
+    floorAir,
     timing: INSPECTION_PROFILE_TIMING,
     calls: counter,
     react,
@@ -311,6 +318,37 @@ describe("the inspection run's frame profile (the owner's report)", () => {
       TABLE_SIZES.low.rayMarchSamples,
       TABLE_SIZES.high.rayMarchSamples,
     ]);
+  });
+
+  it("reads the march's samples from its census's air where it has one, whatever the statements (lane perf-air-mac)", async () => {
+    const { profile } = profiler(100, Number.NEGATIVE_INFINITY, null, () =>
+      Promise.resolve({ ...CENSUS, air: { samples: 36, scale: 0.5 } }),
+    );
+    await profile.measure("orbit", () => ({ position: null, statements: [IMAGE_DETAIL_LIMITED] }));
+    expect(profile.windows[0]?.marchSamples).toBe(36);
+  });
+
+  it("reads a probe's held air's samples where no census names the air, whatever the statements (lane perf-air-mac)", async () => {
+    const samples = async (floorAir: InspectionProfileDeps["floorAir"]): Promise<number> => {
+      const { profile } = profiler(
+        100,
+        Number.NEGATIVE_INFINITY,
+        null,
+        () => null,
+        null,
+        {},
+        null,
+        floorAir,
+      );
+      await profile.measure("orbit", LIMITED);
+      return profile.windows[0]?.marchSamples ?? 0;
+    };
+    expect([
+      await samples("held-own"),
+      await samples("held-middle"),
+      await samples("held-low"),
+      await samples("middle"),
+    ]).toEqual([36, 36, 16, 16]);
   });
 
   it("records the march's census the frame after the window, its ask then withdrawn (R08.T8.d)", async () => {

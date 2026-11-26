@@ -105,6 +105,53 @@ describe("VIEW's frame-rate floor (the owner's report, 2026-11-01)", () => {
   });
 });
 
+describe("VIEW's floor air under a frame profile's --floor-air (lane perf-air-mac)", () => {
+  it("draws its air at the middle step's sizes while a probe holds it there, and says the image is limited", async () => {
+    const render = vi.spyOn(PhotorealRenderer.prototype, "render");
+    const view = await photoreal(["timestamp-query"], { floorAir: "held-middle" });
+    draw(view, 50, 17, 0.2);
+    const frame = render.mock.calls.at(-1)?.[1];
+    expect([frame?.atmosphereSetting, frame?.atmosphereMiddle, sceneTarget(view)]).toEqual([
+      "low",
+      true,
+      STAGE_PX,
+    ]);
+    expect(screen.getByText(statusLine(IMAGE_DETAIL_LIMITED))).toBeTruthy();
+  });
+
+  it("keeps high's own air while a probe holds it, its scale stepping down alone", async () => {
+    const render = vi.spyOn(PhotorealRenderer.prototype, "render");
+    const view = await photoreal(["timestamp-query"], { floorAir: "held-own" });
+    draw(view, 200, 17, 10);
+    const frame = render.mock.calls.at(-1)?.[1];
+    expect([frame?.atmosphereSetting, frame?.atmosphereMiddle, sceneTarget(view)]).toEqual([
+      "high",
+      false,
+      { widthPx: 1280, heightPx: 720 },
+    ]);
+  });
+
+  it("steps its air to the middle step first by the floor's middle step", async () => {
+    const render = vi.spyOn(PhotorealRenderer.prototype, "render");
+    const view = await photoreal(["timestamp-query"], { floorAir: "middle" });
+    draw(view, 50, 17, 0.2);
+    const own = render.mock.calls.at(-1)?.[1].atmosphereMiddle;
+    // Its frames over the budget at the lowest step: the first step is the middle step's.
+    const firstStepped = (): PhotorealFrame | undefined =>
+      render.mock.calls.map(([, frame]) => frame).find((each) => each.atmosphereSetting === "low");
+    draw(view, 200, 17, 10);
+    expect([own, firstStepped()?.atmosphereMiddle]).toEqual([false, true]);
+    expect(screen.getByText(statusLine(IMAGE_DETAIL_LIMITED))).toBeTruthy();
+  });
+
+  it("states nothing while a probe holds high's own air and its frames keep their rate", async () => {
+    const view = await photoreal(["timestamp-query"], { floorAir: "held-own" });
+    draw(view, 200, 17, 0.2);
+    expect(sceneTarget(view)).toEqual(STAGE_PX);
+    expect(screen.queryByText(statusLine(IMAGE_DETAIL_LIMITED))).toBeNull();
+  });
+});
+
 describe("VIEW's atmosphere levers over its setting's (plan R08, R08.T8.d)", () => {
   it("hands a frame profile's levers to every photorealistic frame", async () => {
     const render = vi.spyOn(PhotorealRenderer.prototype, "render");

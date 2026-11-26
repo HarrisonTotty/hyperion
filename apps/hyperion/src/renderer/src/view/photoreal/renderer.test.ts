@@ -145,6 +145,7 @@ import {
   SKY_VIEW_KERNEL,
   SKY_VIEW_THICK_KERNEL,
   tableRadiusM,
+  viewMarchOf,
 } from "../atmosphere/hillaire";
 import { EngineUnavailable } from "../engine/resilientEngine";
 import {
@@ -1227,6 +1228,31 @@ describe("the photorealistic renderer's atmosphere (R08.T10.b)", () => {
         dispatches: engine.dispatched.filter((d) => d.pass === ATMOSPHERE_BEHIND_PASS).length,
         lever: composite?.draws[0]?.uniforms["levers"]?.[0],
       }).toEqual({ dispatches, lever });
+      renderer.dispose();
+      tables.dispose();
+    },
+  );
+
+  it.each([
+    ["high's own, 36 samples at full resolution", "high", undefined, { samples: 36, scale: 1 }],
+    ["the floor's middle step's, high's 36 at half", "low", true, { samples: 36, scale: 0.5 }],
+    ["low's, 16 at half", "low", undefined, { samples: 16, scale: 0.5 }],
+  ] as const)(
+    "draws a body's air at %s (lane perf-air-mac)",
+    async (_, atmosphereSetting, atmosphereMiddle, march) => {
+      const { engine, view, renderer } = await preparedRenderer();
+      const planet = bodyAt("0200080020000000.0300", vec3(0, 0, -3e7));
+      const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, EARTH_RADIUS_M);
+      renderer.render(view, {
+        ...frameWith([]),
+        atmosphereSetting,
+        atmosphereMiddle,
+        bodies: [planet],
+        atmospheres: [airOf(planet, tables)],
+      });
+      const marched = engine.dispatched.find((d) => d.kernel.startsWith("atmosphere ray march"));
+      const uniform = marched?.bindings.uniforms["view"];
+      expect(uniform === undefined ? null : viewMarchOf(uniform)).toEqual(march);
       renderer.dispose();
       tables.dispose();
     },

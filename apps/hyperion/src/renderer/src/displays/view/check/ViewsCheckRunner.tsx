@@ -246,6 +246,7 @@ export function ViewsCheckRunner({
                 sleep: shared.sleep,
                 devicePixelRatio: shared.devicePixelRatio,
                 setting: api.launch.setting,
+                floorAir: api.launch.atmosphereLevers?.floorAir,
                 timing: inspectionProfileTimingOf(INSPECTION_PROFILE_TIMING, launchMode),
                 calls: run.calls,
                 react: reactCommitCounterOf(globalThis),

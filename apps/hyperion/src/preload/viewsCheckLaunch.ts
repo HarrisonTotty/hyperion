@@ -12,6 +12,7 @@
 import type {
   AtmosphereLeversOverride,
   CompositeProbeName,
+  FloorAirName,
   HandoverLookName,
   LitProbeName,
   MarchProbeName,
@@ -90,10 +91,19 @@ export const MARCH_PROBE_NAMES = [
   "no-lobes",
 ] as const satisfies ReadonlyArray<MarchProbeName>;
 
+/** How a frame profile's floor may step its air (lane perf-air-mac). */
+export const FLOOR_AIR_NAMES = [
+  "low",
+  "middle",
+  "held-own",
+  "held-middle",
+  "held-low",
+] as const satisfies ReadonlyArray<FloorAirName>;
+
 /**
  * `value` as the atmosphere's levers over a setting's (plan R08, R08.T8.d, R08.T8.e's table and
- * fix-r08-decked-air-route's surface lobes and decked ground), or `null` if it is not an object of
- * at least one of them, each one of its names.
+ * fix-r08-decked-air-route's surface lobes and decked ground; lane perf-air-mac's floor air), or
+ * `null` if it is not an object of at least one of them, each one of its names.
  */
 export function readAtmosphereLevers(value: unknown): AtmosphereLeversOverride | null {
   if (!isRecord(value)) {
@@ -106,16 +116,20 @@ export function readAtmosphereLevers(value: unknown): AtmosphereLeversOverride |
     surfaceLobes: lobes,
     deckedAirSurface: ground,
     cloudVolume: volume,
+    floorAir: floor,
     ...rest
   } = value;
+  const floorAir = FLOOR_AIR_NAMES.find((each) => each === floor);
   if (
     Object.keys(rest).length > 0 ||
+    (floor !== undefined && floorAir === undefined) ||
     (marchCover === undefined &&
       limbRays === undefined &&
       sources === undefined &&
       lobes === undefined &&
       ground === undefined &&
-      volume === undefined) ||
+      volume === undefined &&
+      floor === undefined) ||
     !(marchCover === undefined || marchCover === "area" || marchCover === "tiles") ||
     !(limbRays === undefined || limbRays === "per-texel" || limbRays === "packed") ||
     !(sources === undefined || sources === "table" || sources === "per-step") ||
@@ -132,6 +146,7 @@ export function readAtmosphereLevers(value: unknown): AtmosphereLeversOverride |
     ...(lobes === undefined ? {} : { surfaceLobes: lobes }),
     ...(ground === undefined ? {} : { deckedAirSurface: ground }),
     ...(volume === undefined ? {} : { cloudVolume: volume }),
+    ...(floorAir === undefined ? {} : { floorAir }),
   };
 }
 

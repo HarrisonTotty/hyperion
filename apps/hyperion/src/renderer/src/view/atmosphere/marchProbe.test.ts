@@ -135,6 +135,7 @@ describe("the march's far-limb census (plan R08, R08.T8.d)", () => {
       rays: 15,
       laneRays: 16,
       composite: null,
+      air: null,
     });
     expect(() => marchCensusOf("atmosphere ray march", words.subarray(1))).toThrow(RangeError);
   });

@@ -20,6 +20,7 @@
 #                              [--march-probe centre|depth-zero|one-source|no-lobes]
 #                              [--march-cover area|tiles] [--limb-rays per-texel|packed]
 #                              [--march-sources table|per-step]
+#                              [--floor-air low|middle|held-own|held-middle|held-low]
 #                              [--lit-probe transmittance-one|planetshine-centre|no-annuli|per-fragment
 #                                           |terrain-unshaded|terrain-no-cascades|terrain-no-horizon
 #                                           |terrain-no-maturity|no-ring-shadow]
@@ -170,6 +171,12 @@
 # table|per-step (R08.T8.e's table), draw that profile's atmospheres with that lever over its
 # setting's, the A/B of each lever on and off on one build; its files end -cover-<cover>,
 # -limb-<rays> and -sources-<way>.
+# --floor-air low|middle|held-own|held-middle|held-low (lane perf-air-mac) is how that profile's
+# frame-rate floor steps the primary's air: straight to the low setting's sizes (low, the floor's
+# own), to its middle step first, high's counts with the march at half resolution (middle, the
+# lever), or held at high's own, the middle step's or low's sizes whatever its frames, its scale
+# still the floor's (the held- probes, of the air's cost); its files end -floor-air-<steps>. Each
+# window's census names the air its march was drawn at.
 # --lit-probe (plan R08, R08.T9.b's measurement) makes that profile's lit materials and kernels
 # with every source's transmittance through the air 1 (transmittance-one), with a planetshine
 # source's at its disc's centre node alone (planetshine-centre), with the eclipse term's annuli

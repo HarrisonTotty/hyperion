@@ -42,6 +42,8 @@ import type { BodyIdHex, UniverseTime } from "@hyperion/protocol";
 import { norm } from "../../geometry/vec3";
 import { untilNextTask } from "../../lib/nextTask";
 import {
+  airSizesOf,
+  type AirSizesName,
   ATMOSPHERE_COMPOSITE_PASS,
   type AtmosphereCamera,
   AtmosphereRetired,
@@ -470,6 +472,13 @@ export interface PhotorealFrame {
    * absent.
    */
   readonly atmosphereSetting?: QualitySetting | undefined;
+  /**
+   * Whether the frame's air is drawn at its frame-rate floor's middle step's sizes
+   * (`hillaire.ts`'s `FLOOR_MIDDLE_SIZES`; `BudgetedScale.airStep`, lane perf-air-mac) in place of
+   * {@link atmosphereSetting}'s, which stays the low setting's for the rest of the step (the cloud
+   * volume's); `false` where absent.
+   */
+  readonly atmosphereMiddle?: boolean | undefined;
   /**
    * A frame profile's atmosphere levers over its setting's `SETTINGS[s].atmosphereLevers` (plan R08,
    * R08.T8.d; `--march-cover`, `--limb-rays`, `--march-sources`, `--surface-lobes`,
@@ -1068,14 +1077,15 @@ export class PhotorealRenderer {
   #disposed = false;
   /**
    * Each body's atmosphere on this view, over the cache's tables (R08.T10.b), made at the first
-   * frame that draws it and let go at the first that does not, with the setting it was made at and
-   * the levers it was made with over that setting's (R08.T8.d).
+   * frame that draws it and let go at the first that does not, with the sizes it was made at (a
+   * setting's or the floor's middle step's) and the levers it was made with over the frame's
+   * setting's (R08.T8.d).
    */
   readonly #atmospheres = new Map<
     BodyIdHex,
     {
       readonly atmosphere: HillaireAtmosphere;
-      readonly setting: QualitySetting;
+      readonly sizes: AirSizesName;
       readonly levers: AtmosphereLeversOverride | undefined;
     }
   >();
@@ -2616,7 +2626,7 @@ export class PhotorealRenderer {
         const atmosphere = this.#atmosphereOf(
           resources,
           air,
-          frame.atmosphereSetting ?? frame.setting,
+          frame.atmosphereMiddle === true ? "middle" : (frame.atmosphereSetting ?? frame.setting),
           frame.atmosphereLevers,
         );
         suns = skySources(
@@ -2974,20 +2984,21 @@ export class PhotorealRenderer {
   }
 
   /**
-   * A body's atmosphere on this view over `air`'s tables, made at the setting's sizes the first
-   * time, or again on a new setting or levers, with `levers` over the setting's (R08.T8.d), and
-   * following the cache's tables as they are remade.
+   * A body's atmosphere on this view over `air`'s tables, made at `sizes` the first time, or again
+   * on new sizes or levers, with `levers` over the setting's (R08.T8.d; the middle step's, high's),
+   * and following the cache's tables as they are remade.
    */
   #atmosphereOf(
     resources: Resources,
     air: FrameAtmosphere,
-    setting: QualitySetting,
+    sizes: AirSizesName,
     levers: AtmosphereLeversOverride | undefined,
   ): HillaireAtmosphere {
     const held = this.#atmospheres.get(air.id);
+    const setting: QualitySetting = sizes === "middle" ? "high" : sizes;
     if (
       held !== undefined &&
-      held.setting === setting &&
+      held.sizes === sizes &&
       held.levers?.marchCover === levers?.marchCover &&
       held.levers?.limbRays === levers?.limbRays &&
       held.levers?.marchSourceTransmittance === levers?.marchSourceTransmittance &&
@@ -3001,11 +3012,11 @@ export class PhotorealRenderer {
     const atmosphere = HillaireAtmosphere.over(
       this.#engine,
       air.tables,
-      SETTINGS[setting].atmosphere,
+      airSizesOf(sizes),
       resources.atmosphere,
       { ...SETTINGS[setting].atmosphereLevers, ...levers },
     );
-    this.#atmospheres.set(air.id, { atmosphere, setting, levers });
+    this.#atmospheres.set(air.id, { atmosphere, sizes, levers });
     return atmosphere;
   }
 

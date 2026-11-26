@@ -10291,3 +10291,8 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
   draws by their twins, for a byte check.
 - **`surface_at` rewritten bit for bit (2026-11-26, perf-bodies-pass-2):** `texel_shares` is gone (`add_term` forms each share from `texel_total`'s sum); `SurfaceAt` adds `matured` (`albedo` filled only then, else `surface_law`'s A); `surface_reflectance(&surface, laws, …)` and `disc_emission(body, normal, &surface, laws)` take it by pointer.
 - **The lit bodies' lean forms (2026-11-26, perf-bodies-pass-2):** a record of no planetshine source, no occluder and no ring's shadow (`isLeanRecord`) is drawn, once they are prepared, by its plain or emissive form's lean form (`leanSource`, `bodyDisc.wgsl`'s `LEAN_FORM`; FormKinds `lean`, `emissiveLean`; `BODY_DISC_CELLS_*LEAN_KERNEL`, `DiscCellSet.lean`; `LEAN_BODY_ENTRIES`, checked in test-render part 29); the screen path's resolve keeps the full forms (lean, 2026-11-26). The terrain's half (`terrainPass.ts`) is not started.
+- **The floor's middle step, a lever (2026-11-26, perf-air-mac; lean):** `--floor-air middle` (default `low`,
+  as before): own → `FLOOR_MIDDLE_SIZES` (high's counts, the march at half resolution) → low, back a step at a time by
+  `FloorAir.costRatios`; a quick failure there raises its step's share. It states `IMAGE: DETAIL LIMITED`.
+- **The floor air's probes (perf-air-mac):** `--floor-air held-own|held-middle|held-low`; `MarchCensus.air` records the
+  air (timing file version 13). Pending: the owner's Mac pairs `floor-air-middle` and `floor-air-own`.

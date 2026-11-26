@@ -31,8 +31,11 @@ import {
   type InspectionTimingFirstFrameResults,
   type InspectionTimingResults,
   type InspectionTimingWindowResults,
+  type MarchAirName,
+  marchAirNameOf,
   type PassFigures,
 } from "./inspectionTiming";
+import type { InspectionTimingMarchAir } from "../preload/api";
 
 /** A setting the batch profiles. */
 export type MacProfileSetting = "high" | "low";
@@ -302,6 +305,33 @@ export const MAC_PROFILE_LEVERS: ReadonlyArray<MacProfileLever> = [
       "R07.T19, the frame pacing on a 120 Hz clock: frames counted, up to 120 Hz (A), against each view at its own rate (B)",
     a: ["--frame-rate", "120", "--frame-pacing", "display"],
     b: ["--frame-rate", "120", "--frame-pacing", "rate"],
+    ratios: [1],
+    countSides: false,
+  },
+  {
+    name: "floor-air-middle",
+    decides:
+      "lane perf-air-mac, the floor's middle step: high's own air straight to low's sizes, the floor's own (A), against by the middle step, high's counts with the march at half resolution, and back a step at a time (B); each window's census names the air drawn",
+    a: [],
+    b: ["--floor-air", "middle"],
+    ratios: [1],
+    countSides: false,
+  },
+  {
+    name: "floor-air-own",
+    decides:
+      "lane perf-air-mac, a probe of high's own air, not a lever: the floor's own steps (A) against the air held at high's own sizes whatever its frames, its scale the floor's (B); B's windows give what high's own air costs on the machine",
+    a: [],
+    b: ["--floor-air", "held-own"],
+    ratios: [1],
+    countSides: false,
+  },
+  {
+    name: "floor-air-middle-held",
+    decides:
+      "lane perf-air-mac, a probe of the floor's middle step, not a lever: the floor's own steps (A) against the air held at the middle step's sizes, high's counts with the march at half resolution, whatever its frames (B)",
+    a: [],
+    b: ["--floor-air", "held-middle"],
     ratios: [1],
     countSides: false,
   },
@@ -654,6 +684,37 @@ export interface ProfiledWindow {
   readonly callbacks?: InspectionTimingWindowResults["callbacks"];
   /** The vsync period its animation frames measure; absent before the file's version 9. */
   readonly measuredVsyncMs?: InspectionTimingWindowResults["measuredVsyncMs"];
+  /** The primary's internal scale at its start and each change in it; absent as not recorded. */
+  readonly scales?: InspectionTimingWindowResults["scales"];
+  /**
+   * The march's census after it, whose air names what the floor drew (lane perf-air-mac); its air
+   * absent or `null` before the file's version 13, as not recorded.
+   */
+  readonly marchCensus?: { readonly air?: InspectionTimingMarchAir | null } | null;
+}
+
+/**
+ * The air a window's march was drawn at and the primary's scale as it ended, in words (lane
+ * perf-air-mac): high's own air, the floor's middle step or low's, from its census; nothing where
+ * neither was recorded.
+ */
+function airText(window: ProfiledWindow): string {
+  const air = window.marchCensus?.air ?? null;
+  const scale = window.scales?.at(-1);
+  const said: Readonly<Record<MarchAirName, string>> = {
+    own: "high's own",
+    middle: "the middle step's",
+    low: "low's",
+  };
+  let named: string | null = null;
+  if (air !== null) {
+    const name = marchAirNameOf(air);
+    named = name === null ? `${String(air.samples)} samples at ${String(air.scale)}` : said[name];
+  }
+  return [
+    ...(named === null ? [] : [`${named} air`]),
+    ...(scale === undefined ? [] : [`scale ${scale.toFixed(3)}`]),
+  ].join(", ");
 }
 
 /**
@@ -957,7 +1018,7 @@ function windowsTable(
           `${msText(window.frame.intervalMs.p95Ms)} | ${fps(window.frame.intervalMs.medianMs)} | ` +
           `${pacingText(window)} | ` +
           `${msText(window.frame.gpuMs.medianMs)} | ${cell(passes.length > 0 ? passes.join(", ") : "—")} | ` +
-          `${cell(readsText(window))} |`
+          `${cell([readsText(window), airText(window)].filter((text) => text.length > 0).join("; "))} |`
         );
       }),
     ),

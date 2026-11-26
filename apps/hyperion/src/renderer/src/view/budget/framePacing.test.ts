@@ -992,3 +992,225 @@ describe("the floor's air at its boundary (lane fix-floor-calm)", () => {
     ]);
   });
 });
+
+describe("BudgetedScale's floor air by a probe or the middle step (lane perf-air-mac)", () => {
+  const floor = floorBudget(886);
+  const [lowest, highest] = floor.control.bounds;
+  const budgetMs = floor.control.target.gpuBudgetMs;
+
+  it("holds the air at a probe's step whatever its frames, its scale still the controller's", () => {
+    const held = (
+      probe: "held-own" | "held-middle" | "held-low",
+      ms: number,
+    ): readonly [string, boolean, number] => {
+      const scale = new BudgetedScale();
+      let s = highest;
+      for (let n = 0; n < 600; n += 1) {
+        s = scale.update(floor, [ms * s * s], 1000 / 60, probe);
+      }
+      return [scale.airStep, scale.airStepped, s];
+    };
+    expect([
+      held("held-own", 3 * budgetMs),
+      held("held-middle", 3 * budgetMs),
+      held("held-low", 0.2 * budgetMs),
+    ]).toEqual([
+      ["own", false, lowest],
+      ["middle", true, lowest],
+      ["low", true, highest],
+    ]);
+  });
+
+  it("steps by the floor's own way, straight to low's sizes, unless the middle step is asked for", () => {
+    // High's own air three times the budget at full scale, the middle step's frame 0.9 of it and
+    // low's 0.8.
+    const share = { own: 3, middle: 0.9, low: 0.8 } as const;
+    const steps = (floorAir: "low" | "middle" | undefined): string => {
+      const scale = new BudgetedScale();
+      let s = highest;
+      for (let n = 0; n < 600; n += 1) {
+        s = scale.update(floor, [share[scale.airStep] * budgetMs * s * s], 1000 / 60, floorAir);
+      }
+      return scale.airStep;
+    };
+    expect([steps(undefined), steps("low"), steps("middle")]).toEqual(["low", "low", "middle"]);
+  });
+
+  /**
+   * The owner's Mac batch of 2026-11-26 (Apple M5, run `high-dpr1`, 886 render rows, the passes'
+   * union since fix-mac-gpu-time), each window's frame with the stepped air, its GPU time's median,
+   * and of it the stepped air's own times (`atmosphere view` and its limb's, the composite's own
+   * and `atmosphere behind`), ms, each carried to full scale: orbit was drawn at full scale, close
+   * at the floor's lowest step.
+   */
+  const MAC_BATCH_2026_11_26 = {
+    orbit: { frameMs: 24.1, airMs: 6.18 + 2.61 + 0.79 + 0.2 },
+    close: { frameMs: 25.5 / lowest ** 2, airMs: (11.4 + 0.8) / lowest ** 2 },
+  } as const;
+
+  /**
+   * The air at each step against the stepped air's as the pod measured it from orbit at the
+   * batch's body (lane perf-air-mac's `results.md`; SwiftShader, each over the rest of its frame):
+   * the middle step's 1.57 times, high's own 6.0 times.
+   */
+  const POD_AIR = { own: 6, middle: 1.57 } as const;
+
+  /**
+   * A window of the batch, its air at each step `factors` times the stepped air's, each part grown
+   * as the square of the scale, the controller's own model.
+   */
+  const macAir =
+    (
+      window: keyof typeof MAC_BATCH_2026_11_26,
+      factors: { readonly own: number; readonly middle: number },
+    ) =>
+    (_n: number, scale: number, step: "own" | "middle" | "low"): number => {
+      const { frameMs, airMs } = MAC_BATCH_2026_11_26[window];
+      const factor = step === "own" ? factors.own : step === "middle" ? factors.middle : 1;
+      return (frameMs - airMs + factor * airMs) * scale * scale;
+    };
+
+  /** What a run of a floor by the middle step came to: each change of its air, and its end. */
+  interface DrivenSteps {
+    readonly changes: ReadonlyArray<readonly [number, string]>;
+    readonly step: string;
+    readonly scale: number;
+  }
+
+  /** Drives the floor by the middle step for `frames` frames, frame `n` costing `costMs`. */
+  function driveSteps(
+    frames: number,
+    costMs: (n: number, scale: number, step: "own" | "middle" | "low") => number,
+  ): DrivenSteps {
+    const scale = new BudgetedScale();
+    let s = scale.update(floor, [], 1000 / 60, "middle");
+    let step: string = scale.airStep;
+    const changes: Array<readonly [number, string]> = [];
+    for (let n = 0; n < frames; n += 1) {
+      s = scale.update(floor, [costMs(n, s, scale.airStep)], 1000 / 60, "middle");
+      if (scale.airStep !== step) {
+        step = scale.airStep;
+        changes.push([n, step]);
+      }
+    }
+    return { changes, step, scale: s };
+  }
+
+  it("holds the M5's orbit at the middle step, at a scale in the controller's band, where its air costs what the pod measured", () => {
+    // The middle step's frame 29.7 ms at full scale, 19.6 at the lowest; high's own 73.0 and 48.2.
+    const run = driveSteps(3_600, macAir("orbit", POD_AIR));
+    expect([run.changes, run.step]).toEqual([[[1, "middle"]], "middle"]);
+    expect([run.scale > lowest, run.scale < highest]).toEqual([true, true]);
+  });
+
+  it("holds the M5's orbit at the middle step where high's own air costs a stepped frame again, as R08's W5 puts it", () => {
+    // High's own air 3.7 times the stepped air's (its frame 2.1 times the stepped frame: W5's
+    // share, `AIR_TUNING.unmeasuredCostRatio`), the middle step's 1.4 times.
+    const run = driveSteps(3_600, macAir("orbit", { own: 3.7, middle: 1.4 }));
+    expect([run.changes, run.step]).toEqual([[[1, "middle"]], "middle"]);
+    expect(run.scale).toBeGreaterThan(0.9);
+  });
+
+  it("brings the M5's orbit back to high's own air where it would fit at the floor's lowest step, its share measured", () => {
+    // High's own air 1.5 times the stepped air's: its frame 29 ms at full scale, 19 at the lowest;
+    // every frame 1.6 times as dear for the first 300, as a view's first frames may be, so that its
+    // own air steps and the middle step's frames, 26.5 ms at the lowest step, measure its share.
+    const orbit = macAir("orbit", { own: 1.5, middle: 1.1 });
+    const run = driveSteps(3_600, (n, scale, step) => (n < 300 ? 1.6 : 1) * orbit(n, scale, step));
+    expect([run.changes.map(([, step]) => step), run.step]).toEqual([["middle", "own"], "own"]);
+  });
+
+  it("holds the middle step where its first frames were too dear for a pair, high's own air's prior share then deciding", () => {
+    // As above, every frame 2.5 times as dear for the first 300: the middle step's frames are over
+    // the budget at the lowest step too, and take the air on to low's before a pair is read.
+    const orbit = macAir("orbit", { own: 1.5, middle: 1.1 });
+    const run = driveSteps(3_600, (n, scale, step) => (n < 300 ? 2.5 : 1) * orbit(n, scale, step));
+    expect([run.changes.map(([, step]) => step), run.step]).toEqual([
+      ["middle", "low", "middle"],
+      "middle",
+    ]);
+  });
+
+  it("takes the M5's close in on to low's air, at the lowest step, where the middle step's frames are over the budget there", () => {
+    // The middle step's air 1.84 times the stepped air's closed in, as the pod measured it there:
+    // its frame 35.7 ms at the lowest step, against the budget's 26.7.
+    const run = driveSteps(3_600, macAir("close", { ...POD_AIR, middle: 1.84 }));
+    expect([run.changes.map(([, step]) => step), run.step, run.scale]).toEqual([
+      ["middle", "low"],
+      "low",
+      lowest,
+    ]);
+  });
+
+  it("changes the air of a load at the middle step's boundary at most once in any 30 s", () => {
+    const next = jitter(11);
+    // The middle step's frame half the budget at the lowest step, in pixels, and high's own air as
+    // much again, so that its own frame there is the budget, each ±5%.
+    const pixelMs = budgetMs / 2 / lowest ** 2;
+    const run = driveSteps(
+      72_000,
+      (_n, scale, step) =>
+        pixelMs *
+        (step === "own" ? 2 : step === "middle" ? 1 : 0.8) *
+        scale *
+        scale *
+        (0.95 + 0.1 * next()),
+    );
+    const within = mostWithin(
+      run.changes.map(([at]) => at),
+      AIR_TUNING.returnWatchUpdates,
+    );
+    expect([run.changes, within]).toEqual([[[1, "middle"]], 1]);
+  });
+
+  it("tries a return to high's own air that a fixed cost misjudged once at its scale, and changes nothing after it", () => {
+    const next = jitter(7);
+    // 10 ms of each frame fixed, carried to the lowest scale by the square of the scale as if it
+    // were pixels; at the lowest scale the middle step's frame half the budget less its air,
+    // high's own air the budget's other half, the middle step's air 0.3 of it.
+    const fixedMs = 10;
+    const pixelMs = (budgetMs / 2 - fixedMs) / lowest ** 2;
+    const airMs = budgetMs / 2 / lowest ** 2;
+    const run = driveSteps(
+      72_000,
+      (_n, scale, step) =>
+        (fixedMs +
+          (pixelMs + (step === "own" ? airMs : step === "middle" ? 0.3 * airMs : 0)) *
+            scale *
+            scale) *
+        (0.95 + 0.1 * next()),
+    );
+    const [step, back, again] = run.changes;
+    expect([
+      run.changes.length,
+      step?.[1],
+      (again?.[0] ?? 0) - (back?.[0] ?? 0) <= AIR_TUNING.quickFailUpdates,
+      run.step,
+    ]).toEqual([3, "middle", true, "middle"]);
+  });
+
+  it("tries a return to the middle step that a fixed cost misjudged once at its scale, and changes nothing after it", () => {
+    const next = jitter(7);
+    // As above, a step down: low's frame half the budget at the lowest scale, the middle step's
+    // air the budget's other half, and high's own air far over it.
+    const fixedMs = 10;
+    const pixelMs = (budgetMs / 2 - fixedMs) / lowest ** 2;
+    const airMs = budgetMs / 2 / lowest ** 2;
+    const run = driveSteps(
+      72_000,
+      (_n, scale, step) =>
+        (fixedMs +
+          (pixelMs + (step === "own" ? 5 * airMs : step === "middle" ? airMs : 0)) *
+            scale *
+            scale) *
+        (0.95 + 0.1 * next()),
+    );
+    const steps = run.changes.map(([, each]) => each);
+    const [, , back, again] = run.changes;
+    expect([
+      steps,
+      (again?.[0] ?? 0) - (back?.[0] ?? 0) <= AIR_TUNING.quickFailUpdates,
+      run.step,
+    ]).toEqual([["middle", "low", "middle", "low"], true, "low"]);
+  });
+});

@@ -986,6 +986,43 @@ describe("the several-views check's options", () => {
     ]).toEqual([{ cloudVolume: "stepped" }, { limbRays: "packed", cloudVolume: "full" }]);
   });
 
+  it("takes --floor-air, how the frame profile's floor steps its air, or a probe that holds it (lane perf-air-mac)", () => {
+    const profile = [
+      "--views-check",
+      "--inspection",
+      "--universe",
+      UNIVERSE,
+      "--body",
+      BODY,
+      "--timing",
+    ];
+    expect(
+      [
+        ["middle"],
+        ["low"],
+        ["held-own"],
+        ["held-middle", "--limb-rays", "packed"],
+        ["held-low"],
+      ].map((rest) => parse([...profile, "--floor-air", ...rest]).viewsCheck?.atmosphereLevers),
+    ).toEqual([
+      { floorAir: "middle" },
+      { floorAir: "low" },
+      { floorAir: "held-own" },
+      { limbRays: "packed", floorAir: "held-middle" },
+      { floorAir: "held-low" },
+    ]);
+    const low = refusal([...profile, "--setting", "low", "--floor-air", "held-middle"]);
+    expect([
+      low.exitCode,
+      low.message,
+      parse([...profile, "--setting", "low", "--floor-air", "low"]).viewsCheck?.atmosphereLevers,
+    ]).toEqual([
+      1,
+      "error: --floor-air steps or holds the high setting's air alone: the low setting has no frame-rate floor",
+      { floorAir: "low" },
+    ]);
+  });
+
   it.each([
     ["--march-cover", "tiles"],
     ["--limb-rays", "packed"],
@@ -993,6 +1030,7 @@ describe("the several-views check's options", () => {
     ["--surface-lobes", "extinguished"],
     ["--decked-air-surface", "uniform"],
     ["--cloud-volume", "lowest"],
+    ["--floor-air", "middle"],
   ] as const)(
     "refuses %s without the frame profile, or naming no value (R08.T8.d)",
     (flag, value) => {

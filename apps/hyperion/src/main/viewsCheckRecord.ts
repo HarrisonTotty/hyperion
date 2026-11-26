@@ -40,6 +40,7 @@ import type {
   InspectionTimingCompile,
   InspectionTimingCompositeCensus,
   InspectionTimingFirstFrame,
+  InspectionTimingMarchAir,
   InspectionTimingMarchCensus,
   InspectionTimingClusters,
   InspectionTimingMemory,
@@ -1607,6 +1608,7 @@ function timingCensus(value: unknown): InspectionTimingMarchCensus | null | unde
   const { kernel, wholeMeans, centresInAir, tiles, limbTiles, rays, laneRays } = value;
   const texelsByNodes = numbers(value["texelsByNodes"]);
   const composite = compositeCensus(value["composite"]);
+  const air = marchAir(value["air"]);
   return typeof kernel !== "string" ||
     kernel.length === 0 ||
     texelsByNodes === null ||
@@ -1620,7 +1622,8 @@ function timingCensus(value: unknown): InspectionTimingMarchCensus | null | unde
     !isCount(rays) ||
     !isCount(laneRays) ||
     laneRays < rays ||
-    composite === undefined
+    composite === undefined ||
+    air === undefined
     ? undefined
     : {
         kernel,
@@ -1632,7 +1635,25 @@ function timingCensus(value: unknown): InspectionTimingMarchCensus | null | unde
         rays,
         laneRays,
         composite,
+        air,
       };
+}
+
+/**
+ * A march census's air (lane perf-air-mac): `null` where it has none, absent included; `undefined`
+ * where it is not one: its samples a whole number above 0 and its resolution's share in (0, 1].
+ */
+function marchAir(value: unknown): InspectionTimingMarchAir | null | undefined {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const { samples, scale } = value;
+  return isCount(samples) && samples > 0 && isFiniteNumber(scale) && scale > 0 && scale <= 1
+    ? { samples, scale }
+    : undefined;
 }
 
 /**

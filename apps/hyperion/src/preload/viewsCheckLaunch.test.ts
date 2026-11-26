@@ -231,6 +231,8 @@ describe("the views check's launch switch", () => {
       { deckedAirSurface: "departure" },
       { cloudVolume: "stepped" },
       { limbRays: "packed", cloudVolume: "full" },
+      { floorAir: "middle" },
+      { floorAir: "held-own", limbRays: "packed" },
     ] as const) {
       const launch: ViewsCheckLaunch = { ...profile, atmosphereLevers };
       expect(viewsCheckLaunchFromArgv([viewsCheckSwitch(launch)])).toEqual(launch);
@@ -243,6 +245,8 @@ describe("the views check's launch switch", () => {
       { surfaceLobes: "reflected" },
       { deckedAirSurface: "average" },
       { cloudVolume: "medium" },
+      { floorAir: "held" },
+      { floorAir: "high" },
       { marchCover: "tiles", strides: true },
     ]) {
       expect(readViewsCheckLaunch({ ...profile, atmosphereLevers })).toBeNull();

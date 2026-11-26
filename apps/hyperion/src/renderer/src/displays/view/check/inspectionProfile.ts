@@ -14,6 +14,7 @@
  */
 
 import type {
+  FloorAirName,
   InspectionTimingMarchCensus,
   InspectionTimingClusters,
   InspectionTimingRecord,
@@ -22,7 +23,8 @@ import type {
   ViewsCheckApi,
   ViewsCheckWindow,
 } from "../../../../../preload/api";
-import { TABLE_SIZES } from "../../../view/atmosphere/hillaire";
+import { airSizesOf, type AirSizesName } from "../../../view/atmosphere/hillaire";
+import { heldStepOf } from "../../../view/budget/floorAir";
 import { IMAGE_DETAIL_LIMITED } from "../../../view/budget/viewBudget";
 import type { QualitySetting } from "../../../view/quality/qualitySetting";
 import { PRIMARY_VIEW_NAME } from "../viewNames";
@@ -82,6 +84,11 @@ export interface InspectionProfileDeps {
   readonly devicePixelRatio: number;
   /** The launch's quality setting, whose march's samples a window's air takes unless stepped. */
   readonly setting: QualitySetting;
+  /**
+   * How the launch's floor steps its air (`--floor-air`; lane perf-air-mac), whose probes hold it
+   * at their sizes, for a window whose census names none; the floor's own where absent.
+   */
+  readonly floorAir?: FloorAirName | undefined;
   readonly timing: InspectionProfileTiming;
   /**
    * The counter of the engine's WebGPU calls and its render passes' attachments
@@ -223,14 +230,33 @@ export class InspectionProfiler {
       atmosphereReads,
       react,
       clusters: this.#deps.clusters(),
-      // The floor's air at the low setting's sizes while it stands stepped (the owner's report).
+      // The march's samples as its census read them from its view (lane perf-air-mac); where it
+      // has none, a probe's held air, or the floor's at the low setting's sizes while the image is
+      // stated limited.
       marchSamples:
-        TABLE_SIZES[said.statements.includes(IMAGE_DETAIL_LIMITED) ? "low" : this.#deps.setting]
+        census?.air?.samples ??
+        airSizesOf(this.#airWithoutCensus(said.statements.includes(IMAGE_DETAIL_LIMITED)))
           .rayMarchSamples,
       position: said.position,
       statements: said.statements,
       marchCensus: census,
     });
+  }
+
+  /**
+   * The sizes a window's air was drawn at where its census names none: a probe's held air
+   * (`--floor-air held-…`), or the low setting's while the image is stated `limited`, else the
+   * launch's setting's.
+   */
+  #airWithoutCensus(limited: boolean): AirSizesName {
+    const held = this.#deps.floorAir === undefined ? null : heldStepOf(this.#deps.floorAir);
+    if (held === "own") {
+      return this.#deps.setting;
+    }
+    if (held !== null) {
+      return held;
+    }
+    return limited ? "low" : this.#deps.setting;
   }
 
   /**

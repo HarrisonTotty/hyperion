@@ -19,10 +19,10 @@
  * (`lib/vsyncPacing.ts`; the owner's frame rate). {@link FramePacer} holds either for a loop.
  */
 
-import type { FramePacingName } from "../../../../preload/api";
+import type { FloorAirName, FramePacingName } from "../../../../preload/api";
 import { drawsNow, VsyncClock, vsyncsPerDraw } from "../../lib/vsyncPacing";
 import type { PassTimes } from "../engine/types";
-import { FloorAir } from "./floorAir";
+import { FloorAir, type FloorAirKind, floorAirModeOf, type FloorAirStep } from "./floorAir";
 import { gpuTimeMs, ResolutionController, type ScaleBounds } from "./resolutionController";
 import { SelectionScaleHold, selectionScaleStep } from "./selectionScale";
 import type { ViewBudget } from "./viewBudget";
@@ -270,8 +270,10 @@ function sameBounds(a: ScaleBounds, b: ScaleBounds): boolean {
  *
  * @remarks
  * Under its frame-rate floor (`ScaleControl.kind` `floor`; the owner's report, 2026-11-01) it also
- * holds whether the view's air is stepped to the low setting's sizes ({@link
- * BudgetedScale.airStepped}; `floorAir.ts`, lane fix-floor-calm): under the pass timer from the
+ * holds the sizes the view's air is drawn at, high's own, the floor's middle step's under a frame
+ * profile's `--floor-air middle` (lane perf-air-mac) or the low setting's ({@link
+ * BudgetedScale.airStep}, {@link BudgetedScale.airStepped}; `floorAir.ts`, lane fix-floor-calm),
+ * or a probe's held sizes: stepped down under the pass timer from the
  * frame its controller's drop aims below the floor's lowest step, until its frames, given the cost
  * the step saved and carried to that step, would fit there with the controller's margin; without
  * a timer from the frame its scale drops below its max, until its scale is back there and its
@@ -287,18 +289,31 @@ export class BudgetedScale {
   #controller: ResolutionController | null = null;
   #bounds: ScaleBounds | null = null;
   readonly #air = new FloorAir();
+  /** The step a probe holds the view's air at whatever its frames (lane perf-air-mac), or `null`. */
+  #held: FloorAirStep | null = null;
   #lowest = false;
   readonly #selection = new SelectionScaleHold();
   #selectionScale = 1;
 
-  /** Whether the frame-rate floor has stepped the view's air to the low setting's sizes. */
+  /**
+   * The sizes the view's air is drawn at: high's own, the frame-rate floor's middle step's or the
+   * low setting's (`floorAir.ts`), or those a probe holds it at (lane perf-air-mac).
+   */
+  get airStep(): FloorAirStep {
+    return this.#held ?? this.#air.step;
+  }
+
+  /** Whether the frame-rate floor has stepped the view's air down from its own sizes. */
   get airStepped(): boolean {
-    return this.#air.stepped;
+    return this.airStep !== "own";
   }
 
   /**
-   * The cost of the floor's own air as a share of a stepped frame (`FloorAir.costRatio`): the last
-   * step's measure, or its assumed value before one.
+   * The cost of the floor's air at the step above the one it stands at as a share of a frame at
+   * that one (`FloorAir.costRatio`), which its next return is judged by: high's own over low's
+   * under the floor's own steps; under the middle step high's own over the middle step's while it
+   * stands at its own or the middle step, the middle step's over low's at low's. Each is its last
+   * pair's measure, or its prior.
    */
   get airCostRatio(): number {
     return this.#air.costRatio;
@@ -337,12 +352,27 @@ export class BudgetedScale {
    * @param gpuFramesMs - {@link PrimaryFrameTimes.take}, or `undefined` while
    *   `GraphicsStatus.timer` is `absent`.
    * @param intervalMs - The interval between the primary's last two frames, ms; 0 for the first.
+   * @param floorAir - How its floor steps its air (a frame profile's `--floor-air`; lane
+   *   perf-air-mac): `low`, the floor's own, by default; a `held-` probe holds it at its sizes
+   *   whatever the control, the scale still the controller's.
    */
   update(
     budget: ViewBudget,
     gpuFramesMs: ReadonlyArray<number> | undefined,
     intervalMs: number,
+    floorAir: FloorAirName = "low",
   ): number {
+    const mode = floorAirModeOf(floorAir);
+    let steps: FloorAirKind = "low";
+    switch (mode.kind) {
+      case "held":
+        this.#held = mode.step;
+        break;
+      case "floor":
+        this.#held = null;
+        steps = mode.steps;
+        break;
+    }
     const { control } = budget;
     if (control === null) {
       this.#controller = null;
@@ -372,17 +402,21 @@ export class BudgetedScale {
     const controller = this.#controller;
     const scale = controller.update(gpuFramesMs, intervalMs);
     this.#selectionScale = this.#selection.update(selectionScaleStep(scale, control.bounds));
-    if (control.kind !== "floor") {
+    if (control.kind !== "floor" || this.#held !== null) {
+      // Beside instruments the air is its own; under a probe's hold the floor steps none.
       this.#air.leave();
     } else if (
-      this.#air.update({
-        framesMs: gpuFramesMs,
-        intervalMs,
-        scale,
-        wantedBelowMin: controller.wantedBelowMin,
-        bounds: control.bounds,
-        target: control.target,
-      })
+      this.#air.update(
+        {
+          framesMs: gpuFramesMs,
+          intervalMs,
+          scale,
+          wantedBelowMin: controller.wantedBelowMin,
+          bounds: control.bounds,
+          target: control.target,
+        },
+        steps,
+      )
     ) {
       controller.restart();
     }

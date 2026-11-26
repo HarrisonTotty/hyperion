@@ -108,6 +108,8 @@ export interface PhotorealInputs {
   readonly geometry?: GeometrySettings | undefined;
   /** The setting whose sizes the frame's air is drawn at (`PhotorealFrame.atmosphereSetting`). */
   readonly atmosphereSetting?: QualitySetting | undefined;
+  /** Whether its air is at the floor's middle step's sizes (`PhotorealFrame.atmosphereMiddle`). */
+  readonly atmosphereMiddle?: boolean | undefined;
   /** The levers over its setting's its air is drawn with (`PhotorealFrame.atmosphereLevers`). */
   readonly atmosphereLevers?: AtmosphereLeversOverride | undefined;
   /** Whether its frame-rate floor stands at its lowest step (`PhotorealFrame.floorLowest`). */
@@ -599,6 +601,7 @@ export function photorealFrame(inputs: PhotorealInputs): PhotorealFrame {
     setting: inputs.setting,
     geometry: inputs.geometry,
     atmosphereSetting: inputs.atmosphereSetting,
+    atmosphereMiddle: inputs.atmosphereMiddle,
     atmosphereLevers: inputs.atmosphereLevers,
     floorLowest: inputs.floorLowest,
     exposureScale,

@@ -219,3 +219,190 @@ describe("a floor's air under the pass timer (lane fix-floor-calm)", () => {
     ]);
   });
 });
+
+describe("a floor's air by the middle step (lane perf-air-mac)", () => {
+  /** One update of `air` by the middle step with one frame of `ms`, at `scale`. */
+  function feedMiddle(air: FloorAir, ms: number, scale: number, wantedBelowMin = false): boolean {
+    return air.update(
+      {
+        framesMs: [ms],
+        intervalMs: 1000 / 60,
+        scale,
+        wantedBelowMin,
+        bounds: BOUNDS,
+        target: TARGET,
+      },
+      "middle",
+    );
+  }
+
+  /**
+   * Steps `air` at the lowest scale by the middle step on two frames of `aboveMs` over the budget,
+   * then feeds `after` frames at the step below.
+   */
+  function stepMiddleAt(air: FloorAir, aboveMs: number, after: ReadonlyArray<number>): void {
+    feedMiddle(air, aboveMs, BOUNDS[0]);
+    feedMiddle(air, aboveMs, BOUNDS[0], true);
+    for (const ms of after) {
+      feedMiddle(air, ms, BOUNDS[0]);
+    }
+  }
+
+  /** The frames of `ms` at `scale` until the air's step changes from `from`, at most `most`. */
+  function framesToChange(air: FloorAir, ms: number, scale: number, most = 10_000): number {
+    const from = air.step;
+    let frames = 0;
+    while (air.step === from && frames < most) {
+      feedMiddle(air, ms, scale);
+      frames += 1;
+    }
+    return frames;
+  }
+
+  it("steps high's own air to the middle step first, and to low's only on a drop below the lowest scale from there", () => {
+    const air = new FloorAir();
+    stepMiddleAt(
+      air,
+      40,
+      Array.from({ length: AFTER }, () => 20),
+    );
+    const atMiddle = air.step;
+    stepMiddleAt(
+      air,
+      28,
+      Array.from({ length: AFTER }, () => 14),
+    );
+    expect([atMiddle, air.step, air.stepped]).toEqual(["middle", "low", true]);
+  });
+
+  it("measures each step's share from its own pair", () => {
+    const air = new FloorAir();
+    stepMiddleAt(
+      air,
+      40,
+      Array.from({ length: AFTER }, () => 20),
+    );
+    stepMiddleAt(
+      air,
+      28,
+      Array.from({ length: AFTER }, () => 14),
+    );
+    expect(air.costRatios).toEqual([1, 1]);
+  });
+
+  it("takes its priors until a pair has measured a step, their product about the floor's own prior", () => {
+    const air = new FloorAir();
+    feedMiddle(air, 10, 1);
+    const [own, middle] = AIR_TUNING.unmeasuredMiddleCostRatios;
+    expect(air.costRatios).toEqual(AIR_TUNING.unmeasuredMiddleCostRatios);
+    expect((1 + own) * (1 + middle) - 1).toBeCloseTo(AIR_TUNING.unmeasuredCostRatio, 1);
+  });
+
+  it("takes no second step on the frames drawn before the first took effect", () => {
+    const air = new FloorAir();
+    feedMiddle(air, 40, BOUNDS[0]);
+    feedMiddle(air, 40, BOUNDS[0], true);
+    // The controller's drop still aims below the lowest scale on the own air's late frames.
+    for (let n = 0; n < CONTROLLER_TUNING.settleUpdates; n += 1) {
+      feedMiddle(air, 40, BOUNDS[0], true);
+    }
+    expect(air.step).toBe("middle");
+  });
+
+  it("brings the air back a step at a time, each by its own step's share: to the middle step where it would fit, no further while high's own would not", () => {
+    const air = new FloorAir();
+    stepMiddleAt(
+      air,
+      40,
+      Array.from({ length: AFTER }, () => 20),
+    );
+    stepMiddleAt(
+      air,
+      30,
+      Array.from({ length: AFTER }, () => 20),
+    );
+    // Low's frames of 20 ms given the middle step's share of 0.5 are 30, over 0.9 of the budget;
+    // of 12 ms, 18, under it.
+    const heldAtLow = framesToChange(air, 20, BOUNDS[0], 2_000);
+    const toMiddle = framesToChange(air, 12, BOUNDS[0]);
+    const atMiddle = air.step;
+    // The middle step's frames of 20 ms given high's own share of 1 are 40, over it.
+    const held = framesToChange(air, 20, BOUNDS[0], 2_000);
+    expect([air.costRatios, heldAtLow, toMiddle, atMiddle, held, air.step]).toEqual([
+      [1, 0.5],
+      2_000,
+      AIR_TUNING.returnFrames + WINDOW_LAG,
+      "middle",
+      2_000,
+      "middle",
+    ]);
+  });
+
+  it("brings high's own air back from the middle step once its frames with that step's share would fit", () => {
+    const air = new FloorAir();
+    stepMiddleAt(
+      air,
+      40,
+      Array.from({ length: AFTER }, () => 20),
+    );
+    // 10 ms given high's own share of 1 is 20, under 0.9 of the budget.
+    expect([framesToChange(air, 10, BOUNDS[0]), air.step, air.stepped]).toEqual([
+      AIR_TUNING.returnFrames + WINDOW_LAG,
+      "own",
+      false,
+    ]);
+  });
+
+  it("holds a return that failed on its own frames at the step it was tried from alone", () => {
+    const air = new FloorAir();
+    stepMiddleAt(
+      air,
+      40,
+      Array.from({ length: AFTER }, () => 20),
+    );
+    // Back to high's own on 10 ms frames, which fail at once: the hold is the middle step's.
+    framesToChange(air, 10, BOUNDS[0]);
+    feedMiddle(air, 40, BOUNDS[0]);
+    feedMiddle(air, 40, BOUNDS[0], true);
+    const heldAtMiddle = framesToChange(air, 10, BOUNDS[0], 2_000);
+    expect([air.step, heldAtMiddle]).toEqual(["middle", 2_000]);
+  });
+
+  it("steps straight to low's sizes without a timer, as the floor's own does", () => {
+    const air = new FloorAir();
+    air.update(
+      {
+        framesMs: undefined,
+        intervalMs: 1000 / 30,
+        scale: 0.6,
+        wantedBelowMin: false,
+        bounds: BOUNDS,
+        target: TARGET,
+      },
+      "middle",
+    );
+    expect(air.step).toBe("low");
+  });
+
+  it("starts again at high's own air with its priors when its kind changes", () => {
+    const air = new FloorAir();
+    stepAt(
+      air,
+      28,
+      Array.from({ length: AFTER }, () => 4),
+    );
+    feedMiddle(air, 10, 1);
+    expect([air.step, air.costRatios]).toEqual(["own", AIR_TUNING.unmeasuredMiddleCostRatios]);
+  });
+
+  it("keeps the floor's own two steps under `low`, its default", () => {
+    const air = new FloorAir();
+    stepAt(
+      air,
+      28,
+      Array.from({ length: AFTER }, () => 14),
+    );
+    feed(air, 28, BOUNDS[0], true);
+    expect([air.step, air.costRatios]).toEqual(["low", [1]]);
+  });
+});

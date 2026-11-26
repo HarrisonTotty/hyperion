@@ -128,13 +128,12 @@ describe("the Mac batch's matrix", () => {
       "limb-rays-high-dpr1-a2",
       "limb-rays-high-dpr1-b2",
     ]);
-    // Four own runs, 25 pairs at DPR 1 (the terrain's four probes, its selection scale, the
-    // Four own runs, 26 pairs at DPR 1 (the terrain's four probes, its selection scale, the
-    // classes' edges, the decoration sets' pair, R11.T6.a's scatter, the composite's five and
-    // R14.T5.d's instances among them) and the two shading pairs at 1 and 2, four runs each; then
-    // two counted settings and the occlusion's, the instances', figure-shading's and both shading
-    // pairs' two counted sides each.
-    expect(matrix).toHaveLength(4 + 26 * 4 + 2 * 2 * 4 + 2 + 5 * 2);
+    // Four own runs, 29 pairs at DPR 1 (the terrain's four probes, its selection scale, the
+    // classes' edges, the decoration sets' pair, R11.T6.a's scatter, the composite's five,
+    // R14.T5.d's instances and the floor's air's middle step and two probes among them) and the two
+    // shading pairs at 1 and 2, four runs each; then two counted settings and the occlusion's, the
+    // instances', figure-shading's and both shading pairs' two counted sides each.
+    expect(matrix).toHaveLength(4 + 29 * 4 + 2 * 2 * 4 + 2 + 5 * 2);
     expect(new Set(matrix.map((run) => run.id)).size).toBe(matrix.length);
   });
 
@@ -604,7 +603,7 @@ describe("a lever's pair", () => {
     });
     const text = lines.join("\n");
     expect(lines[0]).toBe("# The Mac batch: Apple M5, 16 GiB");
-    expect(text).toContain("Tree e9966e0, body 41ffecb200000002.0400; 5 of 136 runs kept");
+    expect(text).toContain("Tree e9966e0, body 41ffecb200000002.0400; 5 of 148 runs kept");
     expect(text).toContain("| high-dpr1 | high | 1 | — | not kept |");
     // A run kept with its windows though its views check failed after them.
     expect(text).toContain(
@@ -649,6 +648,34 @@ describe("a lever's pair", () => {
     expect(lines.join("\n")).toContain(
       "| bodies 9.0 (53%), atmosphere view 7.5 (44%), atmosphere composite 8.0, own 0.5 (3%) |",
     );
+  });
+
+  it("names the air each window's march was drawn at and the primary's scale as it ended (lane perf-air-mac)", () => {
+    const window = (samples: number, marchScale: number, scales: ReadonlyArray<number>) => ({
+      ...windowOf("orbit", 1000 / 60, 24, { bodies: 7 }),
+      atmosphereReads: [],
+      scales,
+      marchCensus: { air: { samples, scale: marchScale } },
+    });
+    const text = macProfileSummaryLines({
+      machine: "Apple M5, 16 GiB",
+      tree: "e9966e0",
+      body: "41ffecb200000002.0400",
+      options: MAC_PROFILE_DEFAULTS,
+      kept: [
+        keptAs(matrix, "floor-air-middle-high-dpr1-a1", [window(16, 0.5, [1])]),
+        keptAs(matrix, "floor-air-middle-high-dpr1-b1", [window(36, 0.5, [0.9687])]),
+        keptAs(matrix, "floor-air-own-high-dpr1-b1", [window(36, 1, [0.8125])]),
+      ],
+      sweep: { table: null, runs: [], flown: true },
+    }).join("\n");
+    expect(
+      [
+        "—; low's air, scale 1.000 |",
+        "—; the middle step's air, scale 0.969 |",
+        "—; high's own air, scale 0.813 |",
+      ].map((cellText) => text.includes(cellText)),
+    ).toEqual([true, true, true]);
   });
 
   it("says the sweep was not run under --no-sweep, not that it is not written yet", () => {

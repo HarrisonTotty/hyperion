@@ -63,7 +63,9 @@
 // Each run's sample, before and after: the 1-minute load, the server's `ps` %CPU and CPU time (the
 // summary gives its mean over the run) and `pmset -g therm` on macOS. The sweep's runs are sampled
 // too, without the server, which is stopped first: each descent starts its own. --levers takes the
-// names of `MAC_PROFILE_LEVERS` (limb-rays, march-sources, surface-lobes, decked-air-surface,
+// names of `MAC_PROFILE_LEVERS` (floor-air-middle, lane perf-air-mac's floor's middle step, and
+// floor-air-own and floor-air-middle-held, its probes of the air's cost, limb-rays, march-sources,
+// surface-lobes, decked-air-surface,
 // lit-per-fragment, composite-per-pixel, occlusion, strides, far-cascades, disc-cells,
 // figure-shading, the lit terrain's probes terrain-unshaded, terrain-no-cascades,
 // terrain-no-horizon and terrain-no-maturity, ring-shadow-on-body, terrain-planetshine,

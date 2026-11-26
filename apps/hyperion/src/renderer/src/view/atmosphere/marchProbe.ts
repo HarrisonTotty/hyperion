@@ -184,9 +184,26 @@ export interface MarchCensus {
   readonly laneRays: number;
   /** The composite's census of the frame ({@link CompositeCensus}), or `null` where none was taken. */
   readonly composite: CompositeCensus | null;
+  /**
+   * The march's sizes as its view's uniforms hold them (`hillaire.ts`'s `viewMarchOf`; lane
+   * perf-air-mac), the air the frame was drawn at, or `null` where they were not read.
+   */
+  readonly air: MarchCensusAir | null;
 }
 
-/** The census of the words `marchCensus.wgsl` wrote, taken beside `kernel`, with no composite's. */
+/**
+ * The air a march was drawn at (lane perf-air-mac): its samples a ray at most and its resolution as
+ * a share of the output's (`TableSizes.rayMarchSamples`, `rayMarchScale`).
+ */
+export interface MarchCensusAir {
+  readonly samples: number;
+  readonly scale: number;
+}
+
+/**
+ * The census of the words `marchCensus.wgsl` wrote, taken beside `kernel`, with no composite's and
+ * no air's.
+ */
 export function marchCensusOf(kernel: string, words: Uint32Array): MarchCensus {
   if (words.length < MARCH_CENSUS_WORDS) {
     throw new RangeError(
@@ -205,6 +222,7 @@ export function marchCensusOf(kernel: string, words: Uint32Array): MarchCensus {
     rays: word(first + 4),
     laneRays: word(first + 5),
     composite: null,
+    air: null,
   };
 }
 

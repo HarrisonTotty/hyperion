@@ -148,6 +148,12 @@ export interface ViewFrameInputs {
    */
   readonly atmosphereSetting?: QualitySetting | undefined;
   /**
+   * Whether its photorealistic frame's air is drawn at its frame-rate floor's middle step's sizes
+   * in place of {@link atmosphereSetting}'s (`BudgetedScale.airStep`; lane perf-air-mac); `false`
+   * where absent.
+   */
+  readonly atmosphereMiddle?: boolean | undefined;
+  /**
    * A frame profile's atmosphere levers over its setting's (plan R08, R08.T8.d), which its
    * photorealistic frame's atmospheres draw with; the setting's where absent.
    */
@@ -843,6 +849,7 @@ export class ViewFrameDrawer {
         setting: inputs.setting,
         geometry: inputs.geometry,
         atmosphereSetting: inputs.atmosphereSetting,
+        atmosphereMiddle: inputs.atmosphereMiddle,
         atmosphereLevers: inputs.atmosphereLevers,
         floorLowest: inputs.floorLowest,
         floorStepped: inputs.floorStepped,
@@ -915,6 +922,7 @@ export class ViewFrameDrawer {
             viewport: still,
             setting,
             atmosphereSetting: undefined,
+            atmosphereMiddle: undefined,
             floorLowest: undefined,
             floorStepped: undefined,
             list: { ...list, sprites: spritesAtScale(list.sprites, viewport, still) },

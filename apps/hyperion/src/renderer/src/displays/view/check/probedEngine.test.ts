@@ -215,6 +215,7 @@ describe("a probed engine's march probe and census (plan R08, R08.T8.d)", () => 
       rays: 17,
       laneRays: 64,
       composite: null,
+      air: null,
     });
     expect({
       dispatched: dispatched.mock.calls.map(([kernel, , workgroups, pass]) => [
@@ -276,6 +277,20 @@ describe("a probed engine's march probe and census (plan R08, R08.T8.d)", () => 
         COMPOSITE_CENSUS_KERNEL.name,
       ],
     });
+  });
+
+  it("names the air its march was drawn at from its view's uniforms (lane perf-air-mac)", async () => {
+    const { engine } = await probed();
+    const census = engine.marchCensus(new AbortController().signal);
+    const march = marchBindings(engine);
+    // `view.wgsl`'s AtmosphereView: `figure`, its ninth member, w the samples a ray; `output`, its
+    // tenth, z the march's share of the output's resolution.
+    const view = new Float32Array(40);
+    view.set([0, 0, 0, 36], 32);
+    view.set([20, 9, 0.5, 0], 36);
+    const bindings = { ...march, uniforms: { ...march.uniforms, view } };
+    engine.dispatch(engine.createCompute(RAY_MARCH_KERNEL), bindings, [2, 3, 1], "atmosphere view");
+    expect((await census).air).toEqual({ samples: 36, scale: 0.5 });
   });
 
   it("keeps the march's census where the composite's fails, with none of the composite's, and releases both", async () => {

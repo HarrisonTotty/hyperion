@@ -1630,6 +1630,7 @@ function ViewStage({
         primaryBudget,
         paced.timer === "absent" ? undefined : gpuFramesMs,
         primaryMs === null ? 0 : nowMs - primaryMs,
+        paced.atmosphereLevers?.floorAir,
       );
       primaryMs = nowMs;
       const dtS = lastMs === null ? 0 : (nowMs - lastMs) / 1000;
@@ -1781,6 +1782,9 @@ function ViewStage({
           // Its air at the low setting's sizes while its frame-rate floor holds it stepped down
           // (the owner's report, 2026-11-01).
           atmosphereSetting: primaryScale.airStepped ? "low" : paced.setting,
+          // At its floor's middle step's sizes in place of low's where it stands there (lane
+          // perf-air-mac).
+          atmosphereMiddle: primaryScale.airStep === "middle",
           // Its large discs' limbs at fewer cells while the floor holds its lowest step (R07.T8.i).
           floorLowest: primaryScale.atLowestStep,
           // The ring's shadow on its planet shed while the floor holds it stepped down (R11.T9.a).

@@ -40,6 +40,7 @@ import type {
   InspectionTimingCompile,
   InspectionTimingCompositeCensus,
   InspectionTimingFirstFrame,
+  InspectionTimingMarchAir,
   InspectionTimingMarchCensus,
   InspectionTimingClusters,
   InspectionTimingMemory,
@@ -85,9 +86,11 @@ export const INSPECTION_TIMING_SCHEMA = "hyperion.views-check.inspection-timing"
  * since the run's pipeline compiles, each window's compiles alongside it and the primary's first
  * frames (plan R08, fix-r08-decked-air-route), 11 since the run's instance probe (plan R14,
  * R14.T5.d), 12 since each pass's own time beside its span's, its share of the GPU taken from its
- * own time, and the frame's GPU time the union of its spans (lane fix-mac-gpu-time).
+ * own time, and the frame's GPU time the union of its spans (lane fix-mac-gpu-time), 13 since each
+ * window's census's air, the march's samples and resolution as its frame drew them (lane
+ * perf-air-mac; a file before it reads `null` there).
  */
-export const INSPECTION_TIMING_VERSION = 12;
+export const INSPECTION_TIMING_VERSION = 13;
 
 /**
  * V8's CPU profiler's category, which samples every isolate's stack: the renderer's main thread,
@@ -1566,10 +1569,50 @@ function censusMarkdown(census: InspectionTimingMarchCensus | null): string[] {
   );
   const waiting = census.rays > 0 ? (census.laneRays / census.rays).toFixed(2) : "—";
   return [
+    ...marchAirMarkdown(census.air),
     `The march's far limb, the frame after the window (\`${cell(census.kernel)}\`): texels by node rays ${counted.length === 0 ? "—" : counted.join(", ")}; ${String(census.wholeMeans)} at w_L 1, with no centre ray; ${String(census.centresInAir)} centre rays in the air; ${String(census.limbTiles)} of ${String(census.tiles)} tiles hold a node ray; ${String(census.rays)} rays in the air, ${String(census.laneRays)} as each tile waits on its slowest texel (${waiting} times).`,
     "",
     ...compositeCensusMarkdown(census.composite),
   ];
+}
+
+/**
+ * The air a window's census's march was drawn at as lines of the summary (lane perf-air-mac): its
+ * samples a ray and its resolution, named high's own, the floor's middle step or low's where they
+ * are one of those; nothing where they were not read.
+ */
+function marchAirMarkdown(air: InspectionTimingMarchAir | null): string[] {
+  if (air === null) {
+    return [];
+  }
+  const named = marchAirNameOf(air);
+  const said: Readonly<Record<MarchAirName, string>> = {
+    own: ": high's own air",
+    middle: ": the frame-rate floor's middle step",
+    low: ": the low setting's air",
+  };
+  return [
+    `The march's air, the frame after the window: ${String(air.samples)} samples a ray at most, at ${String(air.scale)} of the output's resolution${named === null ? "" : said[named]}.`,
+    "",
+  ];
+}
+
+/** The air a march was drawn at, by the sizes it is one of (lane perf-air-mac). */
+export type MarchAirName = "own" | "middle" | "low";
+
+/**
+ * Which sizes `air` is (lane perf-air-mac): high's own (36 samples a ray at full resolution), the
+ * frame-rate floor's middle step's (36 at half) or the low setting's (16 at half), as
+ * `hillaire.ts`'s `TABLE_SIZES` and `FLOOR_MIDDLE_SIZES` hold them; `null` for other sizes.
+ */
+export function marchAirNameOf(air: InspectionTimingMarchAir): MarchAirName | null {
+  if (air.samples === 36 && air.scale === 1) {
+    return "own";
+  }
+  if (air.samples === 36 && air.scale === 0.5) {
+    return "middle";
+  }
+  return air.samples === 16 && air.scale === 0.5 ? "low" : null;
 }
 
 /**
@@ -1735,6 +1778,7 @@ function leversText(levers: AtmosphereLeversOverride | null): string {
     return "";
   }
   const named = [
+    ...(levers.floorAir === undefined ? [] : [`floor air ${levers.floorAir}`]),
     ...(levers.marchCover === undefined ? [] : [`march cover ${levers.marchCover}`]),
     ...(levers.limbRays === undefined ? [] : [`limb rays ${levers.limbRays}`]),
     ...(levers.marchSourceTransmittance === undefined
@@ -1848,7 +1892,7 @@ export async function writeInspectionTimingResults(
   const levers = results.run.atmosphereLevers;
   const lit = results.run.litProbe;
   const particles = results.run.instanceProbe;
-  const stem = `${results.run.startedAt.slice(0, 10)}-${results.run.machine.name}-${results.run.setting}-inspection-timing${probe === null ? "" : `-composite-${probe}`}${march === null ? "" : `-march-${march}`}${levers?.marchCover === undefined ? "" : `-cover-${levers.marchCover}`}${levers?.limbRays === undefined ? "" : `-limb-${levers.limbRays}`}${levers?.marchSourceTransmittance === undefined ? "" : `-sources-${levers.marchSourceTransmittance}`}${levers?.surfaceLobes === undefined ? "" : `-lobes-${levers.surfaceLobes}`}${levers?.deckedAirSurface === undefined ? "" : `-ground-${levers.deckedAirSurface}`}${lit === null ? "" : `-lit-${lit}`}${particles === null ? "" : `-instances-${String(particles)}`}`;
+  const stem = `${results.run.startedAt.slice(0, 10)}-${results.run.machine.name}-${results.run.setting}-inspection-timing${levers?.floorAir === undefined ? "" : `-floor-air-${levers.floorAir}`}${probe === null ? "" : `-composite-${probe}`}${march === null ? "" : `-march-${march}`}${levers?.marchCover === undefined ? "" : `-cover-${levers.marchCover}`}${levers?.limbRays === undefined ? "" : `-limb-${levers.limbRays}`}${levers?.marchSourceTransmittance === undefined ? "" : `-sources-${levers.marchSourceTransmittance}`}${levers?.surfaceLobes === undefined ? "" : `-lobes-${levers.surfaceLobes}`}${levers?.deckedAirSurface === undefined ? "" : `-ground-${levers.deckedAirSurface}`}${lit === null ? "" : `-lit-${lit}`}${particles === null ? "" : `-instances-${String(particles)}`}`;
   const candidates = Array.from({ length: MAX_RUNS_A_DAY }, (_, i) =>
     i === 0 ? stem : `${stem}-${String(i + 1)}`,
   );

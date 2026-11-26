@@ -33,6 +33,7 @@ import {
   COMPOSITE_MATERIAL,
   type CompositeProbe,
   compositeProbedMaterial,
+  viewMarchOf,
   viewOutputPxOf,
 } from "../../../view/atmosphere/hillaire";
 import {
@@ -458,9 +459,12 @@ export class ProbedEngine implements RenderEngine {
             console.warn("views check: the composite's census failed:", error);
             return null;
           });
+    // The air the march was drawn at, from the view's uniforms it took (lane perf-air-mac).
+    const air = view === undefined ? null : viewMarchOf(view);
     const released = Promise.all([march, composite]).then(([census, frame]) => ({
       ...census,
       composite: frame,
+      air,
     }));
     for (const { resolve, reject, release } of asked) {
       release();

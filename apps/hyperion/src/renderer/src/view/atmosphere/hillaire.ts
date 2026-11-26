@@ -420,6 +420,29 @@ export const TABLE_SIZES: Readonly<Record<QualitySetting, TableSizes>> = {
 };
 
 /**
+ * The sizes a view's air is drawn at: a setting's own (`TABLE_SIZES`), or the frame-rate floor's
+ * middle step's ({@link FLOOR_MIDDLE_SIZES}; lane perf-air-mac).
+ */
+export type AirSizesName = QualitySetting | "middle";
+
+/**
+ * The frame-rate floor's middle step's air (lane perf-air-mac), between high's own and the low
+ * setting's sizes: high's tables and its march's counts, 36 a ray scaled by each segment's optical
+ * depth ({@link TableSizes.marchDepthSteps}), so its quadrature within R05.T12.e's gate as high's
+ * is, with the march at half the output's resolution and the composite's depth-aware upsample, as
+ * low's. A quarter of high's march texels, the larger of its own air's two terms: from orbit at
+ * the owner's Mac batch's body (pod, SwiftShader, each over the rest of its frame) high's own air
+ * took 6.0 times the low setting's, its march over 3.9 times the workgroups and 2.2 times as long
+ * each, and the middle step's 1.57 times (the lane's `results.md`).
+ */
+export const FLOOR_MIDDLE_SIZES: TableSizes = { ...TABLE_SIZES.high, rayMarchScale: 0.5 };
+
+/** The sizes `name` draws a view's air at ({@link AirSizesName}). */
+export function airSizesOf(name: AirSizesName): TableSizes {
+  return name === "middle" ? FLOOR_MIDDLE_SIZES : TABLE_SIZES[name];
+}
+
+/**
  * Where the composite forms what lies behind the sky from above the top (the owner's priority,
  * 2026-11-01): `march`, at the ray march's resolution where it runs below the output's, the
  * transmittance across from above formed once a march texel as each channel's ln τ
@@ -2430,6 +2453,28 @@ const VIEW_MEMBERS = [
 export function viewOutputPxOf(view: ArrayLike<number>): readonly [number, number] {
   const at = VIEW_MEMBERS.indexOf("output") * 4;
   return [view[at] ?? 0, view[at + 1] ?? 0];
+}
+
+/**
+ * The march's sizes a view's uniform block holds, as its frame was drawn at them (lane
+ * perf-air-mac; `view.wgsl`'s `AtmosphereView.figure.w` and `output.z`): its samples a ray at most,
+ * {@link TableSizes.rayMarchSamples}, and its resolution as a share of the output's,
+ * {@link TableSizes.rayMarchScale}, for a profile that names the air a window drew; `null` where
+ * the block holds no march, its samples not a whole number above 0 or its share not in (0, 1].
+ */
+export function viewMarchOf(
+  view: ArrayLike<number>,
+): { readonly samples: number; readonly scale: number } | null {
+  const samples = view[VIEW_MEMBERS.indexOf("figure") * 4 + 3];
+  const scale = view[VIEW_MEMBERS.indexOf("output") * 4 + 2];
+  return samples !== undefined &&
+    Number.isInteger(samples) &&
+    samples > 0 &&
+    scale !== undefined &&
+    scale > 0 &&
+    scale <= 1
+    ? { samples, scale }
+    : null;
 }
 
 /**

@@ -141,6 +141,11 @@
  * departure|uniform` (fix-r08-decked-air-route: a drawn surface's forward lobes, and a decked air's
  * ground departing from the bake's), draw that profile's atmospheres with that lever over its
  * setting's, for the A/B of each lever on and off on one build; each is refused without `--timing`.
+ * `--floor-air low|middle|held-own|held-middle|held-low` (lane perf-air-mac) is how that profile's
+ * frame-rate floor steps its primary's air: straight to the low setting's sizes, the floor's own;
+ * to its middle step first, the lever; or held at high's own, the middle step's or low's sizes
+ * whatever its frames, a probe of the air's cost; it is refused without `--timing` too, and at
+ * the low setting, which has no floor, unless it names `low`.
  * With `--lit-probe transmittance-one|planetshine-centre|no-annuli|per-fragment` too (plan R08,
  * R08.T9.b's measurement) that profile makes the lit materials and kernels under the probe, every
  * source's transmittance through the air 1, a planetshine source's at its centre node alone, the
@@ -208,6 +213,7 @@ import {
 } from "../preload/spikeLaunch";
 import {
   COMPOSITE_PROBE_NAMES,
+  FLOOR_AIR_NAMES,
   LIT_PROBE_NAMES,
   MARCH_PROBE_NAMES,
   MAX_INSTANCE_PROBE,
@@ -678,6 +684,12 @@ export function buildCommand(version: string): Command {
     )
     .addOption(
       new Option(
+        "--floor-air <STEPS>",
+        "the frame profile's frame-rate floor's air (lane perf-air-mac): straight to low's sizes, to the middle step first, or held at high's own, the middle step's or low's sizes",
+      ).choices(FLOOR_AIR_NAMES),
+    )
+    .addOption(
+      new Option(
         "--decked-air-surface <GROUND>",
         "the frame profile's decked air's ground over its setting's (R08): departing from the bake's, or the bake's uniform ground",
       ).choices(["departure", "uniform"]),
@@ -913,6 +925,7 @@ export function parseClientArgs(args: readonly string[], version: string): Clien
     ["surfaceLobes", "--surface-lobes"],
     ["deckedAirSurface", "--decked-air-surface"],
     ["cloudVolume", "--cloud-volume"],
+    ["floorAir", "--floor-air"],
   ] as const) {
     if (options[option] !== undefined && options["timing"] !== true) {
       command.error(`error: ${flag} is an option of --timing, which was not given`);
@@ -928,6 +941,17 @@ export function parseClientArgs(args: readonly string[], version: string): Clien
   if (options["instanceProbe"] !== undefined && settingOf(options) === "low") {
     command.error(
       "error: --instance-probe draws on the high setting alone: the low setting makes no instance pipeline",
+    );
+  }
+  // The low setting has no frame-rate floor (`viewBudget.ts`' `aloneScaleBounds`): a held air
+  // there would be stated limited at its own sizes, or drawn above them (lane perf-air-mac).
+  if (
+    options["floorAir"] !== undefined &&
+    options["floorAir"] !== "low" &&
+    settingOf(options) === "low"
+  ) {
+    command.error(
+      "error: --floor-air steps or holds the high setting's air alone: the low setting has no frame-rate floor",
     );
   }
   if (options["look"] !== undefined && options["handover"] !== true) {
@@ -1231,9 +1255,9 @@ function marchProbeOf(
 
 /**
  * The atmosphere's levers `--march-cover`, `--limb-rays`, `--march-sources`, `--surface-lobes`,
- * `--decked-air-surface` and `--cloud-volume` name where any is given, else nothing (plan R08,
- * R08.T8.d, R08.T8.e's table and fix-r08-decked-air-route; plan R11, R11.T7.c); commander has
- * checked their choices.
+ * `--decked-air-surface`, `--cloud-volume` and `--floor-air` name where any is given, else nothing
+ * (plan R08, R08.T8.d, R08.T8.e's table and fix-r08-decked-air-route; plan R11, R11.T7.c; lane
+ * perf-air-mac); commander has checked their choices.
  */
 function atmosphereLeversOf(
   options: Readonly<Record<string, unknown>>,
@@ -1244,6 +1268,7 @@ function atmosphereLeversOf(
   const lobes = options["surfaceLobes"];
   const ground = options["deckedAirSurface"];
   const volume = options["cloudVolume"];
+  const floorAir = FLOOR_AIR_NAMES.find((each) => each === options["floorAir"]);
   const levers: AtmosphereLeversOverride = {
     ...(cover === "area" || cover === "tiles" ? { marchCover: cover } : {}),
     ...(rays === "per-texel" || rays === "packed" ? { limbRays: rays } : {}),
@@ -1253,6 +1278,7 @@ function atmosphereLeversOf(
     ...(volume === "full" || volume === "stepped" || volume === "lowest"
       ? { cloudVolume: volume }
       : {}),
+    ...(floorAir === undefined ? {} : { floorAir }),
   };
   return Object.keys(levers).length === 0 ? {} : { atmosphereLevers: levers };
 }

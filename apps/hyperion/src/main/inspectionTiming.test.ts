@@ -217,6 +217,7 @@ const CENSUS: InspectionTimingMarchCensus = {
   rays: 1_150,
   laneRays: 2_300,
   composite: COMPOSITE_CENSUS,
+  air: null,
 };
 
 /** A kind of attachment two passes of 100 × 50 px took, as the counter tallies it. */
@@ -537,8 +538,19 @@ describe("the frame profile's timing file (the owner's report)", () => {
         { ...CENSUS, composite: { ...COMPOSITE_CENSUS, surface: 2_001 } },
         { ...CENSUS, composite: { ...COMPOSITE_CENSUS, discs: 1_001 } },
         { ...CENSUS, composite: "composite" },
+        { ...CENSUS, air: { samples: 0, scale: 0.5 } },
+        { ...CENSUS, air: { samples: 36.5, scale: 0.5 } },
+        { ...CENSUS, air: { samples: 36, scale: 1.5 } },
+        { ...CENSUS, air: "middle" },
       ].map((census) => takenWindow(withCensus(census))),
-    ).toEqual([null, null, null, null, null, null, null, null, null]);
+    ).toEqual([null, null, null, null, null, null, null, null, null, null, null, null, null]);
+    // A census of a record before its air's (lane perf-air-mac) holds none.
+    const { air: __, ...beforeAir } = CENSUS;
+    expect(
+      readInspectionTimingRecord(withCensus({ ...beforeAir }))?.windows[0]?.marchCensus?.air,
+    ).toBeNull();
+    const middle = { ...CENSUS, air: { samples: 36, scale: 0.5 } };
+    expect(readInspectionTimingRecord(withCensus(middle))?.windows[0]?.marchCensus).toEqual(middle);
     // A census of a record before the composite's (perf-composite-close) holds none.
     const { composite: _, ...before } = CENSUS;
     expect(
@@ -1222,6 +1234,32 @@ describe("the frame profile's timing file (the owner's report)", () => {
     );
   });
 
+  it("writes the air each window's census's march was drawn at, named where it is a step's (lane perf-air-mac)", () => {
+    const [window] = RECORD.windows;
+    if (window === undefined) {
+      throw new Error("the record holds a window");
+    }
+    const withAir = (air: InspectionTimingMarchCensus["air"]): InspectionTimingRecord => ({
+      ...RECORD,
+      windows: [{ ...window, marchCensus: { ...CENSUS, air } }],
+    });
+    const line = (air: InspectionTimingMarchCensus["air"]): string | undefined =>
+      inspectionTimingMarkdown(results(null, null, null, null, withAir(air)))
+        .split("\n")
+        .find((each) => each.startsWith("The march's air"));
+    expect([
+      line({ samples: 36, scale: 1 }),
+      line({ samples: 36, scale: 0.5 }),
+      line({ samples: 16, scale: 0.5 }),
+      line(null),
+    ]).toEqual([
+      "The march's air, the frame after the window: 36 samples a ray at most, at 1 of the output's resolution: high's own air.",
+      "The march's air, the frame after the window: 36 samples a ray at most, at 0.5 of the output's resolution: the frame-rate floor's middle step.",
+      "The march's air, the frame after the window: 16 samples a ray at most, at 0.5 of the output's resolution: the low setting's air.",
+      undefined,
+    ]);
+  });
+
   it("writes each window's composite census: its pixels by the terms formed for each (perf-composite-close)", () => {
     expect(inspectionTimingMarkdown(results())).toContain(
       "The composite's pixels, the same frame: 4000 in the output; 1000 (25.0%) outside the march's area from above the top, kept at once; sky 1000 (25.0%), of which behind read at the march's resolution 800 (20.0%), per pixel 200 (5.0%) and within a drawn disc 0 (0.0%); surfaces 2000 (50.0%), of which through the aerial volume 0 (0.0%); a drawn edge searched 80 (2.0%).",
@@ -1246,7 +1284,7 @@ describe("the frame profile's timing file (the owner's report)", () => {
     ]);
     expect(JSON.parse(written.get(first.json) ?? "{}")).toMatchObject({
       schema: "hyperion.views-check.inspection-timing",
-      version: 12,
+      version: 13,
       run: {
         compositeProbe: null,
         marchProbe: null,
@@ -1334,6 +1372,32 @@ describe("the frame profile's timing file (the owner's report)", () => {
       "/timing/2026-11-01-pod-low-inspection-timing-limb-per-texel.json",
       "/timing/2026-11-01-pod-low-inspection-timing-sources-per-step.json",
       true,
+      true,
+    ]);
+  });
+
+  it("names and states a run whose floor steps its air by the middle step, or a probe holds it (lane perf-air-mac)", async () => {
+    const written = new Map<string, string>();
+    const files = {
+      mkdir: () => Promise.resolve(),
+      exists: (path: string) => Promise.resolve(written.has(path)),
+      writeFile: (path: string, text: string) => {
+        written.set(path, text);
+        return Promise.resolve();
+      },
+    };
+    const middle = results(null, null, { floorAir: "middle" });
+    const held = results(null, null, { floorAir: "held-own", limbRays: "packed" });
+    expect([
+      (await writeInspectionTimingResults("/timing", middle, files)).json,
+      (await writeInspectionTimingResults("/timing", held, files)).json,
+      inspectionTimingMarkdown(held)
+        .split("\n")
+        .find((line) => line.startsWith("- **Launch:**"))
+        ?.endsWith("; atmosphere levers floor air held-own, limb rays packed over the setting's"),
+    ]).toEqual([
+      "/timing/2026-11-01-pod-low-inspection-timing-floor-air-middle.json",
+      "/timing/2026-11-01-pod-low-inspection-timing-floor-air-held-own-limb-packed.json",
       true,
     ]);
   });
