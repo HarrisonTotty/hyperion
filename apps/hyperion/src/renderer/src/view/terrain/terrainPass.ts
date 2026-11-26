@@ -282,7 +282,7 @@ import {
   rockResolveMaterialSpec,
   rockWireMaterialSpec,
 } from "../surface/scatter/rockMaterial";
-import { RockMeshes } from "../surface/scatter/rockMeshes";
+import { RockMeshes, type RockPoolRegion } from "../surface/scatter/rockMeshes";
 import {
   couldTouch,
   type RockDrawnPatch,
@@ -2460,6 +2460,12 @@ export class TerrainPass {
   readonly #rockSource: RockSource | null;
   /** The last step's grounded and descending bodies, whose region's rocks are drawn whole. */
   #grounded: ReadonlyArray<GroundContact> = [];
+  /** The rocks' could-touch region of {@link TerrainPass.#grounded} on a device's cache, made once a step. */
+  #rockRegionOf: {
+    readonly grounded: ReadonlyArray<GroundContact>;
+    readonly cache: PatchCache;
+    readonly region: RockPoolRegion;
+  } | null = null;
   /** The planet as selection reads it: its figure and the field's level table, which grows. */
   #planet: PlanetGeometry;
   #rangesVersion = 0;
@@ -3794,13 +3800,13 @@ export class TerrainPass {
       return null;
     }
     const rocks = (device.rocks ??= this.#makeRocks(device, source));
-    rocks.meshes.sync(this.#rocks);
+    // What the last step's bodies could touch, each footprint widened by the rocks' reach, whose
+    // patches the rocks' pool holds first.
+    const pooled = this.#rockRegion();
+    rocks.meshes.sync(this.#rocks, pooled);
+    const region = pooled.discs;
     const { view } = input;
     const cameraBodyFixedM = rotateToBodyFixed(view.rotation, view.cameraM);
-    // What the last step's bodies could touch: each footprint widened by the rocks' reach.
-    const region = this.#grounded.map((contact) =>
-      couldTouch({ groundPointM: contact.positionM, radiusM: contact.radiusM }),
-    );
     const { patches, inView, regionRefused } = rocksToDraw(
       drawSet,
       mask,
@@ -3842,6 +3848,33 @@ export class TerrainPass {
       },
       culled: false,
     };
+  }
+
+  /**
+   * The rocks' could-touch region (plan R11, R11.T4.b; Design note 7): the last step's grounded and
+   * descending bodies' contacts, each widened by the rocks' reach (`couldTouch`), and each resident
+   * patch's bounding sphere from the patch cache, as the draw's rule reads them; the same object
+   * through a step on one device.
+   */
+  #rockRegion(): RockPoolRegion {
+    const { cache } = this.#device;
+    const held = this.#rockRegionOf;
+    if (held?.grounded === this.#grounded && held.cache === cache) {
+      return held.region;
+    }
+    const region: RockPoolRegion = {
+      discs: this.#grounded.map((contact) =>
+        couldTouch({ groundPointM: contact.positionM, radiusM: contact.radiusM }),
+      ),
+      sphereOf: (keyString) => {
+        const patch = cache.get(keyString);
+        return patch === undefined
+          ? undefined
+          : { centreM: patch.originM, radiusM: patch.boundingRadiusM };
+      },
+    };
+    this.#rockRegionOf = { grounded: this.#grounded, cache, region };
+    return region;
   }
 
   /** View `state`'s rock draw on the device, made at its first need. */
@@ -4218,7 +4251,7 @@ export class TerrainPass {
       return true;
     }
     const meshes = this.#device.rocks?.meshes ?? null;
-    meshes?.sync(this.#rocks);
+    meshes?.sync(this.#rocks, this.#rockRegion());
     for (let n = 0; n < drawSet.count; n += 1) {
       const drawn = drawSet.patches[n];
       if (

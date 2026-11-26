@@ -20,7 +20,8 @@
  * - **The annunciation** ({@link rocksLimitDetail}): on the low setting, exactly where a finest
  *   patch in view outside the region holds a rock that would subtend a pixel
  *   ({@link ROCK_DETAIL_PX}) at the patch's nearest point; and on either, where a region patch's
- *   mesh was refused by the rocks' pool (`RocksToDraw.regionRefused`).
+ *   mesh was refused by the rocks' pool (`RocksToDraw.regionRefused`), which holds the region's
+ *   patches first (`rockMeshes.ts`), so only where the region alone passes it.
  * - **The swept region** ({@link couldTouchContacts}, R11.T4.d): a descending body's footprint
  *   swept along its path ahead over R05's `FORCED_REGION_RESIDENCY_S`, R03's `predictedPath`: the
  *   planned path where one is sent, else the straight line of its pose at its velocity, which is
