@@ -34769,12 +34769,34 @@ ACTIVE HOST · HOST LEAVING MAIN SEQUENCE · EXTRAPOLATED ZONE · FROZEN SURFACE
     least airborne share, times the shoreline's (Earth 0.77 bar).
   - _Lean (2026-11-25):_ every vent is basaltic (1,473.15 K): a lid's eruption temperature is its
     pass's output; `vent_elements` reads the drawn carriers, as `of_exchangeable` would.
-  - _Lean (2026-11-25):_ the cap reads the airborne carbon's CO weight (the division's share), so a
-    temperate thermostat's thin air reaches no cap; ice bulks keep T24.f's carriers (a seafloor vent).
-  - _Lean (2026-11-25):_ "hot" is the division's state or the class (a hothouse re-solve), not
-    P14.T53.e's carried state, which made 2-cycles; the census lists the vented airs published hot.
-  - _Lean (2026-11-25):_ the vent's CH₄ is the vent's supply, outside `methane_outcome`; its hydrogen
-    is two H₂O; the thermostat stores it with the CO₂. The water debit reaches the surface's water.
+  - _Lean (2026-11-25; ruled, research-leans-60, E):_ the cap reads the airborne carbon's CO weight
+    (the division's share), so a temperate thermostat's thin air reaches no cap. _Lean (2026-11-25):_
+    ice bulks keep T24.f's carriers (a seafloor vent).
+  - _Lean (2026-11-25; ruled, research-leans-60, C):_ "hot" is the division's state or the class (a
+    hothouse re-solve), not P14.T53.e's carried state, which made 2-cycles; the census lists the
+    vented airs published hot.
+  - _Lean (2026-11-25; ruled, research-leans-60, D):_ the vent's CH₄ is the vent's supply, outside
+    `methane_outcome`; its hydrogen is two H₂O; the thermostat stores it with the CO₂. The water
+    debit reaches the surface's water (the shift's part read on the airborne carbon by ruling A).
   - _Accept:_ `cargo test -p hyperion-sim --lib` over `planetary::derive::atmosphere` and
     `planetary::chem::outgassing`; the slow census by name,
     `composition_census_under_every_36_hold_speciates_every_secondary_air`.
+- **P14.T55.a.c's shift on the airborne carbon (lane `fix-p14-t55ac-shift`, 2026-11-25).** Under
+  the same hold at 36; 33 bit for bit, no golden moved.
+  - _Ruled (research-leans-60, A):_ the shift's CO is the vent's CO times the division's least
+    airborne share, as the pressure and the cap read it; the stored carbon's CO is carbonate drawn as
+    CO₂, with no debit. Share 1 is unchanged, and a dried air there keeps its class.
+  - _New fields:_ `Outgassed::{airborne_share, water, stored_monoxide}`; `vented::carbon_view` is
+    re-exported to the crate's tests.
+  - _Ruled (research-leans-60, B):_ no new burial rule; the census asserts the bounds (no hot flip;
+    a thermostat-held air keeps its state, is not dried and pays at most share × CO + 2 CH₄; CO₂
+    under its saturation and the carbon under its kept column weight).
+  - _Lean (2026-11-25):_ bound 1 is asserted on the CO₂ (within 1.01 of the twin's). By
+    `carbon_view` 52 thermostat-held airs exceed it on their vent's CH₄ alone, beside a CO₂ the
+    partition or escape holds far below the thermostat's: the census lists them as findings.
+  - _For the CO follow-up (ruled, research-leans-60):_ a frozen thermostat air's airborne CO above
+    the route's share stays unshifted on the stand-in, a lower bound (the table's Mars among them,
+    its route share 6 × 10⁻⁶); the follow-up reads the solve's share there, and takes T_q at the
+    air's own p_s by ZM14's eq. 14.
+  - _Deviation:_ the debit checks are relative to the kept water (the debit is a difference of
+    water masses); the young super-Earth's H₂ test moved beyond the maximum greenhouse (share 1).
