@@ -85,13 +85,19 @@ import {
   BODY_DISC_CELLS_AIR_KERNEL,
   BODY_DISC_CELLS_EMISSIVE_AIR_KERNEL,
   BODY_DISC_CELLS_EMISSIVE_KERNEL,
+  BODY_DISC_CELLS_EMISSIVE_LEAN_KERNEL,
   BODY_DISC_CELLS_KERNEL,
+  BODY_DISC_CELLS_LEAN_KERNEL,
   BODY_DISC_CELLS_PACKED_AIR_KERNEL,
   BODY_DISC_CELLS_PACKED_EMISSIVE_AIR_KERNEL,
   BODY_DISC_CELLS_PACKED_EMISSIVE_KERNEL,
+  BODY_DISC_CELLS_PACKED_EMISSIVE_LEAN_KERNEL,
   BODY_DISC_CELLS_PACKED_KERNEL,
+  BODY_DISC_CELLS_PACKED_LEAN_KERNEL,
   BODY_DISC_EMISSIVE_AIR_MATERIALS,
+  BODY_DISC_EMISSIVE_LEAN_MATERIALS,
   BODY_DISC_EMISSIVE_MATERIALS,
+  BODY_DISC_LEAN_MATERIALS,
   BODY_DISC_MATERIALS,
   FIGURE_RESOLVE_MATERIALS,
   SMOOTH_MESH_AIR_CLUSTER_MATERIAL,
@@ -100,9 +106,13 @@ import {
   SMOOTH_MESH_EMISSIVE_AIR_CLUSTER_MATERIAL,
   SMOOTH_MESH_EMISSIVE_AIR_MATERIAL,
   SMOOTH_MESH_EMISSIVE_CLUSTER_MATERIAL,
+  SMOOTH_MESH_EMISSIVE_LEAN_CLUSTER_MATERIAL,
+  SMOOTH_MESH_EMISSIVE_LEAN_MATERIAL,
   SMOOTH_MESH_EMISSIVE_MATERIAL,
   SMOOTH_MESH_IDS_CLUSTER_MATERIAL,
   SMOOTH_MESH_IDS_MATERIAL,
+  SMOOTH_MESH_LEAN_CLUSTER_MATERIAL,
+  SMOOTH_MESH_LEAN_MATERIAL,
   SMOOTH_MESH_MATERIAL,
 } from "../bodies/draw";
 import {
@@ -577,6 +587,28 @@ export const DISC_EMISSIVE_AIR_ENTRIES: ReadonlyArray<CatalogueEntry> = [
 ];
 
 /**
+ * Perf-bodies-pass-2's lean forms of the lit bodies (`draw.ts`' `leanSource`): the disc's interior and
+ * limb, the mesh regime's figure, instanced and on the cluster path, and the `disc cells` kernel, per
+ * cell and packed, of the plain and the emissive forms, each with its planetshine and
+ * eclipse loops and its ring's shadow compiled out, drawn for a record of none (`isLeanRecord`). The
+ * smoke page compiles them in part 29, beside their check, not in part 1 or 9, for their watchdogs.
+ */
+export const LEAN_BODY_ENTRIES: ReadonlyArray<CatalogueEntry> = [
+  { kind: "material", spec: BODY_DISC_LEAN_MATERIALS.interior },
+  { kind: "material", spec: BODY_DISC_LEAN_MATERIALS.limb },
+  { kind: "material", spec: SMOOTH_MESH_LEAN_MATERIAL },
+  { kind: "material", spec: SMOOTH_MESH_LEAN_CLUSTER_MATERIAL },
+  { kind: "compute", spec: BODY_DISC_CELLS_LEAN_KERNEL },
+  { kind: "compute", spec: BODY_DISC_CELLS_PACKED_LEAN_KERNEL },
+  { kind: "material", spec: BODY_DISC_EMISSIVE_LEAN_MATERIALS.interior },
+  { kind: "material", spec: BODY_DISC_EMISSIVE_LEAN_MATERIALS.limb },
+  { kind: "material", spec: SMOOTH_MESH_EMISSIVE_LEAN_MATERIAL },
+  { kind: "material", spec: SMOOTH_MESH_EMISSIVE_LEAN_CLUSTER_MATERIAL },
+  { kind: "compute", spec: BODY_DISC_CELLS_EMISSIVE_LEAN_KERNEL },
+  { kind: "compute", spec: BODY_DISC_CELLS_PACKED_EMISSIVE_LEAN_KERNEL },
+];
+
+/**
  * Plan R07's packed `disc cells` kernels (`GeometrySettings.discCells` `packed`), the plain one and
  * R08.T18.a's emissive, R08.T16.b's air and R08.T18.b's emissive-with-air forms, each with its
  * table-only twin (R08.T9.b's lever, `sourceTableEngine.ts`). The smoke page compiles them in part
@@ -623,6 +655,7 @@ export const TABLE_ONLY_ENTRIES: ReadonlyArray<CatalogueEntry> = [
   ...THERMAL_ENTRIES,
   ...DISC_AIR_ENTRIES,
   ...DISC_EMISSIVE_AIR_ENTRIES,
+  ...LEAN_BODY_ENTRIES,
 ].flatMap((entry): ReadonlyArray<CatalogueEntry> => {
   if (entry.kind === "material") {
     const spec = tableOnlyMaterial(entry.spec);
@@ -652,6 +685,8 @@ const AIRLESS_SOURCES: ReadonlyArray<CatalogueEntry> = [
   ...THERMAL_ENTRIES,
   { kind: "compute", spec: BODY_DISC_CELLS_PACKED_KERNEL },
   { kind: "compute", spec: BODY_DISC_CELLS_PACKED_EMISSIVE_KERNEL },
+  // Perf-bodies-pass-2's lean forms, which an airless lean record is drawn by.
+  ...LEAN_BODY_ENTRIES,
   ...CLOUD_ENTRIES,
   { kind: "material", spec: OCEAN_FAR_PASS_MATERIAL },
   { kind: "material", spec: OCEAN_NEAR_PASS_MATERIAL },
@@ -765,6 +800,7 @@ export const WGSL_CATALOGUE: ReadonlyArray<CatalogueEntry> = [
   ...DISC_AIR_ENTRIES,
   ...DISC_EMISSIVE_AIR_ENTRIES,
   ...PACKED_CELL_ENTRIES,
+  ...LEAN_BODY_ENTRIES,
   ...SKY_ENTRIES,
   ...TABLE_ONLY_ENTRIES,
   ...AIRLESS_ENTRIES,

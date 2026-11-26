@@ -42,6 +42,7 @@ import {
   discCellJobs,
   drawnThroughCells,
   FIRST_EDGE_KEY_ROW,
+  isLeanRecord,
   faceBandSpans,
   LIMB_SPAN_ROWS,
   type LimbSpans,
@@ -56,6 +57,7 @@ import {
 import { packClassMap } from "./discSurface";
 import {
   BODY_DISC_CELLS_KERNEL,
+  BODY_DISC_CELLS_LEAN_KERNEL,
   BODY_DISC_CELLS_PACKED_KERNEL,
   BODY_DISC_MATERIALS,
   FIGURE_RESOLVE_MATERIALS,
@@ -738,6 +740,7 @@ describe("the cell pass for every record (R07.T8.e)", () => {
         groups,
         emissive: false,
         air: false,
+        lean: false,
       };
       first += count;
       firstGroup += groups;
@@ -1197,7 +1200,18 @@ describe("a large disc's limb through the cell pass (R07.T8.f)", () => {
       true,
       count,
       expected,
-      [{ first: 0, count, record: 0, firstGroup: 0, groups, emissive: false, air: false }],
+      [
+        {
+          first: 0,
+          count,
+          record: 0,
+          firstGroup: 0,
+          groups,
+          emissive: false,
+          air: false,
+          lean: false,
+        },
+      ],
       LIMB_SPAN_ROWS * spans.rows,
     ]);
   });
@@ -1646,5 +1660,89 @@ describe("the lit bodies' renderer's classes' edges (lane fix-jagged-biome-edges
     }
     const packed = packDiscRecords([record, { ...record, edgeWeight: 0.25 }], null);
     expect([packed[46 * 4 + 3], packed[(DISC_ROWS + 46) * 4 + 3]]).toEqual([1, 0.75]);
+  });
+});
+
+/** A record with no planetshine source and no occluder, as a lone body's: lean (perf-bodies-pass-2). */
+function alone(record: DiscRecord): DiscRecord {
+  return { ...record, secondaries: [], occluders: [] };
+}
+
+/** A record given one planetshine source, so that it is not lean (perf-bodies-pass-2). */
+function planetshineLit(record: DiscRecord): DiscRecord {
+  return {
+    ...record,
+    secondaries: [
+      { direction: vec3(1, 0, 0), distance: 60, radius: 0.27, illuminance: [1e-3, 1e-3, 1e-3] },
+    ],
+  };
+}
+
+describe("the cell pass's lean form (perf-bodies-pass-2)", () => {
+  it("holds a record lean that has no planetshine source, no occluder and no ring's shadow", () => {
+    const [one] = recordsOf(planOf([13]), 1);
+    if (one === undefined) {
+      throw new Error("no record");
+    }
+    const record = alone(one);
+    expect(isLeanRecord(record)).toBe(true);
+    expect(isLeanRecord(planetshineLit(record))).toBe(false);
+    expect(isLeanRecord({ ...record, occluders: [{ centre: vec3(0, 0, 40), radius: 0.5 }] })).toBe(
+      false,
+    );
+    const band = { outerOverA: 2, tau: 1 };
+    const ring = { normal: vec3(0, 0, 1), innerOverA: 1.2, bands: [band] };
+    expect(isLeanRecord({ ...record, ring })).toBe(false);
+    expect(isLeanRecord({ ...record, ring: { ...ring, bands: [] } })).toBe(true);
+  });
+
+  it("sets lean records apart from the rest of their textures only where the lean kernel is there", () => {
+    const [small, large] = recordsOf(planOf([3.5, 13]), 2);
+    if (small === undefined || large === undefined) {
+      throw new Error("no records");
+    }
+    const records = [alone(small), planetshineLit(large)];
+    const sets = (lean: boolean): Array<readonly [number, boolean]> =>
+      discCellJobs(records, undefined, null, false, false, false, new Set(), lean).sets.map(
+        (set) => [set.record, set.lean],
+      );
+    expect(sets(false)).toEqual([[0, false]]);
+    expect(sets(true)).toEqual([
+      [0, true],
+      [1, false],
+    ]);
+    // The same jobs a pixel either way: each pixel's sums are its own.
+    const without = discCellJobs(records);
+    const withLean = discCellJobs(records, undefined, null, false, false, false, new Set(), true);
+    expect([withLean.count, withLean.ranges.map((range) => range?.kind)]).toEqual([
+      without.count,
+      without.ranges.map((range) => range?.kind),
+    ]);
+  });
+
+  it("shades a lean record's cells by the kernel's lean form where it is given, the rest by the plain kernel", async () => {
+    const engine = await countingRenderEngine();
+    const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
+    const kernel = engine.createCompute(BODY_DISC_CELLS_KERNEL);
+    const lean = engine.createCompute(BODY_DISC_CELLS_LEAN_KERNEL);
+    const plan = planOf([3.5, 13]);
+    const [small, large] = recordsOf(plan, 2);
+    if (small === undefined || large === undefined) {
+      throw new Error("no records");
+    }
+    const mixed = { ...plan, discs: [alone(small), planetshineLit(large)] };
+    const leans = { plain: lean, emissive: null };
+    expect(renderer.dispatchCells(mixed, kernel, FRAME, null, null, null, leans)).toBe(true);
+    expect(renderer.dispatchCells(planOf([13]), kernel, FRAME)).toBe(true);
+    const full = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite, { leanForms: false });
+    expect(full.dispatchCells(planOf([13]), kernel, FRAME, null, null, null, leans)).toBe(true);
+    expect(engine.dispatched.map((each) => each.kernel)).toEqual([
+      BODY_DISC_CELLS_LEAN_KERNEL.name,
+      BODY_DISC_CELLS_KERNEL.name,
+      BODY_DISC_CELLS_KERNEL.name,
+      BODY_DISC_CELLS_KERNEL.name,
+    ]);
+    renderer.dispose();
+    full.dispose();
   });
 });

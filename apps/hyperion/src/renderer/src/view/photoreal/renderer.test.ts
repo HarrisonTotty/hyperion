@@ -49,11 +49,15 @@ import {
   BODY_DISC_CELLS_AIR_KERNEL,
   BODY_DISC_CELLS_EMISSIVE_AIR_KERNEL,
   BODY_DISC_CELLS_EMISSIVE_KERNEL,
+  BODY_DISC_CELLS_EMISSIVE_LEAN_KERNEL,
   BODY_DISC_CELLS_KERNEL,
+  BODY_DISC_CELLS_LEAN_KERNEL,
   BODY_DISC_CELLS_PACKED_AIR_KERNEL,
   BODY_DISC_CELLS_PACKED_EMISSIVE_AIR_KERNEL,
   BODY_DISC_CELLS_PACKED_EMISSIVE_KERNEL,
+  BODY_DISC_CELLS_PACKED_EMISSIVE_LEAN_KERNEL,
   BODY_DISC_CELLS_PACKED_KERNEL,
+  BODY_DISC_CELLS_PACKED_LEAN_KERNEL,
   type BodyFramePlan,
   DISC_CELLS_PASS,
   type LitBodyInput,
@@ -1976,6 +1980,10 @@ const VIEW_KERNELS: ReadonlyArray<KernelPair> = [
   BODY_DISC_CELLS_PACKED_EMISSIVE_KERNEL,
   BODY_DISC_CELLS_PACKED_AIR_KERNEL,
   BODY_DISC_CELLS_PACKED_EMISSIVE_AIR_KERNEL,
+  BODY_DISC_CELLS_LEAN_KERNEL,
+  BODY_DISC_CELLS_EMISSIVE_LEAN_KERNEL,
+  BODY_DISC_CELLS_PACKED_LEAN_KERNEL,
+  BODY_DISC_CELLS_PACKED_EMISSIVE_LEAN_KERNEL,
   SKY_VIEW_KERNEL,
   AERIAL_PERSPECTIVE_KERNEL,
   RAY_MARCH_CENTRE_KERNEL,
@@ -2034,6 +2042,10 @@ const VIEW_KERNELS: ReadonlyArray<KernelPair> = [
     BODY_DISC_CELLS_PACKED_EMISSIVE_KERNEL,
     BODY_DISC_CELLS_PACKED_AIR_KERNEL,
     BODY_DISC_CELLS_PACKED_EMISSIVE_AIR_KERNEL,
+    BODY_DISC_CELLS_LEAN_KERNEL,
+    BODY_DISC_CELLS_EMISSIVE_LEAN_KERNEL,
+    BODY_DISC_CELLS_PACKED_LEAN_KERNEL,
+    BODY_DISC_CELLS_PACKED_EMISSIVE_LEAN_KERNEL,
   ].flatMap((pair) => tableOnlyKernel(pair) ?? []),
   ...MARCH_TABLE_ONLY_KERNELS,
   RAY_MARCH_THICK_TABLE_KERNEL,
@@ -2247,14 +2259,16 @@ describe("the device's kernels over a session's bodies (R01.T15)", () => {
     // rest stay unmade. Since perf-thick-march the thick read's two marches from the sources' table
     // are made ahead too where a setting takes the table, and the thick pass makes the thick read's
     // packed pairs its kinds of air meet, per step or from the table, as the thin pass the thin
-    // read's.
+    // read's. The `disc cells` kernels' lean forms (perf-bodies-pass-2) add eight: the plain one's of
+    // the way the frames take, which their lean records make, and seven unmade, its other way's, the
+    // emissive's two and the four lean kernels' twins.
     const made = new Set(engine.kernelPairs.map((pair) => pair.name));
     const limbMade = LIMB_KERNELS.filter((pair) => made.has(pair.name)).length;
     expect(limbMade > 0).toBe(!leverOff((levers) => levers.limbRays === "packed"));
     const thickLimbMade = THICK_LIMB_KERNELS.filter((pair) => made.has(pair.name)).length;
     expect(thickLimbMade > 0).toBe(!leverOff((levers) => levers.limbRays === "packed"));
     const unmade =
-      57 +
+      64 +
       (leverOff((levers) => levers.marchCover === "tiles") ? 4 : -2) +
       (LIMB_KERNELS.length - limbMade) +
       (leverOff((levers) => levers.marchSourceTransmittance === "table") ? 2 : 0) +

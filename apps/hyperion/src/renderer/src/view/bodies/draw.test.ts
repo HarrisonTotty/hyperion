@@ -41,6 +41,7 @@ import {
   DISC_ROWS,
   type DiscRecord,
   drawnThroughCells,
+  isLeanRecord,
   packDiscRecords,
   rasteriseDisc,
   viewRay,
@@ -48,18 +49,25 @@ import {
 import { hostAnnuli, type PlacedLight } from "../lighting/hostLights";
 import {
   BODY_DISC_CELLS_KERNEL,
+  BODY_DISC_CELLS_LEAN_KERNEL,
+  BODY_DISC_EMISSIVE_LEAN_MATERIALS,
+  BODY_DISC_LEAN_MATERIALS,
   type BodyFrameOptions,
   type BodyFramePlan,
   bodyLightSources,
   type DiscCellFrame,
   insideFigure,
+  leanSource,
   LitBodyRenderer,
   type LitBodyInput,
   planLitBodies,
   pointFlux,
   SMOOTH_MESH_CLUSTER_MATERIAL,
+  SMOOTH_MESH_LEAN_CLUSTER_MATERIAL,
+  SMOOTH_MESH_LEAN_MATERIAL,
   SMOOTH_MESH_MATERIAL,
   BODY_DISC_MATERIALS,
+  BODY_DISC_EMISSIVE_MATERIALS,
 } from "./draw";
 import { bindingStages } from "../../test/wgslStages";
 import { datumNormalMap, UNREAD_TEXTURES, unreadNormalMap } from "../../test/normalMapFixtures";
@@ -2270,6 +2278,116 @@ describe("the renderer", () => {
 function depthsOf(draw: DrawItem): number[] {
   return Array.from(draw.uniforms["depths"] ?? []);
 }
+
+describe("the lean forms (perf-bodies-pass-2)", () => {
+  const LEAN = "const LEAN_FORM : bool = true;";
+  const FULL = "const LEAN_FORM : bool = false;";
+
+  it("sets bodyDisc.wgsl's lean flag once in a module, and refuses one without it", () => {
+    expect(bodyDiscWgsl.split(FULL)).toHaveLength(2);
+    const lean = leanSource(BODY_DISC_MATERIALS.interior.fragmentWgsl);
+    expect(lean.split(LEAN)).toHaveLength(2);
+    expect(lean.split(LEAN).join(FULL)).toBe(BODY_DISC_MATERIALS.interior.fragmentWgsl);
+    expect(() => leanSource("fn main() {}")).toThrow(/LEAN_FORM once, found 0/u);
+  });
+
+  it("compiles the planetshine and eclipse loops and the ring's shadow out by the flag alone", () => {
+    const shade = bodyDiscWgsl.slice(bodyDiscWgsl.indexOf("fn shade("));
+    expect(shade).toContain(
+      "let occluders = select(min(u32(counts.w), MAX_DISC_OCCLUDERS), 0u, LEAN_FORM);",
+    );
+    expect(shade).toContain(
+      "let secondaries = select(min(u32(disc_row(SECONDARY_COUNT_ROW).x), MAX_DISC_SECONDARIES), 0u, LEAN_FORM);",
+    );
+    expect(shade).toContain(
+      "var ring = vec3f(1.0);\n    if (!LEAN_FORM) {\n      ring = ring_shadow_on_body(q, towards);\n    }",
+    );
+    expect(shade.match(/ring_shadow_on_body\(/gu)).toHaveLength(1);
+  });
+
+  it("makes each lean form from its full form's every binding, uniform and state, its source by the flag", () => {
+    const pairs = [
+      [BODY_DISC_MATERIALS.interior, BODY_DISC_LEAN_MATERIALS.interior],
+      [BODY_DISC_MATERIALS.limb, BODY_DISC_LEAN_MATERIALS.limb],
+      [BODY_DISC_EMISSIVE_MATERIALS.interior, BODY_DISC_EMISSIVE_LEAN_MATERIALS.interior],
+      [SMOOTH_MESH_MATERIAL, SMOOTH_MESH_LEAN_MATERIAL],
+      [SMOOTH_MESH_CLUSTER_MATERIAL, SMOOTH_MESH_LEAN_CLUSTER_MATERIAL],
+    ] as const;
+    for (const [full, lean] of pairs) {
+      const { name: _f, displayName: _fd, vertexWgsl: fv, fragmentWgsl: ff, ...fullRest } = full;
+      const { name: _l, displayName: _ld, vertexWgsl: lv, fragmentWgsl: lf, ...leanRest } = lean;
+      expect(leanRest).toEqual(fullRest);
+      expect([lv, lf]).toEqual([leanSource(fv), leanSource(ff)]);
+      expect(lean.name).toContain("Lean");
+    }
+    expect(BODY_DISC_CELLS_LEAN_KERNEL.reference).toBe(
+      leanSource(BODY_DISC_CELLS_KERNEL.reference),
+    );
+  });
+
+  /** A plan of two 20 px discs, the second given an occluder, so that only the first is lean. */
+  function planOfTwo(): BodyFramePlan {
+    const { body, hosts } = scene(6.371e6 / Math.sin(20 / PX_PER_RAD), 30);
+    const bodies: LitBodyInput[] = [];
+    for (const i of [0, 1]) {
+      bodies.push({
+        ...body,
+        id: `0200080020000000.${(0x100 + i).toString(16).padStart(4, "0")}`,
+        centreM: vec3((i - 1) * 2e7, 0, body.centreM.z * (1 + i * 0.5)),
+      });
+    }
+    const plan = planLitBodies(
+      bodies,
+      hosts,
+      OPTIONS,
+      new Map(bodies.map((b) => [b.id, "disc" as const])),
+    );
+    const [first, second] = plan.discs;
+    if (first === undefined || second === undefined) {
+      throw new Error("the plan has two discs");
+    }
+    // The first alone, the second under an occluder.
+    const alone = { ...first, secondaries: [], occluders: [] };
+    const occluded = { ...second, occluders: [{ centre: vec3(0, 0, 40), radius: 0.5 }] };
+    return { ...plan, discs: [alone, occluded] };
+  }
+
+  it("draws a lean record by the lean forms once they are prepared, and the rest by the full forms", async () => {
+    const engine = await countingRenderEngine();
+    const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
+    const names = (plan: BodyFramePlan): string[] =>
+      renderer
+        .draws(plan)
+        .map((draw) => `${draw.material.name} ${String(draw.uniforms["disc"]?.[0])}`);
+    const first = planOfTwo();
+    expect(first.discs.map(isLeanRecord)).toEqual([true, false]);
+    // Its first plan asks for them, drawn by the full forms meanwhile: the same bytes.
+    expect(names(first).some((name) => name.includes("Lean"))).toBe(false);
+    await renderer.prepareLean();
+    const drawn = names(planOfTwo());
+    expect(drawn.filter((name) => name.endsWith(" 0"))).toEqual([
+      "bodies:discLean 0",
+      "bodies:discLimbLean 0",
+    ]);
+    expect(drawn.filter((name) => name.endsWith(" 1"))).toEqual([
+      "bodies:disc 1",
+      "bodies:discLimb 1",
+    ]);
+    renderer.dispose();
+  });
+
+  it("draws every record by the full forms where made without its lean forms", async () => {
+    const engine = await countingRenderEngine();
+    const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite, {
+      leanForms: false,
+    });
+    await renderer.prepareLean();
+    const drawn = renderer.draws(planOfTwo()).map((draw) => draw.material.name);
+    expect(drawn.some((name) => name.includes("Lean"))).toBe(false);
+    expect(drawn.filter((name) => name.startsWith("bodies:disc"))).toHaveLength(4);
+    renderer.dispose();
+  });
+});
 
 describe("mesh bodies (T9)", () => {
   /** A planet 40 px across lit at 30°, a moon beyond it, and a third body clear of both. */

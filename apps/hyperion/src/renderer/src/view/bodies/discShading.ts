@@ -232,6 +232,20 @@ const SECONDARY_ROWS = 2;
 const CELL_SUMS_ROW = 51;
 
 /**
+ * Whether a record is lean (perf-bodies-pass-2): it has no planetshine source, no occluder and no
+ * ring's shadow, so that its shading takes no pass of the planetshine and eclipse loops and its
+ * ring's shadow is 1, and the lit bodies' lean forms (`draw.ts`' `leanSource`), which compile those
+ * out, draw its bytes.
+ */
+export function isLeanRecord(record: DiscRecord): boolean {
+  return (
+    record.secondaries.length === 0 &&
+    record.occluders.length === 0 &&
+    (record.ring?.bands.length ?? 0) === 0
+  );
+}
+
+/**
  * Whether every pixel of a record can take its sums from the `disc cells` pass (R07.T8.d–e): every
  * pixel of it takes the same cells, at most {@link FINE_DISC_SAMPLES} per axis, as
  * {@link discSamples} gives every disc under {@link SMALL_DISC_PX}.
@@ -340,6 +354,11 @@ export interface DiscCellSet {
    * form shades: a set's records all do, or none.
    */
   readonly air: boolean;
+  /**
+   * Whether its records are lean (perf-bodies-pass-2; {@link isLeanRecord}) and shaded by the
+   * kernel's lean form: a set's records all are, or none.
+   */
+  readonly lean: boolean;
 }
 
 /**
@@ -863,17 +882,20 @@ function plannedCellsOf(record: DiscRecord, frame: DiscLimbFrame | null): Planne
 /**
  * The records that may share a dispatch (R07.T8.e), each set's by index, in the order of its first
  * record, each record's textures taken once: those that bind the same textures, either all carry
- * their ground's emission or none do (R08.T18.a), and either all carry their air or none do
- * (R08.T16.b), which the kernel's forms shade.
+ * their ground's emission or none do (R08.T18.a), either all carry their air or none do
+ * (R08.T16.b), and either all are shaded lean or none are (perf-bodies-pass-2; `leanOf`), which the
+ * kernel's forms shade.
  */
 function boundSets(
   records: ReadonlyArray<DiscRecord>,
   planned: ReadonlyArray<PlannedCells | null>,
+  leanOf: (record: DiscRecord) => boolean,
 ): number[][] {
   const sets: Array<{
     readonly textures: ReadonlyArray<TextureHandle | null>;
     readonly emissive: boolean;
     readonly air: boolean;
+    readonly lean: boolean;
     readonly indices: number[];
   }> = [];
   records.forEach((record, index) => {
@@ -883,12 +905,16 @@ function boundSets(
     const textures = boundTexturesOf(record);
     const emissive = record.emission !== undefined;
     const air = record.air !== undefined;
+    const lean = leanOf(record);
     const set = sets.find(
       (each) =>
-        each.emissive === emissive && each.air === air && sameTextures(each.textures, textures),
+        each.emissive === emissive &&
+        each.air === air &&
+        each.lean === lean &&
+        sameTextures(each.textures, textures),
     );
     if (set === undefined) {
-      sets.push({ textures, emissive, air, indices: [index] });
+      sets.push({ textures, emissive, air, lean, indices: [index] });
     } else {
       set.indices.push(index);
     }
@@ -976,6 +1002,10 @@ function runsOf(
  *   sums of (R07.T8.h): a body handed over to its terrain under a coverage mask of every cell
  *   surveyed, whose figure and limb leave all its ground to the terrain. They take no jobs; a pixel
  *   their draws shade after all sums its own cells.
+ * @param leanCells - Whether the kernel's lean form is there to shade the lean records of the plain
+ *   form (perf-bodies-pass-2; {@link isLeanRecord}); without it they are shaded by the plain kernel,
+ *   the same bits.
+ * @param emissiveLeanCells - Whether the emissive form's lean form is there, as `leanCells`.
  */
 export function discCellJobs(
   records: ReadonlyArray<DiscRecord>,
@@ -985,6 +1015,8 @@ export function discCellJobs(
   airCells = false,
   emissiveAirCells = false,
   discarded: ReadonlySet<number> = new Set(),
+  leanCells = false,
+  emissiveLeanCells = false,
 ): DiscCellJobs {
   const most = Math.min(maxJobs, MAX_CELL_JOBS);
   // A record takes cells where the kernel of its form is made: its emission's, its air's, or both's
@@ -997,12 +1029,17 @@ export function discCellJobs(
   const planned = records.map((record, index) =>
     formMade(record) && !discarded.has(index) ? plannedCellsOf(record, frame) : null,
   );
+  // A lean record of the plain or the emissive form is shaded by its lean form where it is made.
+  const leanOf = (record: DiscRecord): boolean =>
+    record.air === undefined &&
+    isLeanRecord(record) &&
+    (record.emission === undefined ? leanCells : emissiveLeanCells);
   let count = 0;
   let spanRows = 0;
   const ranges: Array<DiscCellRange | null> = records.map(() => null);
   const sets: DiscCellSet[] = [];
   const groups: number[] = [];
-  for (const indices of boundSets(records, planned)) {
+  for (const indices of boundSets(records, planned, leanOf)) {
     const first = count;
     const firstGroup = groups.length / 4;
     let head: number | null = null;
@@ -1047,7 +1084,8 @@ export function discCellJobs(
       count += plan.pixels;
       head ??= index;
     }
-    if (head !== null && count > first) {
+    const headRecord = head === null ? undefined : records[head];
+    if (head !== null && headRecord !== undefined && count > first) {
       const groupCount = groups.length / 4;
       sets.push({
         first,
@@ -1055,8 +1093,9 @@ export function discCellJobs(
         record: head,
         firstGroup,
         groups: groupCount - firstGroup,
-        emissive: records[head]?.emission !== undefined,
-        air: records[head]?.air !== undefined,
+        emissive: headRecord.emission !== undefined,
+        air: headRecord.air !== undefined,
+        lean: leanOf(headRecord),
       });
     }
   }

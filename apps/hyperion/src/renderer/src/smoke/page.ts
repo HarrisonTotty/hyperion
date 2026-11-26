@@ -93,6 +93,7 @@ import {
   CLOUD_ENTRIES,
   DECORATION_ENTRIES,
   INSTANCE_ENTRIES,
+  LEAN_BODY_ENTRIES,
   ROCK_ENTRIES,
   WGSL_CATALOGUE,
 } from "../view/engine/catalogue";
@@ -161,11 +162,12 @@ import { checkAtmosphereFrame } from "./atmosphereFrame";
 import {
   checkAirlessTwins,
   checkCellPassEveryRecord,
+  checkLeanForms,
   checkSourceTableFrames,
   checkSourceTableTwins,
 } from "./cellPass";
 import { checkDiscAir, checkJupiterDiscAir } from "./discAir";
-import { checkThermalDiscs } from "./thermal";
+import { checkThermalDiscs, checkThermalLeanForms } from "./thermal";
 import { captureDatum, checkDatumFrame } from "./datumFrame";
 import { checkRoutedRow, type RoutedRow, timeAtmosphereFrame } from "./frameTiming";
 import {
@@ -683,6 +685,7 @@ async function run(
       !CLOUD_ENTRIES.includes(entry) &&
       !DECORATION_ENTRIES.includes(entry) &&
       !INSTANCE_ENTRIES.includes(entry) &&
+      !LEAN_BODY_ENTRIES.includes(entry) &&
       !ROCK_ENTRIES.includes(entry) &&
       !ATMOSPHERE_THICK_LEVER_ENTRIES.includes(entry) &&
       !RING_ENTRIES.includes(entry) &&
@@ -994,6 +997,18 @@ async function run(
   await group(29, "R14.T5.d a particle's faces", () => checkParticleFaces(engine, checks));
   await group(29, "R14.T5.d instances above the cluster cull, folded past 65,535", () =>
     checkInstancesAboveClusters(engine, checks),
+  );
+  // Perf-bodies-pass-2's lean forms of the lit bodies in part 29 after the instance path's (15 s at
+  // the last gate), not in part 1 or 9, for their watchdogs: their catalogue, and their bytes against
+  // the full forms' and their airless and table-only twins' against theirs.
+  await group(29, "T9.b catalogue: the lit bodies' lean forms", () =>
+    checkCatalogue(engine, status, LEAN_BODY_ENTRIES, checks),
+  );
+  await group(29, "perf-bodies-pass-2: lean bodies drawn by the lean forms and their twins", () =>
+    checkLeanForms(engine, checks),
+  );
+  await group(29, "perf-bodies-pass-2: lean emitting bodies drawn by the emissive lean forms", () =>
+    checkThermalLeanForms(engine, checks),
   );
   // Plan R11's authoritative rocks (R11.T4; plan R14, R14.T5.c) in part 33, alone: their
   // materials' catalogue, the height worker's bake of finest patches with their rocks and its cost,

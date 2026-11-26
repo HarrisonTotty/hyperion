@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   AIRLESS_ENTRIES,
+  LEAN_BODY_ENTRIES,
   type CatalogueEntry,
   TABLE_ONLY_ENTRIES,
   WGSL_CATALOGUE,
@@ -41,13 +42,15 @@ function displayNameOf(entry: CatalogueEntry): string | null {
 }
 
 /**
- * Every material's and post-process's display name but the table-only twins' (R08.T9.b's lever)
- * and the airless twins' (plan R07, perf-bodies-pass), which a refusal names by their originals'
- * effects.
+ * Every material's and post-process's display name but the table-only twins' (R08.T9.b's lever),
+ * the airless twins' (plan R07, perf-bodies-pass) and the lean forms' (perf-bodies-pass-2), which a
+ * refusal names by their originals' effects.
  */
 const DISPLAY_NAMES: ReadonlyArray<string> = WGSL_CATALOGUE.flatMap((entry) => {
   const name =
-    TABLE_ONLY_ENTRIES.includes(entry) || AIRLESS_ENTRIES.includes(entry)
+    TABLE_ONLY_ENTRIES.includes(entry) ||
+    AIRLESS_ENTRIES.includes(entry) ||
+    LEAN_BODY_ENTRIES.includes(entry)
       ? null
       : displayNameOf(entry);
   return name === null ? [] : [name];
@@ -190,6 +193,10 @@ describe("the airless twins (plan R07, perf-bodies-pass)", () => {
         // Plan R11's rocks, forward and by the visibility buffer.
         "rock-lit (airless)",
         "rock-resolve (airless)",
+        // Perf-bodies-pass-2's lean forms, plain and emissive.
+        "bodies:smoothMeshLean (airless)",
+        "bodies:discEmissiveLean (airless)",
+        "BODY DISC CELLS, packed, lean (airless)",
       ]),
     );
     expect(names.some((name) => name.startsWith("terrain"))).toBe(true);
@@ -215,5 +222,26 @@ describe("the airless twins (plan R07, perf-bodies-pass)", () => {
       return twin === null || twinned.has(twin.name) ? [] : [entry.spec.name];
     });
     expect(missing).toEqual([]);
+  });
+});
+
+describe("the lit bodies' lean forms (perf-bodies-pass-2)", () => {
+  it("catalogues each lean form, its airless twin and its table-only twin", () => {
+    const names = LEAN_BODY_ENTRIES.map((entry) => entry.spec.name);
+    expect(names).toHaveLength(12);
+    expect(names.every((name) => name.includes("Lean") || name.endsWith(", lean"))).toBe(true);
+    expect(LEAN_BODY_ENTRIES.every((entry) => WGSL_CATALOGUE.includes(entry))).toBe(true);
+    const airless = new Set(AIRLESS_ENTRIES.map((entry) => entry.spec.name));
+    const tableOnly = new Set(TABLE_ONLY_ENTRIES.map((entry) => entry.spec.name));
+    expect(names.filter((name) => !airless.has(`${name} (airless)`))).toEqual([]);
+    expect(names.filter((name) => !tableOnly.has(`${name} (table only)`))).toEqual([]);
+    // Each the same effect on the console as its full form, as a twin is.
+    const displayed = new Set(DISPLAY_NAMES);
+    expect(
+      LEAN_BODY_ENTRIES.flatMap((entry) => {
+        const name = displayNameOf(entry);
+        return name === null || displayed.has(name) ? [] : [name];
+      }),
+    ).toEqual([]);
   });
 });

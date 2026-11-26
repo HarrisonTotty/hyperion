@@ -36,6 +36,7 @@ import { AtmosphereTables } from "../view/atmosphere/tables";
 import {
   compositeDiscPixels,
   type DiscRecord,
+  isLeanRecord,
   LIMB_OVERLAP_PX,
   rasteriseDisc,
   viewRay,
@@ -43,7 +44,9 @@ import {
 import { type ClassMapTexels, classMapSurface, packClassMap } from "../view/bodies/discSurface";
 import {
   BODY_DISC_CELLS_KERNEL,
+  BODY_DISC_CELLS_LEAN_KERNEL,
   BODY_DISC_CELLS_PACKED_KERNEL,
+  BODY_DISC_CELLS_PACKED_LEAN_KERNEL,
   type BodyFramePlan,
   CELL_SUMS_BUFFER_NAME,
   type LitBodyEngine,
@@ -276,6 +279,7 @@ async function drawPlan(
   viewport: Viewport,
   cells: ComputeHandle,
   by: DrawnBy,
+  leanCells: ComputeHandle | null = null,
 ): Promise<{ readonly bytes: ArrayBuffer; readonly throughCells: boolean }> {
   const target = createSceneTarget(engine, "smoke cell pass", viewport);
   try {
@@ -287,7 +291,15 @@ async function drawPlan(
     );
     const throughCells =
       by !== "in-fragment" &&
-      renderer.dispatchCells(plan, cells, { viewRotation, projection, size: viewport });
+      renderer.dispatchCells(
+        plan,
+        cells,
+        { viewRotation, projection, size: viewport },
+        null,
+        null,
+        null,
+        { plain: leanCells, emissive: null },
+      );
     const buffer = sums();
     if (by === "sentinel" && throughCells && buffer !== null) {
       // After the dispatches on the queue, before the draws that read the sums.
@@ -1116,5 +1128,291 @@ export async function checkAirlessTwins(engine: RenderEngine, checks: Checks): P
         engine.releaseTexture(surface.weights);
       }
     }
+  }
+}
+
+/** A way's cells kernel and its lean form from the four the lean forms' check makes, in its order. */
+function kernelsOf(
+  handles: ReadonlyArray<ComputeHandle>,
+  packed: boolean,
+): { readonly cells: ComputeHandle; readonly lean: ComputeHandle } {
+  const [cells, cellsPacked, leanCells, leanPacked] = handles;
+  if (
+    cells === undefined ||
+    cellsPacked === undefined ||
+    leanCells === undefined ||
+    leanPacked === undefined
+  ) {
+    throw new Error("the lean forms' check made fewer kernels than it asked for");
+  }
+  return packed ? { cells: cellsPacked, lean: leanPacked } : { cells, lean: leanCells };
+}
+
+/** A plan's draws' material names as a renderer makes them. */
+function namesOf(renderer: LitBodyRenderer, plan: BodyFramePlan): ReadonlyArray<string> {
+  return [...renderer.meshDraws(plan), ...renderer.draws(plan)].map((draw) => draw.material.name);
+}
+
+/**
+ * Perf-bodies-pass-2's lean forms (`draw.ts`' `leanSource`): bodies of no planetshine source, no
+ * occluder and no ring's shadow, airless and with R05's Earth's air, uniform and under the twins
+ * check's maps, its edges keyed or not, a 13 px disc, a 96 px mesh body and a 220 px disc, the Sun
+ * 80° and 120° off the line of sight, drawn in-fragment and through the `disc cells` pass, per cell
+ * and packed, by a renderer made without its lean forms and by one with them prepared, and by the
+ * latter through the page's engine, which draws the airless lean forms by their airless twins
+ * (`SourceTableEngine`); every byte the same, the lean forms and their twins taken, and a body
+ * under a ring's shadow and two lighting each other drawn by the full forms alike.
+ */
+export async function checkLeanForms(engine: RenderEngine, checks: Checks): Promise<void> {
+  const name =
+    "perf-bodies-pass-2: lean bodies drawn by the lean forms and their twins draw their full forms' bytes";
+  if (!(engine instanceof SourceTableEngine)) {
+    checks.check(name, false, "the page's engine is not a SourceTableEngine");
+    return;
+  }
+  const full = keepingSums(engine.inner);
+  const lean = keepingSums(engine.inner);
+  const twinned = keepingSums(engine);
+  const fullRenderer = new LitBodyRenderer(full.engine, WIREFRAME_MATERIALS.starSprite, {
+    leanForms: false,
+  });
+  const leanRenderer = new LitBodyRenderer(lean.engine, WIREFRAME_MATERIALS.starSprite);
+  const twinnedRenderer = new LitBodyRenderer(twinned.engine, WIREFRAME_MATERIALS.starSprite);
+  const made: Array<{ readonly by: RenderEngine; readonly kernel: ComputeHandle }> = [];
+  const surfaces: ClassMapDiscSurface[] = [];
+  let tables: AtmosphereTables | null = null;
+  try {
+    const laws = [
+      lawFor([0.12, 0.12, 0.12], [0.6, 0.6, 0.6], "moon"),
+      lawFor([0.5, 0.45, 0.4], [1.3, 1.3, 1.3], "earth"),
+    ];
+    const mapOf = (
+      label: string,
+      texels: ClassMapTexels,
+      edgeKeys: ReadonlyArray<number> | null,
+    ): { readonly surface: ClassMapDiscSurface; readonly texels: ClassMapTexels } => {
+      const surface = classMapSurface(engine, label, texels, laws, PROVISIONAL_PHOTOMETRY.law);
+      surfaces.push(surface);
+      return { surface: edgeKeys === null ? surface : { ...surface, edgeKeys }, texels };
+    };
+    const mapped = mapOf(
+      "smoke lean forms class map",
+      packClassMap(4, 2, ({ i, j }) =>
+        (i + j) % 2 !== 0 ? null : i % 2 === 0 ? [1, 0] : [0.25, 0.75],
+      ),
+      null,
+    );
+    const keyed = mapOf(
+      "smoke lean forms keyed edges",
+      packClassMap(4, 2, ({ i }) => (i < 2 ? [1, 0] : [0, 1])),
+      [0x51f00d, 0x2c0ffe],
+    );
+    tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, EARTH_MEAN_RADIUS_M);
+    const atmosphere = surfaceLightingTablesOf(tables, "table");
+    const a = EARTH.equatorialRadiusM;
+    const ring: LitBodyRing = {
+      profile: ringProfile({
+        ringKind: "massive",
+        material: "porous_ice",
+        innerRadiusM: 1.24 * a,
+        outerRadiusM: 2.27 * a,
+        opticalDepth: 1.5,
+        gapRadiiM: [1.95 * a],
+      }),
+      normal: vec3(0.6, 0.8, 0),
+    };
+    const pairs = [
+      BODY_DISC_CELLS_KERNEL,
+      BODY_DISC_CELLS_PACKED_KERNEL,
+      BODY_DISC_CELLS_LEAN_KERNEL,
+      BODY_DISC_CELLS_PACKED_LEAN_KERNEL,
+    ];
+    const [written, twins] = await Promise.all([
+      Promise.all(pairs.map((pair) => engine.inner.createComputeAsync(pair))),
+      Promise.all(pairs.map((pair) => engine.createComputeAsync(pair))),
+    ]);
+    written.forEach((kernel) => made.push({ by: engine.inner, kernel }));
+    twins.forEach((kernel) => made.push({ by: engine, kernel }));
+    await Promise.all([leanRenderer.prepareLean(), twinnedRenderer.prepareLean()]);
+    const small = { widthPx: 48, heightPx: 48 };
+    const mid = { widthPx: 128, heightPx: 112 };
+    const large = { widthPx: 256, heightPx: 256 };
+    const lit = (body: Omit<CellBody, "id" | "offsetPx">): CellCase => ({
+      name: "",
+      viewport: body.diameterPx < 32 ? small : body.diameterPx < 128 ? mid : large,
+      bodies: one(body),
+      twin: false,
+    });
+    const leanCases: ReadonlyArray<CellCase> = [
+      { ...lit({ diameterPx: 13, mesh: false, samples: [4, 4] }), name: "a 13 px airless disc" },
+      {
+        ...lit({ diameterPx: 13, mapped, mesh: false, samples: [4, 4] }),
+        name: "a 13 px disc under a two-class map",
+      },
+      {
+        ...lit({ diameterPx: 96, mesh: true, samples: [1, 4] }),
+        name: "a 96 px airless mesh body",
+      },
+      {
+        ...lit({ diameterPx: 96, mapped: keyed, mesh: true, samples: [1, 4] }),
+        name: "a 96 px mesh body under a keyed map",
+      },
+      {
+        ...lit({ diameterPx: 220, mapped: keyed, mesh: false, samples: [1, 4] }),
+        name: "a 220 px disc under a keyed map",
+      },
+      {
+        ...lit({ diameterPx: 13, atmosphere, mesh: false, samples: [4, 4] }),
+        name: "a 13 px air disc",
+      },
+      {
+        ...lit({ diameterPx: 96, atmosphere, mapped, mesh: true, samples: [1, 4] }),
+        name: "a 96 px air mesh body under a two-class map",
+      },
+    ];
+    // Bodies not lean: a ring's shadow, and two lighting each other by planetshine.
+    const fullCases: ReadonlyArray<CellCase> = [
+      {
+        ...lit({ diameterPx: 96, mesh: true, samples: [1, 4], ring }),
+        name: "a 96 px mesh body under its ring's shadow",
+      },
+      {
+        name: "a 96 px mesh body and a 24 px disc lighting each other",
+        viewport: large,
+        bodies: [
+          {
+            id: "0200080020000000.0001",
+            offsetPx: [-20.3, 3.2],
+            diameterPx: 96,
+            mesh: true,
+            samples: [1, 4],
+            mapped,
+          },
+          {
+            id: "0200080020000000.0002",
+            offsetPx: [62.7, -1.4],
+            diameterPx: 24,
+            mesh: false,
+            samples: [2, 4],
+          },
+        ],
+        twin: false,
+      },
+    ];
+    const ways: ReadonlyArray<{ readonly by: DrawnBy; readonly packed: boolean }> = [
+      { by: "in-fragment", packed: false },
+      { by: "pass", packed: false },
+      { by: "pass", packed: true },
+    ];
+    // A first draw of each through the page's engine makes and prepares its twins, a second its
+    // kernels' twins, which stand in from the dispatch after they are made.
+    for (let round = 0; round < 2; round += 1) {
+      for (const item of [...leanCases, ...fullCases]) {
+        for (const way of ways) {
+          const { cells, lean: leanCells } = kernelsOf(twins, way.packed);
+          // The harness reads its targets back in order.
+          // oxlint-disable-next-line no-await-in-loop
+          await drawPlan(
+            engine,
+            twinnedRenderer,
+            twinned.sums,
+            planOf(item, 80),
+            item.viewport,
+            cells,
+            way.by,
+            leanCells,
+          );
+        }
+      }
+      // The second round's draws wait for the first's twins.
+      // oxlint-disable-next-line no-await-in-loop
+      await engine.twinsSettled();
+    }
+    const swapsBefore = engine.swaps;
+    let pixels = 0;
+    let differing = 0;
+    let leanDraws = 0;
+    let fullDrawn = true;
+    let recordsLean = true;
+    const results: string[] = [];
+    for (const item of [...leanCases, ...fullCases]) {
+      const isLean = leanCases.includes(item);
+      for (const sunDeg of [80, 120]) {
+        // A plan of its own for each draw: a renderer writes a plan's records once.
+        const probe = planOf(item, sunDeg);
+        recordsLean &&= probe.discs.every((record) => isLeanRecord(record) === isLean);
+        const names = namesOf(leanRenderer, probe);
+        leanDraws += names.filter((each) => each.includes("Lean")).length;
+        // Every draw of a lean case by a lean form, and none of the rest.
+        fullDrawn &&= isLean
+          ? names.length > 0 && names.every((each) => each.includes("Lean"))
+          : !names.some((each) => each.includes("Lean"));
+        for (const way of ways) {
+          const own = kernelsOf(written, way.packed);
+          const twin = kernelsOf(twins, way.packed);
+          // Each draw reads its target back before the next is made.
+          // oxlint-disable-next-line no-await-in-loop
+          const asFull = await drawPlan(
+            engine.inner,
+            fullRenderer,
+            full.sums,
+            planOf(item, sunDeg),
+            item.viewport,
+            own.cells,
+            way.by,
+          );
+          // Each draw reads its target back before the next is made.
+          // oxlint-disable-next-line no-await-in-loop
+          const asLean = await drawPlan(
+            engine.inner,
+            leanRenderer,
+            lean.sums,
+            planOf(item, sunDeg),
+            item.viewport,
+            own.cells,
+            way.by,
+            own.lean,
+          );
+          // Each draw reads its target back before the next is made.
+          // oxlint-disable-next-line no-await-in-loop
+          const byTwins = await drawPlan(
+            engine,
+            twinnedRenderer,
+            twinned.sums,
+            planOf(item, sunDeg),
+            item.viewport,
+            twin.cells,
+            way.by,
+            twin.lean,
+          );
+          const leanApart = halfUlpsApart(asFull.bytes, asLean.bytes).differing;
+          const twinApart = halfUlpsApart(asLean.bytes, byTwins.bytes).differing;
+          pixels += asFull.bytes.byteLength / 8;
+          differing += leanApart + twinApart;
+          if (leanApart + twinApart > 0) {
+            results.push(
+              `${item.name} at ${String(sunDeg)}° ${way.by}${way.packed ? " packed" : ""}: ${String(leanApart)} channels from the full forms', ${String(twinApart)} from the twins'`,
+            );
+          }
+        }
+      }
+    }
+    const swaps = engine.swaps - swapsBefore;
+    checks.check(
+      name,
+      differing === 0 && leanDraws > 0 && fullDrawn && recordsLean && swaps > 0,
+      `${String(pixels)} pixels a way, ${String(differing)} channels differing${results.length > 0 ? `: ${results.join("; ")}` : ""}; ${String(leanDraws)} draws by a lean form; every lean case's draws the lean forms' and the ringed and planetshine-lit bodies' the full forms' ${String(fullDrawn)}; the records lean as their cases ${String(recordsLean)}; ${String(swaps)} draws and dispatches by a twin`,
+    );
+  } finally {
+    fullRenderer.dispose();
+    leanRenderer.dispose();
+    twinnedRenderer.dispose();
+    for (const { by, kernel } of made) {
+      by.releaseCompute(kernel);
+    }
+    for (const surface of surfaces) {
+      engine.releaseTexture(surface.weights);
+    }
+    tables?.dispose();
   }
 }

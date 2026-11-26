@@ -12,9 +12,16 @@ import {
   warmAirlessSurface,
 } from "../../test/thermalSurfaces";
 import type { DiscRecord } from "../bodies/discShading";
-import { DISC_ROWS, discCellJobs, packDiscRecords, shadeDiscPoint } from "../bodies/discShading";
+import {
+  DISC_ROWS,
+  discCellJobs,
+  isLeanRecord,
+  packDiscRecords,
+  shadeDiscPoint,
+} from "../bodies/discShading";
 import {
   BODY_DISC_CELLS_EMISSIVE_KERNEL,
+  BODY_DISC_CELLS_EMISSIVE_LEAN_KERNEL,
   BODY_DISC_CELLS_KERNEL,
   BODY_DISC_EMISSIVE_MATERIALS,
   BODY_DISC_MATERIALS,
@@ -204,10 +211,10 @@ function digestOf(source: string): string {
  * rays take M's off-axis terms, 0 for a frame's on-axis projection, so every value is as before.
  */
 const PLAIN_DIGESTS: ReadonlyArray<readonly [string, string, string]> = [
-  ["the disc's interior", BODY_DISC_MATERIALS.interior.fragmentWgsl, "35dcf54d3ff824e7"],
-  ["the disc's limb", BODY_DISC_MATERIALS.limb.fragmentWgsl, "35dcf54d3ff824e7"],
-  ["the mesh regime's figure", SMOOTH_MESH_MATERIAL.fragmentWgsl, "26b3fbb599acf6d"],
-  ["the disc cells", BODY_DISC_CELLS_KERNEL.reference, "6395a450b64c75b6"],
+  ["the disc's interior", BODY_DISC_MATERIALS.interior.fragmentWgsl, "bbac9eb924bad920"],
+  ["the disc's limb", BODY_DISC_MATERIALS.limb.fragmentWgsl, "bbac9eb924bad920"],
+  ["the mesh regime's figure", SMOOTH_MESH_MATERIAL.fragmentWgsl, "e5ed85077c8e350c"],
+  ["the disc cells", BODY_DISC_CELLS_KERNEL.reference, "f59a0b1bb57450c7"],
   // Re-pinned by plan R14's `@invariant` clip position (terrainLit.wgsl's `LitVertexOut`), which
   // holds every pipeline that places a patch's vertex to the same bits; the arithmetic is as before.
   // And by the seamless lane's sub-patches (R10.T16.h): the instance record's `sub` and a
@@ -447,7 +454,10 @@ describe("the disc's emission (R08.T18.a)", () => {
 describe("the lit bodies' renderer's emissive forms (R08.T18.a)", () => {
   it("makes none for a frame with no emitting record", async () => {
     const engine = await countingRenderEngine();
-    const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
+    // Without the lean forms (perf-bodies-pass-2), which a lean record's first frame makes.
+    const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite, {
+      leanForms: false,
+    });
     const materials = engine.counts.materials;
     renderer.draws(planOf(null, 1, 60));
     expect(engine.counts.materials).toBe(materials);
@@ -456,7 +466,10 @@ describe("the lit bodies' renderer's emissive forms (R08.T18.a)", () => {
 
   it("draws an emitting record as the plain forms do until its forms are prepared, then by them", async () => {
     const engine = await countingRenderEngine();
-    const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
+    // The full emissive forms, without their lean forms (perf-bodies-pass-2), below.
+    const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite, {
+      leanForms: false,
+    });
     const field = groundFieldOf(lavaWorldSurface());
     const first = renderer.draws(planOf(field, 0.048, 60));
     expect(first.map((draw) => draw.material.name)).toEqual(["bodies:disc", "bodies:discLimb"]);
@@ -485,7 +498,10 @@ describe("the lit bodies' renderer's emissive forms (R08.T18.a)", () => {
 
   it("draws an emitting mesh body's figure and limb by the emissive forms", async () => {
     const engine = await countingRenderEngine();
-    const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
+    // The full emissive forms, without their lean forms (perf-bodies-pass-2), below.
+    const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite, {
+      leanForms: false,
+    });
     await renderer.prepareEmissive();
     const plan = planOf(groundFieldOf(magmaOceanSurface()), 0.048, 90, 96, true);
     expect(plan.regimes.get(plan.discs[0]?.body ?? "0200080020000000.0300")).toBe("mesh");
@@ -502,7 +518,10 @@ describe("the lit bodies' renderer's emissive forms (R08.T18.a)", () => {
 
   it("makes and prepares its emissive forms again after a device loss, at the next emitting record", async () => {
     const engine = await countingRenderEngine();
-    const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
+    // The full emissive forms, without their lean forms (perf-bodies-pass-2), below.
+    const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite, {
+      leanForms: false,
+    });
     const field = groundFieldOf(lavaWorldSurface());
     await renderer.prepareEmissive();
     const prepared = (): number =>
@@ -519,6 +538,21 @@ describe("the lit bodies' renderer's emissive forms (R08.T18.a)", () => {
     expect(renderer.draws(planOf(field, 0.048, 60)).map((draw) => draw.material.name)).toEqual([
       "bodies:discEmissive",
       "bodies:discLimbEmissive",
+    ]);
+    renderer.dispose();
+  });
+
+  it("draws a lean emitting record by the emissive forms' lean forms once prepared (perf-bodies-pass-2)", async () => {
+    const engine = await countingRenderEngine();
+    const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
+    const field = groundFieldOf(lavaWorldSurface());
+    await renderer.prepareEmissive();
+    expect(engine.prepares.map((each) => each.name)).toEqual(
+      expect.arrayContaining(["bodies:discEmissiveLean", "bodies:smoothMeshEmissiveLean"]),
+    );
+    expect(renderer.draws(planOf(field, 0.048, 60)).map((draw) => draw.material.name)).toEqual([
+      "bodies:discEmissiveLean",
+      "bodies:discLimbEmissiveLean",
     ]);
     renderer.dispose();
   });
@@ -573,6 +607,24 @@ describe("the lit bodies' renderer's emissive forms (R08.T18.a)", () => {
     );
     const draws = renderer.draws(planOf(groundFieldOf(lavaWorldSurface()), 0.048, 60));
     expect(draws.map((draw) => draw.material.name)).toEqual(["bodies:disc", "bodies:discLimb"]);
+    renderer.dispose();
+  });
+
+  it("shades a lean emitting small disc's cells with the emissive kernel's lean form where it is given (perf-bodies-pass-2)", async () => {
+    const engine = await countingRenderEngine();
+    const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
+    await renderer.prepareEmissive();
+    const plain = await engine.createComputeAsync(BODY_DISC_CELLS_KERNEL);
+    const emissive = await engine.createComputeAsync(BODY_DISC_CELLS_EMISSIVE_KERNEL);
+    const lean = await engine.createComputeAsync(BODY_DISC_CELLS_EMISSIVE_LEAN_KERNEL);
+    const field = groundFieldOf(lavaWorldSurface());
+    const plan = planOf(field, 0.048, 60, 13);
+    expect(plan.discs.map(isLeanRecord)).toEqual([true]);
+    const leans = { plain: null, emissive: lean };
+    expect(renderer.dispatchCells(plan, plain, FRAME, emissive, null, null, leans)).toBe(true);
+    expect(engine.dispatched.map((each) => each.kernel)).toEqual([
+      BODY_DISC_CELLS_EMISSIVE_LEAN_KERNEL.name,
+    ]);
     renderer.dispose();
   });
 

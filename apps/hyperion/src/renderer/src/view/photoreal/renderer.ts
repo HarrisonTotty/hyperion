@@ -93,11 +93,15 @@ import {
   BODY_DISC_CELLS_AIR_KERNEL,
   BODY_DISC_CELLS_EMISSIVE_AIR_KERNEL,
   BODY_DISC_CELLS_EMISSIVE_KERNEL,
+  BODY_DISC_CELLS_EMISSIVE_LEAN_KERNEL,
   BODY_DISC_CELLS_KERNEL,
+  BODY_DISC_CELLS_LEAN_KERNEL,
   BODY_DISC_CELLS_PACKED_AIR_KERNEL,
   BODY_DISC_CELLS_PACKED_EMISSIVE_AIR_KERNEL,
   BODY_DISC_CELLS_PACKED_EMISSIVE_KERNEL,
+  BODY_DISC_CELLS_PACKED_EMISSIVE_LEAN_KERNEL,
   BODY_DISC_CELLS_PACKED_KERNEL,
+  BODY_DISC_CELLS_PACKED_LEAN_KERNEL,
   type BodyFramePlan,
   type BodyLightSources,
   bodyLightSources,
@@ -105,7 +109,7 @@ import {
   LitBodyRenderer,
   planLitBodies,
 } from "../bodies/draw";
-import type { DiscRecord } from "../bodies/discShading";
+import { type DiscRecord, isLeanRecord } from "../bodies/discShading";
 import { drawnAsMesh, type LitRegime, type ScreenCircle } from "../bodies/regime";
 import {
   DEPTH_PYRAMID_KERNEL,
@@ -629,10 +633,10 @@ function blueNoiseTexels(): Uint16Array {
 }
 
 /**
- * A form of the `disc cells` kernel: the plain one, R08.T18.a's emissive, R08.T16.b's air, or
- * R08.T18.b's both.
+ * A form of the `disc cells` kernel: the plain one, R08.T18.a's emissive, R08.T16.b's air,
+ * R08.T18.b's both, or the plain or the emissive one's lean form (perf-bodies-pass-2).
  */
-type CellForm = "plain" | "emissive" | "air" | "emissiveAir";
+type CellForm = "plain" | "emissive" | "air" | "emissiveAir" | "lean" | "emissiveLean";
 
 /** A way of the `disc cells` kernel (`GeometrySettings.discCells`): a cell an invocation, or packed. */
 type CellWay = GeometrySettings["discCells"];
@@ -647,12 +651,16 @@ const CELL_FORM_KERNELS: Readonly<Record<CellWay, Readonly<Record<CellForm, Kern
     emissive: BODY_DISC_CELLS_EMISSIVE_KERNEL,
     air: BODY_DISC_CELLS_AIR_KERNEL,
     emissiveAir: BODY_DISC_CELLS_EMISSIVE_AIR_KERNEL,
+    lean: BODY_DISC_CELLS_LEAN_KERNEL,
+    emissiveLean: BODY_DISC_CELLS_EMISSIVE_LEAN_KERNEL,
   },
   packed: {
     plain: BODY_DISC_CELLS_PACKED_KERNEL,
     emissive: BODY_DISC_CELLS_PACKED_EMISSIVE_KERNEL,
     air: BODY_DISC_CELLS_PACKED_AIR_KERNEL,
     emissiveAir: BODY_DISC_CELLS_PACKED_EMISSIVE_AIR_KERNEL,
+    lean: BODY_DISC_CELLS_PACKED_LEAN_KERNEL,
+    emissiveLean: BODY_DISC_CELLS_PACKED_EMISSIVE_LEAN_KERNEL,
   },
 };
 
@@ -682,9 +690,32 @@ function cellFormOf(record: DiscRecord): CellForm {
   return emits && aired ? "emissiveAir" : aired ? "air" : emits ? "emissive" : "plain";
 }
 
+/**
+ * The forms of the `disc cells` kernel a record may be shaded by: its own, and where it is lean its
+ * own's lean form (perf-bodies-pass-2; `isLeanRecord`), which stands in once made.
+ */
+function cellFormsOf(record: DiscRecord): ReadonlyArray<CellForm> {
+  const form = cellFormOf(record);
+  if (!isLeanRecord(record)) {
+    return [form];
+  }
+  return form === "plain"
+    ? ["plain", "lean"]
+    : form === "emissive"
+      ? ["emissive", "emissiveLean"]
+      : [form];
+}
+
 /** No form of one way's `disc cells` kernel asked yet. */
 function noWayCells(): Record<CellForm, FormCells | null> {
-  return { plain: null, emissive: null, air: null, emissiveAir: null };
+  return {
+    plain: null,
+    emissive: null,
+    air: null,
+    emissiveAir: null,
+    lean: null,
+    emissiveLean: null,
+  };
 }
 
 /** No form of the `disc cells` kernel asked yet, of either way. */
@@ -1651,6 +1682,11 @@ export class PhotorealRenderer {
       this.#cellsFor(plan, way, "emissive"),
       this.#cellsFor(plan, way, "air"),
       this.#cellsFor(plan, way, "emissiveAir"),
+      // The lean forms' (perf-bodies-pass-2), each once made; until then the full kernels'.
+      {
+        plain: this.#cellsFor(plan, way, "lean"),
+        emissive: this.#cellsFor(plan, way, "emissiveLean"),
+      },
     );
     // The mesh bodies' figures, with depth, before the sequence, then the terrain of the bodies
     // handed over to it over them; no pass where there are none. On the high setting the terrain's
@@ -3007,7 +3043,7 @@ export class PhotorealRenderer {
     if (held !== null && held.generation === this.#generation) {
       return held.kernel;
     }
-    const needed = plan.discs.some((record) => cellFormOf(record) === kind);
+    const needed = plan.discs.some((record) => cellFormsOf(record).includes(kind));
     if (needed) {
       this.#askCells(way, kind);
     }
@@ -3040,7 +3076,12 @@ export class PhotorealRenderer {
    * @param way - The way of the `disc cells` kernel its frames take (`GeometrySettings.discCells`).
    */
   async prepareEmissive(way: CellWay = PREPARED_CELL_WAY): Promise<void> {
-    await Promise.all([this.#bodies.prepareEmissive(), this.#cellsMaking(way, "emissive").made]);
+    await Promise.all([
+      this.#bodies.prepareEmissive(),
+      this.#cellsMaking(way, "emissive").made,
+      // Its lean form's (perf-bodies-pass-2).
+      this.#cellsMaking(way, "emissiveLean").made,
+    ]);
   }
 
   /**
@@ -3071,8 +3112,9 @@ export class PhotorealRenderer {
   /**
    * Makes every pipeline its lit bodies draw with, ahead of the first frame (plan R11, R11.T10.b):
    * every regime's (`LitBodyRenderer.prepareAll`), the emissive, air and emissive air forms with
-   * their `disc cells` kernels where `forms` says its frames take them, and the packed plain kernel
-   * where `way` packs the cells; resolves once all are made, or could not be. A still's renderer,
+   * their `disc cells` kernels where `forms` says its frames take them, the packed plain kernel
+   * where `way` packs the cells, and the plain kernel's lean form (perf-bodies-pass-2); resolves
+   * once all are made, or could not be. A still's renderer,
    * new at each still, waits for them before its first batch, so that its draws make none; a view's
    * frames never wait for them.
    *
@@ -3090,6 +3132,8 @@ export class PhotorealRenderer {
       ...(forms.air ? [this.prepareAir(way)] : []),
       ...(forms.emissive && forms.air ? [this.prepareEmissiveAir(way)] : []),
       ...(way === "packed" ? [this.#cellsMaking(way, "plain").made] : []),
+      // The plain kernel's lean form (perf-bodies-pass-2), which a lean record's cells take.
+      this.#cellsMaking(way, "lean").made,
     ]);
   }
 

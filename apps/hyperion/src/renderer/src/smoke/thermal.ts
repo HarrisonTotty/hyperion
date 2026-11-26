@@ -36,13 +36,16 @@ import {
   discCellJobs,
   discCellSums,
   type DiscRecord,
+  isLeanRecord,
   rasteriseDisc,
 } from "../view/bodies/discShading";
 import { type ClassMapTexels, classMapSurface, packClassMap } from "../view/bodies/discSurface";
 import {
   BODY_DISC_CELLS_EMISSIVE_KERNEL,
+  BODY_DISC_CELLS_EMISSIVE_LEAN_KERNEL,
   BODY_DISC_CELLS_KERNEL,
   type BodyFramePlan,
+  DISC_CELLS_PASS,
   type LitBodyEngine,
   type LitBodyInput,
   LitBodyRenderer,
@@ -238,6 +241,7 @@ async function drawPlan(
   plan: BodyFramePlan,
   viewport: Viewport,
   kernels: { readonly plain: ComputeHandle; readonly emissive: ComputeHandle },
+  emissiveLean: ComputeHandle | null = null,
 ): Promise<Drawn> {
   const target = createSceneTarget(engine, "smoke thermal emission", viewport);
   try {
@@ -252,6 +256,9 @@ async function drawPlan(
       kernels.plain,
       { viewRotation, projection, size: viewport },
       kernels.emissive,
+      null,
+      null,
+      { plain: null, emissive: emissiveLean },
     );
     target.render({
       label: PHOTOREAL_PASS_LABELS.bodies,
@@ -529,6 +536,129 @@ export async function checkThermalDiscs(engine: RenderEngine, checks: Checks): P
     }
   } finally {
     renderer.dispose();
+    engine.releaseTexture(melt.surface.weights);
+  }
+}
+
+/**
+ * Perf-bodies-pass-2's lean forms of the emissive forms (`draw.ts`' `leanSource`): the check's
+ * cases, each a lone body of no planetshine source, no occluder and no ring's shadow, drawn and
+ * their cells shaded by a renderer made without its lean forms and by one with them prepared, the
+ * latter's cells by the emissive kernel's lean form; every byte the same, and every draw and every
+ * emitting set's dispatch the lean forms'.
+ */
+export async function checkThermalLeanForms(engine: RenderEngine, checks: Checks): Promise<void> {
+  const name =
+    "perf-bodies-pass-2: lean emitting bodies drawn by the emissive forms' lean forms draw their full forms' bytes";
+  const full = keepingSums(engine);
+  const lean = keepingSums(engine);
+  // The kernels the lean renderer's cells are shaded by.
+  const dispatched: ComputeHandle[] = [];
+  const recording: LitBodyEngine = {
+    ...lean.engine,
+    dispatch: (kernel, bindings, workgroups, pass) => {
+      // The cells' alone, not the figures' cluster cull's.
+      if (pass === DISC_CELLS_PASS) {
+        dispatched.push(kernel);
+      }
+      lean.engine.dispatch(kernel, bindings, workgroups, pass);
+    },
+  };
+  const fullRenderer = new LitBodyRenderer(full.engine, WIREFRAME_MATERIALS.starSprite, {
+    leanForms: false,
+  });
+  const leanRenderer = new LitBodyRenderer(recording, WIREFRAME_MATERIALS.starSprite);
+  const twoClass = packClassMap(4, 2, ({ i, j }) =>
+    (i + j) % 2 !== 0 ? null : i % 2 === 0 ? [1, 0] : [0.25, 0.75],
+  );
+  const melt: MeltMap = {
+    surface: {
+      ...classMapSurface(
+        engine,
+        "smoke thermal lean class map",
+        twoClass,
+        [
+          lawFor([0.12, 0.12, 0.12], [0.6, 0.6, 0.6], "moon"),
+          lawFor([0.05, 0.05, 0.05], [0.6, 0.6, 0.6], "moon"),
+        ],
+        PROVISIONAL_PHOTOMETRY.law,
+      ),
+      meltClasses: [false, true],
+    },
+    texels: twoClass,
+  };
+  const made: ComputeHandle[] = [];
+  try {
+    const kernels = await Promise.all([
+      engine.createComputeAsync(BODY_DISC_CELLS_KERNEL),
+      engine.createComputeAsync(BODY_DISC_CELLS_EMISSIVE_KERNEL),
+      engine.createComputeAsync(BODY_DISC_CELLS_EMISSIVE_LEAN_KERNEL),
+    ]);
+    made.push(...kernels);
+    const [plain, emissive, emissiveLean] = kernels;
+    await Promise.all([fullRenderer.prepareEmissive(), leanRenderer.prepareEmissive()]);
+    let pixels = 0;
+    let differing = 0;
+    let everyLean = true;
+    const results: string[] = [];
+    for (const item of casesOf(melt)) {
+      const probe = planOf(item);
+      const names = [...leanRenderer.meshDraws(probe), ...leanRenderer.draws(probe)].map(
+        (draw) => draw.material.name,
+      );
+      const drawnLean =
+        probe.discs.every(isLeanRecord) &&
+        names.length > 0 &&
+        names.every((each) => each.includes("Lean"));
+      // The harness reads its targets back in order, each before the next is drawn.
+      // oxlint-disable-next-line no-await-in-loop
+      const asFull = await drawPlan(engine, fullRenderer, full.sums, planOf(item), item.viewport, {
+        plain,
+        emissive,
+      });
+      const before = dispatched.length;
+      // Each draw reads its target back before the next is made.
+      // oxlint-disable-next-line no-await-in-loop
+      const asLean = await drawPlan(
+        engine,
+        leanRenderer,
+        lean.sums,
+        planOf(item),
+        item.viewport,
+        { plain, emissive },
+        emissiveLean,
+      );
+      const shadedLean =
+        asLean.dispatched && dispatched.slice(before).every((kernel) => kernel === emissiveLean);
+      everyLean &&= drawnLean && shadedLean;
+      if (!drawnLean || !shadedLean) {
+        results.push(
+          `${item.name}: drawn by ${names.join(", ")}, its cells ${asLean.dispatched ? `by ${String(dispatched.length - before)} dispatches, the lean kernel's ${String(shadedLean)}` : "not dispatched"}`,
+        );
+      }
+      const a = new Uint32Array(asFull.image.buffer);
+      const b = new Uint32Array(asLean.image.buffer);
+      let apart = a.length === b.length ? 0 : Math.max(a.length, b.length);
+      for (let k = 0; k < Math.min(a.length, b.length); k += 1) {
+        apart += a[k] === b[k] ? 0 : 1;
+      }
+      pixels += a.length / 4;
+      differing += apart;
+      if (apart > 0) {
+        results.push(`${item.name}: ${String(apart)} channels differ`);
+      }
+    }
+    checks.check(
+      name,
+      differing === 0 && everyLean,
+      `${String(pixels)} pixels, ${String(differing)} channels differing${results.length > 0 ? `: ${results.join("; ")}` : ""}; every draw and emitting dispatch the lean forms' ${String(everyLean)}`,
+    );
+  } finally {
+    fullRenderer.dispose();
+    leanRenderer.dispose();
+    for (const kernel of made) {
+      engine.releaseCompute(kernel);
+    }
     engine.releaseTexture(melt.surface.weights);
   }
 }

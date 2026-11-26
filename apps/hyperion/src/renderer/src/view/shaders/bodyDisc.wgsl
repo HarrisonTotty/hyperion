@@ -874,6 +874,14 @@ struct Shaded {
   lit : bool,
 }
 
+// Whether this module is a lean form (perf-bodies-pass-2; `draw.ts`' `leanSource`), drawn only for
+// a record of no planetshine source, no occluder and no ring's shadow (`isLeanRecord`): its counts'
+// loops compiled out as the record's counts of 0 and the ring's shadow as its 1 (`ring_shadow_on_body`
+// for no band), so that it draws the full form's bytes for every such record. SwiftShader, the checks'
+// adapter, runs a loop's first pass and every branch whether or not a lane needs them, so that only
+// code compiled out costs nothing there (lane perf-bodies-pass's measure: the figure 13% less).
+const LEAN_FORM : bool = false;
+
 // The radiance of the point `q` (from the body's centre ÷ a) seen along `ray`, pre-exposed: lit on
 // its shading normal n′ (`shading_normal`, R10.T10.g) and its datum's ν, as the header says.
 fn shade(body : Body, q : vec3f, ray : vec3f) -> Shaded {
@@ -923,7 +931,7 @@ fn shade(body : Body, q : vec3f, ray : vec3f) -> Shaded {
   // the figure at zero height.
   let local = local_frame(normal, body.pole);
   let lights = min(u32(counts.z), MAX_DISC_LIGHTS);
-  let occluders = min(u32(counts.w), MAX_DISC_OCCLUDERS);
+  let occluders = select(min(u32(counts.w), MAX_DISC_OCCLUDERS), 0u, LEAN_FORM);
   for (var j = 0u; j < lights; j = j + 1u) {
     let place = disc_row(FIRST_LIGHT_ROW + j * LIGHT_ROWS);
     let light = disc_row(FIRST_LIGHT_ROW + j * LIGHT_ROWS + 1u);
@@ -988,7 +996,10 @@ fn shade(body : Body, q : vec3f, ray : vec3f) -> Shaded {
       }
     }
     visible = max(visible, vec3f(0.0));
-    let ring = ring_shadow_on_body(q, towards);
+    var ring = vec3f(1.0);
+    if (!LEAN_FORM) {
+      ring = ring_shadow_on_body(q, towards);
+    }
     // The sky light shares the point's eclipse and ring shadow: the air above the point is taken to
     // lie in the shadow with it, as an umbra's air does.
     out.radiance = out.radiance + light.xyz * misc.z * mean_a * sky * visible * ring;
@@ -1024,7 +1035,7 @@ fn shade(body : Body, q : vec3f, ray : vec3f) -> Shaded {
   // side, which stays unlit for the meter. As the terrain takes it (R10.T10.g): its direct term and
   // the law's μ₀ on n′, the source's disc cut by the datum's tangent plane as a star's is, so that
   // the body's curvature sets planetshine's terminator too; the sky's and the air's on ν.
-  let secondaries = min(u32(disc_row(SECONDARY_COUNT_ROW).x), MAX_DISC_SECONDARIES);
+  let secondaries = select(min(u32(disc_row(SECONDARY_COUNT_ROW).x), MAX_DISC_SECONDARIES), 0u, LEAN_FORM);
   for (var j = 0u; j < secondaries; j = j + 1u) {
     let place = disc_row(FIRST_SECONDARY_ROW + j * SECONDARY_ROWS);
     let source = disc_row(FIRST_SECONDARY_ROW + j * SECONDARY_ROWS + 1u);

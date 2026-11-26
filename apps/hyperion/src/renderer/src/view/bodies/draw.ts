@@ -174,6 +174,7 @@ import {
   type DiscSecondary,
   discSamples,
   type DrawnDiscSurface,
+  isLeanRecord,
   MAX_DISC_LIGHTS,
   MAX_DISC_OCCLUDERS,
   packDiscRecords,
@@ -1351,6 +1352,54 @@ const LIT_SOURCE =
 
 const DISC_SOURCE = LIT_SOURCE + bodyDiscDrawWgsl;
 
+/** `bodyDisc.wgsl`'s lean flag as the full forms have it (perf-bodies-pass-2). */
+const LEAN_FORM_LINE = "const LEAN_FORM : bool = false;";
+
+/**
+ * A lit-body module's lean form (perf-bodies-pass-2; `bodyDisc.wgsl`'s `LEAN_FORM`): `source` with
+ * its flag set, so that the planetshine and eclipse loops and the ring's shadow are compiled out of
+ * it, drawn only for a record {@link isLeanRecord} holds, for which it draws the full form's bytes.
+ *
+ * @remarks
+ * SwiftShader, the checks' adapter, runs a loop's first pass and both sides of every branch whether
+ * or not a lane needs them, so that code which never runs for a record still costs it; only code
+ * compiled out costs nothing (lane perf-bodies-pass's measure: the figure 13% less on the pod).
+ *
+ * @throws Error unless the flag's line occurs once in `source`.
+ */
+export function leanSource(source: string): string {
+  const parts = source.split(LEAN_FORM_LINE);
+  if (parts.length !== 2) {
+    throw new Error(
+      `a lean form needs bodyDisc.wgsl's LEAN_FORM once, found ${String(parts.length - 1)}`,
+    );
+  }
+  return parts.join("const LEAN_FORM : bool = true;");
+}
+
+/**
+ * `spec`'s lean form ({@link leanSource}) by `name`, its display name its full form's: the same
+ * effect on the console, as a twin's.
+ */
+function leanMaterial(spec: WgslMaterialSpec, name: string): WgslMaterialSpec {
+  return {
+    ...spec,
+    name,
+    vertexWgsl: leanSource(spec.vertexWgsl),
+    fragmentWgsl: leanSource(spec.fragmentWgsl),
+  };
+}
+
+/** `pair`'s lean form ({@link leanSource}) by `name`. */
+function leanKernel(pair: KernelPair, name: string): KernelPair {
+  return {
+    ...pair,
+    name,
+    reference: leanSource(pair.reference),
+    subgroup: pair.subgroup === null ? null : leanSource(pair.subgroup),
+  };
+}
+
 /** The group 2 binding of the first of the body's atmosphere tables (`bodyDisc.wgsl`), past 0–5. */
 const ATMOSPHERE_FIRST_BINDING = 6;
 
@@ -1569,6 +1618,26 @@ export const BODY_DISC_EMISSIVE_AIR_MATERIALS: Readonly<
   };
 })();
 
+/**
+ * The disc's two materials' lean forms (perf-bodies-pass-2; {@link leanSource}), drawn for the lean
+ * records the plain forms would draw; the same bindings, uniforms and states.
+ */
+export const BODY_DISC_LEAN_MATERIALS: Readonly<Record<"interior" | "limb", WgslMaterialSpec>> = {
+  interior: leanMaterial(BODY_DISC_MATERIALS.interior, "bodies:discLean"),
+  limb: leanMaterial(BODY_DISC_MATERIALS.limb, "bodies:discLimbLean"),
+};
+
+/**
+ * The disc's two emissive materials' lean forms (perf-bodies-pass-2), drawn for the lean records
+ * the emissive forms would draw.
+ */
+export const BODY_DISC_EMISSIVE_LEAN_MATERIALS: Readonly<
+  Record<"interior" | "limb", WgslMaterialSpec>
+> = {
+  interior: leanMaterial(BODY_DISC_EMISSIVE_MATERIALS.interior, "bodies:discEmissiveLean"),
+  limb: leanMaterial(BODY_DISC_EMISSIVE_MATERIALS.limb, "bodies:discLimbEmissiveLean"),
+};
+
 const SMOOTH_MESH_SOURCE = LIT_SOURCE + patchVertexWgsl + smoothMeshWgsl;
 
 /**
@@ -1649,6 +1718,18 @@ export const SMOOTH_MESH_EMISSIVE_AIR_MATERIAL: WgslMaterialSpec = (() => {
   };
 })();
 
+/** The mesh regime's material's lean form (perf-bodies-pass-2; {@link leanSource}). */
+export const SMOOTH_MESH_LEAN_MATERIAL: WgslMaterialSpec = leanMaterial(
+  SMOOTH_MESH_MATERIAL,
+  "bodies:smoothMeshLean",
+);
+
+/** The mesh regime's emissive material's lean form (perf-bodies-pass-2). */
+export const SMOOTH_MESH_EMISSIVE_LEAN_MATERIAL: WgslMaterialSpec = leanMaterial(
+  SMOOTH_MESH_EMISSIVE_MATERIAL,
+  "bodies:smoothMeshEmissiveLean",
+);
+
 /** smoothMesh.wgsl's vertex stage's head, which the figure's cluster path calls as `smooth_vertex`. */
 const FIGURE_VERTEX_HEAD =
   "@vertex\nfn vertexMain(@location(0) grid : vec3f, @builtin(instance_index) instance : u32) -> MeshVarying {";
@@ -1718,6 +1799,18 @@ export const SMOOTH_MESH_AIR_CLUSTER_MATERIAL = figureClusterMaterial(
 export const SMOOTH_MESH_EMISSIVE_AIR_CLUSTER_MATERIAL = figureClusterMaterial(
   SMOOTH_MESH_EMISSIVE_AIR_MATERIAL,
   "GLOWING MESH CLUSTERS",
+);
+
+/** Its lean form on the cluster path (plan R14, R14.T4.a; perf-bodies-pass-2). */
+export const SMOOTH_MESH_LEAN_CLUSTER_MATERIAL = figureClusterMaterial(
+  SMOOTH_MESH_LEAN_MATERIAL,
+  SMOOTH_MESH_CLUSTER_MATERIAL.displayName,
+);
+
+/** Its emissive form's lean form on the cluster path (plan R14, R14.T4.a; perf-bodies-pass-2). */
+export const SMOOTH_MESH_EMISSIVE_LEAN_CLUSTER_MATERIAL = figureClusterMaterial(
+  SMOOTH_MESH_EMISSIVE_LEAN_MATERIAL,
+  SMOOTH_MESH_EMISSIVE_CLUSTER_MATERIAL.displayName,
 );
 
 /** smoothMesh.wgsl's fragment stage's head, whose place the figure's raster takes. */
@@ -1791,7 +1884,7 @@ const FIGURE_RESOLVE_SOURCE = withFragmentStage(DISC_SOURCE, DISC_FRAGMENT_HEAD,
  * its record's as the forward draw does and discarding the rest; the disc's interior's uniforms,
  * storage and states, its form's textures and the figure IDs at binding 18.
  */
-export const FIGURE_RESOLVE_MATERIALS: Readonly<Record<"plain" | FormKind, WgslMaterialSpec>> =
+export const FIGURE_RESOLVE_MATERIALS: Readonly<Record<"plain" | ResolvedKind, WgslMaterialSpec>> =
   (() => {
     const plain: WgslMaterialSpec = {
       ...BODY_DISC_MATERIALS.interior,
@@ -1978,6 +2071,35 @@ export const BODY_DISC_CELLS_PACKED_EMISSIVE_AIR_KERNEL: KernelPair = {
   readback: "bit-exact",
 };
 
+/**
+ * The `disc cells` kernel's lean form (perf-bodies-pass-2; {@link leanSource}), one dispatch a set of
+ * lean records (`DiscCellSet.lean`), made at the first frame that has such a record; and its
+ * emissive form's, and the packed kernel's two, alike. Each shades a lean record's cells to the
+ * bit as its full form does.
+ */
+export const BODY_DISC_CELLS_LEAN_KERNEL: KernelPair = leanKernel(
+  BODY_DISC_CELLS_KERNEL,
+  "BODY DISC CELLS, lean",
+);
+
+/** {@link BODY_DISC_CELLS_EMISSIVE_KERNEL}'s lean form (perf-bodies-pass-2). */
+export const BODY_DISC_CELLS_EMISSIVE_LEAN_KERNEL: KernelPair = leanKernel(
+  BODY_DISC_CELLS_EMISSIVE_KERNEL,
+  "BODY DISC CELLS, emissive, lean",
+);
+
+/** {@link BODY_DISC_CELLS_PACKED_KERNEL}'s lean form (perf-bodies-pass-2). */
+export const BODY_DISC_CELLS_PACKED_LEAN_KERNEL: KernelPair = leanKernel(
+  BODY_DISC_CELLS_PACKED_KERNEL,
+  "BODY DISC CELLS, packed, lean",
+);
+
+/** {@link BODY_DISC_CELLS_PACKED_EMISSIVE_KERNEL}'s lean form (perf-bodies-pass-2). */
+export const BODY_DISC_CELLS_PACKED_EMISSIVE_LEAN_KERNEL: KernelPair = leanKernel(
+  BODY_DISC_CELLS_PACKED_EMISSIVE_KERNEL,
+  "BODY DISC CELLS, packed, emissive, lean",
+);
+
 /** The workgroups a dispatch lays along x at most, the kernel's `GROUPS_PER_ROW`. */
 const CELL_GROUPS_PER_ROW = 65_535;
 
@@ -2127,6 +2249,12 @@ interface DeviceResources {
    * that carries both; `null` until then.
    */
   emissiveAir: FormMaterials | null;
+  /**
+   * The plain and the emissive forms' lean forms (perf-bodies-pass-2; {@link leanSource}), made and
+   * prepared at the first lean record either would draw, and drawn once prepared; `null` until then.
+   */
+  lean: FormMaterials | null;
+  emissiveLean: FormMaterials | null;
 }
 
 /**
@@ -2142,18 +2270,24 @@ interface FormMaterials {
   /**
    * The figure's resolve in this form (`figureShading` `screen`), made with the rest but prepared
    * only where a plan asks for it (`LitBodyRenderer.screenReady`); `ready` does not wait on it.
+   * `null` for the lean forms (perf-bodies-pass-2), whose records the screen path resolves by their
+   * full forms (lean, 2026-11-26).
    */
-  readonly resolve: MaterialHandle;
+  readonly resolve: MaterialHandle | null;
   ready: boolean;
   /** Settles once their pipelines are prepared, or could not be. */
   prepared: Promise<void>;
 }
 
 /**
- * The kernels' forms beside the plain ones: R08.T18.a's emissive, R08.T16.b's air, and R08.T18.b's
- * emissive with air.
+ * The kernels' forms beside the plain ones: R08.T18.a's emissive, R08.T16.b's air, R08.T18.b's
+ * emissive with air, and the plain and the emissive forms' lean forms (perf-bodies-pass-2), keyed by
+ * a record's counts of planetshine sources, occluders and ring bands, all 0 ({@link isLeanRecord}).
  */
-type FormKind = "emissive" | "air" | "emissiveAir";
+type FormKind = "emissive" | "air" | "emissiveAir" | "lean" | "emissiveLean";
+
+/** The forms the figure's resolve takes (`figureShading` `screen`): every one but the lean ones. */
+type ResolvedKind = Exclude<FormKind, "lean" | "emissiveLean">;
 
 /** Each form's materials and what its failure to prepare is reported as. */
 const FORM_SPECS: Readonly<
@@ -2189,6 +2323,20 @@ const FORM_SPECS: Readonly<
     meshCluster: SMOOTH_MESH_EMISSIVE_AIR_CLUSTER_MATERIAL,
     what: "the emissive forms with air of the lit bodies",
   },
+  lean: {
+    interior: BODY_DISC_LEAN_MATERIALS.interior,
+    limb: BODY_DISC_LEAN_MATERIALS.limb,
+    mesh: SMOOTH_MESH_LEAN_MATERIAL,
+    meshCluster: SMOOTH_MESH_LEAN_CLUSTER_MATERIAL,
+    what: "the lean forms of the lit bodies",
+  },
+  emissiveLean: {
+    interior: BODY_DISC_EMISSIVE_LEAN_MATERIALS.interior,
+    limb: BODY_DISC_EMISSIVE_LEAN_MATERIALS.limb,
+    mesh: SMOOTH_MESH_EMISSIVE_LEAN_MATERIAL,
+    meshCluster: SMOOTH_MESH_EMISSIVE_LEAN_CLUSTER_MATERIAL,
+    what: "the lean emissive forms of the lit bodies",
+  },
 };
 
 /**
@@ -2208,6 +2356,13 @@ interface DrawnPlan {
    * none has both.
    */
   readonly emissiveAir: FormMaterials | null;
+  /**
+   * The prepared lean forms its lean records of the plain and the emissive forms are drawn by
+   * (perf-bodies-pass-2); `null` where none is lean or they are not prepared, when such a record is
+   * drawn by its full form, the same bytes.
+   */
+  readonly lean: FormMaterials | null;
+  readonly emissiveLean: FormMaterials | null;
 }
 
 /** Whether a record carries its ground's emission and its air together (R08.T18.b). */
@@ -2243,22 +2398,44 @@ function unkeyedEdges(record: DiscRecord): DiscRecord {
     : record;
 }
 
-/** The forms a record is drawn by: its air's, its emission's, or the plain ones. */
-function formsOf(
-  record: DiscRecord,
-  drawn: DrawnPlan,
-  plain: Pick<FormMaterials, "interior" | "limb" | "mesh" | "meshCluster" | "resolve">,
-): Pick<FormMaterials, "interior" | "limb" | "mesh" | "meshCluster" | "resolve"> {
+/** The materials a record's forward draws take from its forms. */
+type ForwardForms = Pick<FormMaterials, "interior" | "limb" | "mesh" | "meshCluster">;
+
+/**
+ * The forms a record is drawn by: its air's, its emission's, or the plain ones; the emissive and the
+ * plain ones' lean forms where it is lean and they are prepared (perf-bodies-pass-2).
+ */
+function formsOf(record: DiscRecord, drawn: DrawnPlan, plain: ForwardForms): ForwardForms {
   if (record.air !== undefined && record.emission !== undefined && drawn.emissiveAir !== null) {
     return drawn.emissiveAir;
   }
   if (record.air !== undefined && drawn.air !== null) {
     return drawn.air;
   }
+  const leans = isLeanRecord(record);
   if (record.emission !== undefined && drawn.emissive !== null) {
-    return drawn.emissive;
+    return leans && drawn.emissiveLean !== null ? drawn.emissiveLean : drawn.emissive;
   }
-  return plain;
+  return leans && drawn.lean !== null ? drawn.lean : plain;
+}
+
+/**
+ * The figure's resolve a record is drawn by (`figureShading` `screen`): its full forms' alone, its
+ * air's, its emission's or the plain one, as the lean forms make none (lean, 2026-11-26).
+ */
+function resolveOf(record: DiscRecord, drawn: DrawnPlan, plain: MaterialHandle): MaterialHandle {
+  const form = [
+    record.air !== undefined && record.emission !== undefined ? drawn.emissiveAir : null,
+    record.air !== undefined ? drawn.air : null,
+    record.emission !== undefined ? drawn.emissive : null,
+  ].find((each) => each !== null);
+  if (form === undefined) {
+    return plain;
+  }
+  if (form.resolve === null) {
+    throw new Error("a full form of the lit bodies was made without its figure's resolve");
+  }
+  return form.resolve;
 }
 
 /**
@@ -2309,10 +2486,21 @@ export class LitBodyRenderer {
   readonly #screenPrepared = new WeakMap<MaterialHandle, boolean>();
   #disposed = false;
   readonly #unsubscribe: () => void;
+  /** Whether it draws a lean record by the lean forms once prepared (perf-bodies-pass-2). */
+  readonly #leanForms: boolean;
 
-  constructor(engine: LitBodyEngine, spriteMaterial: WgslMaterialSpec) {
+  /**
+   * @param options - `leanForms` `false` draws every record by its full forms, as a check of the lean
+   *   forms' bytes draws them (perf-bodies-pass-2); `true` by default.
+   */
+  constructor(
+    engine: LitBodyEngine,
+    spriteMaterial: WgslMaterialSpec,
+    options: { readonly leanForms?: boolean } = {},
+  ) {
     this.#engine = engine;
     this.#spriteMaterial = spriteMaterial;
+    this.#leanForms = options.leanForms ?? true;
     this.#resources = this.#create();
     this.#prepareRegimes(this.#resources);
     this.#unsubscribe = engine.onRestored(() => {
@@ -2382,8 +2570,8 @@ export class LitBodyRenderer {
   /**
    * Makes every regime's pipelines for the scene target ahead of the first draw, and resolves once
    * they are made, or could not be (plan R11, R11.T10.b): those its construction prepares, the
-   * point sprites', which a running view draws unprepared from its first frame with the stars, and
-   * the figures' cluster cull. A still's renderer, new at each still, waits for them before its
+   * point sprites', which a running view draws unprepared from its first frame with the stars, the
+   * figures' cluster cull, and the plain forms' lean forms (perf-bodies-pass-2). A still's renderer, new at each still, waits for them before its
    * first batch, so that none of its draws makes a pipeline.
    */
   async prepareAll(): Promise<void> {
@@ -2393,6 +2581,8 @@ export class LitBodyRenderer {
       this.#regimesPrepared,
       this.#cullReady,
       this.#preparedOrReported(resources.sprite, scene, resources.quad),
+      // The lean forms (perf-bodies-pass-2), which a lean record is drawn by once prepared.
+      ...(this.#leanForms ? [this.#formMade("lean").prepared] : []),
     ]);
   }
 
@@ -2485,6 +2675,8 @@ export class LitBodyRenderer {
       emissive: null,
       air: null,
       emissiveAir: null,
+      lean: null,
+      emissiveLean: null,
     };
   }
 
@@ -2513,7 +2705,11 @@ export class LitBodyRenderer {
     const limb = engine.createMaterial(specs.limb);
     const mesh = engine.createMaterial(specs.mesh);
     const meshCluster = engine.createMaterial(specs.meshCluster);
-    const resolve = engine.createMaterial(FIGURE_RESOLVE_MATERIALS[kind]);
+    // The lean forms make no resolve: the screen path resolves their records by the full forms.
+    const resolve =
+      kind === "lean" || kind === "emissiveLean"
+        ? null
+        : engine.createMaterial(FIGURE_RESOLVE_MATERIALS[kind]);
     const scene = [{ colour: HDR_COLOUR_FORMAT, depth: true }] as const;
     const prepared: ReadonlyArray<readonly [MaterialHandle, MeshHandle]> = [
       [mesh, resources.patch],
@@ -2557,12 +2753,17 @@ export class LitBodyRenderer {
   }
 
   /**
-   * Makes the emissive forms and prepares their pipelines (R08.T18.a), ahead of a body's first
-   * frame above the cut, which until they are prepared draws its records as the plain forms do;
-   * resolves once they are, or could not be. A record drawn after it draws its emission.
+   * Makes the emissive forms and prepares their pipelines (R08.T18.a), and their lean forms
+   * (perf-bodies-pass-2), ahead of a body's first frame above the cut, which until they are
+   * prepared draws its records as the plain forms do; resolves once they are, or could not be. A
+   * record drawn after it draws its emission.
    */
-  prepareEmissive(): Promise<void> {
-    return this.#formMade("emissive").prepared;
+  async prepareEmissive(): Promise<void> {
+    await Promise.all([
+      this.#formMade("emissive").prepared,
+      // Their lean forms (perf-bodies-pass-2), which a lean emitting record is drawn by.
+      ...(this.#leanForms ? [this.#formMade("emissiveLean").prepared] : []),
+    ]);
   }
 
   /**
@@ -2580,6 +2781,15 @@ export class LitBodyRenderer {
    */
   prepareEmissiveAir(): Promise<void> {
     return this.#formMade("emissiveAir").prepared;
+  }
+
+  /**
+   * Makes the lean forms of the plain and the emissive forms and prepares their pipelines
+   * (perf-bodies-pass-2), ahead of a lean record's first frame, which until they are prepared draws
+   * by the full forms, the same bytes; resolves once they are, or could not be.
+   */
+  async prepareLean(): Promise<void> {
+    await Promise.all([this.#formMade("lean").prepared, this.#formMade("emissiveLean").prepared]);
   }
 
   /**
@@ -2623,7 +2833,19 @@ export class LitBodyRenderer {
       return out;
     };
     const records = emits || aired ? plan.discs.map(drawnOf) : plan.discs;
-    this.#drawn = { plan, records, emissive, air, emissiveAir };
+    // The lean forms (perf-bodies-pass-2), asked at the first lean record the plain or the emissive
+    // forms would draw, as drawn; until they are prepared it is drawn by its full form, the same bytes.
+    const leanOf = (emitting: boolean): boolean =>
+      records.some(
+        (record) =>
+          record.air === undefined &&
+          (record.emission !== undefined) === emitting &&
+          isLeanRecord(record),
+      );
+    const lean = this.#leanForms && leanOf(false) ? this.#formMaterials("lean") : null;
+    const emissiveLean =
+      this.#leanForms && leanOf(true) ? this.#formMaterials("emissiveLean") : null;
+    this.#drawn = { plan, records, emissive, air, emissiveAir, lean, emissiveLean };
     return this.#drawn;
   }
 
@@ -2852,6 +3074,9 @@ export class LitBodyRenderer {
    *   is found in.
    * @param emissiveKernel - The kernel's emissive form, or `null` where it is not made yet.
    * @param airKernel - The kernel's air form, or `null` where it is not made yet.
+   * @param leanKernels - The plain and the emissive kernels' lean forms (perf-bodies-pass-2), each
+   *   `null` where it is not made yet, when the lean records are shaded by the full kernel, the same
+   *   bits; none where the renderer was made without its lean forms.
    * @returns Whether it dispatched.
    */
   dispatchCells(
@@ -2861,6 +3086,10 @@ export class LitBodyRenderer {
     emissiveKernel: ComputeHandle | null = null,
     airKernel: ComputeHandle | null = null,
     emissiveAirKernel: ComputeHandle | null = null,
+    leanKernels: {
+      readonly plain: ComputeHandle | null;
+      readonly emissive: ComputeHandle | null;
+    } = { plain: null, emissive: null },
   ): boolean {
     if (this.#written?.plan === plan) {
       return false;
@@ -2872,6 +3101,8 @@ export class LitBodyRenderer {
     const discarded = new Set(
       plan.meshes.filter(({ role }) => coverageOf(role)?.whole === true).map(({ index }) => index),
     );
+    const leanCells = this.#leanForms ? leanKernels.plain : null;
+    const emissiveLeanCells = this.#leanForms ? leanKernels.emissive : null;
     const cells = discCellJobs(
       records,
       fits,
@@ -2880,6 +3111,8 @@ export class LitBodyRenderer {
       airKernel !== null,
       emissiveAirKernel !== null,
       discarded,
+      leanCells !== null,
+      emissiveLeanCells !== null,
     );
     if (cells.count === 0) {
       this.#upload(plan);
@@ -2902,10 +3135,23 @@ export class LitBodyRenderer {
           : set.air
             ? airKernel
             : set.emissive
-              ? emissiveKernel
-              : kernel;
+              ? set.lean
+                ? emissiveLeanCells
+                : emissiveKernel
+              : set.lean
+                ? leanCells
+                : kernel;
       if (setKernel === null) {
-        const form = set.air && set.emissive ? "emissive with air" : set.air ? "air" : "emissive";
+        const form =
+          set.air && set.emissive
+            ? "emissive with air"
+            : set.air
+              ? "air"
+              : set.emissive
+                ? set.lean
+                  ? "lean emissive"
+                  : "emissive"
+                : "lean";
         throw new Error(`the cell pass's ${form} set from job ${set.first} has no kernel`);
       }
       this.#engine.dispatch(
@@ -3039,7 +3285,7 @@ export class LitBodyRenderer {
     for (const body of plan.meshes) {
       const record = drawn.records[body.index];
       if (record !== undefined) {
-        wanted.push([formsOf(record, drawn, resources).resolve, resources.quad, scene]);
+        wanted.push([resolveOf(record, drawn, resources.resolve), resources.quad, scene]);
       }
     }
     let ready = true;
@@ -3096,7 +3342,7 @@ export class LitBodyRenderer {
       return [
         {
           ...draw,
-          material: formsOf(record, drawn, resources).resolve,
+          material: resolveOf(record, drawn, resources.resolve),
           textures: { ...draw.textures, figureIds: ids },
         },
       ];
@@ -3298,8 +3544,18 @@ export class LitBodyRenderer {
     this.#engine.releaseTexture(resources.noAtmosphere.body);
     // Its materials and meshes too (plan R11, R11.T10.b: a still's renderer, made at each still,
     // would hold them for the session otherwise), its forms' among them.
-    const forms = [resources.emissive, resources.air, resources.emissiveAir].flatMap((form) =>
-      form === null ? [] : [form.interior, form.limb, form.mesh, form.meshCluster, form.resolve],
+    const forms = [
+      resources.emissive,
+      resources.air,
+      resources.emissiveAir,
+      resources.lean,
+      resources.emissiveLean,
+    ].flatMap((form) =>
+      form === null
+        ? []
+        : [form.interior, form.limb, form.mesh, form.meshCluster, form.resolve].filter(
+            (material) => material !== null,
+          ),
     );
     const materials = [
       resources.interior,
