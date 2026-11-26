@@ -12,7 +12,7 @@
  * off its equator, where π a b′ Φ(α) errs by 4.2% at 90° and 10.9% at 150° of phase for f = 0.098 seen
  * from 45° latitude.
  */
-import { cross, dot, norm, normalise, type Vec3, vec3 } from "../../geometry/vec3";
+import { cross, dot, normalise, type Vec3, vec3 } from "../../geometry/vec3";
 import {
   limbShareAt,
   phaseFactorFromTable,
@@ -86,12 +86,22 @@ function secondMomentRaw(cOverA: number, sinBeta: number): number {
   return second / first;
 }
 
-/** Each figure's m table by c ÷ a, made on first use. */
+/** Each figure's m table by c ÷ a, made on first use off the equator. */
 const TABLES = new Map<number, Float64Array>();
 
 /**
+ * Each figure's m(0) by c ÷ a, made on first use: the disc's albedo scale reads m at the equator
+ * alone ({@link oblateAlbedoScale}), where the table's 33 quadratures took 50 to 60 ms of the page's
+ * thread on the pod as a figure's first point was lit (perf-long-tasks-5). It is the table's first
+ * entry, the same quadrature, and the table's reading at sin β = 0 adds 0 × Δ to that entry, which
+ * leaves its bits.
+ */
+const EQUATOR_ON = new Map<number, number>();
+
+/**
  * m(β) = ∫ μ² dS ÷ ∫ μ dS over the half of a spheroid seen from latitude β, by linear
- * interpolation in sin β of a table made once per figure; exactly ⅔ for a sphere.
+ * interpolation in sin β of a table made once per figure; exactly ⅔ for a sphere. Equator-on, the
+ * quadrature at β = 0 made once per figure, with no table.
  *
  * @param cOverA - c ÷ a, in (0, 1].
  * @param sinBeta - |sin β| of the sub-observer latitude.
@@ -99,6 +109,14 @@ const TABLES = new Map<number, Float64Array>();
 export function projectedSecondMoment(cOverA: number, sinBeta: number): number {
   if (cOverA >= 1) {
     return 2 / 3;
+  }
+  if (sinBeta === 0) {
+    let equatorOn = EQUATOR_ON.get(cOverA);
+    if (equatorOn === undefined) {
+      equatorOn = secondMomentRaw(cOverA, 0);
+      EQUATOR_ON.set(cOverA, equatorOn);
+    }
+    return equatorOn;
   }
   let table = TABLES.get(cOverA);
   if (table === undefined) {
@@ -174,23 +192,56 @@ export function spheroidGeometricIntegral(
 const REMEMBERED = new Map<string, number>();
 const REMEMBERED_MAX = 4_096;
 
-/** K by midpoint quadrature, the directions in the pole's frame. */
+/** The point's quadrature step in azimuth, rad. */
+const POINT_D_PHI = (2 * Math.PI) / POINT_PHI_STEPS;
+
+/**
+ * cos φ and sin φ at the point's quadrature azimuths, (j + ½) dφ, each the value its point took
+ * afresh: an integral took 18,432 of each, and a vector a point, of only {@link POINT_PHI_STEPS}
+ * angles (perf-long-tasks-5).
+ */
+let pointAzimuths: Azimuths | null = null;
+
+function pointAzimuthsOf(): Azimuths {
+  if (pointAzimuths === null) {
+    const cos = new Float64Array(POINT_PHI_STEPS);
+    const sin = new Float64Array(POINT_PHI_STEPS);
+    for (let j = 0; j < POINT_PHI_STEPS; j += 1) {
+      const phi = (j + 0.5) * POINT_D_PHI;
+      cos[j] = Math.cos(phi);
+      sin[j] = Math.sin(phi);
+    }
+    pointAzimuths = { cos, sin };
+  }
+  return pointAzimuths;
+}
+
+/**
+ * K by midpoint quadrature, the directions in the pole's frame: each point's terms in the order
+ * they were formed when each made a vector of its normal (perf-long-tasks-5), the same bits.
+ */
 function integrate(share: number, cOverA: number, s: Vec3, v: Vec3): number {
   const c = cOverA;
   const dTheta = Math.PI / POINT_THETA_STEPS;
-  const dPhi = (2 * Math.PI) / POINT_PHI_STEPS;
+  const dPhi = POINT_D_PHI;
+  const { cos, sin } = pointAzimuthsOf();
+  const { x: sx, y: sy, z: sz } = s;
+  const { x: vx, y: vy, z: vz } = v;
   let k = 0;
   for (let i = 0; i < POINT_THETA_STEPS; i += 1) {
     const theta = (i + 0.5) * dTheta;
     const sinT = Math.sin(theta);
     const cosT = Math.cos(theta);
+    // c sin²θ as each point formed it, (c sin θ) sin θ, before its azimuth's factor.
+    const radial = c * sinT * sinT;
+    const nz = sinT * cosT;
     for (let j = 0; j < POINT_PHI_STEPS; j += 1) {
-      const phi = (j + 0.5) * dPhi;
       // ∂r/∂θ × ∂r/∂φ, outward; its length is dS ÷ dθ dφ.
-      const n = vec3(c * sinT * sinT * Math.cos(phi), c * sinT * sinT * Math.sin(phi), sinT * cosT);
-      const area = norm(n);
-      const mu = dot(n, v) / area;
-      const mu0 = dot(n, s) / area;
+      const nx = radial * (cos[j] ?? 0);
+      const ny = radial * (sin[j] ?? 0);
+      const area = Math.hypot(nx, ny, nz);
+      const mu = (nx * vx + ny * vy + nz * vz) / area;
+      const mu0 = (nx * sx + ny * sy + nz * sz) / area;
       if (mu <= 0 || mu0 <= 0) {
         continue;
       }
