@@ -331,56 +331,64 @@ describe("the pebbles' placement", () => {
     expect(area / side ** 2).toBeLessThan(2);
   });
 
-  it("places pebbles on the ground below 0.4 m, each its patch's, culled by a body's box", () => {
-    const pebbles = place(0.2, 1);
-    expect(pebbles.length).toBeGreaterThan(100);
-    for (const p of pebbles) {
-      expect(p.diameterM).toBeLessThan(PEBBLE_LARGEST_DIAMETER_M);
-      // Drawn at its whole size, its fade in its tag above patch 0's index.
-      expect(p.radiusM).toBe(p.diameterM / 2);
-      const fadeByte = p.tag >>> PEBBLE_TAG_PATCH_BITS;
-      expect(p.tag & (2 ** PEBBLE_TAG_PATCH_BITS - 1)).toBe(0);
-      expect(fadeByte).toBeGreaterThan(0);
-      expect(fadeByte).toBe(pebbleFadeByte(pebbleFade(p.diameterM, norm(p.centreM), 1000)));
-      // On the datum, 1.5 m below the camera, to the patch's curvature (some 2 mm across it).
-      const fromCentre = { x: p.centreM.x + 1e6 + 1.5, y: p.centreM.y, z: p.centreM.z };
-      expect(Math.abs(norm(fromCentre) - 1e6)).toBeLessThan(5e-3);
-      // Its place's word holds its fractions of the patch.
-      const u = (p.colour & 0xfff) / 4095;
-      const v = ((p.colour >>> 12) & 0xfff) / 4095;
-      expect(u).toBeGreaterThanOrEqual(0);
-      expect(v).toBeLessThanOrEqual(1);
-    }
-    // The twin keeps fewer than its bound on average over the patch, at every octave together, its
-    // area its 64² quads, alike near the face's centre: some 4 % fewer, the finest octave's least
-    // diameters, which the bound takes, holding most of its pebbles.
-    const areaM2 = 64 * 64 * quadAreaM2(flatSlot().terms, [32, 32]);
-    const bound = PEBBLE_OCTAVES.reduce(
-      (sum, _, octave) =>
-        sum + expectedPebblesBound({ nearestM: 1.5, areaM2, abundance: 0.2 }, octave, 1),
-      0,
-    );
-    expect(pebbles.length).toBeLessThan(bound);
-    // A box over part of the patch takes the pebbles under it.
-    const box: ScatterBox = {
-      centreM: { x: -1.5, y: 0, z: 0 },
-      axes: [
-        { x: 0, y: 1, z: 0 },
-        { x: 0, y: 0, z: 1 },
-        { x: 1, y: 0, z: 0 },
-      ],
-      halfExtentsM: [4, 4, 0.5],
-    };
-    const culled = place(0.2, 1, [box]);
-    expect(culled.length).toBeLessThan(pebbles.length);
-    expect(culled.every((p) => Math.abs(p.centreM.y) > 4 || Math.abs(p.centreM.z) > 4)).toBe(true);
-    // The bare ground of no rocks, none; half the density, about half as many.
-    expect(place(0, 1)).toHaveLength(0);
-    const half = place(0.2, 0.5).length;
-    expect(Math.abs(half - pebbles.length / 2)).toBeLessThan(
-      4.5 * Math.sqrt(pebbles.length / 4) + 2,
-    );
-  });
+  // The placement's twin over the block's patches: 8 s on an idle pod, 21 s beside the gate's
+  // builds (pod, 48 vCPU, 2026-11-26), past the 15 s default.
+  it(
+    "places pebbles on the ground below 0.4 m, each its patch's, culled by a body's box",
+    { timeout: 60_000 },
+    () => {
+      const pebbles = place(0.2, 1);
+      expect(pebbles.length).toBeGreaterThan(100);
+      for (const p of pebbles) {
+        expect(p.diameterM).toBeLessThan(PEBBLE_LARGEST_DIAMETER_M);
+        // Drawn at its whole size, its fade in its tag above patch 0's index.
+        expect(p.radiusM).toBe(p.diameterM / 2);
+        const fadeByte = p.tag >>> PEBBLE_TAG_PATCH_BITS;
+        expect(p.tag & (2 ** PEBBLE_TAG_PATCH_BITS - 1)).toBe(0);
+        expect(fadeByte).toBeGreaterThan(0);
+        expect(fadeByte).toBe(pebbleFadeByte(pebbleFade(p.diameterM, norm(p.centreM), 1000)));
+        // On the datum, 1.5 m below the camera, to the patch's curvature (some 2 mm across it).
+        const fromCentre = { x: p.centreM.x + 1e6 + 1.5, y: p.centreM.y, z: p.centreM.z };
+        expect(Math.abs(norm(fromCentre) - 1e6)).toBeLessThan(5e-3);
+        // Its place's word holds its fractions of the patch.
+        const u = (p.colour & 0xfff) / 4095;
+        const v = ((p.colour >>> 12) & 0xfff) / 4095;
+        expect(u).toBeGreaterThanOrEqual(0);
+        expect(v).toBeLessThanOrEqual(1);
+      }
+      // The twin keeps fewer than its bound on average over the patch, at every octave together, its
+      // area its 64² quads, alike near the face's centre: some 4 % fewer, the finest octave's least
+      // diameters, which the bound takes, holding most of its pebbles.
+      const areaM2 = 64 * 64 * quadAreaM2(flatSlot().terms, [32, 32]);
+      const bound = PEBBLE_OCTAVES.reduce(
+        (sum, _, octave) =>
+          sum + expectedPebblesBound({ nearestM: 1.5, areaM2, abundance: 0.2 }, octave, 1),
+        0,
+      );
+      expect(pebbles.length).toBeLessThan(bound);
+      // A box over part of the patch takes the pebbles under it.
+      const box: ScatterBox = {
+        centreM: { x: -1.5, y: 0, z: 0 },
+        axes: [
+          { x: 0, y: 1, z: 0 },
+          { x: 0, y: 0, z: 1 },
+          { x: 1, y: 0, z: 0 },
+        ],
+        halfExtentsM: [4, 4, 0.5],
+      };
+      const culled = place(0.2, 1, [box]);
+      expect(culled.length).toBeLessThan(pebbles.length);
+      expect(culled.every((p) => Math.abs(p.centreM.y) > 4 || Math.abs(p.centreM.z) > 4)).toBe(
+        true,
+      );
+      // The bare ground of no rocks, none; half the density, about half as many.
+      expect(place(0, 1)).toHaveLength(0);
+      const half = place(0.2, 0.5).length;
+      expect(Math.abs(half - pebbles.length / 2)).toBeLessThan(
+        4.5 * Math.sqrt(pebbles.length / 4) + 2,
+      );
+    },
+  );
 
   it("compiles a kernel for each vertex path, the path's buffer at binding 7 of group 0", () => {
     expect(PEBBLE_KERNELS["face-differences"].reference).toContain(
