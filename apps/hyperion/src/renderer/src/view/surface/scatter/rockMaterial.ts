@@ -36,7 +36,7 @@ import resolveBarycentricsWgsl from "../../clusters/resolveBarycentrics.wgsl?raw
 import { VISIBLE_FIRST_UNIFORM } from "../../clusters/visibility";
 import type { StorageBufferSpec, WgslMaterialSpec } from "../../engine/types";
 import frameWgsl from "../../shaders/frame.wgsl?raw";
-import { CASCADE_DEPTH_BIAS } from "../../terrain/shadows/cascades";
+import { CASCADE_SIZE_PX, type CascadeDepthBias } from "../../terrain/shadows/cascades";
 import {
   RESOLVE_FRAME_TEXTURE,
   TERRAIN_LIT_BINDINGS,
@@ -93,6 +93,35 @@ export const ROCK_RESOLVE_MATERIAL = "rock-resolve";
 /** The casters' material name (plan R14, R14.T6.c). */
 export const ROCK_CASTER_MATERIAL = "rock-caster";
 
+/** The self-shadow probe's material name (plan R11, R11.T4.b; the smoke's casters part alone). */
+export const ROCK_PROBE_MATERIAL = "rock-probe";
+
+/** The probe's mark in alpha, which no meter class takes, so that its texels are the rocks'. */
+export const ROCK_PROBE_MARK = 1024;
+
+/**
+ * The rocks' casters' depth bias into the cascades (plan R11, R11.T4.b; r14-t6c-mesh-casters'
+ * finding): under the terrain's `CASCADE_DEPTH_BIAS` { 1, 1, 0 } the smoke's casters part found
+ * 57 of 151 of the rocks' own sun-facing texels lit at under half of their c′ with no mesh caster,
+ * so the rocks cast with a bias of their own, four to eight texels at any slope and twice the
+ * terrain's slope scale, the terrain's receiver offset unchanged (lean, 2026-11-27).
+ *
+ * @remarks
+ * One constant unit is 2⁻²⁴ to 2⁻²³ of the caster's distance from the far plane
+ * (`CASCADE_DEPTH_BIAS`' remarks): 2⁻²³ r over the sphere's half nearer the sun and 2⁻²⁴ r over
+ * the far half, for a cascade's sphere of radius r, whose texel is 2r ÷ {@link CASCADE_SIZE_PX}.
+ * So a texel is 8,192 units nearer the sun and 16,384 beyond, at any radius, and the constant,
+ * 2²⁷ ÷ {@link CASCADE_SIZE_PX}, is four texels to eight. The cause is not found: the rocks cast
+ * at their finest cut, as the casters part draws them, from the lit draw's own placement, yet a
+ * texel or two of bias leaves 28 of the 151, four to eight leave 3, and sixteen to thirty-two
+ * cast nearly no shadow. The clamp is none.
+ */
+export const ROCK_CASTER_DEPTH_BIAS: CascadeDepthBias = {
+  constant: 2 ** 27 / CASCADE_SIZE_PX,
+  slopeScale: 2,
+  clamp: 0,
+};
+
 /** The lit `Draw`'s end, which `terrainMaterial.ts`' `withClusterBase` extends. */
 const CLUSTER_BASE_END = "  clusterBase : u32,\n}";
 
@@ -140,6 +169,38 @@ export function rockLitMaterialSpec(): WgslMaterialSpec {
     ],
     cullMode: "back",
     depthWrite: true,
+  };
+}
+
+/**
+ * The rocks' self-shadow probe (plan R11, R11.T4.b; r14-t6c-mesh-casters' finding): the lit draw
+ * with its fragment's light replaced by what the smoke's casters part compares, the cascades' lit
+ * fraction c′ at the fragment's receiver (its geometric normal's offset, as the lit draw's), the
+ * sun's cosine at that normal and {@link ROCK_PROBE_MARK}, as (c′, N·L, 0, mark).
+ *
+ * @remarks
+ * Never a player's picture: only the casters part makes it, beside the frames it compares, so it
+ * is not in the catalogue, whose lit materials the engine twins (lean, 2026-11-26).
+ */
+export function rockProbeMaterialSpec(): WgslMaterialSpec {
+  const lit = rockLitMaterialSpec();
+  const source = once(
+    "the rocks' probe",
+    lit.fragmentWgsl,
+    "  return rock_fragment(in, geometric);",
+    [
+      "  let rotation = mat3x3f(draw.bodyRotation[0].xyz, draw.bodyRotation[1].xyz, draw.bodyRotation[2].xyz);",
+      "  let sun = normalize(terrain_row(FIRST_TERRAIN_LIGHT_ROW).xyz);",
+      "  let lit = cascade_lit_fraction(rotation * in.fromCameraBf, rotation * geometric, rotation * sun);",
+      `  return vec4f(lit, dot(geometric, sun), 0.0, ${ROCK_PROBE_MARK.toFixed(1)});`,
+    ].join("\n"),
+  );
+  return {
+    ...lit,
+    name: ROCK_PROBE_MATERIAL,
+    displayName: "ROCK PROBE",
+    vertexWgsl: source,
+    fragmentWgsl: source,
   };
 }
 
@@ -310,9 +371,9 @@ export function rockCasterMaterialSpec(unclippedDepth: boolean): WgslMaterialSpe
       { name: "rockInstances", binding: ROCK_BINDINGS.rockInstances, stages: vertex },
     ],
     depthBiasAway: {
-      constant: CASCADE_DEPTH_BIAS.constant,
-      slopeScale: CASCADE_DEPTH_BIAS.slopeScale,
-      clamp: CASCADE_DEPTH_BIAS.clamp,
+      constant: ROCK_CASTER_DEPTH_BIAS.constant,
+      slopeScale: ROCK_CASTER_DEPTH_BIAS.slopeScale,
+      clamp: ROCK_CASTER_DEPTH_BIAS.clamp,
     },
     unclippedDepth,
   };

@@ -54,7 +54,7 @@ import { viewId } from "../view/camera/state";
 import { IDENTITY_ROTATION } from "../view/coords/rotation";
 import { BUFFER_USAGE } from "../view/engine/gpuFlags";
 import type { KernelPair } from "../view/engine/kernels";
-import type { DrawItem, RenderEngine, TextureHandle } from "../view/engine/types";
+import type { DrawItem, MaterialHandle, RenderEngine, TextureHandle } from "../view/engine/types";
 import { annulusEdges } from "../view/lighting/annuli";
 import type { ClusterPassStats } from "../view/clusters/stats";
 import { withVisibilityIds } from "../view/clusters/resolve";
@@ -95,6 +95,11 @@ import { HeightWorkerPool, type HeightWorkerLane } from "../view/terrain/workers
 import type { GroundContact } from "../view/terrain/grounded";
 import { InThreadRockPageBuilder } from "../view/clusters/meshPageProducer";
 import { ROCK_CASCADE_PASS } from "../view/surface/scatter/rockDraw";
+import {
+  ROCK_LIT_MATERIAL,
+  ROCK_PROBE_MARK,
+  rockProbeMaterialSpec,
+} from "../view/surface/scatter/rockMaterial";
 import { rockLayerFrom, rocksAbout } from "../test/rockFixtures";
 import { moonLikeFixture } from "../test/moonLikeFixture";
 import type { CapturedImage } from "./atmosphere";
@@ -1732,6 +1737,112 @@ function rockCasterTriangles(stats: ReadonlyArray<ClusterPassStats> | null): num
   return [0, 1, 2, 3].map((k) => stats?.[ROCK_CASCADE_PASS + k]?.triangles ?? 0);
 }
 
+/** Whether `draw` is a rock's lit draw in a camera's frame. */
+function isRockLit(draw: DrawItem): boolean {
+  return draw.material.name.startsWith(ROCK_LIT_MATERIAL);
+}
+
+/**
+ * The rocks' probe frames' size: the comparison's aspect at three times its side, so that a rock
+ * some pixels wide in the comparison is mostly interior texels, whose geometric normal its own
+ * facet's derivatives give, not a silhouette's (plan R11, R11.T4.b).
+ */
+const ROCK_PROBE_FRAME = { widthPx: 3 * COMPARISON.widthPx, heightPx: 3 * COMPARISON.heightPx };
+
+/**
+ * `draws` drawn from `view` into a probe frame ({@link ROCK_PROBE_FRAME}) with each rock's lit draw
+ * by the rocks' self-shadow probe `probe` (`rockProbeMaterialSpec`; plan R11, R11.T4.b): each rock
+ * texel (c′, N·L, 0, {@link ROCK_PROBE_MARK}), every other texel its own light.
+ */
+async function rockProbeTexels(
+  engine: RenderEngine,
+  name: string,
+  view: TerrainView,
+  draws: ReadonlyArray<DrawItem>,
+  probe: MaterialHandle,
+): Promise<Float32Array> {
+  const probed = draws.map((draw) => (isRockLit(draw) ? { ...draw, material: probe } : draw));
+  return texelsOf(engine, name, view, probed, ROCK_PROBE_FRAME);
+}
+
+/**
+ * The share of the rocks' sun-facing texels their own casts may darken by more than half (plan
+ * R11, R11.T4.b), pinned as it stands: 5 × 10⁻², against the 2.0 × 10⁻² and 1.3 × 10⁻² the
+ * casters part measured on the two variants under `ROCK_CASTER_DEPTH_BIAS` (3 and 2 of 151;
+ * SwiftShader, 2026-11-27), a finding against R14.T6.b's {@link ACNE_SHARE_TOLERANCE}, its target.
+ */
+const ROCK_SELF_SHADOW_PINNED_SHARE = 5e-2;
+
+/** The cosine above which a rock texel faces the sun, at its geometric normal (plan R11, R11.T4.b). */
+const SUN_FACING_COSINE = 0.5;
+
+/** The rocks' own sun-facing texels against their own casts (plan R11, R11.T4.b). */
+interface RockSelfShadow {
+  /** The texels both probe frames draw as a rock's. */
+  readonly rock: number;
+  /** Those facing the sun, N·L above {@link SUN_FACING_COSINE} at their geometric normal. */
+  readonly sunFacing: number;
+  /** Those of them whose c′ the rocks' casts lower by more than {@link NEVER_BRIGHTER}, relative. */
+  readonly darker: number;
+  /** Those of them whose c′ the rocks' casts lower by more than half. */
+  readonly halved: number;
+  /** Their mean c′ with the rocks cast and with no mesh caster. */
+  readonly litMeanCast: number;
+  readonly litMeanNone: number;
+  /** The first halved texels, (x, y) in the probe frame, with their N·L and c′ cast, for the log. */
+  readonly halvedAt: ReadonlyArray<readonly [number, number, number, number]>;
+}
+
+/**
+ * The rocks' self-shadow (plan R11, R11.T4.b; r14-t6c-mesh-casters' finding): each sun-facing rock
+ * texel's c′ in the probe frame with the rocks cast, `cast`, against the same frame with no mesh
+ * caster, `none`.
+ */
+function rockSelfShadow(cast: Float32Array, none: Float32Array): RockSelfShadow {
+  let rock = 0;
+  let sunFacing = 0;
+  let darker = 0;
+  let halved = 0;
+  let litCast = 0;
+  let litNone = 0;
+  const halvedAt: Array<readonly [number, number, number, number]> = [];
+  for (let p = 0; p < Math.floor(none.length / 4); p += 1) {
+    if (cast[4 * p + 3] !== ROCK_PROBE_MARK || none[4 * p + 3] !== ROCK_PROBE_MARK) {
+      continue;
+    }
+    rock += 1;
+    if (!((none[4 * p + 1] ?? 0) > SUN_FACING_COSINE)) {
+      continue;
+    }
+    sunFacing += 1;
+    const withCasts = cast[4 * p] ?? Number.NaN;
+    const without = none[4 * p] ?? Number.NaN;
+    litCast += withCasts;
+    litNone += without;
+    darker += withCasts < without * (1 - NEVER_BRIGHTER) ? 1 : 0;
+    if (withCasts < without / 2) {
+      halved += 1;
+      if (halvedAt.length < 12) {
+        halvedAt.push([
+          p % ROCK_PROBE_FRAME.widthPx,
+          Math.floor(p / ROCK_PROBE_FRAME.widthPx),
+          none[4 * p + 1] ?? Number.NaN,
+          withCasts,
+        ]);
+      }
+    }
+  }
+  return {
+    rock,
+    sunFacing,
+    darker,
+    halved,
+    litMeanCast: litCast / Math.max(1, sunFacing),
+    litMeanNone: litNone / Math.max(1, sunFacing),
+    halvedAt,
+  };
+}
+
 /**
  * Plan R14, R14.T6.c's acceptance on the run's adapter (`R14.T6.c the rocks' casters on the
  * cluster cull`), in a named part of its own (`--part=casters`): the rocks cast into the high
@@ -1751,6 +1862,11 @@ function rockCasterTriangles(stats: ReadonlyArray<ClusterPassStats> | null): num
  *   terrain's casters, and their counters count their clusters in the nearest;
  * - their shadows darken some of the ground and brighten no texel against the same frame with no
  *   mesh caster, and move the nearest layer;
+ * - their own sun-facing texels (N·L above {@link SUN_FACING_COSINE} at their geometric normal),
+ *   drawn by the rocks' self-shadow probe, are darkened by more than half by the rocks' casts in no
+ *   larger a share than {@link ROCK_SELF_SHADOW_PINNED_SHARE}, pinned short of R14.T6.b's
+ *   {@link ACNE_SHARE_TOLERANCE} (plan R11, R11.T4.b: their acne under the terrain's receiver
+ *   offset and their own caster bias, `ROCK_CASTER_DEPTH_BIAS`);
  * - with them cast, a still camera's next frame with time paused renders none of the four
  *   cascades, its frame and layers the frame before's, byte for byte (R14.T6.a);
  * - the way back (`GEOMETRY_BEFORE_R14`) casts no rock and draws none, as before plan R14;
@@ -1780,6 +1896,7 @@ export async function checkMeshCasters(engine: RenderEngine, checks: Checks): Pr
   const shadows = new TerrainShadows(engine, { cascades: true });
   const lowShadows = new TerrainShadows(engine, { cascades: false });
   const made: TerrainPass[] = [];
+  const madeMaterials: MaterialHandle[] = [];
   try {
     field.blocks.forEach((block, n) => {
       if (n === 0) {
@@ -1915,6 +2032,18 @@ export async function checkMeshCasters(engine: RenderEngine, checks: Checks): Pr
     pass.measureClusters(true);
     const cast = pass.drawFor(passView.id, frameInput(view, light, true, performance.now()));
     const castTexels = await texelsOf(engine, "casters: rocks cast", view, cast.draws, COMPARISON);
+    // The rocks' self-shadow probe, compiled for their draws' mesh, drawn over the maps as cast.
+    const rockMeshes = [...new Set(cast.draws.filter(isRockLit).map((draw) => draw.mesh))];
+    const probe = await engine
+      .createMaterialAsync(rockProbeMaterialSpec(), ["rgba16float"], rockMeshes)
+      .catch((error: unknown) => (error instanceof Error ? error.message : String(error)));
+    if (typeof probe !== "string") {
+      madeMaterials.push(probe);
+    }
+    const castProbe =
+      typeof probe === "string"
+        ? null
+        : await rockProbeTexels(engine, "casters: rocks' probe, cast", view, cast.draws, probe);
     const target = shadows.target;
     const layerCount = target?.layers ?? 0;
     const layersCast =
@@ -1977,6 +2106,10 @@ export async function checkMeshCasters(engine: RenderEngine, checks: Checks): Pr
       none.draws,
       COMPARISON,
     );
+    const noneProbe =
+      typeof probe === "string"
+        ? null
+        : await rockProbeTexels(engine, "casters: rocks' probe, none", view, none.draws, probe);
     const layersNone =
       target === null
         ? ["none"]
@@ -1995,6 +2128,19 @@ export async function checkMeshCasters(engine: RenderEngine, checks: Checks): Pr
         seen.brighter <= NEVER_BRIGHTER &&
         layersNone[0] !== layersCast[0],
       `${path}; finite ${String(finite)}; terrain ${String(seen.terrain)} texels, ${String(seen.darker)} darker with the rocks cast, ${String(seen.halved)} of them by more than half, the most brighter ${seen.brighter.toExponential(2)} (at most ${String(NEVER_BRIGHTER)}); caster triangles by cascade, the terrain's ${terrainNone.join(", ")} without the rocks' casts, ${terrainCast.join(", ")} and the rocks' ${rocksCast.join(", ")} with them; digests ${bytesDigest(castTexels)} cast, ${bytesDigest(noneTexels)} none; layers ${layersCast.join(", ")} cast, ${layersNone.join(", ")} none`,
+    );
+    // Plan R11, R11.T4.b: the rocks' own acne under their casts, a check and not a fix.
+    const self =
+      castProbe === null || noneProbe === null ? null : rockSelfShadow(castProbe, noneProbe);
+    checks.check(
+      "R11.T4.b the rocks' own sun-facing texels (N·L > 0.5 at their geometric normal) are darkened by more than half by the rocks' casts in no more than the pinned 5 × 10⁻² of them (ACNE_SHARE_TOLERANCE's 2.5 × 10⁻⁴ the target), under the terrain's receiver offset and the rocks' own caster bias",
+      self !== null &&
+        self.sunFacing > 0 &&
+        self.halved / self.sunFacing <= ROCK_SELF_SHADOW_PINNED_SHARE &&
+        self.litMeanCast <= self.litMeanNone,
+      self === null
+        ? `${path}; the probe was not made: ${typeof probe === "string" ? probe : "no frame"}`
+        : `${path}; ${String(cast.draws.filter(isRockLit).length)} rock draws; ${String(self.rock)} rock texels, ${String(self.sunFacing)} sun-facing; ${String(self.darker)} of those darker with the rocks cast, ${String(self.halved)} by more than half (share ${(self.halved / Math.max(1, self.sunFacing)).toExponential(2)} against the pinned ${String(ROCK_SELF_SHADOW_PINNED_SHARE)}, the target ${String(ACNE_SHARE_TOLERANCE)})${self.halvedAt.length > 0 ? ` at ${self.halvedAt.map(([x, y, nl, c]) => `(${String(x)}, ${String(y)}: N·L ${nl.toFixed(2)}, c′ ${c.toFixed(2)})`).join(" ")}` : ""}; their mean c′ ${self.litMeanCast.toFixed(6)} cast, ${self.litMeanNone.toFixed(6)} none`,
     );
     // The way back: as before plan R14, no rock drawn or cast.
     pass.setGeometry(GEOMETRY_BEFORE_R14);
@@ -2033,6 +2179,9 @@ export async function checkMeshCasters(engine: RenderEngine, checks: Checks): Pr
   } finally {
     for (const each of made) {
       each.dispose();
+    }
+    for (const material of madeMaterials) {
+      engine.releaseMaterial(material);
     }
     shadows.dispose();
     lowShadows.dispose();

@@ -19,6 +19,7 @@ import { describe, expect, it } from "vitest";
 import { type CompositeProbe, compositeProbedMaterial } from "../atmosphere/hillaire";
 import { type CatalogueEntry, WGSL_CATALOGUE } from "./catalogue";
 import { CLUSTER_OVER_KERNEL } from "../clusters/overCount";
+import { rockProbeMaterialSpec } from "../surface/scatter/rockMaterial";
 import { TERRAIN_CLUSTER_ID_PRIMITIVE_MATERIALS } from "../terrain/terrainMaterial";
 import type { ProbedTargetFormat } from "./status";
 import type { WgslMaterialSpec } from "./types";
@@ -92,7 +93,8 @@ const COMPOSITE_PROBES: ReadonlyArray<CompositeProbe> = [
  * Every module the engine can compile, each source once: the catalogue's, and those the engine makes
  * outside it (the post-processes' full-screen stage, the mips' downsampling, the rounding probe's
  * passes, the ID raster's `primitive_index` forms, which SwiftShader cannot compile, the clusters'
- * over-count copy, and the composite's probes, an inspection profile's).
+ * over-count copy, the composite's probes, an inspection profile's, and the rocks' self-shadow
+ * probe, the smoke's casters part's).
  */
 const MODULES: ReadonlyArray<ShippedModule> = [
   ...WGSL_CATALOGUE.flatMap(entryModules),
@@ -107,6 +109,7 @@ const MODULES: ReadonlyArray<ShippedModule> = [
     name: `atmosphere composite, probe ${probe}`,
     wgsl: compositeProbedMaterial(probe).fragmentWgsl,
   })),
+  ...materialModules(rockProbeMaterialSpec()),
 ].filter(({ wgsl }, index, all) => all.findIndex((other) => other.wgsl === wgsl) === index);
 
 /** Every `.wgsl` file under `view/`, by its path from here. */
