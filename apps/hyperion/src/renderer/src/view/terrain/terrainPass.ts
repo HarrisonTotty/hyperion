@@ -1295,6 +1295,13 @@ interface Gate {
   readonly settled: () => void;
 }
 
+/** The rocks' could-touch region as the pass holds it for a step: its contacts and cache. */
+interface HeldRockRegion {
+  readonly grounded: ReadonlyArray<GroundContact>;
+  readonly cache: PatchCache;
+  readonly region: RockPoolRegion;
+}
+
 /** The state made per device: resources, cache and pool. */
 interface Device {
   readonly resources: TerrainResources;
@@ -2461,11 +2468,7 @@ export class TerrainPass {
   /** The last step's grounded and descending bodies, whose region's rocks are drawn whole. */
   #grounded: ReadonlyArray<GroundContact> = [];
   /** The rocks' could-touch region of {@link TerrainPass.#grounded} on a device's cache, made once a step. */
-  #rockRegionOf: {
-    readonly grounded: ReadonlyArray<GroundContact>;
-    readonly cache: PatchCache;
-    readonly region: RockPoolRegion;
-  } | null = null;
+  #rockRegionOf: HeldRockRegion | null = null;
   /** The planet as selection reads it: its figure and the field's level table, which grows. */
   #planet: PlanetGeometry;
   #rangesVersion = 0;

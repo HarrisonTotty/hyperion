@@ -125,6 +125,8 @@ import {
   ROCK_INSTANCE_BYTES,
 } from "../surface/scatter/rockDraw";
 import { type RockLayer, rocksOf } from "../surface/scatter/rockLayer";
+import { RockMeshes } from "../surface/scatter/rockMeshes";
+import { couldTouch } from "../surface/scatter/rockSelection";
 import { rockLayerFrom, rocksAbout } from "../../test/rockFixtures";
 import { type PlanetGeometry, planetGeometry, spheroidNormal, surfacePoint } from "./planet";
 import type { GroundContact } from "./grounded";
@@ -4680,6 +4682,23 @@ describe("the authoritative rocks in the lit pass (plan R11, R11.T4.b; plan R14,
     expect([away.draws.filter(isRock).length, away.rocks?.rocks ?? 0]).toEqual([0, 0]);
     expect(near.draws.filter(isRock).length).toBe(2);
     expect(near.rocks?.rocks ?? 0).toBeGreaterThan(0);
+  });
+
+  it("hands its rocks' pool the could-touch region of its grounded bodies, each resident patch's sphere the patch cache's (R11.T4.b)", async () => {
+    const sync = vi.spyOn(RockMeshes.prototype, "sync");
+    const craft: GroundContact = { positionM: ground, radiusM: 20 };
+    const made = await rockyPass("low", [craft]);
+    made.pass.drawFor(PRIMARY, frameOf(LOW_VIEW, true));
+    const region = sync.mock.calls.at(-1)?.[1];
+    const drawSet = made.pass.lastStep?.drawSet;
+    const drawn = (drawSet?.patches ?? [])
+      .slice(0, drawSet?.count ?? 0)
+      .filter(({ keyString }) => (made.pass.rocks.get(keyString)?.layer.count ?? 0) > 0);
+    expect(drawn.length).toBeGreaterThan(0);
+    expect(region?.discs).toEqual([couldTouch({ groundPointM: ground, radiusM: 20 })]);
+    expect(drawn.map(({ keyString }) => region?.sphereOf(keyString))).toEqual(
+      drawn.map(({ patch }) => ({ centreM: patch.originM, radiusM: patch.boundingRadiusM })),
+    );
   });
 
   it("makes its rocks again after a restore, their pool, forms and kernel new, its first frame's rock draws a fresh pass's (Design note 16)", async () => {

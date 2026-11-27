@@ -973,6 +973,42 @@ export function sceneSweeps(
   return swept;
 }
 
+/** The ground a body's pass lays the rocks' sweep on ({@link sceneSweepContacts}). */
+export interface SweepGround {
+  readonly figure: Pick<BodyFigure, "equatorialRadiusM" | "polarRadiusM">;
+  /** The ground under a body-fixed point, as {@link sceneContacts} takes it. */
+  readonly ground: GroundUnderFunction;
+  /** The finest patch's edge on the body, metres (`finestPatchSizeM`). */
+  readonly patchSizeM: number;
+  /** The pass's selection budget, patches (`TerrainPass.maxPatches`). */
+  readonly maxPatches: number;
+}
+
+/**
+ * The rocks' sweep over `body` as its pass's contacts beside the craft's own (plan R11, T4.d): the
+ * chain `couldTouchContacts` lays over R05's `FORCED_REGION_RESIDENCY_S` along
+ * {@link sceneSweeps}' paths, widened by `pull`'s gravity and, in the body's turning frame, its
+ * spin, its forced patches held to half the budget's.
+ */
+export function sceneSweepContacts(
+  scene: ViewScene,
+  body: ViewBody,
+  on: SweepGround,
+  pull: SweepPull,
+): GroundContact[] {
+  return couldTouchContacts(
+    sceneSweeps(scene, body, on.ground, pull.gravityMps2),
+    FORCED_REGION_RESIDENCY_S,
+    {
+      figure: on.figure,
+      ground: on.ground,
+      patchSizeM: on.patchSizeM,
+      maxForcedPatches: Math.floor(on.maxPatches / 2),
+      ...(pull.spinRadPerS === null ? {} : { spinRadPerS: pull.spinRadPerS }),
+    },
+  );
+}
+
 /**
  * The scene's craft over `body` whose boxes come within 0.2 m of the ground (plan R11, R11.T6.a;
  * Design note 7), body-fixed, against which the body's decorative scatter is culled
@@ -2442,19 +2478,12 @@ export class TerrainSession {
       const ground = heldGroundUnder(pass.planet.figure, pass.heights);
       const patchSizeM = finestPatchSizeM(pass.planet);
       const own = sceneContacts(seen.scene, seen.body, ground, patchSizeM);
-      // The rocks' sweep beside them (R11.T4.d), widened by the record's gravity and spin, its
-      // forced patches held to half the budget's.
-      const pull = this.sweepPull(body);
-      const swept = couldTouchContacts(
-        sceneSweeps(seen.scene, seen.body, ground, pull.gravityMps2),
-        FORCED_REGION_RESIDENCY_S,
-        {
-          figure: pass.planet.figure,
-          ground,
-          patchSizeM,
-          maxForcedPatches: Math.floor(pass.maxPatches / 2),
-          ...(pull.spinRadPerS === null ? {} : { spinRadPerS: pull.spinRadPerS }),
-        },
+      // The rocks' sweep beside them (R11.T4.d), widened by the record's gravity and spin.
+      const swept = sceneSweepContacts(
+        seen.scene,
+        seen.body,
+        { figure: pass.planet.figure, ground, patchSizeM, maxPatches: pass.maxPatches },
+        this.sweepPull(body),
       );
       grounded = [...own, ...swept].slice(0, MAX_CONTACTS);
       // The decorative scatter's culling bodies, those at the ground (R11.T6.a), beside them.

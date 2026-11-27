@@ -19,9 +19,16 @@
  *   outside the region, farthest from the region first, and is admitted; it is refused only where
  *   the region's own meshes leave no room. A mesh outside the region is refused while a refused
  *   region patch waits on the room it would take. The rest of the pool is first come.
- * - **A refused patch is retried** (its mesh built again) once room frees, a mesh let go with its
- *   patch, or once the region comes to hold it, where its pool then has the room it needed; never
- *   twice for one freeing.
+ * - **A refused patch is retried** (its mesh built again) once the room it could take has grown
+ *   past what it was when it was refused or last retried, and fits it: the free root slots, with,
+ *   for a region patch, those of the meshes outside the region, or, for any other, the free ones
+ *   less what the region's refused patches wait on. So room frees as a mesh is let go with its
+ *   patch, as the region moves off held meshes or comes to hold the patch, or as a wait lifts; the
+ *   retries of one sync share the room between them, and none is asked twice of the same room.
+ * - **Not provided against**: a region mesh of pages spanning several root slots may find the
+ *   slots it needs free but in no run (`GeometryPagePool`'s roots are whole runs), and is refused
+ *   after its evictions; a region whose edge sweeps back and forth over a full pool rebuilds the
+ *   patches it crosses each time.
  * - **Builds**: {@link RockMeshes.sync} asks a build for each resident layer it holds no mesh of,
  *   or holds an older bake's, and removes each mesh whose patch has left; a build that lands after
  *   its layer left or was rebaked is dropped. Nothing new is asked while the resident layers'
@@ -69,15 +76,25 @@ export interface RockPoolRegion {
 export const NO_ROCK_REGION: RockPoolRegion = { discs: [], sphereOf: () => undefined };
 
 /** A patch whose mesh the pool refused, as its retry reads it. */
-interface Refusal {
-  /** The bake's generation refused. */
-  readonly generation: number;
-  /** The root slots its mesh needs, `Infinity` for a file that could not be read. */
-  readonly slots: number;
-  /** The pool's freeings ({@link RockMeshes}' `#freed`) when it was refused. */
-  readonly freed: number;
-  /** Whether it was the region's when it was refused. */
-  readonly region: boolean;
+type Refusal =
+  /** A mesh file that could not be read, which no retry would hold. */
+  | { readonly kind: "unreadable"; readonly generation: number }
+  /** A mesh the pool had no room for, or one evicted for the region. */
+  | {
+      readonly kind: "room";
+      /** The bake's generation refused. */
+      readonly generation: number;
+      /** The root slots its mesh needs, its pages' spans. */
+      readonly slots: number;
+      /** The room it could take when it was refused or last retried, root slots. */
+      readonly roomSlots: number;
+    };
+
+/** What the pool's retries last read, which a sync reads again only once one has changed. */
+interface RetryState {
+  readonly region: RockPoolRegion;
+  readonly revision: number;
+  readonly refusals: number;
 }
 
 /** A resident patch's rock mesh in the pool. */
@@ -111,16 +128,11 @@ export class RockMeshes {
   readonly #refusedKeys = new Map<string, Refusal>();
   /** Each held mesh's root slots, its pages' spans. */
   readonly #slots = new Map<string, number>();
-  /** How many times room freed: a mesh let go with its patch, not one evicted for the region. */
-  #freed = 0;
+  /** Rises as a refusal is made or let go. */
+  #refusals = 0;
   /** The region the last sync was handed. */
   #region: RockPoolRegion = NO_ROCK_REGION;
-  /** The region, freeings and refusals its retries last read, which a sync reads again only once changed. */
-  #retried: {
-    readonly region: RockPoolRegion;
-    readonly freed: number;
-    readonly refused: number;
-  } | null = null;
+  #retried: RetryState | null = null;
   #disposed = false;
 
   /**
@@ -193,12 +205,12 @@ export class RockMeshes {
       for (const [keyString, refusal] of this.#refusedKeys) {
         if (rocks.get(keyString)?.generation !== refusal.generation) {
           this.#refusedKeys.delete(keyString);
+          this.#refusals += 1;
         }
       }
       for (const [keyString, held] of this.#meshes) {
         if (rocks.get(keyString)?.generation !== held.generation) {
           this.#let(keyString, held.mesh);
-          this.#freed += 1;
         }
       }
       for (const resident of rocks.values()) {
@@ -219,47 +231,50 @@ export class RockMeshes {
   }
 
   /**
-   * Asks a build again of each refused patch whose room has freed, or which the region has come to
-   * hold, since its refusal, where the pool now has the root slots it needs: the free ones, with,
-   * for a region patch, those of the meshes outside the region, or, for any other, the free ones
-   * less what the region's refused patches wait on.
+   * Asks a build again of each refused patch whose room has grown since it was refused or last
+   * retried, where it fits (see the module's remarks): the retries of one sync take from the same
+   * room in turn, a region patch's from the free slots first and then from those outside the
+   * region.
    */
   #retry(rocks: ResidentRocksView): void {
     const read = this.#retried;
     if (
       this.#refusedKeys.size === 0 ||
       (read?.region === this.#region &&
-        read.freed === this.#freed &&
-        read.refused === this.#refused)
+        read.revision === this.#revision &&
+        read.refusals === this.#refusals)
     ) {
       return;
     }
-    this.#retried = { region: this.#region, freed: this.#freed, refused: this.#refused };
-    const due: Array<readonly [string, Refusal, boolean]> = [];
+    this.#retried = { region: this.#region, revision: this.#revision, refusals: this.#refusals };
+    const free = this.#freeSlots();
+    const outside = this.#outsideSlots();
+    const waiting = this.#regionWaiting(null);
+    let freeLeft = free;
+    let outsideLeft = outside;
     for (const [keyString, refusal] of this.#refusedKeys) {
-      if (this.#building.has(keyString)) {
+      if (refusal.kind === "unreadable" || this.#building.has(keyString)) {
+        continue;
+      }
+      const resident = rocks.get(keyString);
+      if (resident?.generation !== refusal.generation) {
         continue;
       }
       const region = this.#inRegion(keyString);
-      if (this.#freed > refusal.freed || (region && !refusal.region)) {
-        due.push([keyString, refusal, region]);
+      const roomSlots = region ? free + outside : free - waiting;
+      if (!(roomSlots > refusal.roomSlots)) {
+        continue;
       }
-    }
-    if (due.length === 0) {
-      return;
-    }
-    const free = this.#freeSlots();
-    const waiting = this.#regionWaiting(null);
-    let outside = 0;
-    for (const keyString of this.#meshes.keys()) {
-      outside += this.#inRegion(keyString) ? 0 : (this.#slots.get(keyString) ?? 0);
-    }
-    for (const [keyString, refusal, region] of due) {
-      const resident = rocks.get(keyString);
-      const room = region ? free + outside : free - waiting;
-      if (resident?.generation === refusal.generation && refusal.slots <= room) {
-        this.#ask(keyString, resident, rocks);
+      // The room it has now is the room it was asked again of, or found too small.
+      this.#refusedKeys.set(keyString, { ...refusal, roomSlots });
+      const left = region ? freeLeft + outsideLeft : freeLeft - waiting;
+      if (refusal.slots > left) {
+        continue;
       }
+      this.#ask(keyString, resident, rocks);
+      const fromFree = Math.min(freeLeft, refusal.slots);
+      freeLeft -= fromFree;
+      outsideLeft -= refusal.slots - fromFree;
     }
   }
 
@@ -324,7 +339,7 @@ export class RockMeshes {
   ): void {
     const index = readMeshIndex(built.file);
     if (index.kind !== "read") {
-      this.#refuse(keyString, built.generation, Infinity);
+      this.#refuseUnreadable(keyString, built.generation);
       return;
     }
     const pages: MeshPage[] = [];
@@ -335,7 +350,7 @@ export class RockMeshes {
         p,
       );
       if (page.kind !== "read") {
-        this.#refuse(keyString, built.generation, Infinity);
+        this.#refuseUnreadable(keyString, built.generation);
         return;
       }
       pages.push(page.value);
@@ -345,7 +360,12 @@ export class RockMeshes {
       0,
     );
     const region = this.#inRegion(keyString);
-    if (!region && this.#freeSlots() - slots < this.#regionWaiting(keyString)) {
+    // No eviction where the meshes outside the region could not make the room.
+    if (
+      region
+        ? this.#freeSlots() + this.#outsideSlots() < slots
+        : this.#freeSlots() - slots < this.#regionWaiting(keyString)
+    ) {
       this.#refuse(keyString, built.generation, slots);
       return;
     }
@@ -364,7 +384,9 @@ export class RockMeshes {
         const { file: _file, ...held } = built;
         this.#meshes.set(keyString, { ...held, mesh });
         this.#slots.set(keyString, slots);
-        this.#refusedKeys.delete(keyString);
+        if (this.#refusedKeys.delete(keyString)) {
+          this.#refusals += 1;
+        }
         this.#revision += 1;
         return;
       }
@@ -376,7 +398,10 @@ export class RockMeshes {
   }
 
   /** Stores `pages` of a mesh of `index` whole, or none of them: its handle, or `null`. */
-  #tryHold(index: Parameters<GeometryPagePool["addMesh"]>[0], pages: MeshPage[]): number | null {
+  #tryHold(
+    index: Parameters<GeometryPagePool["addMesh"]>[0],
+    pages: ReadonlyArray<MeshPage>,
+  ): number | null {
     const mesh = this.pool.addMesh(index);
     for (const page of pages) {
       if (this.pool.insert(mesh, page).kind !== "stored") {
@@ -410,14 +435,16 @@ export class RockMeshes {
     if (victim === null) {
       return false;
     }
-    const slots = this.#slots.get(victim.keyString) ?? Infinity;
+    const slots = this.#slots.get(victim.keyString) ?? 0;
     this.#let(victim.keyString, victim.held.mesh);
+    // Retried once any room it fits is free of the region's wants.
     this.#refusedKeys.set(victim.keyString, {
+      kind: "room",
       generation: victim.held.generation,
       slots,
-      freed: this.#freed,
-      region: false,
+      roomSlots: 0,
     });
+    this.#refusals += 1;
     return true;
   }
 
@@ -429,15 +456,21 @@ export class RockMeshes {
     this.#revision += 1;
   }
 
-  /** Refuses `keyString`'s mesh of `generation`, of `slots` root slots. */
+  /** Refuses `keyString`'s mesh of `generation`, of `slots` root slots, against the room it had. */
   #refuse(keyString: string, generation: number, slots: number): void {
     this.#refused += 1;
-    this.#refusedKeys.set(keyString, {
-      generation,
-      slots,
-      freed: this.#freed,
-      region: this.#inRegion(keyString),
-    });
+    this.#refusals += 1;
+    const roomSlots = this.#inRegion(keyString)
+      ? this.#freeSlots() + this.#outsideSlots()
+      : this.#freeSlots() - this.#regionWaiting(keyString);
+    this.#refusedKeys.set(keyString, { kind: "room", generation, slots, roomSlots });
+  }
+
+  /** Refuses `keyString`'s mesh of `generation`, its file unreadable. */
+  #refuseUnreadable(keyString: string, generation: number): void {
+    this.#refused += 1;
+    this.#refusals += 1;
+    this.#refusedKeys.set(keyString, { kind: "unreadable", generation });
   }
 
   /** Whether resident patch `keyString` is the last sync's region's (see the module's remarks). */
@@ -471,11 +504,20 @@ export class RockMeshes {
     return this.pool.layout.rootSlots - this.pool.pressure().rootSlotsUsed;
   }
 
+  /** The root slots held by the meshes outside the region, which a region mesh may evict. */
+  #outsideSlots(): number {
+    let outside = 0;
+    for (const keyString of this.#meshes.keys()) {
+      outside += this.#inRegion(keyString) ? 0 : (this.#slots.get(keyString) ?? 0);
+    }
+    return outside;
+  }
+
   /** The root slots the region's refused patches wait on, `except`'s left out. */
   #regionWaiting(except: string | null): number {
     let waiting = 0;
     for (const [keyString, refusal] of this.#refusedKeys) {
-      if (keyString !== except && Number.isFinite(refusal.slots) && this.#inRegion(keyString)) {
+      if (keyString !== except && refusal.kind === "room" && this.#inRegion(keyString)) {
         waiting += refusal.slots;
       }
     }

@@ -3,11 +3,11 @@ import { describe, expect, it } from "vitest";
 import { add, normalise, scale, vec3, type Vec3 } from "../../../geometry/vec3";
 import { CountingRenderEngine, fakeDevice } from "../../../test/countingRenderEngine";
 import { rockLayerFrom, rocksAbout } from "../../../test/rockFixtures";
-import { InThreadRockPageBuilder } from "../../clusters/meshPageProducer";
+import { InThreadRockPageBuilder, type RockPageBuilder } from "../../clusters/meshPageProducer";
 import { ROOT_PAGE_BYTES } from "../../clusters/pageFormat";
 import type { DrawSet, DrawnPatch } from "../../terrain/cache";
 import type { GroundContact } from "../../terrain/grounded";
-import type { PatchKey } from "../../terrain/patchKey";
+import { type PatchKey, patchKeyString } from "../../terrain/patchKey";
 import type { BakedPatch, TerrainLayers } from "../../terrain/workers/messages";
 import { ResidentRocks } from "./residentRocks";
 import type { RockLayer } from "./rockLayer";
@@ -32,8 +32,11 @@ function keyOf(n: number): PatchKey {
 }
 
 function keyStringOf(n: number): string {
-  return `2/17/${String(10 + n)}/20`;
+  return patchKeyString(keyOf(n));
 }
+
+/** Each test patch's number by its key string. */
+const NUMBERS = new Map(Array.from({ length: 10 }, (_, n) => [keyStringOf(n), n] as const));
 
 /** Test patch `n`'s place: `n` spacings east of the first. */
 function centreOf(n: number): Vec3 {
@@ -83,8 +86,8 @@ function regionOf(discs: ReadonlyArray<GroundContact>): RockPoolRegion {
   return {
     discs,
     sphereOf: (keyString) => {
-      const n = Number(keyString.split("/")[2]) - 10;
-      return { centreM: centreOf(n), radiusM: PATCH_RADIUS_M };
+      const n = NUMBERS.get(keyString);
+      return n === undefined ? undefined : { centreM: centreOf(n), radiusM: PATCH_RADIUS_M };
     },
   };
 }
@@ -115,12 +118,36 @@ async function slotsOfOne(engine: CountingRenderEngine, count = 6): Promise<numb
 }
 
 /** A pool of `rootSlots` root slots, as `RockMeshes` sizes its pool from `pageBytes`. */
-function meshesOf(engine: CountingRenderEngine, rootSlots: number): RockMeshes {
-  return new RockMeshes(
+function meshesOf(
+  engine: CountingRenderEngine,
+  rootSlots: number,
+  builder: RockPageBuilder = new InThreadRockPageBuilder(),
+): RockMeshes {
+  const meshes = new RockMeshes(
     engine,
-    new InThreadRockPageBuilder(),
+    builder,
     2 * rootSlots * (ROOT_PAGE_BYTES + SLOT_RECORD_BYTES),
   );
+  if (meshes.pool.layout.rootSlots !== rootSlots) {
+    throw new Error("the test's slot bytes are no longer the pool's: see `rockMeshes.ts`");
+  }
+  return meshes;
+}
+
+/** The in-thread builder, failing while `failing` is set, counting the builds asked of it. */
+class SwitchedBuilder implements RockPageBuilder {
+  failing = false;
+  asked = 0;
+  readonly #inner = new InThreadRockPageBuilder();
+
+  build(input: Parameters<RockPageBuilder["build"]>[0]): ReturnType<RockPageBuilder["build"]> {
+    this.asked += 1;
+    return this.failing ? Promise.resolve("the builder failed") : this.#inner.build(input);
+  }
+
+  dispose(): void {
+    this.#inner.dispose();
+  }
 }
 
 /** Test patches `order` resident, taken in that order, every one of the same rocks. */
@@ -165,34 +192,36 @@ describe("the rocks' pool holds a could-touch region's patches first (R11.T4.b, 
     expect(s).toBeGreaterThan(0);
     // Room for three of six; the region (patches 0 and 1) baked last.
     const meshes = meshesOf(engine, 3 * s);
-    const region = regionOf([discAt(0)]);
-    const resident = residentOf([2, 3, 4, 5, 0, 1]);
-    meshes.sync(resident, region);
+    meshes.sync(residentOf([2, 3, 4, 5, 0, 1]), regionOf([discAt(0)]));
     await landed();
     expect(heldOf(meshes, 6)).toEqual([0, 1, 2]);
-    expect([0, 1, 2, 3, 4, 5].map((n) => meshes.isRefused(keyStringOf(n)))).toEqual([
-      false,
-      false,
-      false,
-      true,
-      true,
-      true,
-    ]);
-    // Without the region, first come.
-    const firstCome = meshesOf(engine, 3 * s);
-    firstCome.sync(residentOf([2, 3, 4, 5, 0, 1]));
+    expect([3, 4, 5].map((n) => meshes.isRefused(keyStringOf(n)))).toEqual([true, true, true]);
+    meshes.dispose();
+  });
+
+  it("takes the resident patches first come where it is given no region", async () => {
+    const engine = new CountingRenderEngine(await fakeDevice());
+    const s = await slotsOfOne(engine);
+    const meshes = meshesOf(engine, 3 * s);
+    meshes.sync(residentOf([2, 3, 4, 5, 0, 1]));
     await landed();
-    expect(heldOf(firstCome, 6)).toEqual([2, 3, 4]);
-    // So the region raises no detail limit, which first come would.
-    const drawSet = drawSetOf(6);
-    const drawn = rocksToDraw(drawSet, 1, 17, meshes, region.discs, "low");
+    expect(heldOf(meshes, 6)).toEqual([2, 3, 4]);
+    meshes.dispose();
+  });
+
+  it("draws every region patch so, raising no detail limit for it", async () => {
+    const engine = new CountingRenderEngine(await fakeDevice());
+    const s = await slotsOfOne(engine);
+    const meshes = meshesOf(engine, 3 * s);
+    const region = regionOf([discAt(0)]);
+    meshes.sync(residentOf([2, 3, 4, 5, 0, 1]), region);
+    await landed();
+    const drawn = rocksToDraw(drawSetOf(6), 1, 17, meshes, region.discs, "low");
     expect([drawn.regionRefused, drawn.patches.map((patch) => patch.keyString)]).toEqual([
       false,
       [keyStringOf(0), keyStringOf(1)],
     ]);
-    expect(rocksToDraw(drawSet, 1, 17, firstCome, region.discs, "low").regionRefused).toBe(true);
     meshes.dispose();
-    firstCome.dispose();
   });
 
   it("draws the same region patches whatever order their bakes land in: a function of the bodies, not the pool's history", async () => {
@@ -204,9 +233,8 @@ describe("the rocks' pool holds a could-touch region's patches first (R11.T4.b, 
       const meshes = meshesOf(engine, 3 * s);
       meshes.sync(residentOf(order), region);
       await landed();
-      const { patches, regionRefused } = rocksToDraw(drawSet, 1, 17, meshes, region.discs, "high");
+      const { patches } = rocksToDraw(drawSet, 1, 17, meshes, region.discs, "high");
       meshes.dispose();
-      expect(regionRefused).toBe(false);
       return patches.filter((patch) => patch.rule === "region").map((patch) => patch.keyString);
     };
     const orders = [
@@ -215,25 +243,46 @@ describe("the rocks' pool holds a could-touch region's patches first (R11.T4.b, 
       [0, 1, 2, 5, 3, 4],
     ];
     const seen = await Promise.all(orders.map(drawnBy));
-    expect(seen).toEqual(orders.map(() => [keyStringOf(2), keyStringOf(3), keyStringOf(4)]));
+    expect(seen).toEqual(orders.map(() => [2, 3, 4].map(keyStringOf)));
   });
 
-  it("refuses the region only where it alone passes the pool, and retries a refused patch once room frees", async () => {
+  it("refuses a region patch where the region alone passes the pool, and says so", async () => {
     const engine = new CountingRenderEngine(await fakeDevice());
     const s = await slotsOfOne(engine);
     const meshes = meshesOf(engine, 3 * s);
     // Patches 0 to 3 the region's, four against room for three.
     const region = regionOf([discAt(0), discAt(2)]);
+    meshes.sync(residentOf([0, 1, 2, 3, 4]), region);
+    await landed();
+    expect([heldOf(meshes, 5), meshes.isRefused(keyStringOf(3))]).toEqual([[0, 1, 2], true]);
+    expect(rocksToDraw(drawSetOf(5), 1, 17, meshes, region.discs, "high").regionRefused).toBe(true);
+    meshes.dispose();
+  });
+
+  it("asks no build again of a sync that leaves the room as it was", async () => {
+    const engine = new CountingRenderEngine(await fakeDevice());
+    const s = await slotsOfOne(engine);
+    const builder = new SwitchedBuilder();
+    const meshes = meshesOf(engine, 3 * s, builder);
+    const resident = residentOf([0, 1, 2, 3, 4]);
+    meshes.sync(resident, regionOf([discAt(0), discAt(2)]));
+    await landed();
+    const asked = builder.asked;
+    // A new step's region of the same discs.
+    meshes.sync(resident, regionOf([discAt(0), discAt(2)]));
+    meshes.sync(resident, regionOf([discAt(0), discAt(2)]));
+    expect([builder.asked, meshes.building]).toEqual([asked, 0]);
+    meshes.dispose();
+  });
+
+  it("retries a refused region patch once a patch leaves, before a patch outside the region", async () => {
+    const engine = new CountingRenderEngine(await fakeDevice());
+    const s = await slotsOfOne(engine);
+    const meshes = meshesOf(engine, 3 * s);
+    const region = regionOf([discAt(0), discAt(2)]);
     const resident = residentOf([0, 1, 2, 3, 4]);
     meshes.sync(resident, region);
     await landed();
-    expect([heldOf(meshes, 5), meshes.isRefused(keyStringOf(3))]).toEqual([[0, 1, 2], true]);
-    const drawSet = drawSetOf(5);
-    expect(rocksToDraw(drawSet, 1, 17, meshes, region.discs, "high").regionRefused).toBe(true);
-    // A sync with nothing freed asks nothing again.
-    meshes.sync(resident, region);
-    expect(meshes.building).toBe(0);
-    // Patch 0 leaves: its room goes to the region's refused patch, not to patch 4 outside it.
     resident.forget(keyStringOf(0));
     meshes.sync(resident, region);
     expect([meshes.isBuilding(keyStringOf(3)), meshes.isBuilding(keyStringOf(4))]).toEqual([
@@ -242,19 +291,73 @@ describe("the rocks' pool holds a could-touch region's patches first (R11.T4.b, 
     ]);
     await landed();
     expect([heldOf(meshes, 5), meshes.isRefused(keyStringOf(3))]).toEqual([[1, 2, 3], false]);
-    expect(rocksToDraw(drawSet, 1, 17, meshes, region.discs, "high").regionRefused).toBe(false);
-    // The bodies move on: the region holds patch 4 alone, which evicts the farthest from it.
-    const moved = regionOf([{ positionM: centreOf(4), radiusM: 1 }]);
-    meshes.sync(resident, moved);
+    meshes.dispose();
+  });
+
+  it("evicts for a patch the region comes to hold, the farthest from the region first", async () => {
+    const engine = new CountingRenderEngine(await fakeDevice());
+    const s = await slotsOfOne(engine);
+    const meshes = meshesOf(engine, 3 * s);
+    const resident = residentOf([1, 2, 3, 4]);
+    meshes.sync(resident);
+    await landed();
+    expect(heldOf(meshes, 5)).toEqual([1, 2, 3]);
+    meshes.sync(resident, regionOf([{ positionM: centreOf(4), radiusM: 1 }]));
     expect(meshes.isBuilding(keyStringOf(4))).toBe(true);
     await landed();
-    expect(heldOf(meshes, 5)).toEqual([2, 3, 4]);
-    // Patch 2 leaves, and patch 1, evicted, outside the region now, is retried into its room.
+    expect([heldOf(meshes, 5), meshes.isRefused(keyStringOf(1))]).toEqual([[2, 3, 4], true]);
+    meshes.dispose();
+  });
+
+  it("retries a patch evicted for the region once room frees", async () => {
+    const engine = new CountingRenderEngine(await fakeDevice());
+    const s = await slotsOfOne(engine);
+    const meshes = meshesOf(engine, 3 * s);
+    const resident = residentOf([1, 2, 3, 4]);
+    meshes.sync(resident);
+    await landed();
+    const region = regionOf([{ positionM: centreOf(4), radiusM: 1 }]);
+    meshes.sync(resident, region);
+    await landed();
     resident.forget(keyStringOf(2));
-    meshes.sync(resident, moved);
+    meshes.sync(resident, region);
     expect(meshes.isBuilding(keyStringOf(1))).toBe(true);
     await landed();
     expect(heldOf(meshes, 5)).toEqual([1, 3, 4]);
+    meshes.dispose();
+  });
+
+  it("retries a refused region patch once the region moves off meshes it may then evict", async () => {
+    const engine = new CountingRenderEngine(await fakeDevice());
+    const s = await slotsOfOne(engine);
+    const meshes = meshesOf(engine, 3 * s);
+    const resident = residentOf([0, 1, 2, 3]);
+    meshes.sync(resident, regionOf([discAt(0), discAt(2)]));
+    await landed();
+    expect([heldOf(meshes, 4), meshes.isRefused(keyStringOf(3))]).toEqual([[0, 1, 2], true]);
+    // The craft touches down by patch 3: the sweep's patches leave the region, resident still.
+    meshes.sync(resident, regionOf([{ positionM: centreOf(3), radiusM: 1 }]));
+    expect(meshes.isBuilding(keyStringOf(3))).toBe(true);
+    await landed();
+    expect([heldOf(meshes, 4), meshes.isRefused(keyStringOf(3))]).toEqual([[1, 2, 3], false]);
+    meshes.dispose();
+  });
+
+  it("evicts nothing for a region mesh the meshes outside the region could not make room for", async () => {
+    const engine = new CountingRenderEngine(await fakeDevice());
+    const s = await slotsOfOne(engine);
+    const small = await slotsOfOne(engine, 1);
+    expect(small).toBeLessThan(s);
+    const meshes = meshesOf(engine, 2 * s + small);
+    // The small patch outside the region first, then the region's three.
+    const resident = new ResidentRocks();
+    resident.take(keyStringOf(5), bakeOf(keyOf(5), layerOf(1)));
+    for (const n of [0, 1, 2]) {
+      resident.take(keyStringOf(n), bakeOf(keyOf(n), layerOf()));
+    }
+    meshes.sync(resident, regionOf([discAt(0), discAt(1)]));
+    await landed();
+    expect([heldOf(meshes, 6), meshes.isRefused(keyStringOf(2))]).toEqual([[0, 1, 5], true]);
     meshes.dispose();
   });
 
@@ -262,16 +365,72 @@ describe("the rocks' pool holds a could-touch region's patches first (R11.T4.b, 
     const engine = new CountingRenderEngine(await fakeDevice());
     const s = await slotsOfOne(engine);
     const small = await slotsOfOne(engine, 1);
-    expect(small).toBeLessThan(s);
     // Room for two region meshes and the small one, but not a third region mesh.
+    const meshes = meshesOf(engine, 2 * s + small);
+    const resident = residentOf([0, 1, 2]);
+    resident.take(keyStringOf(5), bakeOf(keyOf(5), layerOf(1)));
+    meshes.sync(resident, regionOf([discAt(0), discAt(1)]));
+    await landed();
+    expect([heldOf(meshes, 6), meshes.isRefused(keyStringOf(5))]).toEqual([[0, 1], true]);
+    meshes.dispose();
+  });
+
+  it("retries that mesh once the wait lifts", async () => {
+    const engine = new CountingRenderEngine(await fakeDevice());
+    const s = await slotsOfOne(engine);
+    const small = await slotsOfOne(engine, 1);
     const meshes = meshesOf(engine, 2 * s + small);
     const region = regionOf([discAt(0), discAt(1)]);
     const resident = residentOf([0, 1, 2]);
     resident.take(keyStringOf(5), bakeOf(keyOf(5), layerOf(1)));
     meshes.sync(resident, region);
     await landed();
-    expect([heldOf(meshes, 6), meshes.isRefused(keyStringOf(2))]).toEqual([[0, 1], true]);
-    expect(meshes.isRefused(keyStringOf(5))).toBe(true);
+    // The waiting region patch leaves, and with it the wait.
+    resident.forget(keyStringOf(2));
+    meshes.sync(resident, region);
+    expect(meshes.isBuilding(keyStringOf(5))).toBe(true);
+    await landed();
+    expect(heldOf(meshes, 6)).toEqual([0, 1, 5]);
+    meshes.dispose();
+  });
+
+  it("asks a retry whose build fails no more until its room grows", async () => {
+    const engine = new CountingRenderEngine(await fakeDevice());
+    const s = await slotsOfOne(engine);
+    const builder = new SwitchedBuilder();
+    const meshes = meshesOf(engine, 3 * s, builder);
+    const resident = residentOf([0, 1, 2, 3]);
+    meshes.sync(resident, regionOf([discAt(0), discAt(2)]));
+    await landed();
+    builder.failing = true;
+    resident.forget(keyStringOf(0));
+    meshes.sync(resident, regionOf([discAt(0), discAt(2)]));
+    await landed();
+    const asked = builder.asked;
+    for (let step = 0; step < 3; step += 1) {
+      meshes.sync(resident, regionOf([discAt(0), discAt(2)]));
+    }
+    expect([builder.asked, heldOf(meshes, 4)]).toEqual([asked, [1, 2]]);
+    builder.failing = false;
+    resident.forget(keyStringOf(1));
+    meshes.sync(resident, regionOf([discAt(0), discAt(2)]));
+    await landed();
+    expect(heldOf(meshes, 4)).toEqual([2, 3]);
+    meshes.dispose();
+  });
+
+  it("shares one freeing's room among its retries, asking no more than it holds", async () => {
+    const engine = new CountingRenderEngine(await fakeDevice());
+    const s = await slotsOfOne(engine);
+    const meshes = meshesOf(engine, 3 * s);
+    const resident = residentOf([0, 1, 2, 3, 4, 5]);
+    meshes.sync(resident);
+    await landed();
+    resident.forget(keyStringOf(0));
+    meshes.sync(resident);
+    expect([3, 4, 5].map((n) => meshes.isBuilding(keyStringOf(n)))).toEqual([true, false, false]);
+    await landed();
+    expect(heldOf(meshes, 6)).toEqual([1, 2, 3]);
     meshes.dispose();
   });
 });

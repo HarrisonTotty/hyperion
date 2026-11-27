@@ -80,6 +80,7 @@ import {
   craftVelocityAgainst,
   sceneContacts,
   sceneScatterBoxes,
+  sceneSweepContacts,
   sceneSweeps,
   TerrainSession,
 } from "./session";
@@ -1149,6 +1150,11 @@ describe("a craft held in another body's frame (R10.T14.c; decision-r10-t16-lean
   });
 });
 
+/** The widest of `contacts`' radii, m; 0 for none. */
+function widest(contacts: ReadonlyArray<GroundContact>): number {
+  return Math.max(0, ...contacts.map((contact) => contact.radiusM));
+}
+
 describe("the scene's descending craft as the rocks' sweep (R11.T4.d)", () => {
   const moon = sceneMoon(SCENE);
   const figure = moonLikeHeader(MOON);
@@ -1216,6 +1222,27 @@ describe("the scene's descending craft as the rocks' sweep (R11.T4.d)", () => {
     expect(swept.map(({ path }) => path)).toEqual([
       { kind: "planned", positionsM: [add(pole, vec3(0, 0, 300)), add(pole, vec3(400, 0, 50))] },
     ]);
+  });
+
+  it("lays the pass's chain widened by the record's gravity, and further by its spin (R11.T4.d)", () => {
+    const on = {
+      figure: {
+        equatorialRadiusM: figure.equatorial_radius_m,
+        polarRadiusM: figure.polar_radius_m,
+      },
+      ground,
+      patchSizeM: 20,
+      maxPatches: 2_000,
+    };
+    const scene = withCraft(300, vec3(40, 0, -20));
+    const line = sceneSweepContacts(scene, moon, on, { gravityMps2: null, spinRadPerS: null });
+    const fall = sceneSweepContacts(scene, moon, on, { gravityMps2: 1.62, spinRadPerS: null });
+    // The Moon's 2.66 × 10⁻⁶ rad/s.
+    const spun = sceneSweepContacts(scene, moon, on, { gravityMps2: 1.62, spinRadPerS: 2.66e-6 });
+    expect(line.length).toBeGreaterThan(0);
+    expect(fall.length).toBeGreaterThan(line.length);
+    expect(widest(fall)).toBeGreaterThan(widest(line));
+    expect(widest(spun)).toBeGreaterThan(widest(fall));
   });
 
   it("sweeps neither a climbing craft nor one at rest", () => {
